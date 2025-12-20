@@ -1,0 +1,44 @@
+version: '3'
+
+tasks:
+  default:
+    cmds:
+      - task: test
+
+  test:
+    desc: Run Go Unit Tests
+    dir: infrastructure
+    cmds:
+      - go test -v ./...
+
+  deps:
+    desc: Install dependencies
+    dir: infrastructure
+    cmds:
+      - go mod tidy
+
+  lint:
+    desc: Run linters
+    cmds:
+      - golangci-lint run ./...
+      - yamllint .
+
+  local:up:
+    desc: Start local Talos cluster (Pulumi)
+    dir: infrastructure
+    env:
+      # PULUMI_CONFIG_PASSPHRASE: "openaether" # CAUTION: Set this in your environment or .env file, do not commit!
+
+    cmds:
+      - pulumi stack select dev --create
+      - pulumi up --stack dev --yes
+      - echo "Local Talos node started via Pulumi."
+
+  local:down:
+    desc: Stop local Talos cluster (Pulumi)
+    dir: infrastructure
+    env:
+      # PULUMI_CONFIG_PASSPHRASE: "openaether"
+
+    cmds:
+      - pulumi destroy --stack dev --yes

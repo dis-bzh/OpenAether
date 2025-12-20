@@ -1,0 +1,34 @@
+version: v1alpha1
+machine:
+  type: controlplane
+  certSANs:
+    - 127.0.0.1
+    - localhost
+  kubelet:
+    extraArgs:
+      node-labels: "role=hub"
+  network:
+    hostname: openaether-hub
+cluster:
+  clusterName: openaether-hub
+  apiServer:
+    certSANs:
+      - 127.0.0.1
+      - localhost
+  inlineManifests:
+    - name: argocd-install
+      contents: |-
+        apiVersion: argoproj.io/v1alpha1
+        kind: Application
+        metadata:
+          name: argocd-bootstrap
+          namespace: argocd
+        spec:
+          project: default
+          source:
+            repoURL: https://github.com/argoproj/argo-cd.git
+            targetRevision: stable
+            path: manifests/install.yaml
+          destination:
+            server: https://kubernetes.default.svc
+            namespace: argocd

@@ -1,0 +1,7 @@
+name: openaether-infrastructure
+runtime: go
+description: OpenAether Infrastructure as Code (Talos + CloudStack)
+config:
+    pulumi:tags:
+        value:
+            stack: dev
