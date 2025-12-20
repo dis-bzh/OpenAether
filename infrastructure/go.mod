@@ -3,12 +3,13 @@ module openaether/infrastructure
 go 1.25.5
 
 require (
-	github.com/pulumi/pulumi-command/sdk v1.1.3
+	github.com/joho/godotenv v1.5.1
 	github.com/pulumi/pulumi-docker/sdk/v4 v4.10.0
 	github.com/pulumi/pulumi/sdk/v3 v3.213.0
 	github.com/pulumiverse/pulumi-scaleway/sdk v1.39.0
 	github.com/pulumiverse/pulumi-talos/sdk v0.6.1
 	github.com/stretchr/testify v1.11.1
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -60,6 +61,7 @@ require (
 	github.com/opentracing/basictracer-go v1.1.0 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pgavlin/fx v0.1.6 // indirect
+	github.com/pgavlin/fx/v2 v2.0.10 // indirect
 	github.com/pjbgf/sha1cd v0.3.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pkg/term v1.1.0 // indirect
@@ -92,8 +94,7 @@ require (
 	google.golang.org/grpc v1.75.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/frand v1.4.2 // indirect
 )
 
-replace github.com/pulumiverse/pulumi-talos/sdk => ../repositories/pulumi-talos/sdk
+replace github.com/pulumiverse/pulumi-talos/sdk => ../../repositories/pulumi-talos/sdk
