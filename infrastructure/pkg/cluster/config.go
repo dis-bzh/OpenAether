@@ -23,6 +23,7 @@ type ClusterConfig struct {
 	KubernetesVersion string
 	TalosVersion      string
 	Endpoint          string
+	PublicEndpoint    string
 	Domain            string
 
 	// Nodes
@@ -39,6 +40,7 @@ type ClusterConfig struct {
 
 type DockerConfig struct {
 	NetworkName string
+	Clouds      []string
 }
 
 type ScalewayConfig struct {
@@ -65,13 +67,19 @@ func LoadClusterConfigFromEnv() *ClusterConfig {
 		ClusterName:       getEnv("CLUSTER_NAME", DefaultClusterName),
 		KubernetesVersion: getEnv("KUBERNETES_VERSION", DefaultKubernetesVersion),
 		TalosVersion:      getEnv("TALOS_VERSION", DefaultTalosVersion),
-		Endpoint:          getEnv("CLUSTER_ENDPOINT", "127.0.0.1"), // Default for local
+		// Endpoint: Internal Endpoint used by Nodes to talk to API Server (Load Balancer).
+		// For Docker Local: Use the container name of the HAProxy LB.
+		Endpoint: getEnv("CLUSTER_ENDPOINT", "openaether-local-lb"),
+		// PublicEndpoint: External Endpoint used by User (kubeconfig).
+		PublicEndpoint:    getEnv("CLUSTER_PUBLIC_ENDPOINT", "127.0.0.1"),
 		Domain:            getEnv("CLUSTER_DOMAIN", "cluster.local"),
-		ControlPlaneNodes: getEnvInt("CONTROL_PLANE_NODES", 1),
-		WorkerNodes:       getEnvInt("WORKER_NODES", 1),
+		ControlPlaneNodes: getEnvInt("CONTROL_PLANE_NODES", 3), // Default to 3 for HA simulation
+		WorkerNodes:       getEnvInt("WORKER_NODES", 2),        // Default to 2 for multi-cloud simulation
 
 		Docker: DockerConfig{
+			// Default to simulating two clouds
 			NetworkName: getEnv("DOCKER_NETWORK_NAME", DefaultDockerNetwork),
+			Clouds:      []string{"cloud-a", "cloud-b"},
 		},
 		Scaleway: ScalewayConfig{
 			Image: getEnv("SCW_IMAGE", DefaultScalewayImage),

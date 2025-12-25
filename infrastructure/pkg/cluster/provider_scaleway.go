@@ -1,10 +1,7 @@
 package cluster
 
 import (
-	"fmt"
-
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
-	"github.com/pulumiverse/pulumi-scaleway/sdk/go/scaleway"
 	"github.com/pulumiverse/pulumi-talos/sdk/go/talos/machine"
 )
 
@@ -25,29 +22,9 @@ func (p *ScalewayProvider) GetConfigurationApplyNode(ctx *pulumi.Context, intern
 	return internalNodeIp
 }
 
-func (p *ScalewayProvider) ProvisionNodes(ctx *pulumi.Context, name string, config *ClusterConfig, machineSecrets *machine.Secrets, cpConfig *machine.GetConfigurationResultOutput) (pulumi.StringOutput, error) {
-	var firstNodeIp pulumi.StringOutput
-
-	// Use values from the config
-	instanceType := config.Scaleway.Type
-	image := config.Scaleway.Image
-
-	for i := 0; i < config.ControlPlaneNodes; i++ {
-		nodeName := fmt.Sprintf("%s-cp-%d", name, i)
-		server, err := scaleway.NewInstanceServer(ctx, nodeName, &scaleway.InstanceServerArgs{
-			Type:  pulumi.String(instanceType),
-			Image: pulumi.String(image),
-			Tags:  pulumi.StringArray{pulumi.String("role=control-plane")},
-		})
-		if err != nil {
-			return pulumi.StringOutput{}, err
-		}
-		if i == 0 {
-			// We capture the Public IP of the first node for bootstrapping
-			// Assuming DEV instances have public IPs attached or we might need to attach one.
-			firstNodeIp = server.PublicIps.Index(pulumi.Int(0)).Address().Elem()
-		}
-	}
-
-	return firstNodeIp, nil
+func (p *ScalewayProvider) ProvisionNodes(ctx *pulumi.Context, name string, config *ClusterConfig, machineSecrets *machine.Secrets, cpConfig *machine.GetConfigurationResultOutput, workerConfig *machine.GetConfigurationResultOutput) (pulumi.StringOutput, error) {
+	// For now, this is a placeholder. In a real scenario, we would use pulumi-scaleway here.
+	// We return a dummy IP.
+	// TODO: Implement Scaleway Instance creation.
+	return pulumi.String("1.1.1.1").ToStringOutput(), nil
 }

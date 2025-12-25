@@ -10,7 +10,7 @@ import (
 type ClusterProvider interface {
 	// ProvisionNodes provisions the node infrastructure (VMs, Containers) and returns the IP of the first control plane node.
 	// It is responsible for applying the initial Machine Configuration to the nodes.
-	ProvisionNodes(ctx *pulumi.Context, name string, config *ClusterConfig, machineSecrets *machine.Secrets, cpConfig *machine.GetConfigurationResultOutput) (pulumi.StringOutput, error)
+	ProvisionNodes(ctx *pulumi.Context, name string, config *ClusterConfig, machineSecrets *machine.Secrets, cpConfig *machine.GetConfigurationResultOutput, workerConfig *machine.GetConfigurationResultOutput) (pulumi.StringOutput, error)
 
 	// GetControlPlaneEndpoint returns the address to reach the Kubernetes API Server (VIP or Load Balancer).
 	GetControlPlaneEndpoint(ctx *pulumi.Context) pulumi.StringOutput
