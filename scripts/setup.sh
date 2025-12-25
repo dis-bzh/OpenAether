@@ -34,7 +34,7 @@ install_talosctl() {
 
 install_golangci_lint() {
      echo "Installing golangci-lint..."
-     curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.55.2
+     curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin latest
 }
 
 # 1. Check Go
@@ -64,9 +64,41 @@ if ! check_cmd golangci-lint; then
     install_golangci_lint
 fi
 
+install_yamllint() {
+    echo "Installing yamllint..."
+    if command -v apt-get &> /dev/null; then
+        echo "Detected apt-get. Asking for sudo..."
+        sudo apt-get update && sudo apt-get install -y yamllint
+    elif command -v pip3 &> /dev/null; then
+        echo "Installing via pip3..."
+        pip3 install --user yamllint
+        # Ensure ~/.local/bin is in PATH
+    else
+        echo "⚠️  Could not install yamllint automatically. Please install it manually."
+    fi
+}
+
+# 6. Check yamllint
+if ! check_cmd yamllint; then
+    install_yamllint
+fi
+
 install_task() {
     echo "Installing Task..."
-    sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+    # Check if we can write to /usr/local/bin
+    if [ -w /usr/local/bin ]; then
+        sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+    elif command -v sudo &> /dev/null; then
+        echo "Requires sudo to install to /usr/local/bin..."
+        sudo sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+    else
+        echo "Cannot write to /usr/local/bin and sudo is missing. Installing to ~/.local/bin..."
+        mkdir -p ~/.local/bin
+        sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b ~/.local/bin
+        export PATH=$PATH:~/.local/bin
+        # Remind user to update PATH
+        echo "NOTE: Added ~/.local/bin to PATH for this session. Please add it to your shell profile."
+    fi
 }
 
 # 6. Check Task
@@ -75,5 +107,16 @@ if ! check_cmd task; then
 fi
 
 echo -e "\n${GREEN}🚀 Environment ready!${NC}"
+
+# Post-install checks for PATH
+GOPATH_BIN="$(go env GOPATH)/bin"
+if ! command -v golangci-lint &> /dev/null; then
+    if [ -f "$GOPATH_BIN/golangci-lint" ]; then
+        echo -e "${RED}⚠️  golangci-lint is installed in $GOPATH_BIN but not in your PATH.${NC}"
+        echo "Please add the following to your ~/.bashrc or ~/.zshrc:"
+        echo "  export PATH=\$PATH:$GOPATH_BIN"
+    fi
+fi
+
 echo "You may need to restart your shell if you just installed Pulumi."
 echo "Run 'source ~/.bashrc' or 'source ~/.zshrc' if paths were updated."
