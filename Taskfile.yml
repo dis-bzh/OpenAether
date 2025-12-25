@@ -19,17 +19,18 @@ tasks:
 
   lint:
     desc: Run linters
+    dir: infrastructure
     cmds:
-      - golangci-lint run ./...
+      - golangci-lint run .
       - yamllint .
 
   local:up:
     desc: Start local Talos cluster (Pulumi)
     dir: infrastructure
     env:
-      # PULUMI_CONFIG_PASSPHRASE: "openaether" # CAUTION: Set this in your environment or .env file, do not commit!
-
+      PULUMI_CONFIG_PASSPHRASE: "openaether" # CAUTION: Set this in your environment or .env file, do not commit!
     cmds:
+      - pulumi login --local
       - pulumi stack select dev --create
       - pulumi up --stack dev --yes
       - echo "Local Talos node started via Pulumi."
@@ -38,7 +39,6 @@ tasks:
     desc: Stop local Talos cluster (Pulumi)
     dir: infrastructure
     env:
-      # PULUMI_CONFIG_PASSPHRASE: "openaether"
-
+      PULUMI_CONFIG_PASSPHRASE: "openaether"
     cmds:
       - pulumi destroy --stack dev --yes

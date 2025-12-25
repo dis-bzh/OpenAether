@@ -8,8 +8,8 @@ import (
 
 // Global constants for defaults
 const (
-	DefaultKubernetesVersion = "v1.32.0"
-	DefaultTalosVersion      = "v1.11.6"
+	DefaultKubernetesVersion = "v1.35.0"
+	DefaultTalosVersion      = "v1.12.0"
 	DefaultClusterName       = "openaether"
 	DefaultDockerNetwork     = "openaether-net"
 	DefaultScalewayImage     = "ubuntu_jammy"
