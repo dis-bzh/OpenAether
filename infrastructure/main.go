@@ -9,7 +9,9 @@ import (
 )
 
 func main() {
-	// Load .env file if present
+	// Load .env.local first for local overrides (ignored if missing)
+	_ = godotenv.Load(".env.local")
+	// Load .env file (defaults)
 	_ = godotenv.Load()
 
 	pulumi.Run(func(ctx *pulumi.Context) error {
@@ -27,7 +29,7 @@ func main() {
 			fallthrough
 		default:
 			if cloudProvider != "docker" && cloudProvider != "" {
-				ctx.Log.Warn("Unknown Cloud Provider: "+cloudProvider+". Defaulting to Docker.", nil)
+				_ = ctx.Log.Warn("Unknown Cloud Provider: "+cloudProvider+". Defaulting to Docker.", nil)
 			}
 			provider = cluster.NewDockerProvider()
 		}
