@@ -7,6 +7,7 @@
 *.dll
 *.so
 *.dylib
+/bin
 
 # Test binary, built with `go test -c`
 *.test
@@ -24,9 +25,10 @@ vendor/
 go.work
 go.work.sum
 
-# env file
+# env files (contain secrets)
 .env
 .env.local
+infrastructure/environments/.env.*
 
 # Editor/IDE
 # .idea/
@@ -38,8 +40,10 @@ go.work.sum
 *.p12
 *.pfx
 *.crt
-kubeconfig.y*
-talosconfig.y*
+kubeconfig*.yaml
+talosconfig*.yaml
 **/*.kubeconfig
 infrastructure/kubeconfig.yaml
 
+# Pulumi
+infrastructure/.pulumi/

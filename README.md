@@ -5,62 +5,94 @@
 
 ## 🏗️ Architecture
 
-OpenAether follows a **Hub & Spoke** architecture powered by **Talos Linux** and **Pulumi**.
+OpenAether uses **Talos Linux** and a "Zero Trust" sovereign stack:
 
 *   **Infrastructure**: Pulumi (Go)
 *   **OS**: Talos Linux (Immutable, Secure)
-*   **GitOps**: ArgoCD
-*   **UI**: Backstage
-*   **Observability**: Prometheus / Grafana / OpenCost
+*   **Gateway**: Traefik (Gateway API)
+*   **Identity**: Keycloak (OIDC/SAML) + CloudNativePG (HA Postgres)
+*   **Service Mesh**: Linkerd (mTLS everywhere)
+*   **Secrets**: OpenBao (Vault Fork)
+*   **Policy**: Kyverno (Policy as Code)
+*   **Observability**: VictoriaMetrics (Metrics), Loki (Logs), Grafana (UI)
 
 ## 📂 Repository Structure
 
 *   `infrastructure/` - **Pulumi Go Code**. Defines the infrastructure components (Clusters, Networking).
-*   `clusters/` - **Talos Configs**. Machine configurations for the Control Plane (Hub).
-*   `apps/` - **ArgoCD Manifests**. "App of Apps" pattern for deploying services (Backstage, Monitoring, etc.).
+*   `clusters/` - **Talos Configs**. Machine configurations.
+*   `apps/` - **Kustomize Structure**.
+    *   `base/` - Core components (Gateway, Linkerd, etc.).
+    *   `overlays/` - Environment specific (local, prod).
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-### Prerequisites
-Run the setup script to check/install required tools (Go, Docker, Pulumi, Task, Talosctl):
+Run the setup script:
 ```bash
 bash scripts/setup.sh
 ```
-*Restart your shell if new tools were installed.*
+*Note: You may need `sudo modprobe br_netfilter` on your host for local Docker networking.*
 
 ### 1. Configure Pulumi (Local Backend)
-Store infrastructure state locally (no account required):
 ```bash
 pulumi login --local
 ```
 
-### 2. Run Tests (with Mocks)
-Verify the infrastructure logic without cloud credentials:
-```bash
-cd infrastructure
-task deps
-task test
-```
-
 ### 2. Start Local Simulation (Talos-in-Docker)
-Spin up a local Talos node using Pulumi (Docker Provider + Talos Provider):
+Spin up a local Talos node using Pulumi:
 ```bash
 task local:up
 ```
-*This runs `pulumi up` to provision the container, generate configuration, and bootstrap the cluster.*
-*You will see the `kubeconfig` in the Stack Outputs.*
 
-### 3. Deploy to Cloud (Scaleway/OVH)
-1.  Set your credentials (e.g., `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`).
-2.  Edit `infrastructure/main.go` to set `CloudProvider: "scaleway"`.
-3.  Run:
-    ```bash
-    pulumi up
-    ```
+### 3. Deploy Platform (DevSecOps Stack)
+Deploy the entire stack (Gateway, IAM, Mesh, Apps) to the local cluster:
+```bash
+task deploy:local
+```
+
+Access services via `*.localhost` (automatically mapped by Chrome/Firefox or add to `/etc/hosts`):
+*   **Demo App**: [http://demo.localhost](http://demo.localhost)
+*   **Keycloak**: [http://auth.localhost](http://auth.localhost)
+*   **Grafana**: [http://grafana.localhost](http://grafana.localhost)
 
 ## 🛡️ Security
 
-*   **Secrets**: Managed via **HashiCorp Vault** + **External Secrets Operator**.
-*   **Policies**: Enforced by Pulumi Policy as Code.
-*   **Compliance**: ISO-ready (Immutable OS).
+*   **Secrets**: Managed via **OpenBao**.
+*   **Network**: mTLS enabled by default via **Linkerd**.
+*   **Policies**: **Kyverno** enforces Pod Security Standards (Audit mode default).
+
+## 🔧 Troubleshooting
+
+### `Failed to check br_netfilter`
+If pods (specifically `kube-flannel`) crash with this error:
+1.  Run `sudo modprobe br_netfilter` on your host.
+2.  Restart: `task local:down && task local:up`.
+
+## 📜 License
+
+**OpenAether** is licensed under the [GNU Affero General Public License v3.0 (AGPLv3)](LICENSE).
+
+### Source Code
+
+The complete source code is available at: **https://github.com/dis-bzh/OpenAether**
+
+If you use this software as a service (SaaS), you must:
+- Provide a link to the exact source code version you are running
+- Include all your modifications in the published source
+
+### Third-Party Components
+
+OpenAether uses the following open-source components, all compatible with AGPLv3:
+
+| Component | License |
+|-----------|---------|
+| Pulumi | Apache 2.0 |
+| Talos Linux | MPL 2.0 |
+| Keycloak | Apache 2.0 |
+| OpenBao | MPL 2.0 |
+| Linkerd | Apache 2.0 |
+| Traefik | MIT |
+| cert-manager | Apache 2.0 |
+| Cilium | Apache 2.0 |
+| Grafana Stack | AGPLv3 |
+
