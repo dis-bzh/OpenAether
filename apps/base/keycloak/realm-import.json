@@ -1,0 +1,37 @@
+{
+    "id": "platform",
+    "realm": "platform",
+    "displayName": "Platform Services",
+    "enabled": true,
+    "sslRequired": "external",
+    "registrationAllowed": false,
+    "clients": [
+        {
+            "clientId": "grafana",
+            "name": "Grafana",
+            "enabled": true,
+            "protocol": "openid-connect",
+            "redirectUris": [
+                "https://grafana.localhost/*",
+                "http://grafana.observability.svc.cluster.local:3000/*"
+            ],
+            "publicClient": false,
+            "secret": "grafana-client-secret-placeholder"
+        }
+    ],
+    "users": [
+        {
+            "username": "admin",
+            "enabled": true,
+            "email": "admin@platform.local",
+            "credentials": [
+                {
+                    "type": "password",
+                    "value": "admin",
+                    "temporary": false
+                }
+            ],
+            "realmRoles": ["admin"]
+        }
+    ]
+}

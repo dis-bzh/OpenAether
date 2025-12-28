@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # Gateway API Standard CRDs (Downladed locally via Taskfile)
+  - standard-install.yaml
+  # Traefik v3 CRDs (RBAC, Definitions)
+  - https://raw.githubusercontent.com/traefik/traefik/v3.0/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml
+  # Traefik v3 RBAC
+  - https://raw.githubusercontent.com/traefik/traefik/v3.0/docs/content/reference/dynamic-configuration/kubernetes-crd-rbac.yml
+  # Local Gateway Definition
+  - gateway-class.yaml
+  - gateway.yaml
+  - traefik-deployment.yaml
+  - rbac-gateway.yaml
+
+

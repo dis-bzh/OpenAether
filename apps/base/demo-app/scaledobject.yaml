@@ -1,0 +1,18 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: demo-app-scaler
+  namespace: keda
+spec:
+  scaleTargetRef:
+    name: demo-app
+    kind: Deployment
+  minReplicaCount: 1
+  maxReplicaCount: 5
+  triggers:
+  - type: prometheus
+    metadata:
+      serverAddress: http://victoriametrics.observability.svc.cluster.local:8428
+      metricName: http_requests_total
+      query: sum(rate(http_requests_total{app="demo-app"}[2m]))
+      threshold: '5'

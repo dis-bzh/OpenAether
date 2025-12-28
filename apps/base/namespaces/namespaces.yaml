@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: security
+  labels:
+    linkerd.io/inject: enabled
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+  labels:
+    linkerd.io/inject: enabled
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: identity
+  labels:
+    linkerd.io/inject: enabled
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: external-secrets
+  labels:
+    pod-security.kubernetes.io/enforce: privileged # Operator needs permissions
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: databases
+  labels:
+    linkerd.io/inject: enabled
+    pod-security.kubernetes.io/enforce: privileged # Often needed for DBs/perf tuning

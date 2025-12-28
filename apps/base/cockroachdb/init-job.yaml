@@ -1,0 +1,28 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cockroachdb-init
+  labels:
+    app: cockroachdb-init
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  template:
+    spec:
+      containers:
+      - name: init
+        image: cockroachdb/cockroach:v23.1.10
+        command:
+        - "/bin/bash"
+        - "-c"
+        - |
+          # Wait for DB
+          until ./cockroach sql --insecure --host=cockroachdb-public:26257 --execute="SELECT 1"; do echo "Waiting for CockroachDB..."; sleep 5; done
+          
+          # Create DBs
+          echo "Creating Databases..."
+          ./cockroach sql --insecure --host=cockroachdb-public:26257 --execute="CREATE DATABASE IF NOT EXISTS keycloak;"
+          ./cockroach sql --insecure --host=cockroachdb-public:26257 --execute="CREATE USER IF NOT EXISTS keycloak;"
+          ./cockroach sql --insecure --host=cockroachdb-public:26257 --execute="GRANT ALL ON DATABASE keycloak TO keycloak;"
+      restartPolicy: OnFailure
