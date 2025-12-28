@@ -13,148 +13,171 @@ import (
 )
 
 type DockerProvider struct {
-	// We can store provider specific state here if needed
+	// Provider-specific state
+	lbContainer *docker.Container
 }
 
 func NewDockerProvider() *DockerProvider {
 	return &DockerProvider{}
 }
 
-func (p *DockerProvider) GetControlPlaneEndpoint(ctx *pulumi.Context) pulumi.StringOutput {
+// Name returns the provider identifier.
+func (p *DockerProvider) Name() string {
+	return "docker"
+}
+
+// GetPublicEndpoint returns the public endpoint for Docker (localhost).
+func (p *DockerProvider) GetPublicEndpoint(ctx *pulumi.Context) pulumi.StringOutput {
 	return pulumi.String("127.0.0.1").ToStringOutput()
 }
 
-func (p *DockerProvider) GetConfigurationApplyNode(ctx *pulumi.Context, internalNodeIp pulumi.StringOutput) pulumi.StringOutput {
-	// For local Docker, we apply config to localhost because the ports are forwarded.
-	return pulumi.String("127.0.0.1").ToStringOutput()
-}
-
-func (p *DockerProvider) ProvisionNodes(ctx *pulumi.Context, name string, config *ClusterConfig, machineSecrets *machine.Secrets, cpConfig *machine.GetConfigurationResultOutput, workerConfig *machine.GetConfigurationResultOutput) (pulumi.StringOutput, error) {
+// ConfigureNetworking creates Docker networks for multi-cloud simulation.
+func (p *DockerProvider) ConfigureNetworking(ctx *pulumi.Context, name string, config *ClusterConfig) error {
 	internetNetworkName := config.Docker.NetworkName + "-internet"
 
-	// 1. Create the "Internet" Network (Shared)
-	// This network simulates the public internet. All nodes technically have an interface here to talk to "each other" via public IPs if needed,
-	// or at least to be reachable from the host.
+	// Create the "Internet" Network (Shared between all clouds)
 	_, err := docker.NewNetwork(ctx, internetNetworkName, &docker.NetworkArgs{
 		Name:           pulumi.String(internetNetworkName),
 		Driver:         pulumi.String("bridge"),
 		CheckDuplicate: pulumi.Bool(true),
 	})
 	if err != nil {
-		return pulumi.StringOutput{}, err
+		return err
 	}
 
-	// 2. Create "Cloud" Networks (Private VPCs)
-	// e.g. openaether-cloud-a, openaether-cloud-b
+	// Create "Cloud" Networks (Private VPCs) for multi-cloud simulation
 	for _, cloudName := range config.Docker.Clouds {
 		netName := config.Docker.NetworkName + "-" + cloudName
 		_, err := docker.NewNetwork(ctx, netName, &docker.NetworkArgs{
 			Name:           pulumi.String(netName),
 			Driver:         pulumi.String("bridge"),
 			CheckDuplicate: pulumi.Bool(true),
-			Internal:       pulumi.Bool(true), // Internal to simulate limited access? Or just bridge. Let's keep bridge for now but separate.
+			Internal:       pulumi.Bool(false), // Bridge for testing
 		})
 		if err != nil {
-			return pulumi.StringOutput{}, err
+			return err
 		}
 	}
 
-	var firstNodeIp pulumi.StringOutput
+	return nil
+}
 
-	// Helper to create nodes
-	createNode := func(role string, index int, totalCount int, configOutput *machine.GetConfigurationResultOutput, exposePorts bool) (pulumi.StringOutput, error) {
-		nodeName := fmt.Sprintf("%s-%s-%d", name, role, index)
-		// Distribution text: Cloud A, Cloud B...
-		// cloudIndex := index % len(config.Docker.Clouds)
-		// cloudName := config.Docker.Clouds[cloudIndex]
-		// cloudNetworkName := config.Docker.NetworkName + "-" + cloudName
-		// For now, simplificy: Just use the Internet network for Apply IP lookup.
-		// All nodes are on Internet network.
+// ProvisionNodes provisions Docker containers as Talos nodes.
+func (p *DockerProvider) ProvisionNodes(
+	ctx *pulumi.Context,
+	name string,
+	config *ClusterConfig,
+	distribution NodeDistribution,
+	globalNodeIndex int,
+	machineSecrets *machine.Secrets,
+	cpConfig *machine.GetConfigurationResultOutput,
+	workerConfig *machine.GetConfigurationResultOutput,
+) ([]ProvisionedNode, pulumi.StringOutput, error) {
 
-		// Create the container attached to Internet AND its specific Cloud
-		cloudIndex := index % len(config.Docker.Clouds)
+	internetNetworkName := config.Docker.NetworkName + "-internet"
+	var nodes []ProvisionedNode
+	var firstCPIP pulumi.StringOutput
+
+	nodeIndex := globalNodeIndex
+
+	// Helper to create a node
+	createNode := func(role string, localIndex int, configOutput *machine.GetConfigurationResultOutput) (ProvisionedNode, error) {
+		nodeName := fmt.Sprintf("%s-%s-%d", name, role, nodeIndex)
+
+		// Distribute nodes across simulated clouds
+		cloudIndex := localIndex % len(config.Docker.Clouds)
 		cloudName := config.Docker.Clouds[cloudIndex]
 		cloudNetworkName := config.Docker.NetworkName + "-" + cloudName
 
 		networks := []string{internetNetworkName, cloudNetworkName}
 
-		container, err := p.createContainer(ctx, nodeName, config.TalosVersion, networks, exposePorts)
+		container, err := p.createContainer(ctx, nodeName, config.TalosVersion, networks)
 		if err != nil {
-			return pulumi.StringOutput{}, err
+			return ProvisionedNode{}, err
 		}
 
 		// Retrieve IP address from the Internet Network
-		// Retrieve IP address from the Internet Network
-		// We need to look up the NetworkData for the specific network name
-		containerInternalIp := container.NetworkDatas.ApplyT(func(datas []docker.ContainerNetworkData) (string, error) {
+		containerInternalIP := container.NetworkDatas.ApplyT(func(datas []docker.ContainerNetworkData) (string, error) {
 			for _, data := range datas {
-				// NetworkName is *string, IpAddress is *string
 				if data.NetworkName != nil && *data.NetworkName == internetNetworkName && data.IpAddress != nil && *data.IpAddress != "" {
 					return *data.IpAddress, nil
 				}
 			}
-			// Fallback: If not found, try to find ANY ip.
+			// Fallback: Use first IP found
 			if len(datas) > 0 && datas[0].IpAddress != nil && *datas[0].IpAddress != "" {
 				return *datas[0].IpAddress, nil
 			}
 			return "", fmt.Errorf("could not find IP address for node %s", nodeName)
 		}).(pulumi.StringOutput)
 
-		// Transform config
+		// Transform config for Docker
 		containerConfig := p.transformConfig(configOutput.MachineConfiguration())
 
 		// Apply Configuration
-		// We use the Container IP to reach the node from the Host (Linux specific, or requires routing)
-		// Since user is on Linux, this works.
 		_, err = machine.NewConfigurationApply(ctx, fmt.Sprintf("%s-apply", nodeName), &machine.ConfigurationApplyArgs{
 			ClientConfiguration:       machineSecrets.ClientConfiguration,
 			MachineConfigurationInput: containerConfig,
-			Node:                      containerInternalIp,
-			Endpoint:                  containerInternalIp, // The temporary endpoint for the Apply command
+			Node:                      containerInternalIP,
+			Endpoint:                  containerInternalIP,
 		}, pulumi.Parent(container), pulumi.DependsOn([]pulumi.Resource{container}))
 		if err != nil {
-			return pulumi.StringOutput{}, err
+			return ProvisionedNode{}, err
 		}
 
-		return containerInternalIp, nil
+		node := ProvisionedNode{
+			Name:       nodeName,
+			Role:       role,
+			Provider:   "docker",
+			InternalIP: containerInternalIP,
+			PublicIP:   pulumi.String("127.0.0.1").ToStringOutput(), // Docker uses localhost
+			Container:  container,
+		}
+
+		nodeIndex++
+		return node, nil
 	}
 
-	// 3. Provision Load Balancer (HAProxy)
-	// Must happen before/parallel to nodes so DNS resolution works or retries
-	_, err = p.createLoadBalancer(ctx, name, config, internetNetworkName)
-	if err != nil {
-		return pulumi.StringOutput{}, err
-	}
-
-	// 4. Provision Control Plane Nodes
-	for i := 0; i < config.ControlPlaneNodes; i++ {
-		// All nodes are internal now. No exposed ports.
-		// Access is strictly through the Load Balancer.
-		expose := false
-		ip, err := createNode("cp", i, config.ControlPlaneNodes, cpConfig, expose)
+	// Provision Control Plane Nodes
+	for i := 0; i < distribution.ControlPlanes; i++ {
+		node, err := createNode("cp", i, cpConfig)
 		if err != nil {
-			return pulumi.StringOutput{}, err
+			return nil, pulumi.StringOutput{}, err
 		}
+		nodes = append(nodes, node)
+
 		if i == 0 {
-			firstNodeIp = ip
+			firstCPIP = node.InternalIP
 		}
 	}
 
-	// 5. Provision Worker Nodes
-	for i := 0; i < config.WorkerNodes; i++ {
-		_, err := createNode("worker", i, config.WorkerNodes, workerConfig, false)
+	// Provision Worker Nodes
+	for i := 0; i < distribution.Workers; i++ {
+		node, err := createNode("worker", i, workerConfig)
 		if err != nil {
-			return pulumi.StringOutput{}, err
+			return nil, pulumi.StringOutput{}, err
 		}
+		nodes = append(nodes, node)
 	}
 
-	return firstNodeIp, nil
+	return nodes, firstCPIP, nil
 }
 
-func (p *DockerProvider) createLoadBalancer(ctx *pulumi.Context, name string, config *ClusterConfig, networkName string) (*docker.Container, error) {
+// CreateLoadBalancer creates an HAProxy container for the cluster.
+func (p *DockerProvider) CreateLoadBalancer(ctx *pulumi.Context, name string, config *ClusterConfig, nodes []ProvisionedNode) (*docker.Container, error) {
 	lbName := "openaether-local-lb"
+	networkName := config.Docker.NetworkName + "-internet"
 
-	// 1. Generate HAProxy Config
+	// Collect node names by role
+	var cpNodes, workerNodes []string
+	for _, n := range nodes {
+		if n.Role == "controlplane" || n.Role == "cp" {
+			cpNodes = append(cpNodes, n.Name)
+		} else {
+			workerNodes = append(workerNodes, n.Name)
+		}
+	}
+
+	// Generate HAProxy config
 	var sb strings.Builder
 	sb.WriteString(`
 defaults
@@ -169,8 +192,7 @@ frontend k8s_api
 
 backend k8s_api_backend
 `)
-	for i := 0; i < config.ControlPlaneNodes; i++ {
-		nodeName := fmt.Sprintf("%s-cp-%d", name, i)
+	for i, nodeName := range cpNodes {
 		sb.WriteString(fmt.Sprintf("    server cp-%d %s:6443 check\n", i, nodeName))
 	}
 
@@ -181,8 +203,7 @@ frontend talos_api
 
 backend talos_api_backend
 `)
-	for i := 0; i < config.ControlPlaneNodes; i++ {
-		nodeName := fmt.Sprintf("%s-cp-%d", name, i)
+	for i, nodeName := range cpNodes {
 		sb.WriteString(fmt.Sprintf("    server cp-%d %s:50000 check\n", i, nodeName))
 	}
 
@@ -193,8 +214,7 @@ frontend ingress_http
 
 backend ingress_http_backend
 `)
-	for i := 0; i < config.WorkerNodes; i++ {
-		nodeName := fmt.Sprintf("%s-worker-%d", name, i)
+	for i, nodeName := range workerNodes {
 		sb.WriteString(fmt.Sprintf("    server worker-%d %s:80 check\n", i, nodeName))
 	}
 
@@ -205,12 +225,11 @@ frontend ingress_https
 
 backend ingress_https_backend
 `)
-	for i := 0; i < config.WorkerNodes; i++ {
-		nodeName := fmt.Sprintf("%s-worker-%d", name, i)
+	for i, nodeName := range workerNodes {
 		sb.WriteString(fmt.Sprintf("    server worker-%d %s:443 check\n", i, nodeName))
 	}
 
-	// 2. Write Config to Host (project dir/haproxy/haproxy.cfg)
+	// Write config to host
 	wd, _ := os.Getwd()
 	configDir := filepath.Join(wd, "haproxy")
 	if err := os.MkdirAll(configDir, 0755); err != nil {
@@ -221,8 +240,8 @@ backend ingress_https_backend
 		return nil, err
 	}
 
-	// 3. Create HAProxy Container
-	return docker.NewContainer(ctx, lbName, &docker.ContainerArgs{
+	// Create HAProxy container
+	container, err := docker.NewContainer(ctx, lbName, &docker.ContainerArgs{
 		Image: pulumi.String("haproxy:alpine"),
 		Name:  pulumi.String(lbName),
 		NetworksAdvanced: docker.ContainerNetworksAdvancedArray{
@@ -243,9 +262,16 @@ backend ingress_https_backend
 		},
 		Restart: pulumi.String("unless-stopped"),
 	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	p.lbContainer = container
+	return container, nil
 }
 
-func (p *DockerProvider) createContainer(ctx *pulumi.Context, nodeName string, talosVersion string, networks []string, exposePorts bool) (*docker.Container, error) {
+func (p *DockerProvider) createContainer(ctx *pulumi.Context, nodeName string, talosVersion string, networks []string) (*docker.Container, error) {
 	image := fmt.Sprintf("ghcr.io/siderolabs/talos:%s", talosVersion)
 
 	networkArgs := docker.ContainerNetworksAdvancedArray{}
@@ -253,14 +279,6 @@ func (p *DockerProvider) createContainer(ctx *pulumi.Context, nodeName string, t
 		networkArgs = append(networkArgs, &docker.ContainerNetworksAdvancedArgs{
 			Name: pulumi.String(net),
 		})
-	}
-
-	var ports docker.ContainerPortArray
-	if exposePorts {
-		ports = docker.ContainerPortArray{
-			&docker.ContainerPortArgs{Internal: pulumi.Int(6443), External: pulumi.Int(6443)},
-			&docker.ContainerPortArgs{Internal: pulumi.Int(50000), External: pulumi.Int(50000)},
-		}
 	}
 
 	return docker.NewContainer(ctx, nodeName, &docker.ContainerArgs{
@@ -287,7 +305,6 @@ func (p *DockerProvider) createContainer(ctx *pulumi.Context, nodeName string, t
 		Privileged:       pulumi.Bool(true),
 		Envs:             pulumi.StringArray{pulumi.String("PLATFORM=container")},
 		NetworksAdvanced: networkArgs,
-		Ports:            ports,
 		Restart:          pulumi.String("unless-stopped"),
 	})
 }
@@ -308,13 +325,13 @@ func (p *DockerProvider) transformConfig(config pulumi.StringOutput) pulumi.Stri
 			return append(slice, item)
 		}
 
-		if machine, ok := data["machine"].(map[string]interface{}); ok {
-			delete(machine, "install")
+		if machineData, ok := data["machine"].(map[string]interface{}); ok {
+			delete(machineData, "install")
 			var certSANs []interface{}
-			if existing, ok := machine["certSANs"].([]interface{}); ok {
+			if existing, ok := machineData["certSANs"].([]interface{}); ok {
 				certSANs = existing
 			}
-			machine["certSANs"] = appendUnique(certSANs, "127.0.0.1")
+			machineData["certSANs"] = appendUnique(certSANs, "127.0.0.1")
 		}
 
 		if cluster, ok := data["cluster"].(map[string]interface{}); ok {
@@ -324,6 +341,32 @@ func (p *DockerProvider) transformConfig(config pulumi.StringOutput) pulumi.Stri
 					certSANs = existing
 				}
 				apiServer["certSANs"] = appendUnique(certSANs, "127.0.0.1")
+			}
+
+			// Disable default CNI (Flannel) to allow Cilium installation
+			if network, ok := cluster["network"].(map[string]interface{}); ok {
+				if cni, ok := network["cni"].(map[string]interface{}); ok {
+					cni["name"] = "none"
+				} else {
+					network["cni"] = map[string]interface{}{
+						"name": "none",
+					}
+				}
+			} else {
+				cluster["network"] = map[string]interface{}{
+					"cni": map[string]interface{}{
+						"name": "none",
+					},
+				}
+			}
+
+			// Disable kube-proxy to avoid conflict with Cilium kubeProxyReplacement
+			if proxy, ok := cluster["proxy"].(map[string]interface{}); ok {
+				proxy["disabled"] = true
+			} else {
+				cluster["proxy"] = map[string]interface{}{
+					"disabled": true,
+				}
 			}
 		}
 

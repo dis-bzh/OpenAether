@@ -4,7 +4,11 @@ go 1.25.5
 
 require (
 	github.com/joho/godotenv v1.5.1
+	github.com/pulumi/pulumi-command/sdk v1.1.3
 	github.com/pulumi/pulumi-docker/sdk/v4 v4.11.0
+	github.com/pulumi/pulumi-kubernetes/sdk/v4 v4.24.1
+	github.com/pulumi/pulumi-openstack/sdk/v5 v5.4.0
+	github.com/pulumi/pulumi-terraform-provider/sdks/go/outscale v0.0.0-00010101000000-000000000000
 	github.com/pulumi/pulumi/sdk/v3 v3.213.0
 	github.com/pulumiverse/pulumi-scaleway/sdk v1.40.0
 	github.com/pulumiverse/pulumi-talos/sdk v0.7.0
@@ -105,3 +109,5 @@ require (
 )
 
 // replace github.com/pulumiverse/pulumi-talos/sdk => ../../repositories/pulumi-talos/sdk
+
+replace github.com/pulumi/pulumi-terraform-provider/sdks/go/outscale => ./sdks/outscale

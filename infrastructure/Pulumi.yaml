@@ -2,6 +2,12 @@ name: openaether-infrastructure
 runtime: go
 description: OpenAether Infrastructure as Code (Talos + CloudStack)
 config:
-    pulumi:tags:
-        value:
-            stack: dev
+  pulumi:tags:
+    value:
+      stack: dev
+packages:
+  outscale:
+    source: terraform-provider
+    version: 1.0.2
+    parameters:
+      - outscale/outscale
