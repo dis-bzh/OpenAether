@@ -82,12 +82,16 @@ func NewTalosCluster(ctx *pulumi.Context, name string, config *ClusterConfig, pr
 	}
 
 	// 3. Talos Config Patches for Cilium
-	// Disable kube-proxy (Cilium will replace it with eBPF)
-	// Keep Flannel as bootstrap CNI - Cilium will coexist and handle routing
+	// Disable kube-proxy (Cilium replaces it with eBPF)
+	// Disable default CNI (Flannel) so we can install Cilium
+	// Note: Cilium DaemonSet uses hostNetwork:true, so it can bootstrap without CNI
 	talosConfigPatches := pulumi.StringArray{
 		pulumi.String(`cluster:
   proxy:
     disabled: true
+  network:
+    cni:
+      name: none
 `),
 	}
 

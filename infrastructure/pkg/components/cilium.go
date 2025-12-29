@@ -62,21 +62,44 @@ for i in $(seq 1 60); do
     sleep 5
 done
 
-# Extra wait for API to stabilize and nodes to be visible
+# Wait for at least 1 node to be visible
 echo "Waiting for nodes to be visible..."
-for i in $(seq 1 30); do
+for i in $(seq 1 60); do
     NODE_COUNT=$(kubectl --kubeconfig "$KUBECONFIG_FILE" get nodes --no-headers 2>/dev/null | wc -l || echo "0")
     if [ "$NODE_COUNT" -gt "0" ]; then
         echo "Found $NODE_COUNT node(s)!"
         kubectl --kubeconfig "$KUBECONFIG_FILE" get nodes
-        echo "API is stable, proceeding..."
-        exit 0
+        break
     fi
-    echo "Attempt $i/30: No nodes visible yet, waiting 5 seconds..."
+    echo "Attempt $i/60: No nodes visible yet, waiting 5 seconds..."
     sleep 5
 done
 
-echo "ERROR: No nodes became visible in time"
+# Continuous Stability Check
+# We need 30 consecutive seconds of successful API checks to consider it stable.
+# This prevents Helm failures during transient API restarts.
+echo "Starting continuous stability check (targeting 30s of uptime)..."
+CONSECUTIVE_SUCCESS=0
+REQUIRED_SUCCESS=30
+MAX_ATTEMPTS=300 # 5 minutes max
+
+for i in $(seq 1 $MAX_ATTEMPTS); do
+    if kubectl --kubeconfig "$KUBECONFIG_FILE" get --raw /livez > /dev/null 2>&1; then
+        CONSECUTIVE_SUCCESS=$((CONSECUTIVE_SUCCESS + 1))
+        echo "API check passed ($CONSECUTIVE_SUCCESS/$REQUIRED_SUCCESS)"
+    else
+        echo "API check FAILED! Resetting counter..."
+        CONSECUTIVE_SUCCESS=0
+    fi
+
+    if [ "$CONSECUTIVE_SUCCESS" -ge "$REQUIRED_SUCCESS" ]; then
+        echo "API successfully stabilized for $REQUIRED_SUCCESS seconds!"
+        exit 0
+    fi
+    sleep 1
+done
+
+echo "ERROR: API failed to stabilize for $REQUIRED_SUCCESS consecutive seconds within $MAX_ATTEMPTS attempts."
 exit 1
 `
 
