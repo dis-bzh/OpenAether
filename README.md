@@ -3,6 +3,10 @@
 > **Store Anywhere, Run Anywhere.**
 > An open-source, resilient, multi-cloud Internal Developer Platform (IDP).
 
+## 📋 Version
+
+**v0.1.0** - Multi-provider infrastructure provisioning with Talos Linux.
+
 ## 🏗️ Architecture
 
 OpenAether uses **Talos Linux** and a sovereign-first approach:
