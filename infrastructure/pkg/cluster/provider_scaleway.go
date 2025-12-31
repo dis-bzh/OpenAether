@@ -10,11 +10,11 @@ import (
 
 // ScalewayProvider implements ClusterProvider for Scaleway Cloud.
 type ScalewayProvider struct {
-	vpc           *scaleway.Vpc
-	privateNet    *scaleway.VpcPrivateNetwork
-	securityGroup *scaleway.InstanceSecurityGroup
-	publicIps     []*scaleway.InstanceIp
-	firstCPIP     pulumi.StringOutput
+	vpc             *scaleway.Vpc
+	privateNet      *scaleway.VpcPrivateNetwork
+	securityGroup   *scaleway.InstanceSecurityGroup
+	publicIps       []*scaleway.InstanceIp
+	firstCPPublicIp *scaleway.InstanceIp // Pre-allocated IP for first CP
 }
 
 // NewScalewayProvider creates a new Scaleway provider.
@@ -29,15 +29,23 @@ func (p *ScalewayProvider) Name() string {
 
 // GetPublicEndpoint returns the public endpoint for Scaleway.
 func (p *ScalewayProvider) GetPublicEndpoint(ctx *pulumi.Context) pulumi.StringOutput {
-	return p.firstCPIP
+	if p.firstCPPublicIp != nil {
+		return p.firstCPPublicIp.Address
+	}
+	if len(p.publicIps) > 0 {
+		return p.publicIps[0].Address
+	}
+	return pulumi.String("").ToStringOutput()
 }
 
 // ConfigureNetworking creates the VPC, Private Network, and Security Groups for Scaleway.
 func (p *ScalewayProvider) ConfigureNetworking(ctx *pulumi.Context, name string, config *ClusterConfig) error {
 	// Create VPC
+	// Region and ProjectId are required by Scaleway API for proper resource placement
 	vpc, err := scaleway.NewVpc(ctx, name+"-vpc", &scaleway.VpcArgs{
-		Name:   pulumi.String(name + "-vpc"),
-		Region: pulumi.String(config.Scaleway.Region),
+		Name:      pulumi.String(name + "-vpc"),
+		Region:    pulumi.String(config.Scaleway.Region),
+		ProjectId: pulumi.String(config.Scaleway.ProjectID),
 		Tags: pulumi.StringArray{
 			pulumi.String("openaether"),
 			pulumi.String(name),
@@ -50,9 +58,10 @@ func (p *ScalewayProvider) ConfigureNetworking(ctx *pulumi.Context, name string,
 
 	// Create Private Network
 	privateNet, err := scaleway.NewVpcPrivateNetwork(ctx, name+"-pn", &scaleway.VpcPrivateNetworkArgs{
-		Name:   pulumi.String(name + "-pn"),
-		VpcId:  vpc.ID(),
-		Region: pulumi.String(config.Scaleway.Region),
+		Name:      pulumi.String(name + "-pn"),
+		VpcId:     vpc.ID(),
+		Region:    pulumi.String(config.Scaleway.Region),
+		ProjectId: pulumi.String(config.Scaleway.ProjectID),
 		Tags: pulumi.StringArray{
 			pulumi.String("openaether"),
 		},
@@ -144,6 +153,17 @@ func (p *ScalewayProvider) ConfigureNetworking(ctx *pulumi.Context, name string,
 	}
 	p.securityGroup = sg
 
+	// Pre-allocate Public IP for the first control plane node
+	// This is needed so GetPublicEndpoint can return the IP before ProvisionNodes is called
+	firstCPIp, err := scaleway.NewInstanceIp(ctx, name+"-cp-0-ip-prealloc", &scaleway.InstanceIpArgs{
+		Zone: pulumi.String(config.Scaleway.Zone),
+	})
+	if err != nil {
+		return err
+	}
+	p.firstCPPublicIp = firstCPIp
+	p.publicIps = append(p.publicIps, firstCPIp)
+
 	return nil
 }
 
@@ -167,28 +187,26 @@ func (p *ScalewayProvider) ProvisionNodes(
 	createInstance := func(role string, localIndex int, configOutput *machine.GetConfigurationResultOutput) (ProvisionedNode, error) {
 		nodeName := fmt.Sprintf("%s-%s-%d", name, role, nodeIndex)
 
-		// Create Public IP
-		publicIp, err := scaleway.NewInstanceIp(ctx, nodeName+"-ip", &scaleway.InstanceIpArgs{
-			Zone: pulumi.String(config.Scaleway.Zone),
-		})
-		if err != nil {
-			return ProvisionedNode{}, err
-		}
-		p.publicIps = append(p.publicIps, publicIp)
+		var publicIp *scaleway.InstanceIp
+		var err error
 
-		// Create extra volume for EPHEMERAL partition
-		// Scaleway Talos requires separate disk for EPHEMERAL
-		ephemeralVolume, err := scaleway.NewInstanceVolume(ctx, nodeName+"-ephemeral", &scaleway.InstanceVolumeArgs{
-			Name:     pulumi.String(nodeName + "-ephemeral"),
-			Zone:     pulumi.String(config.Scaleway.Zone),
-			Type:     pulumi.String("l_ssd"), // Local SSD for performance
-			SizeInGb: pulumi.Int(25),         // 25GB for EPHEMERAL
-		})
-		if err != nil {
-			return ProvisionedNode{}, err
+		// Reuse pre-allocated IP for first control plane
+		if role == "cp" && localIndex == 0 && p.firstCPPublicIp != nil {
+			publicIp = p.firstCPPublicIp
+		} else {
+			// Create new Public IP
+			publicIp, err = scaleway.NewInstanceIp(ctx, nodeName+"-ip", &scaleway.InstanceIpArgs{
+				Zone: pulumi.String(config.Scaleway.Zone),
+			})
+			if err != nil {
+				return ProvisionedNode{}, err
+			}
+			p.publicIps = append(p.publicIps, publicIp)
 		}
 
 		// Create Instance Server
+		// Note: Talos needs enough space on root disk for EPHEMERAL partition
+		// We don't use additional volumes as Talos doesn't auto-detect them for EPHEMERAL
 		server, err := scaleway.NewInstanceServer(ctx, nodeName, &scaleway.InstanceServerArgs{
 			Name:            pulumi.String(nodeName),
 			Zone:            pulumi.String(config.Scaleway.Zone),
@@ -200,8 +218,8 @@ func (p *ScalewayProvider) ProvisionNodes(
 				pulumi.String("openaether"),
 				pulumi.String(role),
 			},
-			AdditionalVolumeIds: pulumi.StringArray{
-				ephemeralVolume.ID(),
+			RootVolume: &scaleway.InstanceServerRootVolumeArgs{
+				SizeInGb: pulumi.Int(40), // Max for DEV1-M local volume
 			},
 		})
 		if err != nil {
@@ -242,7 +260,6 @@ func (p *ScalewayProvider) ProvisionNodes(
 
 		if i == 0 {
 			firstCPIP = node.PublicIP
-			p.firstCPIP = firstCPIP
 		}
 	}
 

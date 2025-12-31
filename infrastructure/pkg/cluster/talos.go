@@ -240,14 +240,15 @@ contexts:
 `, clusterName, clusterName, endpoint, endpoint, ca, cert, key)
 	}).(pulumi.StringOutput)
 
-	// 9. Create Kubernetes provider for Helm deployments
-	kubeProvider, err := helm.NewKubernetesProvider(ctx, name+"-k8s-provider", cluster.Kubeconfig)
+	// 9. Wait for cluster to be ready before deploying CNI
+	waitCmd, err := components.WaitForClusterReady(ctx, name+"-wait-ready", cluster.Kubeconfig, pulumi.DependsOn([]pulumi.Resource{bootstrap}))
 	if err != nil {
 		return nil, err
 	}
 
-	// 10. Wait for cluster to be ready before deploying CNI
-	waitCmd, err := components.WaitForClusterReady(ctx, name+"-wait-ready", cluster.Kubeconfig, pulumi.DependsOn([]pulumi.Resource{bootstrap}))
+	// 10. Create Kubernetes provider for Helm deployments (AFTER cluster is ready)
+	// The provider validates connection on creation, so it must wait for the API server
+	kubeProvider, err := helm.NewKubernetesProvider(ctx, name+"-k8s-provider", cluster.Kubeconfig, pulumi.DependsOn([]pulumi.Resource{waitCmd}))
 	if err != nil {
 		return nil, err
 	}

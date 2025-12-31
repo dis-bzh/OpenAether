@@ -27,8 +27,7 @@ go.work.sum
 
 # env files (contain secrets)
 .env
-.env.local
-infrastructure/environments/.env.*
+.env.*
 
 # Editor/IDE
 # .idea/
@@ -40,10 +39,9 @@ infrastructure/environments/.env.*
 *.p12
 *.pfx
 *.crt
-kubeconfig*.yaml
-talosconfig*.yaml
-**/*.kubeconfig
-infrastructure/kubeconfig.yaml
+kubeconfig*
+talosconfig*
 
 # Pulumi
 infrastructure/.pulumi/
+Pulumi.*.yaml
