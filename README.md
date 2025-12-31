@@ -5,94 +5,157 @@
 
 ## 🏗️ Architecture
 
-OpenAether uses **Talos Linux** and a "Zero Trust" sovereign stack:
+OpenAether uses **Talos Linux** and a sovereign-first approach:
 
-*   **Infrastructure**: Pulumi (Go)
-*   **OS**: Talos Linux (Immutable, Secure)
-*   **Gateway**: Traefik (Gateway API)
-*   **Identity**: Keycloak (OIDC/SAML) + CloudNativePG (HA Postgres)
-*   **Service Mesh**: Linkerd (mTLS everywhere)
-*   **Secrets**: OpenBao (Vault Fork)
-*   **Policy**: Kyverno (Policy as Code)
-*   **Observability**: VictoriaMetrics (Metrics), Loki (Logs), Grafana (UI)
+| Layer | Technology | Status |
+|-------|------------|--------|
+| **IaC** | Pulumi (Go) | ✅ |
+| **OS** | Talos Linux (Immutable) | ✅ |
+| **CNI** | Cilium | ✅ |
+| **Gateway** | Traefik (Gateway API) | 🚧 Phase 2 |
+| **Identity** | Keycloak + CloudNativePG | 🚧 Phase 2 |
+| **Secrets** | OpenBao (Vault Fork) | 🚧 Phase 2 |
+| **Mesh** | Linkerd (mTLS) | 🚧 Phase 2 |
+| **Observability** | VictoriaMetrics, Loki, Grafana | 🚧 Phase 2 |
+
+## ☁️ Provider Support
+
+| Provider | Status | Notes |
+|----------|--------|-------|
+| **Docker** | ✅ Production | Local Talos-in-Docker for dev/test |
+| **Outscale** | ✅ Production | 3DS sovereign cloud (EU) |
+| **Scaleway** | ✅ Production | EU sovereign cloud |
+| **OVH** | 🚧 Planned | OpenStack-based |
 
 ## 📂 Repository Structure
 
-*   `infrastructure/` - **Pulumi Go Code**. Defines the infrastructure components (Clusters, Networking).
-*   `clusters/` - **Talos Configs**. Machine configurations.
-*   `apps/` - **Kustomize Structure**.
-    *   `base/` - Core components (Gateway, Linkerd, etc.).
-    *   `overlays/` - Environment specific (local, prod).
+```
+OpenAether/
+├── infrastructure/          # Pulumi Go code
+│   ├── main.go              # Entry point
+│   ├── pkg/cluster/         # Provider implementations
+│   ├── pkg/components/      # Cilium, etc.
+│   ├── environments/        # .env.local, .env.test, etc.
+│   └── sdks/                # Outscale SDK
+├── apps/                    # Kustomize/ArgoCD (Phase 2)
+│   ├── base/                # Core manifests
+│   ├── overlays/            # Environment-specific
+│   └── bootstrap/           # ArgoCD bootstrap
+├── scripts/                 # Setup scripts
+└── Taskfile.yml             # Task automation
+```
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-Run the setup script:
-```bash
-bash scripts/setup.sh
-```
-*Note: You may need `sudo modprobe br_netfilter` on your host for local Docker networking.*
 
-### 1. Configure Pulumi (Local Backend)
 ```bash
-pulumi login --local
+# Install dependencies
+task setup
+
+# For Docker provider (local dev)
+sudo modprobe br_netfilter
 ```
 
-### 2. Start Local Simulation (Talos-in-Docker)
-Spin up a local Talos node using Pulumi:
+### Configure Environment
+
 ```bash
-task local:up
+# Copy example config
+cp infrastructure/.env.example infrastructure/environments/.env.prod
 ```
 
-### 3. Deploy Platform (DevSecOps Stack)
-Deploy the entire stack (Gateway, IAM, Mesh, Apps) to the local cluster:
+### Deploy a Cluster
+
 ```bash
-task deploy:local
+# Local Docker cluster
+task deploy ENV=local
+
+# Test in cloud
+task deploy ENV=test
+
+# Prod in cloud
+task deploy ENV=prod
+
+# Preview changes without applying
+task preview ENV=test
 ```
 
-Access services via `*.localhost` (automatically mapped by Chrome/Firefox or add to `/etc/hosts`):
-*   **Demo App**: [http://demo.localhost](http://demo.localhost)
-*   **Keycloak**: [http://auth.localhost](http://auth.localhost)
-*   **Grafana**: [http://grafana.localhost](http://grafana.localhost)
+### Access the Cluster
+
+```bash
+# Check cluster status
+task status ENV=test
+
+# Export kubeconfig separately
+task kubeconfig ENV=test
+
+# Use kubectl directly
+kubectl --kubeconfig kubeconfig-test.yaml get nodes
+```
+
+### Destroy a Cluster
+
+```bash
+task destroy ENV=test
+```
+
+## ⚙️ Multi-Provider Mode
+
+Deploy nodes across multiple providers using `NODE_DISTRIBUTION`:
+
+```bash
+# .env example
+NODE_DISTRIBUTION=outscale:3:2
+# Format: provider:controlplanes:workers
+```
+
+This deploys 3 control-plane + 2 worker on Outscale.
+
+## 🛠️ Available Tasks
+
+```bash
+task              # Show all available tasks
+task setup        # Run initial setup
+task lint         # Run linters (golangci-lint, yamllint)
+task test         # Run Go tests
+task deploy       # Deploy cluster (ENV=local|test|prod)
+task destroy      # Destroy cluster
+task preview      # Preview changes
+task status       # Show cluster status
+task kubeconfig   # Export kubeconfig
+```
 
 ## 🛡️ Security
 
-*   **Secrets**: Managed via **OpenBao**.
-*   **Network**: mTLS enabled by default via **Linkerd**.
-*   **Policies**: **Kyverno** enforces Pod Security Standards (Audit mode default).
+- **OS**: Talos Linux - immutable, minimal, API-driven
+- **CNI**: Cilium with WireGuard encryption
+- **Secrets**: Never committed (`.gitignore` enforced)
 
 ## 🔧 Troubleshooting
 
-### `Failed to check br_netfilter`
-If pods (specifically `kube-flannel`) crash with this error:
-1.  Run `sudo modprobe br_netfilter` on your host.
-2.  Restart: `task local:down && task local:up`.
+### `Failed to check br_netfilter` (Docker)
+```bash
+sudo modprobe br_netfilter
+task destroy ENV=local && task deploy ENV=local
+```
+
+### Pulumi state issues
+```bash
+pulumi login --local
+pulumi stack select <env> --create
+```
 
 ## 📜 License
 
 **OpenAether** is licensed under the [GNU Affero General Public License v3.0 (AGPLv3)](LICENSE).
 
-### Source Code
-
-The complete source code is available at: **https://github.com/dis-bzh/OpenAether**
-
-If you use this software as a service (SaaS), you must:
-- Provide a link to the exact source code version you are running
-- Include all your modifications in the published source
+Source code: **https://github.com/dis-bzh/OpenAether**
 
 ### Third-Party Components
-
-OpenAether uses the following open-source components, all compatible with AGPLv3:
 
 | Component | License |
 |-----------|---------|
 | Pulumi | Apache 2.0 |
 | Talos Linux | MPL 2.0 |
-| Keycloak | Apache 2.0 |
-| OpenBao | MPL 2.0 |
-| Linkerd | Apache 2.0 |
-| Traefik | MIT |
-| cert-manager | Apache 2.0 |
 | Cilium | Apache 2.0 |
-| Grafana Stack | AGPLv3 |
-
+| Outscale SDK | Apache 2.0 |

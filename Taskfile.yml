@@ -9,18 +9,34 @@ tasks:
     cmds:
       - task --list
 
+  # ============================================
+  # CORE TASKS
+  # ============================================
+
+  setup:
+    desc: Run initial setup script
+    dir: scripts
+    cmds:
+      - bash setup.sh
+
   lint:
     desc: Run golangci-lint and yamllint
     cmds:
       - cd infrastructure && golangci-lint run ./...
       - yamllint .
 
+  test:
+    desc: Run Go tests
+    dir: infrastructure
+    cmds:
+      - go test -v ./...
+
   # ============================================
-  # DEPLOYMENT TASKS (Multi-Environment)
+  # DEPLOYMENT TASKS
   # ============================================
 
   deploy:
-    desc: "Deploy cluster to environment. Usage: task deploy ENV=test"
+    desc: "Deploy cluster. Usage: task deploy ENV=test"
     dir: infrastructure
     dotenv:
       - '.env'
@@ -31,7 +47,6 @@ tasks:
       - pulumi up --stack {{.ENV}} --yes
       - pulumi stack output kubeconfig --stack {{.ENV}} --show-secrets > ../kubeconfig-{{.ENV}}.yaml
       - echo "✅ Deployed to {{.ENV}}"
-      - echo "Kubeconfig saved to kubeconfig-{{.ENV}}.yaml"
 
   destroy:
     desc: "Destroy cluster. Usage: task destroy ENV=test"
@@ -44,7 +59,7 @@ tasks:
       - echo "🗑️ Destroyed {{.ENV}}"
 
   preview:
-    desc: "Preview changes without applying. Usage: task preview ENV=test"
+    desc: "Preview changes. Usage: task preview ENV=test"
     dir: infrastructure
     dotenv:
       - '.env'
@@ -60,56 +75,6 @@ tasks:
       - kubectl --kubeconfig kubeconfig-{{.ENV}}.yaml get nodes
       - kubectl --kubeconfig kubeconfig-{{.ENV}}.yaml get pods -A
 
-  # ============================================
-  # SHORTCUT TASKS
-  # ============================================
-
-  local:up:
-    desc: Deploy local Docker cluster (shortcut for deploy ENV=local)
-    cmds:
-      - task: deploy
-        vars:
-          ENV: local
-
-  local:down:
-    desc: Destroy local Docker cluster
-    cmds:
-      - task: destroy
-        vars:
-          ENV: local
-
-  test:up:
-    desc: Deploy test environment
-    cmds:
-      - task: deploy
-        vars:
-          ENV: test
-
-  test:down:
-    desc: Destroy test environment
-    cmds:
-      - task: destroy
-        vars:
-          ENV: test
-
-  prod:up:
-    desc: Deploy production environment
-    cmds:
-      - task: deploy
-        vars:
-          ENV: prod
-
-  prod:down:
-    desc: Destroy production environment
-    cmds:
-      - task: destroy
-        vars:
-          ENV: prod
-
-  # ============================================
-  # UTILITY TASKS
-  # ============================================
-
   kubeconfig:
     desc: "Export kubeconfig. Usage: task kubeconfig ENV=test"
     dir: infrastructure
@@ -119,24 +84,3 @@ tasks:
     cmds:
       - pulumi stack output kubeconfig --stack {{.ENV}} --show-secrets > ../kubeconfig-{{.ENV}}.yaml
       - echo "Kubeconfig saved to kubeconfig-{{.ENV}}.yaml"
-
-  # generate:manifests:
-  #   desc: Generate/Download required manifests (Gateway API) locally if missing
-  #   cmds:
-  #     - mkdir -p apps/infrastructure/gateway-api
-  #     - curl -sL https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.0.0/standard-install.yaml -o apps/infrastructure/gateway-api/standard-install.yaml
-
-  deploy:platform:
-    desc: Deploy platform components via Kustomize
-    cmds:
-      - kubectl --kubeconfig kubeconfig-{{.ENV}}.yaml apply -k apps/platform/
-
-  # ============================================
-  # SETUP TASKS
-  # ============================================
-
-  setup:
-    desc: Copy .env.example to .env
-    dir: scripts
-    cmds:
-      - bash setup.sh
