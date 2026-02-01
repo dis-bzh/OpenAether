@@ -54,3 +54,18 @@ variable "talos_version" {
 variable "kubernetes_version" {
   type = string
 }
+variable "admin_ip" {
+  description = "List of allowed Source IPs/CIDRs for Admin Access (SSH, API)"
+  type        = list(string)
+}
+
+variable "bastion_ssh_key" {
+  description = "SSH Public Key for the Bastion"
+  type        = string
+}
+
+variable "bastion_image_id" {
+  description = "Image ID for Bastion"
+  type        = string
+  default     = null # Must be provided if searching by name is not used
+}

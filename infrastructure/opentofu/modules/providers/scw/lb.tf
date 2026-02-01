@@ -52,11 +52,13 @@ resource "scaleway_lb_acl" "k8s_api_whitelist" {
   }
 
   match {
-    ip_subnet = [
+    ip_subnet = concat(
       var.admin_ip,
-      "${scaleway_vpc_public_gateway_ip.this.address}/32", # Allow nodes via NAT GW (Hairpinning)
-      "172.16.0.0/12"                                     # Allow nodes directly if routed
-    ]
+      [
+        "${scaleway_vpc_public_gateway_ip.this.address}/32", # Allow nodes via NAT GW (Hairpinning)
+        "172.16.0.0/12"                                     # Allow nodes directly if routed
+      ]
+    )
   }
 }
 

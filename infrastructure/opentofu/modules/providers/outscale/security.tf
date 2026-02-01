@@ -17,10 +17,15 @@ resource "outscale_security_group_rule" "k8s_api" {
 resource "outscale_security_group_rule" "talos_api" {
   flow              = "Inbound"
   security_group_id = outscale_security_group.this.security_group_id
-  from_port_range   = 50000
-  to_port_range     = 50000
-  ip_protocol       = "tcp"
-  ip_range          = "0.0.0.0/0" # TODO: Restrict to Bastion
+  
+  rules {
+    from_port_range = 50000
+    to_port_range   = 50000
+    ip_protocol     = "tcp"
+    security_groups_members {
+      security_group_id = outscale_security_group.bastion.security_group_id
+    }
+  }
 }
 
 # HTTP/HTTPS - Open
