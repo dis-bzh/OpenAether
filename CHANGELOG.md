@@ -38,6 +38,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.0] - 2026-02-01
+
+### Added
+
+- **OpenTofu Migration**: Native IaC for infrastructure stability and idempotency.
+- **OVH Provider**: Full support for OVH OpenStack-based clusters.
+- **Scaleway HA Architecture**: Hybrid multi-zone deployment (Control Plane across multiple zones).
+- **Native Talos Bootstrap**: Automated cluster initialization via `talos_machine_bootstrap`.
+- **Hardened Bastion**: Improved bastion host with automated routing fixes (Asymmetric DHCP fix).
+- **LB Private Connectivity**: Load Balancer now attached directly to the Private Network for secure API access.
+- **Local Config Export**: Automatic generation of `talosconfig` and `kubeconfig`.
+
+### Infrastructure
+
+- Scaleway: Improved Security Group management with zonal segmentation.
+- Scaleway: Hybrid zone support for `DEV1-S` / `PRO2` instance types.
+
+### Security
+
+- LB ACLs with NAT Gateway whitelisting for node-to-API communication (Hairpinning).
+- Bastion SSH restricted to administrator IP by default.
+
+---
+
 ## [Unreleased]
 
 ### Planned
