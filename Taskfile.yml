@@ -1,86 +1,37 @@
 version: "3"
 
-vars:
-  ENV: '{{.ENV | default "local"}}'
-
 tasks:
   default:
     desc: Show available tasks
     cmds:
       - task --list
 
-  # ============================================
-  # CORE TASKS
-  # ============================================
-
   setup:
-    desc: Run initial setup script
-    dir: scripts
+    desc: Install dependencies
     cmds:
-      - bash setup.sh
-
-  lint:
-    desc: Run golangci-lint and yamllint
-    cmds:
-      - cd infrastructure && golangci-lint run ./...
-      - yamllint .
-
-  test:
-    desc: Run Go tests
-    dir: infrastructure
-    cmds:
-      - go test -v ./...
-
-  # ============================================
-  # DEPLOYMENT TASKS
-  # ============================================
+      - echo "Ensure tofu, talosctl, and kubectl are installed."
 
   deploy:
-    desc: "Deploy cluster. Usage: task deploy ENV=test"
-    dir: infrastructure
-    dotenv:
-      - '.env'
-      - 'environments/.env.{{.ENV}}'
+    desc: Deploy the cluster using OpenTofu
+    dir: infrastructure/opentofu
     cmds:
-      - pulumi login --local
-      - pulumi stack select {{.ENV}} --create
-      - pulumi up --stack {{.ENV}} --yes
-      - pulumi stack output kubeconfig --stack {{.ENV}} --show-secrets > ../kubeconfig-{{.ENV}}.yaml
-      - echo "✅ Deployed to {{.ENV}}"
-
-  destroy:
-    desc: "Destroy cluster. Usage: task destroy ENV=test"
-    dir: infrastructure
-    dotenv:
-      - '.env'
-      - 'environments/.env.{{.ENV}}'
-    cmds:
-      - pulumi destroy --stack {{.ENV}} --yes
-      - echo "🗑️ Destroyed {{.ENV}}"
+      - tofu apply -var-file="tofu.tfvars"
 
   preview:
-    desc: "Preview changes. Usage: task preview ENV=test"
-    dir: infrastructure
-    dotenv:
-      - '.env'
-      - 'environments/.env.{{.ENV}}'
+    desc: Preview changes
+    dir: infrastructure/opentofu
     cmds:
-      - pulumi login --local
-      - pulumi stack select {{.ENV}} --create
-      - pulumi preview --stack {{.ENV}}
+      - tofu plan -var-file="tofu.tfvars"
 
-  status:
-    desc: "Show cluster status. Usage: task status ENV=test"
+  destroy:
+    desc: Destroy the cluster
+    dir: infrastructure/opentofu
     cmds:
-      - kubectl --kubeconfig kubeconfig-{{.ENV}}.yaml get nodes
-      - kubectl --kubeconfig kubeconfig-{{.ENV}}.yaml get pods -A
+      - tofu destroy -var-file="tofu.tfvars"
 
   kubeconfig:
-    desc: "Export kubeconfig. Usage: task kubeconfig ENV=test"
-    dir: infrastructure
-    dotenv:
-      - '.env'
-      - 'environments/.env.{{.ENV}}'
+    desc: Retrieve kubeconfig
+    dir: infrastructure/opentofu
     cmds:
-      - pulumi stack output kubeconfig --stack {{.ENV}} --show-secrets > ../kubeconfig-{{.ENV}}.yaml
-      - echo "Kubeconfig saved to kubeconfig-{{.ENV}}.yaml"
+      - tofu output -raw talosconfig > talosconfig
+      - echo "Use talosctl to retrieve kubeconfig using the talosconfig"
