@@ -70,8 +70,8 @@ variable "image_name" {
 # Config will be generated locally in config.tf
 
 variable "admin_ip" {
-  type        = string
-  description = "IP de l'administrateur pour whitelist"
+  type        = list(string)
+  description = "List of allowed Source IPs/CIDRs for Admin Access (SSH, API)"
 }
 
 variable "bastion_ssh_key" {
