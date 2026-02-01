@@ -162,12 +162,4 @@ resource "talos_cluster_kubeconfig" "this" {
   depends_on = [talos_machine_bootstrap.this]
 }
 
-resource "local_file" "talosconfig" {
-  content  = module.talos.talosconfig
-  filename = "${path.module}/talosconfig"
-}
 
-resource "local_file" "kubeconfig" {
-  content  = talos_cluster_kubeconfig.this.kubeconfig_raw
-  filename = "${path.module}/kubeconfig"
-}

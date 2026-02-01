@@ -39,41 +39,32 @@ resource "scaleway_lb_frontend" "control_plane" {
   backend_id   = scaleway_lb_backend.control_plane.id
   name         = "control-plane-frontend"
   inbound_port = 6443
-}
 
-# ACL pour restreindre l'accès au port 6443 à l'IP admin uniquement
-resource "scaleway_lb_acl" "k8s_api_whitelist" {
-  frontend_id = scaleway_lb_frontend.control_plane.id
-  name        = "k8s-api-whitelist"
-  index       = 0
-
-  action {
-    type = "allow"
+  acl {
+    name = "k8s_api_whitelist"
+    action {
+      type = "allow"
+    }
+    match {
+      ip_subnet = concat(
+        var.admin_ip,
+        [
+          "${scaleway_vpc_public_gateway_ip.this.address}/32", # Allow nodes via NAT GW (Hairpinning)
+          "172.16.0.0/12"                                     # Allow nodes directly if routed
+        ]
+      )
+    }
   }
 
-  match {
-    ip_subnet = concat(
-      var.admin_ip,
-      [
-        "${scaleway_vpc_public_gateway_ip.this.address}/32", # Allow nodes via NAT GW (Hairpinning)
-        "172.16.0.0/12"                                     # Allow nodes directly if routed
-      ]
-    )
-  }
-}
-
-# ACL par défaut : deny all other traffic
-resource "scaleway_lb_acl" "k8s_api_deny" {
-  frontend_id = scaleway_lb_frontend.control_plane.id
-  name        = "k8s-api-deny-default"
-  index       = 1
-
-  action {
-    type = "deny"
-  }
-
-  match {
-    ip_subnet = ["0.0.0.0/0"]
+  # ACL par défaut : deny all other traffic
+  acl {
+    name = "k8s_api_deny_default"
+    action {
+      type = "deny"
+    }
+    match {
+      ip_subnet = ["0.0.0.0/0"]
+    }
   }
 }
 # --- App Traffic (HTTP/HTTPS) ---

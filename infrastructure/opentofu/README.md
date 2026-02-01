@@ -21,7 +21,31 @@ This directory contains the OpenTofu (Terraform compatible) code to deploy the O
   - **OVH**: `OS_AUTH_URL`, `OS_TENANT_ID`, `OS_TENANT_NAME`, `OS_USERNAME`, `OS_PASSWORD`, `OS_REGION_NAME`
   - **Outscale**: `OSC_ACCESS_KEY`, `OSC_SECRET_KEY`, `OSC_REGION`
 
-## Usage
+## Remote State & Security (Production)
+
+The state is stored in an **Encrypted S3 Backend** (Scaleway Object Storage) with **Client-Side Encryption** (AES-GCM).
+
+### 1. Export Credentials & Secrets
+To initialize or apply, you **must** export the following variables:
+
+```bash
+# S3 Backend & Backup Access
+export AWS_ACCESS_KEY_ID="<SCW_ACCESS_KEY>"
+export AWS_SECRET_ACCESS_KEY="<SCW_SECRET_KEY>"
+export AWS_DEFAULT_REGION="fr-par"
+
+# Encryption Passphrase (Zero-Knowledge & SSE-C Key)
+# Used for Client-Side State encryption AND S3 Object Backups
+export TF_VAR_encryption_passphrase="<YOUR_SECURE_PASSPHRASE>"
+```
+
+### 2. Configuration Backups (SSE-C)
+Critical cluster artifacts are automatically backed up to Scaleway Object Storage with **Server-Side Encryption with Customer-Provided Keys (SSE-C)**. 
+- **Encryption Key**: Derived from the first 32 characters of your `encryption_passphrase`.
+- **Location**: `s3-openaether-tfstate/backups/`.
+- **Privacy**: Scaleway cannot access the unencrypted data without your passphrase.
+
+### 2. Usage Sequence
 
 1.  **Initialize**:
     ```bash
@@ -67,10 +91,17 @@ The infrastructure uses a **zero-trust** approach:
 
 ## Post-Deployment Access
 
-Once the bootstrap is complete, `talosconfig` and `kubeconfig` are generated in the current directory.
+Once the bootstrap is complete, all configurations are managed in memory (no persistent local files). You can retrieve them securely using Tofu outputs:
 
 ```bash
+# Retrieve Kubeconfig
+tofu output -raw kubeconfig > kubeconfig
 export KUBECONFIG=./kubeconfig
+
+# Retrieve Talosconfig
+tofu output -raw talosconfig > talosconfig
+
+# Access Cluster
 kubectl get nodes
 ```
 
