@@ -42,10 +42,25 @@ go.work.sum
 *.p12
 *.pfx
 *.crt
+# Talos & Kubernetes Credentials
 kubeconfig*
 talosconfig*
+controlplane.yaml
+worker.yaml
 
-# Pulumi
-infrastructure/.pulumi/
-Pulumi.*.yaml
-Pulumi.test*
+# OpenTofu / Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+*.tfplan
+plan
+
+# Editor/IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
