@@ -5,7 +5,7 @@
 
 ## 📋 Version
 
-**v0.2.0** - Multi-provider infrastructure provisioning with Talos Linux and OpenTofu.
+**v0.2.0** - High-Availability (HA) infrastructure provisioning with Talos Linux and OpenTofu.
 
 ## 🏗️ Architecture
 
@@ -26,8 +26,8 @@ OpenAether uses **Talos Linux** and a sovereign-first approach:
 
 | Provider | Status | Notes |
 |----------|--------|-------|
+| **Scaleway** | ✅ HA Production | Multi-zone Control Plane support |
 | **Outscale** | ✅ Production | 3DS sovereign cloud (EU) |
-| **Scaleway** | ✅ Production | EU sovereign cloud |
 | **OVH** | ✅ Production | OpenStack-based |
 | **Docker** | ⚠️ Legacy | Moved to legacy, use Talos-in-Docker manually if needed |
 
@@ -91,9 +91,9 @@ task deploy
 
 - **OS**: Talos Linux - immutable, minimal, API-driven.
 - **Network Isolation**: All nodes (Control Plane/Workers) reside in a **Private VPC** with NO public IP.
-- **Admin Access**: Hardened **Bastion Host** (Jump Server) for all management operations.
+- **Admin Access**: Hardened **Bastion Host** (Jump Server) with automated asymmetric routing protection.
 - **Outbound Connectivity**: **Public Gateway (NAT)** for secure image pulls and updates.
-- **ACLs**: Kubernetes API whitelisted to administrator IPs on the Load Balancer.
+- **ACLs**: Kubernetes API whitelisted to administrator IPs on the Elastic Load Balancer (connected to private network).
 - **Encryption**: Cilium with WireGuard encryption for inter-node traffic.
 - **Secrets**: Never committed (`.gitignore` enforced).
 

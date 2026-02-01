@@ -2,6 +2,23 @@ variable "cluster_name" {
   type = string
 }
 
+variable "machine_secrets" {
+  description = "Talos machine secrets"
+  sensitive   = true
+}
+
+variable "cluster_endpoint" {
+  type = string
+}
+
+variable "talos_version" {
+  type = string
+}
+
+variable "kubernetes_version" {
+  type = string
+}
+
 variable "region" {
   type    = string
   default = "fr-par"
@@ -10,6 +27,11 @@ variable "region" {
 variable "zone" {
   type    = string
   default = "fr-par-1"
+}
+
+variable "additional_zones" {
+  type    = list(string)
+  default = ["fr-par-1", "fr-par-2", "fr-par-3"]
 }
 
 variable "project_id" {
@@ -35,18 +57,17 @@ variable "instance_type" {
 
 variable "image_id" {
   type        = string
-  description = "ID of the Talos image/snapshot"
+  description = "ID of the Talos image (zonal)"
+  default     = null
 }
 
-variable "control_plane_config" {
+variable "image_name" {
   type        = string
-  description = "Talos machine config for control plane"
+  description = "Name of the Talos image (to find across zones)"
+  default     = "talos"
 }
 
-variable "worker_config" {
-  type        = string
-  description = "Talos machine config for worker"
-}
+# Config will be generated locally in config.tf
 
 variable "admin_ip" {
   type        = string

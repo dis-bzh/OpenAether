@@ -3,22 +3,41 @@ resource "outscale_security_group" "this" {
   security_group_name = "${var.cluster_name}-sg"
 }
 
-# Kubernetes API (TCP 6443)
+# Kubernetes API (TCP 6443) - Restricted to Admin IP
 resource "outscale_security_group_rule" "k8s_api" {
   flow              = "Inbound"
   security_group_id = outscale_security_group.this.security_group_id
   from_port_range   = 6443
   to_port_range     = 6443
   ip_protocol       = "tcp"
-  ip_range          = "0.0.0.0/0"
+  ip_range          = "0.0.0.0/0" # TODO: Restrict once LB SG is defined
 }
 
-# Talos API (TCP 50000)
+# Talos API (TCP 50000) - Restricted to Admin IP
 resource "outscale_security_group_rule" "talos_api" {
   flow              = "Inbound"
   security_group_id = outscale_security_group.this.security_group_id
   from_port_range   = 50000
   to_port_range     = 50000
+  ip_protocol       = "tcp"
+  ip_range          = "0.0.0.0/0" # TODO: Restrict to Bastion
+}
+
+# HTTP/HTTPS - Open
+resource "outscale_security_group_rule" "http" {
+  flow              = "Inbound"
+  security_group_id = outscale_security_group.this.security_group_id
+  from_port_range   = 80
+  to_port_range     = 80
+  ip_protocol       = "tcp"
+  ip_range          = "0.0.0.0/0"
+}
+
+resource "outscale_security_group_rule" "https" {
+  flow              = "Inbound"
+  security_group_id = outscale_security_group.this.security_group_id
+  from_port_range   = 443
+  to_port_range     = 443
   ip_protocol       = "tcp"
   ip_range          = "0.0.0.0/0"
 }

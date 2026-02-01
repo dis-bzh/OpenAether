@@ -8,15 +8,6 @@ output "machine_secrets" {
   sensitive = true
 }
 
-output "control_plane_machine_config" {
-  value     = module.talos.controlplane_machine_config
-  sensitive = true
-}
-
-output "worker_machine_config" {
-  value     = module.talos.worker_machine_config
-  sensitive = true
-}
 
 # Load Balancer IPs (cluster endpoints)
 output "scaleway_ips" {
@@ -41,13 +32,21 @@ output "bastion_ips" {
   description = "Public IPs of bastion hosts for SSH tunneling"
 }
 
-# Cluster endpoint (Load Balancer IP)
 output "cluster_endpoint" {
-  value = coalesce(
-    try(module.scw[0].lb_ip, null),
-    try(module.ovh[0].lb_ip, null),
-    try(module.outscale[0].lb_ip, null),
-    "no-lb-provisioned"
-  )
-  description = "Public endpoint for Kubernetes API access"
+  value = local.effective_endpoint # Use local defined in main.tf or same logic
+  description = "Public endpoint for Kubernetes API access (Load Balancer)"
+}
+
+output "bootstrap_node_ip" {
+  value       = local.bootstrap_node
+  description = "Private IP of the node used for bootstrap. Access via tunnel/sshtunnel for initial bootstrap."
+}
+
+output "instructions" {
+  value = <<EOT
+1. Ensure you have network access to the private IPs (e.g. via sshtunnel through the bastion).
+2. The Talos bootstrap has been initiated via the provider.
+3. Use the local 'talosconfig' and 'kubeconfig' files to manage your cluster.
+   Example: talosctl --talosconfig talosconfig Health --nodes ${local.bootstrap_node}
+EOT
 }
