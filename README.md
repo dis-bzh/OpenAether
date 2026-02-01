@@ -5,7 +5,7 @@
 
 ## 📋 Version
 
-**v0.1.0** - Multi-provider infrastructure provisioning with Talos Linux.
+**v0.2.0** - Multi-provider infrastructure provisioning with Talos Linux and OpenTofu.
 
 ## 🏗️ Architecture
 
@@ -13,7 +13,7 @@ OpenAether uses **Talos Linux** and a sovereign-first approach:
 
 | Layer | Technology | Status |
 |-------|------------|--------|
-| **IaC** | Pulumi (Go) | ✅ |
+| **IaC** | OpenTofu | ✅ |
 | **OS** | Talos Linux (Immutable) | ✅ |
 | **CNI** | Cilium | ✅ |
 | **Gateway** | Traefik (Gateway API) | 🚧 Phase 2 |
@@ -26,21 +26,21 @@ OpenAether uses **Talos Linux** and a sovereign-first approach:
 
 | Provider | Status | Notes |
 |----------|--------|-------|
-| **Docker** | ✅ Production | Local Talos-in-Docker for dev/test |
 | **Outscale** | ✅ Production | 3DS sovereign cloud (EU) |
 | **Scaleway** | ✅ Production | EU sovereign cloud |
-| **OVH** | 🚧 Planned | OpenStack-based |
+| **OVH** | ✅ Production | OpenStack-based |
+| **Docker** | ⚠️ Legacy | Moved to legacy, use Talos-in-Docker manually if needed |
 
 ## 📂 Repository Structure
 
 ```
 OpenAether/
-├── infrastructure/          # Pulumi Go code
-│   ├── main.go              # Entry point
-│   ├── pkg/cluster/         # Provider implementations
-│   ├── pkg/components/      # Cilium, etc.
-│   ├── environments/        # .env.local, .env.test, etc.
-│   └── sdks/                # Outscale SDK
+├── infrastructure/
+│   ├── opentofu/            # OpenTofu IaC code
+│   │   ├── main.tf
+│   │   ├── modules/
+│   │   └── tofu.tfvars.example
+│   ├── legacy_pulumi/       # Old Pulumi code (archived)
 ├── apps/                    # Kustomize/ArgoCD (Phase 2)
 │   ├── base/                # Core manifests
 │   ├── overlays/            # Environment-specific
@@ -53,113 +53,52 @@ OpenAether/
 
 ### Prerequisites
 
-```bash
-# Install dependencies
-task setup
-
-# For Docker provider (local dev)
-sudo modprobe br_netfilter
-```
+- [OpenTofu](https://opentofu.org/) (`tofu`)
+- `talosctl`
+- `kubectl`
 
 ### Configure Environment
 
-```bash
-# Copy example config
-cp infrastructure/.env.example infrastructure/environments/.env.prod
-```
+1. Go to the OpenTofu directory:
+   ```bash
+   cd infrastructure/opentofu
+   ```
+
+2. Initialize OpenTofu:
+   ```bash
+   tofu init
+   ```
+
+3. Create your configuration from the example:
+   ```bash
+   cp tofu.tfvars.example tofu.tfvars
+   # Edit tofu.tfvars
+   ```
 
 ### Deploy a Cluster
 
 ```bash
-# Local Docker cluster
-task deploy ENV=local
+# Preview changes
+task preview
 
-# Test in cloud
-task deploy ENV=test
-
-# Prod in cloud
-task deploy ENV=prod
-
-# Preview changes without applying
-task preview ENV=test
+# Deploy
+task deploy
 ```
+*Note: Ensure you have exported the necessary environment variables for your chosen providers (SCW_*, OSC_*, OS_*).*
 
-### Access the Cluster
-
-```bash
-# Check cluster status
-task status ENV=test
-
-# Export kubeconfig separately
-task kubeconfig ENV=test
-
-# Use kubectl directly
-kubectl --kubeconfig kubeconfig-test.yaml get nodes
-```
-
-### Destroy a Cluster
-
-```bash
-task destroy ENV=test
-```
-
-## ⚙️ Multi-Provider Mode
-
-Deploy nodes across multiple providers using `NODE_DISTRIBUTION`:
-
-```bash
-# .env example
-NODE_DISTRIBUTION=outscale:3:2
-# Format: provider:controlplanes:workers
-```
-
-This deploys 3 control-plane + 2 worker on Outscale.
-
-## 🛠️ Available Tasks
-
-```bash
-task              # Show all available tasks
-task setup        # Run initial setup
-task lint         # Run linters (golangci-lint, yamllint)
-task test         # Run Go tests
-task deploy       # Deploy cluster (ENV=local|test|prod)
-task destroy      # Destroy cluster
-task preview      # Preview changes
-task status       # Show cluster status
-task kubeconfig   # Export kubeconfig
-```
 
 ## 🛡️ Security
 
-- **OS**: Talos Linux - immutable, minimal, API-driven
-- **CNI**: Cilium with WireGuard encryption
-- **Secrets**: Never committed (`.gitignore` enforced)
-
-## 🔧 Troubleshooting
-
-### `Failed to check br_netfilter` (Docker)
-```bash
-sudo modprobe br_netfilter
-task destroy ENV=local && task deploy ENV=local
-```
-
-### Pulumi state issues
-```bash
-pulumi login --local
-pulumi stack select <env> --create
-```
+- **OS**: Talos Linux - immutable, minimal, API-driven.
+- **Network Isolation**: All nodes (Control Plane/Workers) reside in a **Private VPC** with NO public IP.
+- **Admin Access**: Hardened **Bastion Host** (Jump Server) for all management operations.
+- **Outbound Connectivity**: **Public Gateway (NAT)** for secure image pulls and updates.
+- **ACLs**: Kubernetes API whitelisted to administrator IPs on the Load Balancer.
+- **Encryption**: Cilium with WireGuard encryption for inter-node traffic.
+- **Secrets**: Never committed (`.gitignore` enforced).
 
 ## 📜 License
 
 **OpenAether** is licensed under the [GNU Affero General Public License v3.0 (AGPLv3)](LICENSE).
 
 Source code: **https://github.com/dis-bzh/OpenAether**
-
-### Third-Party Components
-
-| Component | License |
-|-----------|---------|
-| Pulumi | Apache 2.0 |
-| Talos Linux | MPL 2.0 |
-| Cilium | Apache 2.0 |
-| Outscale SDK | Apache 2.0 |
