@@ -8,9 +8,9 @@ This directory contains the OpenTofu (Terraform compatible) code to deploy the O
 - `modules/`:
   - `talos/`: Generates Talos machine configuration (secrets, control plane, worker).
   - `providers/`: Provider-specific implementations.
-    - `scw` (Scaleway): Uses `scaleway_lb` (Managed LB).
-    - `ovh` (OVH): Uses OpenStack Octavia (`openstack_lb_loadbalancer_v2`) and Floating IP.
-    - `outscale` (Outscale): Uses `outscale_load_balancer` (LBU).
+    - `scw` (Scaleway): **[Status: Fully Deployed & Validated]** Uses `scaleway_lb` (Managed LB).
+    - `ovh` (OVH): **[Status: Code Ready / Mock Tested]** Uses OpenStack Octavia.
+    - `outscale` (Outscale): **[Status: Code Ready / Mock Tested]** Uses `outscale_load_balancer` (LBU).
 - `tofu.tfvars.example`: Template for configuration.
 
 ## Prerequisites

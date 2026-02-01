@@ -26,10 +26,9 @@ OpenAether uses **Talos Linux** and a sovereign-first approach:
 
 | Provider | Status | Notes |
 |----------|--------|-------|
-| **Scaleway** | ✅ HA Production | Multi-zone Control Plane support |
-| **Outscale** | ✅ Production | 3DS sovereign cloud (EU) |
-| **OVH** | ✅ Production | OpenStack-based |
-| **Docker** | ⚠️ Legacy | Moved to legacy, use Talos-in-Docker manually if needed |
+| **Scaleway** | ✅ Effective & Tested | Full HA Control Plane, whitelisted API, SSE-C Backups |
+| **Outscale** | 🛠️ Code Ready | Mock tested, ready for deployment |
+| **OVH** | 🛠️ Code Ready | Mock tested (OpenStack-based) |
 
 ## 📂 Repository Structure
 
@@ -89,6 +88,12 @@ task deploy
 
 ## 🛡️ Security
 
+- **Encrypted Remote State**: Terraform state stored in S3 with **Client-Side Encryption (AES-GCM)**.
+- **Secure Artifact Backups**: `kubeconfig`, `talosconfig` and YAMLs backed up to S3 with **SSE-C (Customer-Provided Keys)**.
+- **LB ACL Refactoring**: Port 6443 whitelisted to admin IPs and NAT Gateway for secure cluster management.
+- **Zero-Local Policy**: No sensitive configuration files stored permanently on the local disk.
+- Bastion SSH restricted to administrator IP by default.
+- Talos API over mTLS.
 - **OS**: Talos Linux - immutable, minimal, API-driven.
 - **Network Isolation**: All nodes (Control Plane/Workers) reside in a **Private VPC** with NO public IP.
 - **Admin Access**: Hardened **Bastion Host** (Jump Server) with automated asymmetric routing protection.

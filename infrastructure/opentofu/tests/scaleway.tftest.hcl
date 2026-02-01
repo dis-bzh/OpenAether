@@ -110,19 +110,7 @@ override_resource {
   }
 }
 
-override_resource {
-  target = module.scw.scaleway_lb_acl.k8s_api_whitelist
-  values = {
-    id = "dddddddd-dddd-dddd-dddd-dddddddddddd"
-  }
-}
 
-override_resource {
-  target = module.scw.scaleway_lb_acl.k8s_api_deny
-  values = {
-    id = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
-  }
-}
 
 # Variables globales pour les tests
 variables {
