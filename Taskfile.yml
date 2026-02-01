@@ -35,3 +35,24 @@ tasks:
     cmds:
       - tofu output -raw talosconfig > talosconfig
       - echo "Use talosctl to retrieve kubeconfig using the talosconfig"
+
+  test:
+    desc: Run OpenTofu tests
+    dir: infrastructure/opentofu
+    cmds:
+      - tofu test -var-file="tofu.tfvars"
+
+  cost:
+    desc: Estimate infrastructure costs using Terracost
+    dir: infrastructure/opentofu
+    cmds:
+      - tofu plan -var-file="tofu.tfvars" -out=plan.binary
+      - tofu show -json plan.binary > plan.json
+      - echo "Run 'terracost estimate --plan-path plan.json' to see costs."
+
+  map:
+    desc: Generate infrastructure map using Inframap
+    dir: infrastructure/opentofu
+    cmds:
+      - tofu show -json > state.json
+      - echo "Run 'inframap generate state.json | dot -Tpng > graph.png' to see the map."

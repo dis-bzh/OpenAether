@@ -81,3 +81,29 @@ If `kubectl` returns `EOF` or `connection reset`:
 - Ensure the Load Balancer is attached to the Private Network.
 - Check that LB ACLs allow the NAT Gateway IP (for node-to-LB traffic/hairpinning).
 - Verify that Security Groups allow Scaleway internal health checks (`100.64.0.0/10`).
+
+## Testing & DevTools
+
+### 1. OpenTofu Tests
+We use the native `tofu test` framework. Tests are located in the `tests/` directory.
+```bash
+task test
+```
+
+### 2. Cost Estimation (Terracost)
+To estimate the cost of your infrastructure:
+1. Install [Terracost](https://github.com/cycloidio/terracost).
+2. Run the task:
+```bash
+task cost
+# Then follow instructions in output
+```
+
+### 3. Infrastructure Map (Inframap)
+To visualize your infrastructure:
+1. Install [Inframap](https://github.com/cycloidio/inframap).
+2. Run the task:
+```bash
+task map
+# Then follow instructions in output
+```
