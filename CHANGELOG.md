@@ -10,7 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Multi-provider architecture** with `ProviderRegistry` for extensible cloud support
-- **Docker provider** for local development (Talos-in-Docker)
 - **Outscale provider** for 3DS sovereign cloud (EU)
 - **Scaleway provider** for EU sovereign cloud
 - **Cilium CNI** auto-deployment after cluster bootstrap
@@ -40,15 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - 2026-02-01
 
-### Added
-
-- **OpenTofu Migration**: Native IaC for infrastructure stability and idempotency.
-- **OVH Provider**: Full support for OVH OpenStack-based clusters.
-- **Scaleway HA Architecture**: Hybrid multi-zone deployment (Control Plane across multiple zones).
-- **Native Talos Bootstrap**: Automated cluster initialization via `talos_machine_bootstrap`.
-- **Hardened Bastion**: Improved bastion host with automated routing fixes (Asymmetric DHCP fix).
-- **LB Private Connectivity**: Load Balancer now attached directly to the Private Network for secure API access.
-- **Local Config Export**: Automatic generation of `talosconfig` and `kubeconfig`.
+- **Secure Remote Management**: Implementation of **Encrypted S3 Backend** for Tofu state (Client-Side Encryption).
+- **Automated SSE-C Backups**: Secure artifact backup (`kubeconfig`, configurations) directly to S3 using Customer-Provided Keys.
+- **Zero-Trust Networking**: Refactored Load Balancer ACLs for precise access control (Admin + NAT GW hairpinning).
+- **Scaleway Deployment**: First provider successfully deployed and validated in a production-ready HA environment.
+- **Zero-Local Policy**: Removal of all persistent local configuration files for improved security posture.
 
 ### Infrastructure
 
