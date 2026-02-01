@@ -14,3 +14,7 @@ output "worker_private_ips" {
   value = openstack_compute_instance_v2.worker[*].access_ip_v4
 }
 
+output "bastion_ip" {
+  value = openstack_compute_instance_v2.bastion.access_ip_v4
+}
+

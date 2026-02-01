@@ -27,6 +27,7 @@ variable "node_distribution" {
     image_id       = optional(string)
     image_name     = optional(string)
     zones          = optional(list(string))
+    subnet_id      = optional(string)
   }))
   default = {}
 }
@@ -38,8 +39,8 @@ variable "cluster_endpoint" {
 }
 
 variable "admin_ip" {
-  description = "IP publique de l'administrateur (pour whitelist bastion et LB)"
-  type        = string
+  description = "List of allowed Source IPs/CIDRs for Admin Access (SSH, API)"
+  type        = list(string)
 }
 
 variable "bastion_ssh_keys" {

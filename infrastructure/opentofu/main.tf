@@ -35,9 +35,9 @@ locals {
   # You can override specific settings in var.node_distribution if needed
 
   # Parse distribution
-  scw_dist      = lookup(var.node_distribution, "scaleway", { control_planes = 0, workers = 0, region = null, zone = null, instance_type = null, image_id = null, image_name = "talos", zones = null })
-  ovh_dist      = lookup(var.node_distribution, "ovh", { control_planes = 0, workers = 0, region = null, zone = null, instance_type = null, image_id = null, image_name = null, zones = null })
-  outscale_dist = lookup(var.node_distribution, "outscale", { control_planes = 0, workers = 0, region = null, zone = null, instance_type = null, image_id = null, image_name = null, zones = null })
+  scw_dist      = merge({ control_planes = 0, workers = 0, region = null, zone = null, instance_type = null, image_id = null, image_name = "talos", zones = null, subnet_id = null }, try(var.node_distribution["scaleway"], {}))
+  ovh_dist      = merge({ control_planes = 0, workers = 0, region = null, zone = null, instance_type = null, image_id = null, image_name = null, zones = null, subnet_id = null }, try(var.node_distribution["ovh"], {}))
+  outscale_dist = merge({ control_planes = 0, workers = 0, region = null, zone = null, instance_type = null, image_id = null, image_name = null, zones = null, subnet_id = null }, try(var.node_distribution["outscale"], {}))
 }
 
 # ------------------------------------------------------------------------------
@@ -91,6 +91,10 @@ module "ovh" {
   image_id    = coalesce(local.ovh_dist.image_id, "IMAGE_ID_NEEDED")
   region      = local.ovh_dist.region
   flavor_name = local.ovh_dist.instance_type
+
+  # Security configuration
+  admin_ip        = var.admin_ip
+  bastion_ssh_key = lookup(var.bastion_ssh_keys, "ovh", "")
 }
 
 # ------------------------------------------------------------------------------
@@ -113,8 +117,13 @@ module "outscale" {
 
   image_id = coalesce(local.outscale_dist.image_id, "ami-ce7e9d99")
   region   = local.outscale_dist.region
+  subnet_id = local.outscale_dist.subnet_id
   # Outscale module likely expects 'instance_type' or 'vm_type', checking variables.tf would confirm but instance_type is standard
   instance_type = local.outscale_dist.instance_type
+
+  # Security configuration
+  admin_ip        = var.admin_ip
+  bastion_ssh_key = lookup(var.bastion_ssh_keys, "outscale", "")
 }
 
 # ------------------------------------------------------------------------------

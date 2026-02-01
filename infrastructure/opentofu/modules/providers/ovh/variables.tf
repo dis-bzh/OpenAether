@@ -65,3 +65,19 @@ variable "subnet_id" {
   description = "Subnet ID for LB members (Required for Octavia)"
   default     = ""
 }
+
+variable "admin_ip" {
+  description = "List of allowed Source IPs/CIDRs for Admin Access (SSH, API)"
+  type        = list(string)
+}
+
+variable "bastion_ssh_key" {
+  description = "SSH Public Key for the Bastion"
+  type        = string
+}
+
+variable "bastion_image_id" {
+  description = "Image ID or Name for Bastion (e.g. Ubuntu 22.04)"
+  type        = string
+  default     = "Ubuntu 22.04"
+}

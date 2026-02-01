@@ -6,3 +6,7 @@ output "worker_private_ips" {
   value = outscale_vm.worker[*].private_ip
 }
 
+output "bastion_ip" {
+  value = outscale_public_ip.bastion.public_ip
+}
+

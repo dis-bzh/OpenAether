@@ -11,7 +11,7 @@ data "talos_machine_configuration" "control_plane" {
       machine = {
         certSANs = concat(
           ["127.0.0.1", "localhost"],
-          [for n in outscale_nic.control_plane : n.private_ips[0].private_ip]
+          [for n in outscale_nic.control_plane : tolist(n.private_ips)[0].private_ip]
         )
         install = {
           disk = "/dev/vda"

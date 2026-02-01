@@ -8,11 +8,14 @@ resource "scaleway_instance_security_group" "bastion" {
   inbound_default_policy  = "drop"
   outbound_default_policy = "accept"
 
-  inbound_rule {
-    action   = "accept"
-    protocol = "TCP"
-    port     = 22
-    ip_range = var.admin_ip
+  dynamic "inbound_rule" {
+    for_each = var.admin_ip
+    content {
+      action   = "accept"
+      protocol = "TCP"
+      port     = 22
+      ip_range = inbound_rule.value
+    }
   }
 }
 

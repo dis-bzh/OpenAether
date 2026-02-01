@@ -21,7 +21,7 @@ resource "openstack_networking_secgroup_rule_v2" "talos_api" {
   protocol          = "tcp"
   port_range_min    = 50000
   port_range_max    = 50000
-  remote_ip_prefix  = "0.0.0.0/0" # TODO: Restrict to Bastion after implementation
+  remote_group_id   = openstack_networking_secgroup_v2.bastion.id
   security_group_id = openstack_networking_secgroup_v2.this.id
 }
 
