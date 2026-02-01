@@ -11,6 +11,14 @@ resource "scaleway_lb" "this" {
   project_id = var.project_id
 }
 
+resource "scaleway_lb_private_network" "this" {
+  lb_id              = scaleway_lb.this.id
+  private_network_id = scaleway_vpc_private_network.this.id
+  
+  # Optional: specify a static IP for the LB in the private net if needed, 
+  # or let Scaleway DHCP handle it.
+}
+
 resource "scaleway_lb_backend" "control_plane" {
   lb_id                  = scaleway_lb.this.id
   name                   = "control-plane-backend"
@@ -44,7 +52,11 @@ resource "scaleway_lb_acl" "k8s_api_whitelist" {
   }
 
   match {
-    ip_subnet = [var.admin_ip]
+    ip_subnet = [
+      var.admin_ip,
+      "${scaleway_vpc_public_gateway_ip.this.address}/32", # Allow nodes via NAT GW (Hairpinning)
+      "172.16.0.0/12"                                     # Allow nodes directly if routed
+    ]
   }
 }
 
@@ -61,6 +73,39 @@ resource "scaleway_lb_acl" "k8s_api_deny" {
   match {
     ip_subnet = ["0.0.0.0/0"]
   }
+}
+# --- App Traffic (HTTP/HTTPS) ---
+
+resource "scaleway_lb_backend" "http" {
+  lb_id                  = scaleway_lb.this.id
+  name                   = "http-backend"
+  forward_port           = 80
+  forward_port_algorithm = "roundrobin"
+  forward_protocol       = "tcp"
+  server_ips             = [for server in scaleway_instance_server.worker : [for ip in server.private_ips : ip.address if !can(regex(":", ip.address))][0] if length(server.private_ips) > 0]
+}
+
+resource "scaleway_lb_frontend" "http" {
+  lb_id        = scaleway_lb.this.id
+  backend_id   = scaleway_lb_backend.http.id
+  name         = "http-frontend"
+  inbound_port = 80
+}
+
+resource "scaleway_lb_backend" "https" {
+  lb_id                  = scaleway_lb.this.id
+  name                   = "https-backend"
+  forward_port           = 443
+  forward_port_algorithm = "roundrobin"
+  forward_protocol       = "tcp"
+  server_ips             = [for server in scaleway_instance_server.worker : [for ip in server.private_ips : ip.address if !can(regex(":", ip.address))][0] if length(server.private_ips) > 0]
+}
+
+resource "scaleway_lb_frontend" "https" {
+  lb_id        = scaleway_lb.this.id
+  backend_id   = scaleway_lb_backend.https.id
+  name         = "https-frontend"
+  inbound_port = 443
 }
 
 output "lb_ip" {

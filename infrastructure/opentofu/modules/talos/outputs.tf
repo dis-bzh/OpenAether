@@ -8,13 +8,7 @@ output "client_configuration" {
   sensitive = true
 }
 
-output "controlplane_machine_config" {
-  value = data.talos_machine_configuration.controlplane.machine_configuration
-}
-
-output "worker_machine_config" {
-  value = data.talos_machine_configuration.worker.machine_configuration
-}
+# Machine configurations are now handled in provider modules.
 
 output "talosconfig" {
   value     = data.talos_client_configuration.this.talos_config

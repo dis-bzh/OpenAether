@@ -23,6 +23,11 @@ variable "subnet_id" {
   default     = null # Optional if default VPC
 }
 
+variable "availability_zones" {
+  type    = list(string)
+  default = ["eu-west-2a", "eu-west-2b", "eu-west-2c"]
+}
+
 variable "control_plane_count" {
   type    = number
   default = 0
@@ -33,10 +38,19 @@ variable "worker_count" {
   default = 0
 }
 
-variable "control_plane_config" {
+variable "machine_secrets" {
+  description = "Talos machine secrets"
+  sensitive   = true
+}
+
+variable "cluster_endpoint" {
   type = string
 }
 
-variable "worker_config" {
+variable "talos_version" {
+  type = string
+}
+
+variable "kubernetes_version" {
   type = string
 }

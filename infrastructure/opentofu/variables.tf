@@ -25,6 +25,8 @@ variable "node_distribution" {
     zone           = optional(string)
     instance_type  = optional(string)
     image_id       = optional(string)
+    image_name     = optional(string)
+    zones          = optional(list(string))
   }))
   default = {}
 }

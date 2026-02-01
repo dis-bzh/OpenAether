@@ -41,6 +41,13 @@ resource "scaleway_instance_server" "bastion" {
       
       runcmd:
         - echo "Bastion initialized" > /etc/motd
+        - |
+          # Fix asymmetric routing: ensure private network DHCP doesn't override public default gateway
+          PRIVATE_IF=$(ip -4 addr show | grep 172.16 | awk '{print $NF}')
+          if [ -n "$PRIVATE_IF" ]; then
+            echo "network: {version: 2, ethernets: {$PRIVATE_IF: {dhcp4: true, dhcp4-overrides: {use-routes: false}}}}" > /etc/netplan/99-vpc-ignore-default.yaml
+            netplan apply
+          fi
     EOT
   }
 

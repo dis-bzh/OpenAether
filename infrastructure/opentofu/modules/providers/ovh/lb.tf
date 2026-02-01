@@ -25,7 +25,53 @@ resource "openstack_lb_member_v2" "control_plane" {
   pool_id       = openstack_lb_pool_v2.k8s_api.id
   address       = openstack_compute_instance_v2.control_plane[count.index].access_ip_v4
   protocol_port = 6443
-  subnet_id     = var.subnet_id # Required usually for member
+  subnet_id     = var.subnet_id
+}
+
+# --- App Traffic (HTTP/HTTPS) ---
+
+resource "openstack_lb_listener_v2" "http" {
+  protocol        = "TCP"
+  protocol_port   = 80
+  loadbalancer_id = openstack_lb_loadbalancer_v2.this.id
+  name            = "http-listener"
+}
+
+resource "openstack_lb_pool_v2" "http" {
+  protocol    = "TCP"
+  lb_method   = "ROUND_ROBIN"
+  listener_id = openstack_lb_listener_v2.http.id
+  name        = "http-pool"
+}
+
+resource "openstack_lb_member_v2" "worker_http" {
+  count         = var.worker_count
+  pool_id       = openstack_lb_pool_v2.http.id
+  address       = openstack_compute_instance_v2.worker[count.index].access_ip_v4
+  protocol_port = 80
+  subnet_id     = var.subnet_id
+}
+
+resource "openstack_lb_listener_v2" "https" {
+  protocol        = "TCP"
+  protocol_port   = 443
+  loadbalancer_id = openstack_lb_loadbalancer_v2.this.id
+  name            = "https-listener"
+}
+
+resource "openstack_lb_pool_v2" "https" {
+  protocol    = "TCP"
+  lb_method   = "ROUND_ROBIN"
+  listener_id = openstack_lb_listener_v2.https.id
+  name        = "https-pool"
+}
+
+resource "openstack_lb_member_v2" "worker_https" {
+  count         = var.worker_count
+  pool_id       = openstack_lb_pool_v2.https.id
+  address       = openstack_compute_instance_v2.worker[count.index].access_ip_v4
+  protocol_port = 443
+  subnet_id     = var.subnet_id
 }
 
 # Floating IP for External Access
