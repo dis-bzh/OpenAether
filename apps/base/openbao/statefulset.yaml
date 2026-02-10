@@ -33,10 +33,13 @@ spec:
       - name: openbao
         image: openbao/openbao:2.0.0
         args:
-          - server
+          - "server"
+          - "-config=/bao/config/config.hcl"
         env:
-          - name: BAO_API_ADDR
-            value: "http://0.0.0.0:8200"
+          - name: POD_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
         ports:
           - containerPort: 8200
             name: http
@@ -48,6 +51,12 @@ spec:
         volumeMounts:
           - name: data
             mountPath: /bao/data
+          - name: config
+            mountPath: /bao/config
+      volumes:
+        - name: config
+          configMap:
+            name: openbao-config
   volumeClaimTemplates:
   - metadata:
       name: data

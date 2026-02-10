@@ -1,0 +1,42 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base/namespaces
+  - ../../base/external-secrets
+  - ../../base/kyverno-policies
+  - ../../base/traefik
+  - ../../base/linkerd
+  - ../../base/cnpg
+  - ../../base/openbao
+  - ../../base/keycloak
+  - ../../base/kyverno
+  - ../../base/keda
+  - ../../base/observability
+  - ../../base/demo-app
+  - ../../base/kubernetes-dashboard
+  - ../../base/storage
+
+patches:
+  # Host Network for Traefik (to work with generic Load Balancers)
+  - target:
+      kind: Deployment
+      name: traefik
+    patch: |-
+      - op: add
+        path: /spec/template/spec/hostNetwork
+        value: true
+  
+  # Ensure High Availability for Keycloak
+  - target:
+      kind: Deployment
+      name: keycloak
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: KC_HOSTNAME
+          value: "auth.openaether.cloud" # CHANGEME

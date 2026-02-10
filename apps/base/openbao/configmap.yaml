@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openbao-config
+  namespace: security
+data:
+  config.hcl: |
+    ui = true
+    listener "tcp" {
+      tls_disable = 1
+      address = "[::]:8200"
+      cluster_address = "[::]:8201"
+    }
+    storage "raft" {
+      path = "/bao/data"
+      retry_join {
+        leader_api_addr = "http://openbao-0.openbao-internal:8200"
+      }
+      retry_join {
+        leader_api_addr = "http://openbao-1.openbao-internal:8200"
+      }
+      retry_join {
+        leader_api_addr = "http://openbao-2.openbao-internal:8200"
+      }
+    }
+    api_addr = "http://POD_IP:8200"
+    cluster_addr = "http://POD_IP:8201"
+    disable_mlock = true

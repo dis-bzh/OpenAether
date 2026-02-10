@@ -36,7 +36,7 @@ spec:
         - name: KC_DB
           value: postgres
         - name: KC_DB_URL
-          value: "jdbc:postgresql://cockroachdb-public.databases.svc.cluster.local:26257/keycloak?sslmode=disable"
+          value: "jdbc:postgresql://keycloak-db-rw.databases.svc.cluster.local:5432/keycloak"
         - name: KC_DB_USERNAME
           valueFrom:
             secretKeyRef:
@@ -48,9 +48,15 @@ spec:
               name: keycloak-db-app
               key: password
         - name: KEYCLOAK_ADMIN
-          value: "admin"
+          valueFrom:
+            secretKeyRef:
+              name: keycloak-db-app
+              key: admin-username
         - name: KEYCLOAK_ADMIN_PASSWORD
-          value: "admin"
+          valueFrom:
+            secretKeyRef:
+              name: keycloak-db-app
+              key: admin-password
         ports:
         - name: http
           containerPort: 8080

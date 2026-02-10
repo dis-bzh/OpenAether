@@ -8,7 +8,7 @@ resources:
   - ../../base/traefik
   - ../../base/linkerd
   - ../../base/cnpg
-  - ../../base/cockroachdb # Added CockroachDB
+
   - ../../base/openbao
   - ../../base/keycloak
   - ../../base/kyverno
@@ -105,24 +105,4 @@ patches:
         path: /spec/template/spec/containers/0/resources/limits/memory
         value: 256Mi
 
-  # Configure CockroachDB for Local Dev (Single Node)
-  - target:
-      kind: StatefulSet
-      name: cockroachdb
-    patch: |-
-      - op: replace
-        path: /spec/replicas
-        value: 1
-      - op: replace
-        path: /spec/template/spec/containers/0/command
-        value:
-          - "/bin/bash"
-          - "-ecx"
-          - |
-            exec /cockroach/cockroach start-single-node \
-            --logtostderr \
-            --insecure \
-            --advertise-host=$(hostname -f) \
-            --http-addr=0.0.0.0 \
-            --cache=25% \
-            --max-sql-memory=25%
+
