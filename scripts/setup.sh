@@ -20,11 +20,19 @@ check_cmd() {
     fi
 }
 
-install_pulumi() {
-    echo "Installing Pulumi..."
-    curl -fsSL https://get.pulumi.com | sh
-    # Attempt to add to PATH for current session only if not already there
-    export PATH=$PATH:$HOME/.pulumi/bin
+install_tofu() {
+    echo "Installing OpenTofu..."
+    if command -v snap &> /dev/null; then
+        sudo snap install --classic opentofu
+    elif command -v brew &> /dev/null; then
+        brew install opentofu
+    else
+        # Official install script
+        curl -fsSL https://get.opentofu.org/install-opentofu.sh -o install-opentofu.sh
+        chmod +x install-opentofu.sh
+        ./install-opentofu.sh --install-method standalone
+        rm -f install-opentofu.sh
+    fi
 }
 
 install_talosctl() {
@@ -32,91 +40,102 @@ install_talosctl() {
     curl -fsSL https://talos.dev/install | bash
 }
 
-install_golangci_lint() {
-     echo "Installing golangci-lint..."
-     curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin latest
+install_kubectl() {
+    echo "Installing kubectl..."
+    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+    chmod +x kubectl
+    if [ -w /usr/local/bin ]; then
+        mv kubectl /usr/local/bin/
+    elif command -v sudo &> /dev/null; then
+        sudo mv kubectl /usr/local/bin/
+    else
+        mkdir -p ~/.local/bin
+        mv kubectl ~/.local/bin/
+        echo "NOTE: kubectl installed to ~/.local/bin. Ensure it's in your PATH."
+    fi
 }
-
-# 1. Check Go
-if ! check_cmd go; then
-    echo "Please install Go: https://go.dev/doc/install"
-    exit 1
-fi
-
-# 2. Check Docker
-if ! check_cmd docker; then
-    echo "Please install Docker."
-    exit 1
-fi
-
-# 3. Check Pulumi
-if ! check_cmd pulumi; then
-    install_pulumi
-fi
-
-# 4. Check Talosctl
-if ! check_cmd talosctl; then
-    install_talosctl
-fi
-
-# 5. Check golangci-lint
-if ! check_cmd golangci-lint; then
-    install_golangci_lint
-fi
 
 install_yamllint() {
     echo "Installing yamllint..."
-    if command -v apt-get &> /dev/null; then
-        echo "Detected apt-get. Asking for sudo..."
-        sudo apt-get update && sudo apt-get install -y yamllint
-    elif command -v pip3 &> /dev/null; then
-        echo "Installing via pip3..."
+    if command -v pip3 &> /dev/null; then
         pip3 install --user yamllint
-        # Ensure ~/.local/bin is in PATH
+    elif command -v apt-get &> /dev/null; then
+        sudo apt-get update && sudo apt-get install -y yamllint
     else
         echo "⚠️  Could not install yamllint automatically. Please install it manually."
     fi
 }
 
-# 6. Check yamllint
+install_task() {
+    echo "Installing Task..."
+    if [ -w /usr/local/bin ]; then
+        sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+    elif command -v sudo &> /dev/null; then
+        sudo sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+    else
+        mkdir -p ~/.local/bin
+        sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b ~/.local/bin
+        echo "NOTE: task installed to ~/.local/bin. Ensure it's in your PATH."
+    fi
+}
+
+install_precommit() {
+    echo "Installing pre-commit..."
+    if command -v apt-get &> /dev/null; then
+        sudo apt-get update && sudo apt-get install -y pre-commit
+    elif command -v brew &> /dev/null; then
+        brew install pre-commit
+    elif command -v pip3 &> /dev/null; then
+        pip3 install --user pre-commit
+        export PATH=$PATH:$HOME/.local/bin
+    else
+        echo "⚠️  Could not install pre-commit automatically. Please install 'pip3' or 'brew' first."
+        return 1
+    fi
+}
+
+# 1. Check OpenTofu
+if ! check_cmd tofu; then
+    install_tofu
+fi
+
+# 2. Check talosctl
+if ! check_cmd talosctl; then
+    install_talosctl
+fi
+
+# 3. Check kubectl
+if ! check_cmd kubectl; then
+    install_kubectl
+fi
+
+# 4. Check yamllint
 if ! check_cmd yamllint; then
     install_yamllint
 fi
 
-install_task() {
-    echo "Installing Task..."
-    # Check if we can write to /usr/local/bin
-    if [ -w /usr/local/bin ]; then
-        sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
-    elif command -v sudo &> /dev/null; then
-        echo "Requires sudo to install to /usr/local/bin..."
-        sudo sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
-    else
-        echo "Cannot write to /usr/local/bin and sudo is missing. Installing to ~/.local/bin..."
-        mkdir -p ~/.local/bin
-        sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b ~/.local/bin
-        export PATH=$PATH:~/.local/bin
-        # Remind user to update PATH
-        echo "NOTE: Added ~/.local/bin to PATH for this session. Please add it to your shell profile."
-    fi
-}
-
-# 6. Check Task
+# 5. Check Task
 if ! check_cmd task; then
     install_task
 fi
 
-echo -e "\n${GREEN}🚀 Environment ready!${NC}"
-
-# Post-install checks for PATH
-GOPATH_BIN="$(go env GOPATH)/bin"
-if ! command -v golangci-lint &> /dev/null; then
-    if [ -f "$GOPATH_BIN/golangci-lint" ]; then
-        echo -e "${RED}⚠️  golangci-lint is installed in $GOPATH_BIN but not in your PATH.${NC}"
-        echo "Please add the following to your ~/.bashrc or ~/.zshrc:"
-        echo "  export PATH=\$PATH:$GOPATH_BIN"
+# 6. Check pre-commit (optional but recommended)
+if ! check_cmd pre-commit; then
+    echo -e "${RED}⚠ pre-commit is not installed (recommended for DevSecOps)${NC}"
+    read -p "Install pre-commit? (y/N) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        install_precommit
+        echo "Run 'pre-commit install' in the repo root to activate hooks."
     fi
 fi
 
-echo "You may need to restart your shell if you just installed Pulumi."
-echo "Run 'source ~/.bashrc' or 'source ~/.zshrc' if paths were updated."
+echo -e "\n${GREEN}🚀 Environment ready!${NC}"
+echo ""
+echo "Next steps:"
+echo "  1. cd infrastructure/opentofu"
+echo "  2. cp tofu.tfvars.example tofu.tfvars  # Edit with your config"
+echo "  3. export AWS_ACCESS_KEY_ID=<KEY>"
+echo "  4. export AWS_SECRET_ACCESS_KEY=<SECRET>"
+echo "  5. export TF_VAR_encryption_passphrase=<PASSPHRASE>"
+echo "  6. tofu init && tofu plan -var-file=tofu.tfvars"

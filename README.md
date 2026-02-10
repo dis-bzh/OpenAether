@@ -55,10 +55,18 @@ OpenAether/
 - [OpenTofu](https://opentofu.org/) (`tofu`)
 - `talosctl`
 - `kubectl`
+- `task` (Taskfile)
 
 ### Configure Environment
 
-1. Go to the OpenTofu directory:
+1. **Install Dependencies**:
+   Run the included setup script to install all required tools (OpenTofu, Talosctl, Kubectl, Task, etc.):
+   ```bash
+   chmod +x scripts/setup.sh
+   ./scripts/setup.sh
+   ```
+
+2. Go to the OpenTofu directory:
    ```bash
    cd infrastructure/opentofu
    ```
@@ -74,6 +82,43 @@ OpenAether/
    # Edit tofu.tfvars
    ```
 
+### ☁️ Provider Selection
+
+OpenAether supports **one active cloud provider at a time**. This is enforced by the configuration in `tofu.tfvars`.
+To select a provider (e.g., Scaleway), set its node count to > 0 and ensure others are 0 in the `node_distribution` variable:
+
+```hcl
+node_distribution = {
+  scaleway = { control_planes = 3, workers = 1, ... } # ACTIVE
+  ovh      = { control_planes = 0, workers = 0, ... } # DISABLED
+  outscale = { control_planes = 0, workers = 0, ... } # DISABLED
+}
+```
+
+### 🗄️ Remote Backend (Output S3)
+
+By default, OpenTofu uses a **local state** (`terraform.tfstate`). For production (or team usage), you should configure an S3-compatible backend.
+
+1. Create a file `backend.tf`:
+   ```hcl
+   terraform {
+     backend "s3" {
+       bucket                      = "s3-openaether-tfstate"
+       key                         = "terraform.tfstate"
+       region                      = "fr-par"
+       endpoint                    = "https://s3.fr-par.scw.cloud"
+       skip_credentials_validation = true
+       skip_region_validation      = true
+     }
+   }
+   ```
+
+2. Initialize with backend config:
+   ```bash
+   tofu init
+   ```
+   *Note: Ensure you satisfy the backend authentication (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY) env vars.*
+
 ### Deploy a Cluster
 
 ```bash
@@ -84,6 +129,31 @@ task preview
 task deploy
 ```
 *Note: Ensure you have exported the necessary environment variables for your chosen providers (SCW_*, OSC_*, OS_*).*
+
+### 🔐 Cluster Access & Bootstrap
+
+Since the Kubernetes API relies on a private Load Balancer and the Talos API on private nodes, you must access them via the Bastion host.
+
+1. **Establish SSH Tunnel**:
+   ```bash
+   # In a separate terminal
+   ssh -i <path_to_key> -L 6443:<lb_ip>:6443 -L 50000:<control_plane_ip>:50000 ubuntu@<bastion_ip>
+   ```
+
+2. **Configure Access**:
+   - **Talos**: `talosctl config endpoint 127.0.0.1`
+   - **Kubernetes**: Ensure `kubeconfig` points to `https://127.0.0.1:6443`
+
+3. **Bootstrap Applications (ArgoCD)**:
+   ```bash
+   task bootstrap
+   ```
+
+### 🔮 Future Roadmap
+
+- **Service Mesh**: Evaluation of **Cilium Service Mesh** to replace Linkerd (simplifying the stack).
+- **Database**: Migration from CockroachDB to **CloudNativePG** (Completed).
+- **Secrets**: **OpenBao** High Availability with Raft storage (Completed).
 
 
 ## 🛡️ Security

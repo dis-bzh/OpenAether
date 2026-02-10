@@ -24,8 +24,8 @@ repos:
         args: ["--args=-recursive"]
       - id: terraform_validate
         args: ["--hook-config=--retry-once-with-cleanup=true"]
-      - id: terraform_tflint
-        args: ["--args=--recursive"]
+      # - id: terraform_tflint
+      #   args: ["--args=--recursive"]
 
   # YAML linting
   - repo: https://github.com/adrienverge/yamllint

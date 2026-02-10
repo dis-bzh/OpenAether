@@ -1,5 +1,26 @@
-# Mocking des providers pour éviter les appels API réels pendant les tests unitaires
 mock_provider "scaleway" {}
+mock_provider "talos" {}
+mock_provider "aws" {}
+
+override_resource {
+  target = aws_s3_object.talosconfig
+  values = { id = "dummy-s3-talosconfig" }
+}
+
+override_resource {
+  target = aws_s3_object.kubeconfig
+  values = { id = "dummy-s3-kubeconfig" }
+}
+
+override_resource {
+  target = aws_s3_object.controlplane_yaml
+  values = { id = "dummy-s3-controlplane" }
+}
+
+override_resource {
+  target = aws_s3_object.worker_yaml
+  values = { id = "dummy-s3-worker" }
+}
 
 # Surcharge des data sources pour simuler la présence d'images
 override_data {
@@ -114,11 +135,11 @@ override_resource {
 
 # Variables globales pour les tests
 variables {
-  cluster_name      = "test-cluster"
-  zone              = "fr-par-1"
-  additional_zones  = ["fr-par-1", "fr-par-2"]
-  admin_ip          = ["1.2.3.4/32"]
-  bastion_ssh_keys  = {
+  cluster_name     = "test-cluster"
+  zone             = "fr-par-1"
+  additional_zones = ["fr-par-1", "fr-par-2"]
+  admin_ip         = ["1.2.3.4/32"]
+  bastion_ssh_keys = {
     scaleway = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMpj9y94C3NzaC1lZDI1NTE5AAAAIOMpj9y9"
   }
   node_distribution = {
@@ -182,7 +203,7 @@ run "verify_module_activation" {
 
 # --- Test 4: Security Outputs ---
 run "verify_security_outputs" {
-  command = plan
+  command = apply
 
   # Bastion IP should be available
   assert {

@@ -1,47 +1,111 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-echo "Initializing Platform Secrets..."
+# ─────────────────────────────────────────────────────────────
+# OpenAether — Platform Secrets Initialization
+# Manages secrets in OpenBao for Keycloak + CNPG
+# Uses 'kubectl exec' to run commands securely inside the pod
+# ─────────────────────────────────────────────────────────────
 
-# 1. Wait for OpenBao
-echo "Waiting for OpenBao..."
-kubectl -n security wait --for=condition=ready pod -l app=openbao --timeout=120s
+NAMESPACE="security"
+DB_NAMESPACE="databases"
+POD_NAME=""
+CONTAINER_NAME="openbao"
 
-# 2. Get/Set Vault Token (Dev Mode = root)
-# In Prod, this would involve 'vault operator init' and unsealing.
-export VAULT_ADDR="http://127.0.0.1:8200"
-export VAULT_TOKEN="root" # Default in -dev mode
+# Require VAULT_TOKEN from environment (no hardcoded tokens)
+if [ -z "${VAULT_TOKEN:-}" ]; then
+    echo "❌ VAULT_TOKEN environment variable is not set."
+    echo "   For dev mode: export VAULT_TOKEN=root"
+    echo "   For prod: use the initial root token from 'bao operator init'"
+    exit 1
+fi
 
-# Port Forwarding in background
-kubectl -n security port-forward svc/openbao 8200:8200 > /dev/null 2>&1 &
-PF_PID=$!
-trap "kill $PF_PID" EXIT
-sleep 2
+# ─────────────────────────────────────────────────────────────
+# 1. Helper Function: Execute bao command inside pod
+# ─────────────────────────────────────────────────────────────
+bao_exec() {
+    kubectl exec -n "$NAMESPACE" "$POD_NAME" -c "$CONTAINER_NAME" -- env VAULT_TOKEN="$VAULT_TOKEN" VAULT_ADDR="http://127.0.0.1:8200" bao "$@"
+}
 
-# 3. Enable KV v2 Engine (if not exists)
-# In -dev mode, 'secret/' is usually mounted as v2 by default.
-echo "Checking Vault status..."
-curl --header "X-Vault-Token: $VAULT_TOKEN" $VAULT_ADDR/v1/sys/health
+# ─────────────────────────────────────────────────────────────
+# 2. Find Healthy OpenBao Pod
+# ─────────────────────────────────────────────────────────────
+echo "⏳ Waiting for OpenBao..."
+kubectl -n "$NAMESPACE" wait --for=condition=ready pod -l app=openbao --timeout=120s
+POD_NAME=$(kubectl get pod -n "$NAMESPACE" -l app=openbao -o jsonpath="{.items[0].metadata.name}" | head -n 1)
 
-# 4. Generate & Write Secrets
-echo "Generating Keycloak DB Credentials..."
-DB_PASS=$(openssl rand -base64 16)
+if [ -z "$POD_NAME" ]; then
+    echo "❌ No OpenBao pod found."
+    exit 1
+fi
+echo "🎯 Using Pod: $POD_NAME"
 
-# Write to OpenBao (KV v2 path: secret/data/...)
-# Note: External Secrets expects data at 'secret/data/keycloak/db' if simple 'secret' mount is v2
-curl \
-    --header "X-Vault-Token: $VAULT_TOKEN" \
-    --request POST \
-    --data "{ \"data\": { \"username\": \"keycloak\", \"password\": \"$DB_PASS\" } }" \
-    $VAULT_ADDR/v1/secret/data/keycloak/db
+# ─────────────────────────────────────────────────────────────
+# 3. Health Check
+# ─────────────────────────────────────────────────────────────
+echo "🔍 Checking OpenBao health..."
+if ! bao_exec status > /dev/null 2>&1; then
+    echo "❌ OpenBao is not healthy or sealed."
+    echo "   If sealed, exec into the pod and run: bao operator unseal"
+    exit 1
+fi
+echo "✅ OpenBao is healthy."
 
-echo "✅ Secrets populated in OpenBao."
-echo "   - Keycloak DB Password set."
+# ─────────────────────────────────────────────────────────────
+# 4. Enable KV v2 Engine (idempotent)
+# ─────────────────────────────────────────────────────────────
+if ! bao_exec secrets list | grep -q "^secret/"; then
+    echo "🔧 Enabling KV v2 secrets engine..."
+    bao_exec secrets enable -path=secret kv-v2
+else
+    echo "✅ KV v2 engine already enabled at secret/"
+fi
 
-# 5. Update CockroachDB User (Optional/Future Proofing)
-# Since we are in insecure mode, CRDB accepts any password or none.
-# But good practice to set it if we switch to secure later.
-echo "Updating CockroachDB User..."
-kubectl -n databases exec -it cockroachdb-0 -- ./cockroach sql --insecure --execute="ALTER USER keycloak WITH PASSWORD '$DB_PASS';" || echo "Warning: Could not set DB password, CRDB might be initializing."
+# ─────────────────────────────────────────────────────────────
+# 5. Generate & Write Keycloak DB Credentials (idempotent)
+# ─────────────────────────────────────────────────────────────
+if bao_exec kv get secret/keycloak/db > /dev/null 2>&1; then
+    echo "✅ Keycloak DB secret already exists. Skipping generation."
+    # Retrieve existing password for CNPG update later if needed
+    DB_PASS=$(bao_exec kv get -field=password secret/keycloak/db)
+else
+    echo "🔐 Generating Keycloak DB credentials..."
+    DB_PASS=$(openssl rand -base64 24)
+    bao_exec kv put secret/keycloak/db \
+        username="keycloak" \
+        password="$DB_PASS"
+    echo "✅ Keycloak DB credentials stored."
+fi
 
-echo "🎉 Initialization Complete. External Secrets should sync momentarily."
+# ─────────────────────────────────────────────────────────────
+# 6. Generate & Write Keycloak Admin Credentials (idempotent)
+# ─────────────────────────────────────────────────────────────
+if bao_exec kv get secret/keycloak/admin > /dev/null 2>&1; then
+    echo "✅ Keycloak admin secret already exists. Skipping generation."
+else
+    echo "🔐 Generating Keycloak admin credentials..."
+    ADMIN_PASS=$(openssl rand -base64 24)
+    bao_exec kv put secret/keycloak/admin \
+        username="admin" \
+        password="$ADMIN_PASS"
+    echo "✅ Keycloak admin credentials stored."
+    echo "   ⚠ Save the admin password securely — it won't be displayed again."
+fi
+
+# ─────────────────────────────────────────────────────────────
+# 7. Update CNPG (PostgreSQL) User (optional)
+# ─────────────────────────────────────────────────────────────
+if kubectl get pods -n "$DB_NAMESPACE" -l cnpg.io/cluster=keycloak-db --no-headers 2>/dev/null | grep -q Running; then
+    echo "🐘 Updating CNPG PostgreSQL user..."
+    # We already have DB_PASS from step 5 (either generated or retrieved)
+    kubectl -n "$DB_NAMESPACE" exec -it keycloak-db-1 -- psql -U postgres -c \
+        "ALTER USER keycloak WITH PASSWORD '$DB_PASS';" 2>/dev/null || \
+        echo "⚠ Could not update CNPG user — cluster may be initializing."
+else
+    echo "ℹ CNPG cluster not running yet. Skipping DB user update."
+fi
+
+echo ""
+echo "🎉 Initialization Complete."
+echo "   External Secrets should sync momentarily."
+echo "   Verify: kubectl get externalsecrets -A"

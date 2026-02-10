@@ -25,21 +25,21 @@ resource "scaleway_instance_security_group" "this" {
   # Communication inter-nœuds (réseau privé) et Health Checks LB
   inbound_rule {
     action   = "accept"
-    port     = 0 
-    ip_range = "172.16.0.0/12" 
+    port     = 0
+    ip_range = "172.16.0.0/12"
     protocol = "ANY"
   }
 
   inbound_rule {
     action   = "accept"
-    port     = 0 
-    ip_range = "10.0.0.0/8" 
+    port     = 0
+    ip_range = "10.0.0.0/8"
     protocol = "ANY"
   }
 
   inbound_rule {
     action   = "accept"
-    port     = 0 
+    port     = 0
     ip_range = "100.64.0.0/10" # Scaleway internal/LB health checks
     protocol = "ANY"
   }

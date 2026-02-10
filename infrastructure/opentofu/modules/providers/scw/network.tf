@@ -9,7 +9,7 @@ resource "scaleway_ipam_ip" "control_plane" {
   count      = var.control_plane_count
   project_id = var.project_id
   region     = var.region
-  
+
   source {
     private_network_id = scaleway_vpc_private_network.this.id
   }
@@ -67,7 +67,7 @@ resource "scaleway_vpc_gateway_network" "main" {
   private_network_id = scaleway_vpc_private_network.this.id
   enable_masquerade  = true # Enable NAT
   zone               = var.zone
-  
+
   ipam_config {
     push_default_route = false
   }

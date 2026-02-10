@@ -14,8 +14,8 @@ resource "scaleway_lb" "this" {
 resource "scaleway_lb_private_network" "this" {
   lb_id              = scaleway_lb.this.id
   private_network_id = scaleway_vpc_private_network.this.id
-  
-  # Optional: specify a static IP for the LB in the private net if needed, 
+
+  # Optional: specify a static IP for the LB in the private net if needed,
   # or let Scaleway DHCP handle it.
 }
 
@@ -26,7 +26,7 @@ resource "scaleway_lb_backend" "control_plane" {
   forward_port_algorithm = "roundrobin"
   forward_protocol       = "tcp"
   server_ips             = [for server in scaleway_instance_server.control_plane : [for ip in server.private_ips : ip.address if !can(regex(":", ip.address))][0] if length(server.private_ips) > 0]
-  
+
   health_check_delay       = "10s"
   health_check_timeout     = "5s"
   health_check_max_retries = 3
@@ -50,7 +50,7 @@ resource "scaleway_lb_frontend" "control_plane" {
         var.admin_ip,
         [
           "${scaleway_vpc_public_gateway_ip.this.address}/32", # Allow nodes via NAT GW (Hairpinning)
-          "172.16.0.0/12"                                     # Allow nodes directly if routed
+          "172.16.0.0/12"                                      # Allow nodes directly if routed
         ]
       )
     }

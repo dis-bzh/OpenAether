@@ -11,6 +11,7 @@ resource "openstack_lb_listener_v2" "k8s_api" {
   protocol_port   = 6443
   loadbalancer_id = openstack_lb_loadbalancer_v2.this.id
   name            = "k8s-api-listener"
+  allowed_cidrs   = var.admin_ip
 }
 
 resource "openstack_lb_pool_v2" "k8s_api" {
