@@ -48,3 +48,18 @@ variable "bastion_ssh_keys" {
   type        = map(string)
   default     = {}
 }
+
+variable "backup_s3_endpoint" {
+  description = "S3 Endpoint for backups (e.g. https://s3.fr-par.scw.cloud)"
+  type        = string
+}
+
+variable "backup_s3_region" {
+  description = "S3 Region for backups (e.g. fr-par)"
+  type        = string
+}
+
+variable "backup_s3_bucket" {
+  description = "S3 Bucket name for backups"
+  type        = string
+}

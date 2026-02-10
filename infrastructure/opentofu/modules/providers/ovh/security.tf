@@ -46,14 +46,14 @@ resource "openstack_networking_secgroup_rule_v2" "https" {
   security_group_id = openstack_networking_secgroup_v2.this.id
 }
 
-# WireGuard / Cilium (UDP 51820)
+# WireGuard / Cilium (UDP 51820) - Restricted to cluster SG (inter-node only)
 resource "openstack_networking_secgroup_rule_v2" "wireguard" {
   direction         = "ingress"
   ethertype         = "IPv4"
   protocol          = "udp"
   port_range_min    = 51820
   port_range_max    = 51820
-  remote_ip_prefix  = "0.0.0.0/0"
+  remote_group_id   = openstack_networking_secgroup_v2.this.id
   security_group_id = openstack_networking_secgroup_v2.this.id
 }
 

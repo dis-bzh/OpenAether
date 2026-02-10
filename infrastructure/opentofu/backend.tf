@@ -1,6 +1,11 @@
 variable "encryption_passphrase" {
   type      = string
   sensitive = true
+
+  validation {
+    condition     = length(var.encryption_passphrase) >= 32
+    error_message = "encryption_passphrase must be at least 32 characters long for SSE-C key derivation."
+  }
 }
 
 terraform {

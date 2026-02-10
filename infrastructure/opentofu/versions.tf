@@ -1,26 +1,30 @@
 terraform {
-  required_version = ">= 1.6.0"
+  required_version = ">= 1.11.0"
 
   required_providers {
     talos = {
       source  = "siderolabs/talos"
-      version = ">= 0.7.0"
+      version = "0.10.1"
     }
     scaleway = {
       source  = "scaleway/scaleway"
-      version = ">= 2.40"
+      version = "2.69.0"
     }
     ovh = {
       source  = "ovh/ovh"
-      version = ">= 0.40"
+      version = "2.11.0"
     }
     outscale = {
       source  = "outscale/outscale"
-      version = ">= 0.12.0"
+      version = "1.3.2"
     }
     openstack = {
       source  = "terraform-provider-openstack/openstack"
-      version = ">= 1.53.0"
+      version = "3.4.0"
+    }
+    aws = {
+      source  = "hashicorp/aws"
+      version = ">= 5.0"
     }
   }
 }
