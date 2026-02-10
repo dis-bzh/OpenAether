@@ -1,0 +1,39 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: keycloak-db
+  namespace: databases
+spec:
+  instances: 3
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.1
+
+  # HA Configuration
+  postgresql:
+    parameters:
+      max_connections: "200"
+      shared_buffers: "128MB"
+
+  # Storage Configuration
+  storage:
+    size: 1Gi
+    storageClass: openebs-hostpath
+
+  # Bootstrap from SQL (create DB/User if needed, though init_secrets.sh does user/pass via Secret)
+  bootstrap:
+    initdb:
+      database: keycloak
+      owner: keycloak
+      # References the secret created by init_secrets.sh
+      secret:
+        name: keycloak-db-app
+
+  # Monitoring
+  monitoring:
+    enablePodMonitor: true
+
+  # Backup (example - to be configured with S3)
+  # backup:
+  #   barmanObjectStore:
+  #     destinationPath: s3://backups/
+  #     endpointURL: https://s3.fr-par.scw.cloud
+  #     s3Credentials: ...
