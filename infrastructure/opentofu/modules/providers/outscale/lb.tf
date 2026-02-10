@@ -19,7 +19,7 @@ resource "outscale_load_balancer" "this" {
     load_balancer_protocol = "TCP"
   }
   subnets         = [var.subnet_id]
-  security_groups = [] # Needs SG
+  security_groups = [outscale_security_group.this.security_group_id]
   tags {
     key   = "Name"
     value = "${var.cluster_name}-lb"

@@ -35,3 +35,9 @@ bastion_ssh_keys = {
   # ovh      = "ssh-ed25519 AAAA... user@host"
   # outscale = "ssh-ed25519 AAAA... user@host"
 }
+
+# Generic S3 Backup Configuration
+# Can be Scaleway Object Storage, AWS S3, MinIO, etc.
+backup_s3_endpoint = "https://s3.fr-par.scw.cloud"
+backup_s3_region   = "fr-par"
+backup_s3_bucket   = "s3-openaether-tfstate"
