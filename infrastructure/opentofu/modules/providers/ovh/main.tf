@@ -1,9 +1,9 @@
 # Reserve fixed private IPs for control plane nodes
 resource "openstack_networking_port_v2" "control_plane" {
-  count          = var.control_plane_count
-  name           = "${var.cluster_name}-cp-port-${count.index}"
-  network_id     = var.network_id
-  admin_state_up = "true"
+  count              = var.control_plane_count
+  name               = "${var.cluster_name}-cp-port-${count.index}"
+  network_id         = var.network_id
+  admin_state_up     = "true"
   security_group_ids = [openstack_networking_secgroup_v2.this.id]
 }
 

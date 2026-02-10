@@ -1,5 +1,27 @@
 # Mocking des providers OpenStack pour OVH
 mock_provider "openstack" {}
+mock_provider "talos" {}
+mock_provider "aws" {}
+
+override_resource {
+  target = aws_s3_object.talosconfig
+  values = { id = "dummy-s3-talosconfig" }
+}
+
+override_resource {
+  target = aws_s3_object.kubeconfig
+  values = { id = "dummy-s3-kubeconfig" }
+}
+
+override_resource {
+  target = aws_s3_object.controlplane_yaml
+  values = { id = "dummy-s3-controlplane" }
+}
+
+override_resource {
+  target = aws_s3_object.worker_yaml
+  values = { id = "dummy-s3-worker" }
+}
 
 # Surcharge des ressources pour éviter les erreurs de validation
 override_resource {
@@ -19,7 +41,7 @@ override_data {
 override_resource {
   target = module.ovh.openstack_networking_port_v2.control_plane
   values = {
-    id = "ovh-port-id"
+    id            = "ovh-port-id"
     all_fixed_ips = ["192.168.1.10"]
   }
 }
@@ -40,9 +62,9 @@ override_resource {
 
 # Variables globales pour les tests OVH
 variables {
-  cluster_name      = "test-ovh"
-  admin_ip          = ["1.2.3.4/32"]
-  bastion_ssh_keys  = {
+  cluster_name = "test-ovh"
+  admin_ip     = ["1.2.3.4/32"]
+  bastion_ssh_keys = {
     ovh = "ssh-ed25519 AAAAC3... dummy"
   }
   node_distribution = {
@@ -95,7 +117,7 @@ run "verify_ovh_module_activation" {
 
 # --- Test 3: Security Outputs ---
 run "verify_ovh_outputs" {
-  command = plan
+  command = apply
 
   assert {
     condition     = output.bastion_ips != null
@@ -105,5 +127,10 @@ run "verify_ovh_outputs" {
   assert {
     condition     = output.cluster_endpoint != ""
     error_message = "L'endpoint du cluster ne peut pas être vide."
+  }
+
+  assert {
+    condition     = output.talosconfig != null
+    error_message = "La talosconfig doit être définie en sortie."
   }
 }

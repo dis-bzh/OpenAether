@@ -1,7 +1,9 @@
 provider "talos" {}
 provider "scaleway" {}
 provider "openstack" {}
-provider "outscale" {}
+provider "outscale" {
+  region = try(local.outscale_dist.region, "eu-west-2")
+}
 
 # S3-compatible provider for backups (works with Scaleway, Outscale, OVH, MinIO, etc.)
 provider "aws" {
@@ -14,18 +16,19 @@ provider "aws" {
 
   # Required for S3-compatible providers that are not AWS
   skip_credentials_validation = true
+  skip_region_validation      = true
   skip_metadata_api_check     = true
   skip_requesting_account_id  = true
   s3_use_path_style           = true
 }
 
 
-# Calculate endpoint: prioritize LB IPs, otherwise fallback to var.cluster_endpoint
 locals {
-  # We need to know which provider is active to pick the right LB
-  # For now, simplistic logic: pick first non-empty LB IP from active modules
-  # Note: `one(...)` or similar logic might be needed if multiple modules are active (multi-cloud)
+  # Use localhost for Talos configuration to allow bootstrapping via SSH tunnel
+  # This breaks the circular dependency between LB creation (Module) and Node Config (Talos Module)
+  formatted_endpoint = "https://127.0.0.1:6443"
 
+  # Public endpoint (Load Balancer) for Outputs
   effective_endpoint = coalesce(
     try(module.scw[0].lb_ip, ""),
     try(module.ovh[0].lb_ip, ""),
@@ -33,8 +36,23 @@ locals {
     var.cluster_endpoint
   )
 
-  # Format endpoint as URL if not already
-  formatted_endpoint = can(regex("^https://", local.effective_endpoint)) ? local.effective_endpoint : "https://${local.effective_endpoint}:6443"
+  # Determine active providers for validation
+  active_providers = compact([
+    (local.scw_dist.control_planes + local.scw_dist.workers) > 0 ? "scaleway" : "",
+    (local.ovh_dist.control_planes + local.ovh_dist.workers) > 0 ? "ovh" : "",
+    (local.outscale_dist.control_planes + local.outscale_dist.workers) > 0 ? "outscale" : ""
+  ])
+}
+
+# Enforce Single Cloud Provider Constraint
+resource "terraform_data" "validate_single_provider" {
+  input = local.active_providers # Trigger separate lifecycle check on input change
+  lifecycle {
+    precondition {
+      condition     = length(local.active_providers) == 1
+      error_message = "Only one cloud provider can be active at a time. Please check your 'node_distribution' variable. Active providers found: ${join(", ", local.active_providers)}"
+    }
+  }
 }
 
 module "talos" {
@@ -74,10 +92,10 @@ module "scw" {
   talos_version      = var.talos_version
   kubernetes_version = var.kubernetes_version
 
-  image_id      = local.scw_dist.image_id
-  image_name    = local.scw_dist.image_name
-  zone          = local.scw_dist.zone
-  region        = local.scw_dist.region
+  image_id         = local.scw_dist.image_id
+  image_name       = local.scw_dist.image_name
+  zone             = local.scw_dist.zone
+  region           = local.scw_dist.region
   instance_type    = local.scw_dist.instance_type
   additional_zones = local.scw_dist.zones != null ? local.scw_dist.zones : ["fr-par-1", "fr-par-2", "fr-par-3"]
 
@@ -131,8 +149,8 @@ module "outscale" {
   talos_version      = var.talos_version
   kubernetes_version = var.kubernetes_version
 
-  image_id = coalesce(local.outscale_dist.image_id, "ami-ce7e9d99")
-  region   = local.outscale_dist.region
+  image_id  = coalesce(local.outscale_dist.image_id, "ami-ce7e9d99")
+  region    = local.outscale_dist.region
   subnet_id = local.outscale_dist.subnet_id
   # Outscale module likely expects 'instance_type' or 'vm_type', checking variables.tf would confirm but instance_type is standard
   instance_type = local.outscale_dist.instance_type
@@ -160,7 +178,7 @@ resource "talos_machine_bootstrap" "this" {
   node                 = local.bootstrap_node
   endpoint             = "127.0.0.1"
   client_configuration = module.talos.client_configuration
-  
+
   # Ensure instances are ready before bootstrapping
   depends_on = [
     module.scw,
@@ -173,9 +191,7 @@ resource "talos_cluster_kubeconfig" "this" {
   client_configuration = module.talos.client_configuration
   node                 = local.bootstrap_node
   endpoint             = "127.0.0.1"
-  
+
   # Wait for bootstrap to complete
   depends_on = [talos_machine_bootstrap.this]
 }
-
-
