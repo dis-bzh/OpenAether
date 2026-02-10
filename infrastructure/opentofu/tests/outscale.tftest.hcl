@@ -78,6 +78,7 @@ variables {
   }
 }
 
+# --- Test 1: Configuration Validation ---
 run "verify_outscale_config" {
   command = plan
 
@@ -89,5 +90,52 @@ run "verify_outscale_config" {
   assert {
     condition     = var.node_distribution.outscale.region == "eu-west-2"
     error_message = "La région Outscale par défaut pour les tests doit être eu-west-2."
+  }
+}
+
+# --- Test 2: Module Activation ---
+run "verify_outscale_module_activation" {
+  command = plan
+
+  # Outscale module should be active
+  assert {
+    condition     = length(module.outscale) == 1
+    error_message = "Le module Outscale devrait être activé quand des nœuds sont configurés."
+  }
+
+  # Scaleway and OVH should NOT be active
+  assert {
+    condition     = length(module.scw) == 0
+    error_message = "Le module Scaleway ne devrait pas être activé sans nœuds configurés."
+  }
+
+  assert {
+    condition     = length(module.ovh) == 0
+    error_message = "Le module OVH ne devrait pas être activé sans nœuds configurés."
+  }
+}
+
+# --- Test 3: Security Outputs ---
+run "verify_outscale_outputs" {
+  command = plan
+
+  assert {
+    condition     = output.bastion_ips != null
+    error_message = "Les IPs bastion doivent être disponibles en sortie."
+  }
+
+  assert {
+    condition     = output.cluster_endpoint != ""
+    error_message = "L'endpoint du cluster ne peut pas être vide."
+  }
+}
+
+# --- Test 4: HA Requirements ---
+run "verify_outscale_ha" {
+  command = plan
+
+  assert {
+    condition     = var.node_distribution.outscale.control_planes >= 3
+    error_message = "HA nécessite au minimum 3 control planes Outscale."
   }
 }
