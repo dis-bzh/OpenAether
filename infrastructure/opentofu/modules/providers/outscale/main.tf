@@ -1,7 +1,7 @@
 # Reserve fixed private IPs for control plane nodes via NICs
 resource "outscale_nic" "control_plane" {
-  count      = var.control_plane_count
-  subnet_id  = var.subnet_id
+  count     = var.control_plane_count
+  subnet_id = var.subnet_id
   private_ips {
     is_primary = true
     private_ip = "10.0.1.${count.index + 10}" # Example predictable range
@@ -9,9 +9,9 @@ resource "outscale_nic" "control_plane" {
 }
 
 resource "outscale_vm" "control_plane" {
-  count             = var.control_plane_count
-  image_id          = var.image_id
-  vm_type           = var.instance_type
+  count    = var.control_plane_count
+  image_id = var.image_id
+  vm_type  = var.instance_type
 
   nics {
     nic_id        = outscale_nic.control_plane[count.index].nic_id

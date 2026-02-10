@@ -38,7 +38,7 @@ output "bastion_ips" {
 }
 
 output "cluster_endpoint" {
-  value = local.effective_endpoint # Use local defined in main.tf or same logic
+  value       = local.effective_endpoint # Use local defined in main.tf or same logic
   description = "Public endpoint for Kubernetes API access (Load Balancer)"
 }
 

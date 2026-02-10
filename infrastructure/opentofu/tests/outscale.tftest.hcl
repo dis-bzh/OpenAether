@@ -1,5 +1,27 @@
 # Mocking du provider Outscale
 mock_provider "outscale" {}
+mock_provider "talos" {}
+mock_provider "aws" {}
+
+override_resource {
+  target = aws_s3_object.talosconfig
+  values = { id = "dummy-s3-talosconfig" }
+}
+
+override_resource {
+  target = aws_s3_object.kubeconfig
+  values = { id = "dummy-s3-kubeconfig" }
+}
+
+override_resource {
+  target = aws_s3_object.controlplane_yaml
+  values = { id = "dummy-s3-controlplane" }
+}
+
+override_resource {
+  target = aws_s3_object.worker_yaml
+  values = { id = "dummy-s3-worker" }
+}
 
 # Surcharge des ressources Computed
 override_resource {
@@ -13,25 +35,25 @@ override_data {
   target = module.outscale.data.outscale_images.ubuntu
   values = {
     images = [{
-      image_id = "dummy-bastion-image-id"
-      account_alias = "dummy"
-      account_id = "dummy"
-      architecture = "x86_64"
+      image_id              = "dummy-bastion-image-id"
+      account_alias         = "dummy"
+      account_id            = "dummy"
+      architecture          = "x86_64"
       block_device_mappings = []
-      boot_modes = []
-      creation_date = "2024-01-01T00:00:00Z"
-      description = "dummy"
-      file_location = "dummy"
-      image_name = "dummy-ubuntu"
-      image_type = "machine"
+      boot_modes            = []
+      creation_date         = "2024-01-01T00:00:00Z"
+      description           = "dummy"
+      file_location         = "dummy"
+      image_name            = "dummy-ubuntu"
+      image_type            = "machine"
       permissions_to_launch = []
-      product_codes = []
-      root_device_name = "/dev/sda1"
-      root_device_type = "ebs"
-      secure_boot = false
-      state = "available"
-      state_comment = []
-      tags = []
+      product_codes         = []
+      root_device_name      = "/dev/sda1"
+      root_device_type      = "ebs"
+      secure_boot           = false
+      state                 = "available"
+      state_comment         = []
+      tags                  = []
     }]
   }
 }
@@ -39,14 +61,14 @@ override_data {
 override_resource {
   target = module.outscale.outscale_nic.control_plane
   values = {
-    nic_id    = "test-nic-id"
+    nic_id = "test-nic-id"
   }
 }
 
 override_resource {
   target = module.outscale.outscale_vm.control_plane
   values = {
-    vm_id = "test-vm-id"
+    vm_id      = "test-vm-id"
     private_ip = "10.0.1.10"
   }
 }
@@ -61,9 +83,9 @@ override_resource {
 
 # Variables globales pour les tests Outscale
 variables {
-  cluster_name      = "test-osc"
-  admin_ip          = ["1.2.3.4/32"]
-  bastion_ssh_keys  = {
+  cluster_name = "test-osc"
+  admin_ip     = ["1.2.3.4/32"]
+  bastion_ssh_keys = {
     outscale = "ssh-ed25519 AAAAC3... dummy"
   }
   node_distribution = {
@@ -117,7 +139,7 @@ run "verify_outscale_module_activation" {
 
 # --- Test 3: Security Outputs ---
 run "verify_outscale_outputs" {
-  command = plan
+  command = apply
 
   assert {
     condition     = output.bastion_ips != null
@@ -127,6 +149,11 @@ run "verify_outscale_outputs" {
   assert {
     condition     = output.cluster_endpoint != ""
     error_message = "L'endpoint du cluster ne peut pas être vide."
+  }
+
+  assert {
+    condition     = output.talosconfig != null
+    error_message = "La talosconfig doit être définie en sortie."
   }
 }
 

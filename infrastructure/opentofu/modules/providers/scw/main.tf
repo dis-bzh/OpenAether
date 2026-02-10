@@ -19,9 +19,9 @@ resource "scaleway_instance_server" "control_plane" {
   image      = coalesce(var.image_id, data.scaleway_instance_image.talos[count.index].id)
   zone       = element(var.additional_zones, count.index)
   project_id = var.project_id
-  
+
   root_volume {
-    size_in_gb = 20
+    size_in_gb            = 20
     delete_on_termination = true
   }
 
@@ -46,7 +46,7 @@ resource "scaleway_instance_server" "worker" {
   project_id = var.project_id
 
   root_volume {
-    size_in_gb = 20
+    size_in_gb            = 20
     delete_on_termination = true
   }
 
