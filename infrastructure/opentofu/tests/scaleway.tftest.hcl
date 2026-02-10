@@ -133,9 +133,7 @@ variables {
   }
 }
 
-# Bloc de test unitaire (sans provisionnement réel grâce aux mocks si possible, 
-# mais ici OpenTofu test provisionne par défaut. Nous testons la logique des variables.)
-
+# --- Test 1: Variable Validation ---
 run "verify_variable_validation" {
   command = plan
 
@@ -150,11 +148,74 @@ run "verify_variable_validation" {
   }
 }
 
+# --- Test 2: Bastion Configuration ---
 run "verify_bastion_config" {
   command = plan
 
   assert {
     condition     = length(var.bastion_ssh_keys.scaleway) > 0
     error_message = "La clé SSH du bastion Scaleway ne peut pas être vide."
+  }
+}
+
+# --- Test 3: Module Activation Logic ---
+run "verify_module_activation" {
+  command = plan
+
+  # Scaleway module should be active (control_planes + workers > 0)
+  assert {
+    condition     = length(module.scw) == 1
+    error_message = "Le module Scaleway devrait être activé quand des nœuds sont configurés."
+  }
+
+  # OVH and Outscale modules should NOT be active
+  assert {
+    condition     = length(module.ovh) == 0
+    error_message = "Le module OVH ne devrait pas être activé sans nœuds configurés."
+  }
+
+  assert {
+    condition     = length(module.outscale) == 0
+    error_message = "Le module Outscale ne devrait pas être activé sans nœuds configurés."
+  }
+}
+
+# --- Test 4: Security Outputs ---
+run "verify_security_outputs" {
+  command = plan
+
+  # Bastion IP should be available
+  assert {
+    condition     = output.bastion_ips != null
+    error_message = "Les IPs bastion doivent être disponibles en sortie."
+  }
+
+  # Cluster endpoint should be set
+  assert {
+    condition     = output.cluster_endpoint != ""
+    error_message = "L'endpoint du cluster ne peut pas être vide."
+  }
+
+  # Sensitive outputs should be defined
+  assert {
+    condition     = output.talosconfig != null
+    error_message = "La talosconfig doit être définie en sortie."
+  }
+}
+
+# --- Test 5: HA Configuration ---
+run "verify_ha_configuration" {
+  command = plan
+
+  # At least 3 control planes for HA
+  assert {
+    condition     = var.node_distribution.scaleway.control_planes >= 3
+    error_message = "HA nécessite au minimum 3 control planes."
+  }
+
+  # Control planes should be distributed across zones
+  assert {
+    condition     = length(var.node_distribution.scaleway.zones) >= 2
+    error_message = "Les control planes doivent être distribués sur au moins 2 zones."
   }
 }

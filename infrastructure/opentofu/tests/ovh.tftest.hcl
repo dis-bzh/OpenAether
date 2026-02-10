@@ -56,6 +56,7 @@ variables {
   }
 }
 
+# --- Test 1: Configuration Validation ---
 run "verify_ovh_ha_config" {
   command = plan
 
@@ -67,5 +68,42 @@ run "verify_ovh_ha_config" {
   assert {
     condition     = var.node_distribution.ovh.region == "GRA11"
     error_message = "La région OVH par défaut pour les tests doit être GRA11."
+  }
+}
+
+# --- Test 2: Module Activation ---
+run "verify_ovh_module_activation" {
+  command = plan
+
+  # OVH module should be active
+  assert {
+    condition     = length(module.ovh) == 1
+    error_message = "Le module OVH devrait être activé quand des nœuds sont configurés."
+  }
+
+  # Scaleway and Outscale should NOT be active
+  assert {
+    condition     = length(module.scw) == 0
+    error_message = "Le module Scaleway ne devrait pas être activé sans nœuds configurés."
+  }
+
+  assert {
+    condition     = length(module.outscale) == 0
+    error_message = "Le module Outscale ne devrait pas être activé sans nœuds configurés."
+  }
+}
+
+# --- Test 3: Security Outputs ---
+run "verify_ovh_outputs" {
+  command = plan
+
+  assert {
+    condition     = output.bastion_ips != null
+    error_message = "Les IPs bastion doivent être disponibles en sortie."
+  }
+
+  assert {
+    condition     = output.cluster_endpoint != ""
+    error_message = "L'endpoint du cluster ne peut pas être vide."
   }
 }
