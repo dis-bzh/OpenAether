@@ -1,0 +1,291 @@
+# GitOps Structure Analysis & Option A Alignment
+
+## Current apps/ Structure Analysis
+
+### ✅ What Works (No Changes Needed)
+
+#### apps/base/
+- `namespaces/` - ✅ Already updated with `foundation-networking` and `management-gitops`
+- `linkerd/` - ✅ Service mesh (GitOps-managed)
+- `traefik/` - ✅ API Gateway (GitOps-managed)
+- `keycloak/` - ✅ Identity (GitOps-managed)
+- `openbao/` - ✅ Secrets (GitOps-managed)
+- `kyverno/` - ✅ Policy engine (GitOps-managed)
+- `observability/` - ✅ Monitoring (GitOps-managed)
+- `storage/` - ✅ Storage classes (GitOps-managed)
+- `databases/` - ✅ CockroachDB, CNPG (GitOps-managed)
+- `keda/` - ✅ Autoscaling (GitOps-managed)
+- `external-secrets/` - ✅ Secrets management (GitOps-managed)
+
+### ❌ Conflicts to Resolve
+
+#### 1. apps/infrastructure/cilium/
+**Status**: Exists but NOT referenced in any kustomization  
+**Action**: DELETE - Terraform manages Cilium via [helm.tf](infrastructure/opentofu/helm.tf)  
+**Reason**: CNI must be installed before GitOps can function
+
+#### 2. apps/bootstrap/
+**Status**: Designed to install ArgoCD manually  
+**Action**: KEEP but MODIFY - Terraform installs ArgoCD, bootstrap just applies root app  
+**Changes**:
+- Fix namespace in [argocd-cmd-params-cm.yaml](apps/bootstrap/overlays/prod/argocd-cmd-params-cm.yaml) (`argocd` → `management-gitops`)
+- Update README to reflect Terraform bootstrap
+
+### 📝 Documentation Updates Needed
+
+#### apps/README.md
+Current flow mentions `task bootstrap` - needs update for Terraform workflow
+
+---
+
+## Option A Implementation Plan
+
+### Phase 1: Cleanup Conflicts
+
+#### [DELETE] apps/infrastructure/cilium/
+Not needed - Terraform manages Cilium
+
+#### [MODIFY] apps/bootstrap/overlays/local/argocd-cmd-params-cm.yaml
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cmd-params-cm
+  namespace: management-gitops  # ← Fix namespace
+data:
+  server.insecure: "true"
+```
+
+---
+
+### Phase 2: Add Root App to Terraform
+
+#### [NEW] infrastructure/opentofu/argocd-root-app.tf
+
+```terraform
+# ArgoCD Root Application
+# Deploys the "App of Apps" pattern to let ArgoCD manage all applications
+
+resource "null_resource" "argocd_root_app" {
+  # Trigger re-apply if root app changes (hash of the kustomization/overlay)
+  triggers = {
+    root_app_hash = sha1(join("", [for f in fileset("${path.root}/../../apps/bootstrap/overlays/prod", "**") : filemd5("${path.root}/../../apps/bootstrap/overlays/prod/${f}")]))
+  }
+  
+  provisioner "local-exec" {
+    command = <<-EOT
+      # Wait for ArgoCD to be ready
+      kubectl wait --for=condition=available --timeout=300s \
+        deployment/argocd-server \
+        -n management-gitops \
+        --kubeconfig=${path.root}/kubeconfig
+      
+      # Apply root application
+      kubectl apply -f ${path.root}/../../apps/bootstrap/overlays/prod/root-app.yaml \
+        --kubeconfig=${path.root}/kubeconfig
+      
+      echo "✅ ArgoCD root application deployed"
+    EOT
+  }
+  
+  depends_on = [
+    helm_release.argocd
+  ]
+}
+```
+
+---
+
+### Phase 6: Hotfixes & Stabilization
+
+#### 1. Scaleway LB ACL Bug
+**Issue**: Nested `acl` blocks in `scaleway_lb_frontend` caused "inconsistent final plan" errors with dynamic IPs.  
+**Fix**: Refactored ACLs into standalone `scaleway_lb_acl` resources.
+
+#### 2. [DELETE] SSH Tunnel
+**Rationale**: Fragile and hinders automation.
+**Action**: Delete [tunnel.tf](infrastructure/opentofu/tunnel.tf).
+
+#### 3. Self-Managed CNI (Zero-Tunnel)
+**Issue**: Installing CNI via Helm requires API access, which requires the LB, which requires CNI.
+**Fix**:
+- Use Terraform `helm_template` data source to generate Cilium manifest.
+- Inject manifest into Talos configuration via `inlineManifests`.
+- Result: Talos installs CNI on boot, LB becomes healthy, API becomes accessible without tunnel.
+- **Status**: ✅ Implemented (Manifest generation + scw module injection)
+
+#### 4. Network & ACL Fixes
+- **Issue**: Static route conflict with DHCP & LB ACL inconsistency.
+- **Fix**: Removed static routes, added lifecycle ignore to ACLs.
+- **Status**: ✅ Implemented
+
+---
+
+### Phase 3: Create prod Overlay
+
+#### [NEW] apps/bootstrap/overlays/prod/
+
+Currently only `local` overlay exists. Need `prod` for production deployment.
+
+**Directory structure:**
+```
+apps/bootstrap/overlays/prod/
+├── kustomization.yaml
+├── argocd-cmd-params-cm.yaml (if needed)
+└── root-app.yaml
+```
+
+**root-app.yaml:**
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: openaether-platform
+  namespace: management-gitops
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/dis-bzh/OpenAether.git
+    targetRevision: HEAD
+    path: apps/overlays/prod  # ← Point to prod overlay
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: management-gitops
+  syncPolicy:
+    automated:
+      prune: true  # ← Enable pruning for prod
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+```
+
+---
+
+### Phase 4: Create prod Apps Overlay
+
+#### [NEW] apps/overlays/prod/
+
+Similar to `local` but with production-ready settings:
+- Higher replica counts
+- Resource limits
+- No dev mode flags
+- TLS enabled
+- etc.
+
+**kustomization.yaml:**
+```yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base/namespaces
+  - ../../base/external-secrets
+  - ../../base/kyverno-policies
+  - ../../base/traefik
+  - ../../base/linkerd
+  - ../../base/cnpg
+  - ../../base/cockroachdb
+  - ../../base/openbao
+  - ../../base/keycloak
+  - ../../base/kyverno
+  - ../../base/keda
+  - ../../base/observability
+  - ../../base/storage
+
+# Production patches (HA, resource limits, etc.)
+patches:
+  - target:
+      kind: Deployment
+      name: traefik
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3  # HA for prod
+```
+
+---
+
+### Phase 5: Update Documentation
+
+#### [MODIFY] apps/README.md
+
+Update flow section:
+```markdown
+## Flow
+
+1. **Terraform Bootstrap**: `cd infrastructure/opentofu && make deploy`
+   - Deploys infrastructure (network, VMs, bastion)
+   - Establishes SSH tunnel
+   - Bootstraps Talos cluster
+   - Installs Cilium CNI
+   - Installs ArgoCD
+   - Applies root application
+
+2. **ArgoCD Sync**: ArgoCD automatically syncs all applications
+   - Reads `apps/overlays/{env}` (local or prod)
+   - Applies all base applications with environment patches
+   - Manages ongoing reconciliation
+
+3. **Verify**: `kubectl get applications -n management-gitops -w`
+```
+
+---
+
+## Final Deployment Flow (Option A)
+
+```mermaid
+graph TD
+    A[make deploy] --> B[Terraform: Infrastructure]
+    B --> C[Terraform: Talos Bootstrap]
+    C --> D[Talos: Auto-Install CNI]
+    D --> E[LB becomes Healthy]
+    E --> F[Terraform: ArgoCD (Public Endpoint)]
+    F --> G[Terraform: Root App]
+    G --> H[ArgoCD: Sync All Apps]
+    H --> I[Platform Ready]
+```
+
+**User action**: `make deploy`  
+**Result**: Fully deployed platform with all applications
+
+---
+
+## Files to Modify/Create
+
+### Delete
+- [ ] `apps/infrastructure/cilium/` (entire directory)
+
+### Modify
+- [ ] [apps/bootstrap/overlays/local/argocd-cmd-params-cm.yaml](apps/bootstrap/overlays/local/argocd-cmd-params-cm.yaml) (namespace fix)
+- [ ] [apps/README.md](apps/README.md) (update flow documentation)
+
+### Create
+- [ ] [infrastructure/opentofu/argocd-root-app.tf](infrastructure/opentofu/argocd-root-app.tf) (Terraform root app deployment)
+- [ ] `apps/bootstrap/overlays/prod/` (production bootstrap overlay)
+- [ ] `apps/overlays/prod/` (production apps overlay)
+
+---
+
+## Verification Steps
+
+```bash
+# 1. Full deployment
+cd infrastructure/opentofu
+make deploy
+
+# 2. Verify bootstrap components
+kubectl get pods -n foundation-networking  # Cilium
+kubectl get pods -n management-gitops      # ArgoCD
+
+# 3. Verify root app deployed
+kubectl get application openaether-platform -n management-gitops
+
+# 4. Watch ArgoCD sync all apps
+kubectl get applications -n management-gitops -w
+
+# 5. Verify all apps deployed
+kubectl get pods -A
+```

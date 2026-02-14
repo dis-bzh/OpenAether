@@ -1,0 +1,137 @@
+# Tier 0 Bootstrap Strategy - Multi-Cloud Two-Phase Deployment
+
+## Problem
+Talos machine configuration requires IP addresses that are only known after infrastructure provisioning, creating a circular dependency across all cloud providers.
+
+## Solution: Two-Phase Deployment with Plan Output
+
+### Phase 0: Network & Identity Layer
+
+Create all resources that generate IP addresses and network infrastructure, without creating compute instances.
+
+#### Step 1: Generate and Review Plan
+
+```bash
+# Set mock credentials for unused providers
+export OS_AUTH_URL=http://localhost
+export OS_USERNAME=dummy
+export OS_PASSWORD=dummy
+export OS_PROJECT_NAME=dummy
+export OUTSCALE_REGION=eu-west-2
+export OUTSCALE_ACCESS_KEY=dummy
+export OUTSCALE_SECRET_KEY=dummy
+
+# Generate targeted plan for Phase 0
+tofu plan -var-file="tofu.tfvars" -out=phase0.tfplan \
+  -target=module.scw[0].scaleway_vpc_private_network.this \
+  -target=module.scw[0].scaleway_vpc_public_gateway_ip.this \
+  -target=module.scw[0].scaleway_vpc_public_gateway.this \
+  -target=module.scw[0].scaleway_vpc_gateway_network.main \
+  -target=module.scw[0].scaleway_ipam_ip.control_plane \
+  -target=module.scw[0].scaleway_lb_ip.this \
+  -target=module.scw[0].scaleway_lb.this \
+  -target=module.scw[0].scaleway_lb_private_network.this \
+  -target=module.scw[0].scaleway_instance_ip.bastion \
+  -target=module.scw[0].scaleway_instance_server.bastion \
+  -target=module.scw[0].scaleway_instance_private_nic.bastion \
+  -target=module.scw[0].scaleway_instance_security_group.bastion \
+  -target=module.ovh[0].openstack_networking_port_v2.control_plane \
+  -target=module.ovh[0].openstack_networking_secgroup_v2.this \
+  -target=module.outscale[0].outscale_nic.control_plane \
+  -target=module.outscale[0].outscale_security_group.this \
+  -target=module.talos.talos_machine_secrets.this
+```
+
+#### Step 2: Apply Phase 0
+
+```bash
+tofu apply phase0.tfplan
+```
+
+**What gets created:**
+- ✅ VPC/Private Networks
+- ✅ IPAM IPs (Scaleway) / Network Ports (OVH) / NICs (Outscale)
+- ✅ Load Balancer IP and LB instance (Scaleway)
+- ✅ Public Gateway IP (Scaleway)
+- ✅ Bastion instance + IP (Scaleway)
+- ✅ Security Groups
+- ✅ Talos machine secrets
+
+**What is NOT created:**
+- ❌ Control plane instances
+- ❌ Worker instances
+- ❌ LB backends/frontends (depend on instance IPs)
+
+---
+
+### Phase 1: Cluster Deployment
+
+Once Phase 0 completes, the Terraform state contains all IP addresses. The Talos data sources can now resolve correctly.
+
+#### Step 1: Generate Full Plan
+
+```bash
+tofu plan -var-file="tofu.tfvars" -out=phase1.tfplan
+```
+
+This plan will show:
+- Control plane instances with correct certSANs (using IPAM/Port IPs from state)
+- Worker instances
+- LB backends and frontends
+- Talos bootstrap
+
+#### Step 2: Apply Phase 1
+
+```bash
+tofu apply phase1.tfplan
+```
+
+---
+
+## Provider-Specific Resource Mapping
+
+### Scaleway (VPC v2 + IPAM)
+| Resource Type | Purpose | Phase |
+|--------------|---------|-------|
+| `scaleway_vpc_private_network` | Private network | 0 |
+| `scaleway_ipam_ip.control_plane` | Reserved IPs for certSANs | 0 |
+| `scaleway_lb_ip` | LB public IP (cluster endpoint) | 0 |
+| `scaleway_lb` | Load balancer instance | 0 |
+| `scaleway_instance_server.control_plane` | Control plane VMs | 1 |
+| `scaleway_instance_private_nic.control_plane` | Attach VMs to network | 1 |
+
+### OVH (OpenStack)
+| Resource Type | Purpose | Phase |
+|--------------|---------|-------|
+| `openstack_networking_port_v2.control_plane` | Reserved ports with fixed IPs | 0 |
+| `openstack_networking_secgroup_v2` | Security group | 0 |
+| `openstack_compute_instance_v2.control_plane` | Control plane VMs | 1 |
+
+### Outscale
+| Resource Type | Purpose | Phase |
+|--------------|---------|-------|
+| `outscale_nic.control_plane` | NICs with fixed private IPs | 0 |
+| `outscale_security_group` | Security group | 0 |
+| `outscale_vm.control_plane` | Control plane VMs | 1 |
+
+---
+
+## Benefits
+
+✅ **No circular dependency errors** - IPs exist before Talos config generation  
+✅ **Multi-cloud ready** - Works for Scaleway, OVH, and Outscale  
+✅ **Reviewable** - Plan files allow inspection before apply  
+✅ **Idempotent** - Can re-run Phase 1 without issues  
+✅ **Clean code** - No provider blocks commented out  
+
+---
+
+## Workflow Summary
+
+```
+Phase 0: tofu plan -out=phase0.tfplan (network + IPs)
+         tofu apply phase0.tfplan
+         
+Phase 1: tofu plan -out=phase1.tfplan (full cluster)
+         tofu apply phase1.tfplan
+```

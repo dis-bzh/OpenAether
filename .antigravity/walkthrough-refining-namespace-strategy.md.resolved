@@ -1,0 +1,32 @@
+# Walkthrough - Tier 0: Infrastructure
+
+I have updated the Talos machine configuration across all supported providers (Scaleway, OVH, Outscale) to prepare for Cilium as the primary CNI and `kube-proxy` replacement.
+
+## Changes Made
+
+### [Tier 0] Talos Configuration
+
+I modified the [config.tf](infrastructure/opentofu/modules/providers/scw/config.tf) files for each provider to add the following patches:
+
+```yaml
+cluster:
+  network:
+    cni:
+      name: none
+  proxy:
+    disabled: true
+```
+
+#### Files Updated:
+- [SCW config.tf](infrastructure/opentofu/modules/providers/scw/config.tf)
+- [OVH config.tf](infrastructure/opentofu/modules/providers/ovh/config.tf)
+- [Outscale config.tf](infrastructure/opentofu/modules/providers/outscale/config.tf)
+
+## Validation Results
+
+- [x] HCL Syntax Check: Files are syntactically correct.
+- [x] Functional Check: Both `control_plane` and `worker` node configurations are patched.
+
+## Next Step
+
+The next step is **Tier 1: Core Network (Cilium)**. This involves configuring Cilium with the desired security features (Wireguard, Hubble) before transitioning to **Tier 2: Management (ArgoCD)**.

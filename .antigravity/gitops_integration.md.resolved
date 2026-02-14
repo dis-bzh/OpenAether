@@ -1,0 +1,140 @@
+# GitOps Integration Plan
+
+## Current State
+
+### Existing Structure
+- **apps/base/** - Environment-agnostic application definitions
+- **apps/overlays/** - Environment-specific patches (local, prod)
+- **apps/bootstrap/** - ArgoCD installation and root app
+
+### Namespace Strategy
+Existing namespaces in [apps/base/namespaces/namespaces.yaml](apps/base/namespaces/namespaces.yaml):
+- `foundation-vault`
+- `foundation-service-mesh` (Linkerd)
+- `foundation-policy-engine` (Kyverno)
+- `foundation-pki-management`
+- `foundation-storage`
+- `foundation-databases`
+- `services-identity` (Keycloak)
+- `services-observability`
+- `services-gateway` (Traefik)
+- `services-autoscaling` (KEDA)
+
+### Missing Namespaces
+Terraform creates these but they're not in GitOps:
+- `foundation-networking` (Cilium CNI)
+- `management-gitops` (ArgoCD)
+
+---
+
+## Integration Strategy
+
+### Option 1: Terraform Bootstrap Only (Recommended)
+
+**Terraform deploys:**
+1. Infrastructure (network, VMs, bastion)
+2. SSH tunnel
+3. Talos bootstrap
+4. **Cilium CNI** (foundation-networking) - Required for cluster networking
+5. **ArgoCD** (management-gitops) - GitOps engine
+
+**ArgoCD then takes over:**
+- Deploys all apps from `apps/overlays/{env}`
+- Manages namespaces from `apps/base/namespaces/`
+- Handles Linkerd, Traefik, Keycloak, etc.
+
+**Changes needed:**
+1. Add missing namespaces to `apps/base/namespaces/namespaces.yaml`
+2. Remove Cilium/ArgoCD from `apps/base/` (managed by Terraform)
+3. Update ArgoCD root app to point to correct overlay
+
+---
+
+### Option 2: Full GitOps (Alternative)
+
+**Terraform deploys:**
+1. Infrastructure only
+2. Talos bootstrap
+3. **Cilium CNI only** (required for networking)
+
+**Manual step:**
+- Apply ArgoCD bootstrap: `kubectl apply -k apps/bootstrap/overlays/prod`
+
+**ArgoCD manages everything else:**
+- All applications including itself (self-management)
+- All namespaces
+
+**Changes needed:**
+1. Move Cilium to `apps/base/cilium/`
+2. Keep ArgoCD in `apps/bootstrap/`
+3. Add all namespaces to `apps/base/namespaces/`
+
+---
+
+## Recommended Approach: Option 1
+
+### Rationale
+- **Cilium is critical** - Cluster won't function without CNI
+- **ArgoCD is the engine** - Bootstrap it via Terraform, let it manage the rest
+- **Clean separation** - Infrastructure (Terraform) vs Applications (ArgoCD)
+
+### Implementation
+
+#### 1. Update Namespace Definitions
+
+[MODIFY] [apps/base/namespaces/namespaces.yaml](apps/base/namespaces/namespaces.yaml)
+
+Add:
+```yaml
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: foundation-networking
+  labels:
+    linkerd.io/inject: disabled  # CNI itself
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: management-gitops
+  labels:
+    linkerd.io/inject: disabled  # ArgoCD control plane
+    pod-security.kubernetes.io/enforce: privileged
+```
+
+#### 2. Remove Terraform Namespace Creation
+
+[MODIFY] [infrastructure/opentofu/helm.tf](infrastructure/opentofu/helm.tf)
+
+Remove `kubernetes_namespace` resources - ArgoCD will manage them.
+
+#### 3. Update Helm Dependencies
+
+Helm releases should depend on ArgoCD being ready to manage namespaces:
+```terraform
+depends_on = [
+  talos_machine_bootstrap.this
+  # Namespaces will be created by ArgoCD
+]
+```
+
+---
+
+## Verification Plan
+
+```bash
+# 1. Deploy infrastructure
+make deploy
+
+# 2. Verify Cilium and ArgoCD are running
+kubectl get pods -n foundation-networking
+kubectl get pods -n management-gitops
+
+# 3. Apply root app (ArgoCD takes over)
+kubectl apply -f apps/bootstrap/overlays/prod/root-app.yaml
+
+# 4. Watch ArgoCD sync everything
+kubectl get applications -n management-gitops
+```
