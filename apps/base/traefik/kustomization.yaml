@@ -1,6 +1,8 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+namespace: services-gateway
+
 resources:
   # Gateway API Standard CRDs (Downladed locally via Taskfile)
   - standard-install.yaml

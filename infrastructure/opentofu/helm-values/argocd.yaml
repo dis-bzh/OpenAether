@@ -1,0 +1,97 @@
+# ArgoCD Configuration for GitOps
+# Namespace: management-gitops
+
+# Global configuration
+global:
+  domain: argocd.openaether.local
+
+# High Availability
+replicaCount: 3
+
+# Controller
+controller:
+  replicas: 1
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+# Server
+server:
+  replicas: 3
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  
+  # API Gateway integration (placeholder - configure based on your gateway)
+  service:
+    type: ClusterIP
+  
+  ingress:
+    enabled: false  # Use API Gateway instead
+
+# Repo Server
+repoServer:
+  replicas: 3
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# Redis HA
+redis-ha:
+  enabled: true
+  haproxy:
+    enabled: true
+    replicas: 3
+
+# ApplicationSet Controller
+applicationSet:
+  enabled: true
+  replicas: 2
+
+# Notifications
+notifications:
+  enabled: true
+
+# Dex (SSO) - disabled by default
+dex:
+  enabled: false
+
+# Configs
+configs:
+  params:
+    server.insecure: true  # Use API Gateway for TLS termination
+  
+  cm:
+    # Git repositories
+    repositories: |
+      - url: https://github.com/dis-bzh/OpenAether.git
+        name: openaether
+    
+    # Resource customizations
+    resource.customizations: |
+      argoproj.io/Application:
+        health.lua: |
+          hs = {}
+          hs.status = "Progressing"
+          hs.message = ""
+          if obj.status ~= nil then
+            if obj.status.health ~= nil then
+              hs.status = obj.status.health.status
+              if obj.status.health.message ~= nil then
+                hs.message = obj.status.health.message
+              end
+            end
+          end
+          return hs

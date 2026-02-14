@@ -38,20 +38,20 @@ output "bastion_ips" {
 }
 
 output "cluster_endpoint" {
-  value       = local.effective_endpoint # Use local defined in main.tf or same logic
+  value = local.effective_endpoint
   description = "Public endpoint for Kubernetes API access (Load Balancer)"
 }
 
 output "bootstrap_node_ip" {
   value       = local.bootstrap_node
-  description = "Private IP of the node used for bootstrap. Access via tunnel/sshtunnel for initial bootstrap."
+  description = "Private IP of the node used for bootstrap."
 }
 
 output "instructions" {
   value = <<EOT
-1. Ensure you have network access to the private IPs (e.g. via sshtunnel through the bastion).
-2. The Talos bootstrap has been initiated via the provider.
-3. Use the local 'talosconfig' and 'kubeconfig' files to manage your cluster.
-   Example: talosctl --talosconfig talosconfig Health --nodes ${local.bootstrap_node}
+1. The Talos bootstrap is auto-configured via inline manifests (Cilium CNI).
+2. The Load Balancer should become healthy once Cilium starts.
+3. Access your cluster via the Load Balancer IP using the generated 'kubeconfig'.
+   Example: kubectl get nodes --kubeconfig kubeconfig
 EOT
 }

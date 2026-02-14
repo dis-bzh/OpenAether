@@ -1,0 +1,60 @@
+# Cilium CNI Configuration for Multi-Cloud Kubernetes
+# Namespace: foundation-networking
+
+# Cluster configuration
+cluster:
+  name: openaether-prod
+  id: 1
+
+# IPAM Configuration
+ipam:
+  mode: kubernetes
+  operator:
+    clusterPoolIPv4PodCIDRList:
+      - "10.244.0.0/16"
+    clusterPoolIPv4MaskSize: 24
+
+# BGP Configuration for multi-cloud routing
+bgpControlPlane:
+  enabled: true
+
+# Routing mode
+routingMode: native
+autoDirectNodeRoutes: true
+ipv4NativeRoutingCIDR: "10.244.0.0/16"
+
+# Hubble Observability
+hubble:
+  enabled: true
+  relay:
+    enabled: true
+  ui:
+    enabled: true
+    service:
+      type: ClusterIP
+
+# Security
+encryption:
+  enabled: false  # Enable in production with proper key management
+  type: wireguard
+
+# Monitoring
+prometheus:
+  enabled: true
+  serviceMonitor:
+    enabled: false  # Enable when Prometheus Operator is installed
+
+# Operator configuration
+operator:
+  replicas: 1
+  prometheus:
+    enabled: true
+
+# Resource limits
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 100m
+    memory: 128Mi

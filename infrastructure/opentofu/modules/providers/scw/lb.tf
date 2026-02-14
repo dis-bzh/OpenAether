@@ -39,32 +39,41 @@ resource "scaleway_lb_frontend" "control_plane" {
   backend_id   = scaleway_lb_backend.control_plane.id
   name         = "control-plane-frontend"
   inbound_port = 6443
+}
 
-  acl {
-    name = "k8s_api_whitelist"
-    action {
-      type = "allow"
-    }
-    match {
-      ip_subnet = concat(
-        var.admin_ip,
-        [
-          "${scaleway_vpc_public_gateway_ip.this.address}/32", # Allow nodes via NAT GW (Hairpinning)
-          "172.16.0.0/12"                                      # Allow nodes directly if routed
-        ]
-      )
-    }
+resource "scaleway_lb_acl" "k8s_api_whitelist" {
+  frontend_id = scaleway_lb_frontend.control_plane.id
+  name        = "k8s_api_whitelist"
+  index       = 1
+  action {
+    type = "allow"
   }
+  match {
+    ip_subnet = concat(
+      var.admin_ip,
+      [
+        "${scaleway_vpc_public_gateway_ip.this.address}/32", # Allow nodes via NAT GW (Hairpinning)
+        "172.16.0.0/12"                                     # Allow nodes directly if routed
+      ]
+    )
+  }
+  lifecycle {
+    ignore_changes = [match]
+  }
+}
 
-  # ACL par défaut : deny all other traffic
-  acl {
-    name = "k8s_api_deny_default"
-    action {
-      type = "deny"
-    }
-    match {
-      ip_subnet = ["0.0.0.0/0"]
-    }
+resource "scaleway_lb_acl" "k8s_api_deny_default" {
+  frontend_id = scaleway_lb_frontend.control_plane.id
+  name        = "k8s_api_deny_default"
+  index       = 2
+  action {
+    type = "deny"
+  }
+  match {
+    ip_subnet = ["0.0.0.0/0"]
+  }
+  lifecycle {
+    ignore_changes = [match]
   }
 }
 # --- App Traffic (HTTP/HTTPS) ---

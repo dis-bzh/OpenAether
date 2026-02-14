@@ -84,3 +84,9 @@ variable "bastion_image_id" {
   description = "Image ID pour le bastion (Ubuntu/Debian)"
   default     = "ubuntu_jammy" # Ubuntu 22.04 LTS
 }
+
+variable "extra_manifests" {
+  type        = list(string)
+  description = "List of extra manifests to directy inject into Talos configuration (e.g. CNI)"
+  default     = []
+}

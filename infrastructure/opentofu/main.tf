@@ -102,6 +102,9 @@ module "scw" {
   # Security configuration
   admin_ip        = var.admin_ip
   bastion_ssh_key = lookup(var.bastion_ssh_keys, "scaleway", "")
+  
+  # Inject Cilium manifest for self-bootstrap
+  extra_manifests = [data.helm_template.cilium.manifest]
 }
 
 # ------------------------------------------------------------------------------
@@ -113,20 +116,16 @@ module "ovh" {
   count = (local.ovh_dist.control_planes + local.ovh_dist.workers) > 0 ? 1 : 0
 
   cluster_name = var.cluster_name
-
+  # ... (leaving other modules as is for now, they might need updates later)
   control_plane_count = local.ovh_dist.control_planes
   worker_count        = local.ovh_dist.workers
-
   machine_secrets    = module.talos.machine_secrets
   cluster_endpoint   = local.formatted_endpoint
   talos_version      = var.talos_version
   kubernetes_version = var.kubernetes_version
-
   image_id    = coalesce(local.ovh_dist.image_id, "IMAGE_ID_NEEDED")
   region      = local.ovh_dist.region
   flavor_name = local.ovh_dist.instance_type
-
-  # Security configuration
   admin_ip        = var.admin_ip
   bastion_ssh_key = lookup(var.bastion_ssh_keys, "ovh", "")
 }
@@ -152,7 +151,7 @@ module "outscale" {
   image_id  = coalesce(local.outscale_dist.image_id, "ami-ce7e9d99")
   region    = local.outscale_dist.region
   subnet_id = local.outscale_dist.subnet_id
-  # Outscale module likely expects 'instance_type' or 'vm_type', checking variables.tf would confirm but instance_type is standard
+  
   instance_type = local.outscale_dist.instance_type
 
   # Security configuration
@@ -176,10 +175,9 @@ locals {
 
 resource "talos_machine_bootstrap" "this" {
   node                 = local.bootstrap_node
-  endpoint             = "127.0.0.1"
+  endpoint             = local.effective_endpoint
   client_configuration = module.talos.client_configuration
-
-  # Ensure instances are ready before bootstrapping
+  
   depends_on = [
     module.scw,
     module.ovh,
@@ -190,8 +188,33 @@ resource "talos_machine_bootstrap" "this" {
 resource "talos_cluster_kubeconfig" "this" {
   client_configuration = module.talos.client_configuration
   node                 = local.bootstrap_node
-  endpoint             = "127.0.0.1"
-
+  endpoint             = local.effective_endpoint
+  
   # Wait for bootstrap to complete
   depends_on = [talos_machine_bootstrap.this]
 }
+
+# Export configs to local files for use by kubectl and helm
+resource "null_resource" "export_configs" {
+  triggers = {
+    kubeconfig_hash = sha1(talos_cluster_kubeconfig.this.kubeconfig_raw)
+    talosconfig_hash = sha1(module.talos.talosconfig)
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      echo "${talos_cluster_kubeconfig.this.kubeconfig_raw}" > ${path.root}/kubeconfig
+      echo "${module.talos.talosconfig}" > ${path.root}/talosconfig
+      chmod 600 ${path.root}/kubeconfig ${path.root}/talosconfig
+      echo "✅ Kubeconfig and Talosconfig exported"
+    EOT
+  }
+
+  depends_on = [
+    talos_cluster_kubeconfig.this
+  ]
+}
+
+
+
+

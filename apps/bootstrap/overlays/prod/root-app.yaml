@@ -10,13 +10,13 @@ spec:
   source:
     repoURL: https://github.com/dis-bzh/OpenAether.git
     targetRevision: HEAD
-    path: apps/overlays/local
+    path: apps/overlays/prod
   destination:
     server: https://kubernetes.default.svc
     namespace: management-gitops
   syncPolicy:
     automated:
-      prune: false
+      prune: true  # Enable pruning for production
       selfHeal: true
     syncOptions:
       - CreateNamespace=true

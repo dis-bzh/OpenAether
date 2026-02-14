@@ -1,0 +1,7 @@
+machine:
+  network:
+    interfaces:
+      - interface: eth1
+        routes:
+          - network: 0.0.0.0/0
+            gateway: 172.16.16.1

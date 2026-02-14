@@ -1,7 +1,15 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: security
+  name: foundation-networking
+  labels:
+    linkerd.io/inject: disabled  # CNI itself
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: foundation-vault
   labels:
     linkerd.io/inject: enabled
     pod-security.kubernetes.io/enforce: privileged
@@ -9,7 +17,36 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: observability
+  name: foundation-service-mesh
+  labels:
+    linkerd.io/inject: disabled # Linkerd control plane itself
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: foundation-policy-engine
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: foundation-pki-management
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: foundation-storage
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: foundation-databases
   labels:
     linkerd.io/inject: enabled
     pod-security.kubernetes.io/enforce: privileged
@@ -17,7 +54,15 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: identity
+  name: management-gitops
+  labels:
+    linkerd.io/inject: disabled  # ArgoCD control plane
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: services-identity
   labels:
     linkerd.io/inject: enabled
     pod-security.kubernetes.io/enforce: restricted
@@ -25,14 +70,24 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: external-secrets
+  name: services-observability
   labels:
-    pod-security.kubernetes.io/enforce: privileged # Operator needs permissions
+    linkerd.io/inject: enabled
+    pod-security.kubernetes.io/enforce: privileged
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: databases
+  name: services-gateway
   labels:
     linkerd.io/inject: enabled
-    pod-security.kubernetes.io/enforce: privileged # Often needed for DBs/perf tuning
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: services-autoscaling
+  labels:
+    linkerd.io/inject: enabled
+    pod-security.kubernetes.io/enforce: baseline
+

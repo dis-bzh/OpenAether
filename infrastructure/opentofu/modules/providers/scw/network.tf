@@ -69,6 +69,6 @@ resource "scaleway_vpc_gateway_network" "main" {
   zone               = var.zone
 
   ipam_config {
-    push_default_route = false
+    push_default_route = true  # Push default route to nodes for Internet access via NAT
   }
 }

@@ -18,6 +18,16 @@ data "talos_machine_configuration" "control_plane" {
           wipe = true
         }
       }
+      cluster = {
+        network = {
+          cni = {
+            name = "none"
+          }
+        }
+        proxy = {
+          disabled = true
+        }
+      }
     })
   ]
 }
@@ -29,4 +39,18 @@ data "talos_machine_configuration" "worker" {
   machine_secrets    = var.machine_secrets
   talos_version      = var.talos_version
   kubernetes_version = var.kubernetes_version
+  config_patches = [
+    yamlencode({
+      cluster = {
+        network = {
+          cni = {
+            name = "none"
+          }
+        }
+        proxy = {
+          disabled = true
+        }
+      }
+    })
+  ]
 }
