@@ -1,36 +1,10 @@
 # ArgoCD Root Application Deployment
-# Automatically deploys the "App of Apps" pattern after ArgoCD is ready
-
-resource "null_resource" "argocd_root_app" {
-  # Trigger re-apply if root app changes
-  triggers = {
-    root_app_hash = filemd5("${path.root}/../../apps/bootstrap/overlays/prod/root-app.yaml")
-  }
-  
-  provisioner "local-exec" {
-    command = <<-EOT
-      # Wait for ArgoCD to be ready
-      echo "Waiting for ArgoCD to be ready..."
-      kubectl wait --for=condition=available --timeout=300s \
-        deployment/argocd-server \
-        -n management-gitops \
-        --kubeconfig=${path.root}/kubeconfig
-      
-      # Apply root application
-      echo "Deploying ArgoCD root application..."
-      kubectl apply -f ${path.root}/../../apps/bootstrap/overlays/prod/root-app.yaml \
-        --kubeconfig=${path.root}/kubeconfig
-      
-      echo "✅ ArgoCD root application deployed - GitOps is now active!"
-    EOT
-  }
-  
-  depends_on = [
-    helm_release.argocd
-  ]
-}
+# The root "App of Apps" is deployed as a server.additionalApplications
+# in the ArgoCD Helm values, making it fully declarative.
+# If a separate YAML manifest is needed post-bootstrap, apply manually:
+#   kubectl apply -f apps/bootstrap/overlays/prod/root-app.yaml --kubeconfig=./kubeconfig
 
 output "argocd_root_app_status" {
-  value = "ArgoCD root application will be deployed automatically"
+  value       = var.admin_lb_enabled ? "ArgoCD root application deployed via Helm values" : "Admin LB disabled — ArgoCD manages itself via GitOps"
   description = "Status of ArgoCD root application deployment"
 }

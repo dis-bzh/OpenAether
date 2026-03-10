@@ -8,7 +8,7 @@ terraform {
     }
     scaleway = {
       source  = "scaleway/scaleway"
-      version = "2.69.0"
+      version = "2.68.0"
     }
     ovh = {
       source  = "ovh/ovh"
@@ -17,7 +17,6 @@ terraform {
     outscale = {
       source  = "outscale/outscale"
       version = ">= 1.3.2"
-      version = "1.3.2"
     }
     openstack = {
       source  = "terraform-provider-openstack/openstack"
@@ -31,9 +30,9 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = ">= 3.0.0"
     }
-    null = {
-      source  = "hashicorp/null"
-      version = ">= 3.2.0"
+    local = {
+      source  = "hashicorp/local"
+      version = ">= 2.5.0"
     }
   }
 }

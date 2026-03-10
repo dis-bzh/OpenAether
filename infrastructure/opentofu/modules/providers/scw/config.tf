@@ -1,6 +1,6 @@
 data "talos_machine_configuration" "control_plane" {
   cluster_name       = var.cluster_name
-  cluster_endpoint   = var.cluster_endpoint
+  cluster_endpoint   = "https://${scaleway_lb_ip.admin[0].ip_address}:6443"
   machine_type       = "controlplane"
   machine_secrets    = var.machine_secrets
   talos_version      = var.talos_version
@@ -11,21 +11,15 @@ data "talos_machine_configuration" "control_plane" {
       machine = {
         certSANs = concat(
           ["127.0.0.1", "localhost"],
+          [scaleway_lb_ip.app.ip_address],
+          var.admin_lb_enabled ? [scaleway_lb_ip.admin[0].ip_address] : [],
           [for ip in scaleway_ipam_ip.control_plane : ip.address]
         )
         install = {
-          disk = "/dev/vda"
-          wipe = true
-          image = "ghcr.io/siderolabs/installer:v1.12.0"
+          disk              = "/dev/vda"
+          wipe              = true
+          image             = "ghcr.io/siderolabs/installer:v1.12.0"
           grubUseUKICmdline = true
-        }
-        network = {
-          interfaces = [
-            {
-              interface = "eth1"
-              dhcp      = true
-            }
-          ]
         }
         kubelet = {
           defaultRuntimeSeccompProfileEnabled = true
@@ -55,12 +49,6 @@ data "talos_machine_configuration" "control_plane" {
         proxy = {
           disabled = true
         }
-        inlineManifests = [
-          {
-            name = "cilium"
-            contents = join("---\n", var.extra_manifests)
-          }
-        ]
         apiServer = {
           admissionControl = [
             {
@@ -99,7 +87,7 @@ data "talos_machine_configuration" "control_plane" {
 
 data "talos_machine_configuration" "worker" {
   cluster_name       = var.cluster_name
-  cluster_endpoint   = var.cluster_endpoint
+  cluster_endpoint   = "https://${scaleway_lb_ip.admin[0].ip_address}:6443"
   machine_type       = "worker"
   machine_secrets    = var.machine_secrets
   talos_version      = var.talos_version
@@ -108,17 +96,9 @@ data "talos_machine_configuration" "worker" {
     yamlencode({
       machine = {
         install = {
-          disk = "/dev/vda"
-          wipe = true
+          disk  = "/dev/vda"
+          wipe  = true
           image = "ghcr.io/siderolabs/installer:v1.12.0"
-        }
-        network = {
-          interfaces = [
-            {
-              interface = "eth1"
-              dhcp      = true
-            }
-          ]
         }
         features = {
           diskQuotaSupport = true

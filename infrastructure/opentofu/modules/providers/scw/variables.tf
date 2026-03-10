@@ -7,8 +7,10 @@ variable "machine_secrets" {
   sensitive   = true
 }
 
-variable "cluster_endpoint" {
-  type = string
+variable "admin_lb_enabled" {
+  type        = bool
+  description = "Enable the ephemeral admin LB for bootstrap/maintenance"
+  default     = false
 }
 
 variable "talos_version" {

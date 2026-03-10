@@ -19,7 +19,7 @@ jobs:
       - name: Setup OpenTofu
         uses: opentofu/setup-opentofu@v1
         with:
-          tofu_version: "1.11.4"
+          tofu_version: "1.12.2"
 
       - name: Check OpenTofu formatting
         run: tofu fmt -check -recursive
@@ -51,7 +51,7 @@ jobs:
       - name: Setup OpenTofu
         uses: opentofu/setup-opentofu@v1
         with:
-          tofu_version: "1.11.4"
+          tofu_version: "1.12.2"
 
       - name: Initialize OpenTofu (no backend)
         run: tofu init -backend=false
@@ -71,7 +71,7 @@ jobs:
       - name: Setup OpenTofu
         uses: opentofu/setup-opentofu@v1
         with:
-          tofu_version: "1.11.4"
+          tofu_version: "1.12.2"
 
       - name: Initialize OpenTofu (no backend)
         run: tofu init -backend=false

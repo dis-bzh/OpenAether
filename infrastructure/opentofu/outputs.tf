@@ -3,28 +3,20 @@ output "talosconfig" {
   sensitive = true
 }
 
-output "kubeconfig" {
-  value     = talos_cluster_kubeconfig.this.kubeconfig_raw
-  sensitive = true
-}
-
 output "machine_secrets" {
   value     = module.talos.machine_secrets
   sensitive = true
 }
 
-
-# Load Balancer IPs (cluster endpoints)
-output "scaleway_ips" {
-  value = try(module.scw[0].lb_ip, null)
+# LB IPs
+output "app_lb_ip" {
+  value       = try(module.scw[0].app_lb_ip, null)
+  description = "Public IP of the permanent App LB (80/443)"
 }
 
-output "ovh_ips" {
-  value = try(module.ovh[0].lb_ip, null)
-}
-
-output "outscale_ips" {
-  value = try(module.outscale[0].lb_ip, null)
+output "admin_lb_ip" {
+  value       = try(module.scw[0].admin_lb_ip, null)
+  description = "Public IP of the ephemeral Admin LB (6443/50000). Null when disabled."
 }
 
 # Bastion IPs for SSH access
@@ -34,24 +26,26 @@ output "bastion_ips" {
     ovh      = try(module.ovh[0].bastion_ip, null)
     outscale = try(module.outscale[0].bastion_ip, null)
   }
-  description = "Public IPs of bastion hosts for SSH tunneling"
-}
-
-output "cluster_endpoint" {
-  value = local.effective_endpoint
-  description = "Public endpoint for Kubernetes API access (Load Balancer)"
+  description = "Public IPs of bastion hosts"
 }
 
 output "bootstrap_node_ip" {
-  value       = local.bootstrap_node
-  description = "Private IP of the node used for bootstrap."
+  value       = local.bootstrap_node_ip
+  description = "Private IP of the node used for bootstrap"
 }
 
 output "instructions" {
   value = <<EOT
-1. The Talos bootstrap is auto-configured via inline manifests (Cilium CNI).
-2. The Load Balancer should become healthy once Cilium starts.
-3. Access your cluster via the Load Balancer IP using the generated 'kubeconfig'.
-   Example: kubectl get nodes --kubeconfig kubeconfig
+# Bootstrap (Day 0):
+  tofu apply -var 'admin_lb_enabled=true'
+
+# After bootstrap, remove helm releases from state (ArgoCD takes over):
+  tofu state rm 'helm_release.cilium[0]' 'helm_release.argocd[0]'
+  tofu apply -var 'admin_lb_enabled=false'
+
+# Maintenance (Day N):
+  tofu apply -var 'admin_lb_enabled=true'
+  kubectl --kubeconfig=./kubeconfig get nodes
+  tofu apply -var 'admin_lb_enabled=false'
 EOT
 }

@@ -1,8 +1,15 @@
 provider "talos" {}
 provider "scaleway" {}
-provider "openstack" {}
+provider "openstack" {
+  # Fournir un dummy auth_url si OVH n'est pas le provider actif
+  auth_url = length(compact([local.active_providers[0] == "ovh" ? "ovh" : ""])) > 0 ? null : "http://dummy.local:5000/v3"
+}
 provider "outscale" {
-  region = try(local.outscale_dist.region, "eu-west-2")
+  # Fournir une dummy region si Outscale n'est pas le provider actif
+  region = length(compact([local.active_providers[0] == "outscale" ? "outscale" : ""])) > 0 ? try(local.outscale_dist.region, "eu-west-2") : "dummy-region-1"
+  endpoints {
+    api = length(compact([local.active_providers[0] == "outscale" ? "outscale" : ""])) > 0 ? null : "https://dummy.outscale.local"
+  }
 }
 
 # S3-compatible provider for backups (works with Scaleway, Outscale, OVH, MinIO, etc.)
@@ -24,18 +31,6 @@ provider "aws" {
 
 
 locals {
-  # Use localhost for Talos configuration to allow bootstrapping via SSH tunnel
-  # This breaks the circular dependency between LB creation (Module) and Node Config (Talos Module)
-  formatted_endpoint = "https://127.0.0.1:6443"
-
-  # Public endpoint (Load Balancer) for Outputs
-  effective_endpoint = coalesce(
-    try(module.scw[0].lb_ip, ""),
-    try(module.ovh[0].lb_ip, ""),
-    try(module.outscale[0].lb_ip, ""),
-    var.cluster_endpoint
-  )
-
   # Determine active providers for validation
   active_providers = compact([
     (local.scw_dist.control_planes + local.scw_dist.workers) > 0 ? "scaleway" : "",
@@ -59,24 +54,21 @@ module "talos" {
   source = "./modules/talos"
 
   cluster_name       = var.cluster_name
-  cluster_endpoint   = local.formatted_endpoint
+  cluster_endpoint   = "https://127.0.0.1:6443" # Placeholder — actual endpoint is set in provider module config.tf
   talos_version      = var.talos_version
   kubernetes_version = var.kubernetes_version
 }
 
 locals {
   # Default provider configurations
-  # You can override specific settings in var.node_distribution if needed
-
-  # Parse distribution
   scw_dist      = merge({ control_planes = 0, workers = 0, region = null, zone = null, instance_type = null, image_id = null, image_name = "talos", zones = null, subnet_id = null }, try(var.node_distribution["scaleway"], {}))
   ovh_dist      = merge({ control_planes = 0, workers = 0, region = null, zone = null, instance_type = null, image_id = null, image_name = null, zones = null, subnet_id = null }, try(var.node_distribution["ovh"], {}))
   outscale_dist = merge({ control_planes = 0, workers = 0, region = null, zone = null, instance_type = null, image_id = null, image_name = null, zones = null, subnet_id = null }, try(var.node_distribution["outscale"], {}))
 }
 
-# ------------------------------------------------------------------------------
+# ==============================================================================
 # Scaleway
-# ------------------------------------------------------------------------------
+# ==============================================================================
 module "scw" {
   source = "./modules/providers/scw"
 
@@ -88,7 +80,6 @@ module "scw" {
   worker_count        = local.scw_dist.workers
 
   machine_secrets    = module.talos.machine_secrets
-  cluster_endpoint   = local.formatted_endpoint
   talos_version      = var.talos_version
   kubernetes_version = var.kubernetes_version
 
@@ -102,37 +93,36 @@ module "scw" {
   # Security configuration
   admin_ip        = var.admin_ip
   bastion_ssh_key = lookup(var.bastion_ssh_keys, "scaleway", "")
-  
-  # Inject Cilium manifest for self-bootstrap
-  extra_manifests = [data.helm_template.cilium.manifest]
+
+  # Admin LB toggle
+  admin_lb_enabled = var.admin_lb_enabled
 }
 
-# ------------------------------------------------------------------------------
+# ==============================================================================
 # OVH
-# ------------------------------------------------------------------------------
+# ==============================================================================
 module "ovh" {
   source = "./modules/providers/ovh"
 
   count = (local.ovh_dist.control_planes + local.ovh_dist.workers) > 0 ? 1 : 0
 
-  cluster_name = var.cluster_name
-  # ... (leaving other modules as is for now, they might need updates later)
+  cluster_name        = var.cluster_name
   control_plane_count = local.ovh_dist.control_planes
   worker_count        = local.ovh_dist.workers
-  machine_secrets    = module.talos.machine_secrets
-  cluster_endpoint   = local.formatted_endpoint
-  talos_version      = var.talos_version
-  kubernetes_version = var.kubernetes_version
-  image_id    = coalesce(local.ovh_dist.image_id, "IMAGE_ID_NEEDED")
-  region      = local.ovh_dist.region
-  flavor_name = local.ovh_dist.instance_type
-  admin_ip        = var.admin_ip
-  bastion_ssh_key = lookup(var.bastion_ssh_keys, "ovh", "")
+  machine_secrets     = module.talos.machine_secrets
+  cluster_endpoint    = "https://127.0.0.1:6443"
+  talos_version       = var.talos_version
+  kubernetes_version  = var.kubernetes_version
+  image_id            = coalesce(local.ovh_dist.image_id, "IMAGE_ID_NEEDED")
+  region              = local.ovh_dist.region
+  flavor_name         = local.ovh_dist.instance_type
+  admin_ip            = var.admin_ip
+  bastion_ssh_key     = lookup(var.bastion_ssh_keys, "ovh", "")
 }
 
-# ------------------------------------------------------------------------------
+# ==============================================================================
 # Outscale
-# ------------------------------------------------------------------------------
+# ==============================================================================
 module "outscale" {
   source = "./modules/providers/outscale"
 
@@ -144,77 +134,77 @@ module "outscale" {
   worker_count        = local.outscale_dist.workers
 
   machine_secrets    = module.talos.machine_secrets
-  cluster_endpoint   = local.formatted_endpoint
+  cluster_endpoint   = "https://127.0.0.1:6443"
   talos_version      = var.talos_version
   kubernetes_version = var.kubernetes_version
 
-  image_id  = coalesce(local.outscale_dist.image_id, "ami-ce7e9d99")
-  region    = local.outscale_dist.region
-  subnet_id = local.outscale_dist.subnet_id
-  
+  image_id      = coalesce(local.outscale_dist.image_id, "ami-ce7e9d99")
+  region        = local.outscale_dist.region
+  subnet_id     = local.outscale_dist.subnet_id
   instance_type = local.outscale_dist.instance_type
 
-  # Security configuration
   admin_ip        = var.admin_ip
   bastion_ssh_key = lookup(var.bastion_ssh_keys, "outscale", "")
 }
 
-# ------------------------------------------------------------------------------
-# Talos Bootstrap & Config Export
-# ------------------------------------------------------------------------------
+# ==============================================================================
+# Talos Bootstrap (native provider resources, conditional on admin_lb_enabled)
+# ==============================================================================
 
 locals {
   # Pick the first control plane IP from the active provider for bootstrap
-  bootstrap_node = coalesce(
+  bootstrap_node_ip = coalesce(
     try(module.scw[0].control_plane_private_ips[0], null),
     try(module.ovh[0].control_plane_private_ips[0], null),
     try(module.outscale[0].control_plane_private_ips[0], null),
-    "127.0.0.1" # Fallback
+    "127.0.0.1"
+  )
+
+  # Admin LB IP
+  admin_lb_ip = coalesce(
+    try(module.scw[0].admin_lb_ip, null),
+    try(module.ovh[0].admin_lb_ip, null),
+    try(module.outscale[0].admin_lb_ip, null),
+    "127.0.0.1"
   )
 }
 
+# Bootstrap etcd on the first control plane
 resource "talos_machine_bootstrap" "this" {
-  node                 = local.bootstrap_node
-  endpoint             = local.effective_endpoint
+  count = var.admin_lb_enabled ? 1 : 0
+
   client_configuration = module.talos.client_configuration
-  
-  depends_on = [
-    module.scw,
-    module.ovh,
-    module.outscale
-  ]
+  node                 = local.bootstrap_node_ip
+  endpoint             = local.admin_lb_ip
+
+  depends_on = [module.scw, module.ovh, module.outscale]
 }
 
+# Retrieve kubeconfig from the cluster
 resource "talos_cluster_kubeconfig" "this" {
+  count = var.admin_lb_enabled ? 1 : 0
+
   client_configuration = module.talos.client_configuration
-  node                 = local.bootstrap_node
-  endpoint             = local.effective_endpoint
-  
-  # Wait for bootstrap to complete
+  node                 = local.bootstrap_node_ip
+  endpoint             = local.admin_lb_ip
+
   depends_on = [talos_machine_bootstrap.this]
 }
 
-# Export configs to local files for use by kubectl and helm
-resource "null_resource" "export_configs" {
-  triggers = {
-    kubeconfig_hash = sha1(talos_cluster_kubeconfig.this.kubeconfig_raw)
-    talosconfig_hash = sha1(module.talos.talosconfig)
-  }
+# Write kubeconfig to local file
+resource "local_file" "kubeconfig" {
+  count = var.admin_lb_enabled ? 1 : 0
 
-  provisioner "local-exec" {
-    command = <<-EOT
-      echo "${talos_cluster_kubeconfig.this.kubeconfig_raw}" > ${path.root}/kubeconfig
-      echo "${module.talos.talosconfig}" > ${path.root}/talosconfig
-      chmod 600 ${path.root}/kubeconfig ${path.root}/talosconfig
-      echo "✅ Kubeconfig and Talosconfig exported"
-    EOT
-  }
-
-  depends_on = [
-    talos_cluster_kubeconfig.this
-  ]
+  content         = talos_cluster_kubeconfig.this[0].kubeconfig_raw
+  filename        = "${path.root}/kubeconfig"
+  file_permission = "0600"
 }
 
+# Write talosconfig to local file
+resource "local_file" "talosconfig" {
+  count = var.admin_lb_enabled ? 1 : 0
 
-
-
+  content         = module.talos.talosconfig
+  filename        = "${path.root}/talosconfig"
+  file_permission = "0600"
+}

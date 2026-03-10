@@ -7,13 +7,13 @@ variable "cluster_name" {
 variable "talos_version" {
   description = "Talos version to use"
   type        = string
-  default     = "v1.9.3"
+  default     = "v1.12.0"
 }
 
 variable "kubernetes_version" {
   description = "Kubernetes version to use"
   type        = string
-  default     = "v1.32.1"
+  default     = "v1.34.4"
 }
 
 variable "node_distribution" {
@@ -32,10 +32,10 @@ variable "node_distribution" {
   default = {}
 }
 
-variable "cluster_endpoint" {
-  description = "Public endpoint for the cluster"
-  type        = string
-  default     = "openaether.local"
+variable "admin_lb_enabled" {
+  description = "Enable the ephemeral admin LB (ports 6443/50000) for bootstrap or maintenance. Disable after bootstrap to reduce attack surface."
+  type        = bool
+  default     = false
 }
 
 variable "admin_ip" {
@@ -48,6 +48,8 @@ variable "bastion_ssh_keys" {
   type        = map(string)
   default     = {}
 }
+
+
 
 variable "backup_s3_endpoint" {
   description = "S3 Endpoint for backups (e.g. https://s3.fr-par.scw.cloud)"

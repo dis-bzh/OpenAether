@@ -30,6 +30,8 @@ node_distribution = {
 # Security Configuration
 admin_ip = "YOUR_PUBLIC_IP/32"  # Ex: "80.14.185.25/32"
 
+bastion_ssh_private_key_path = "~/.ssh/id_rsa"
+
 bastion_ssh_keys = {
   scaleway = "ssh-ed25519 AAAA... user@host"
   # ovh      = "ssh-ed25519 AAAA... user@host"

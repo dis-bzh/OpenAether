@@ -6,15 +6,37 @@ resource "scaleway_instance_security_group" "this" {
   # Inbound Rules - Principe du moindre privilège
   inbound_default_policy = "drop"
 
-  # Kubernetes API - Depuis Load Balancer uniquement
+  # Kubernetes API - Depuis App LB
   inbound_rule {
     action   = "accept"
     port     = 6443
-    ip_range = "${scaleway_lb_ip.this.ip_address}/32"
+    ip_range = "${scaleway_lb_ip.app.ip_address}/32"
     protocol = "TCP"
   }
 
-  # Talos API - Depuis Bastion uniquement
+  # Kubernetes API - Depuis Admin LB (quand actif)
+  dynamic "inbound_rule" {
+    for_each = var.admin_lb_enabled ? [1] : []
+    content {
+      action   = "accept"
+      port     = 6443
+      ip_range = "${scaleway_lb_ip.admin[0].ip_address}/32"
+      protocol = "TCP"
+    }
+  }
+
+  # Talos API - Depuis Admin LB (quand actif)
+  dynamic "inbound_rule" {
+    for_each = var.admin_lb_enabled ? [1] : []
+    content {
+      action   = "accept"
+      port     = 50000
+      ip_range = "${scaleway_lb_ip.admin[0].ip_address}/32"
+      protocol = "TCP"
+    }
+  }
+
+  # Talos API - Depuis Bastion
   inbound_rule {
     action   = "accept"
     port     = 50000
@@ -44,18 +66,18 @@ resource "scaleway_instance_security_group" "this" {
     protocol = "ANY"
   }
 
-  # HTTP/HTTPS - Depuis Load Balancer
+  # HTTP/HTTPS - Depuis App LB
   inbound_rule {
     action   = "accept"
     port     = 80
-    ip_range = "${scaleway_lb_ip.this.ip_address}/32"
+    ip_range = "${scaleway_lb_ip.app.ip_address}/32"
     protocol = "TCP"
   }
 
   inbound_rule {
     action   = "accept"
     port     = 443
-    ip_range = "${scaleway_lb_ip.this.ip_address}/32"
+    ip_range = "${scaleway_lb_ip.app.ip_address}/32"
     protocol = "TCP"
   }
 
@@ -65,3 +87,4 @@ resource "scaleway_instance_security_group" "this" {
   project_id = var.project_id
   zone       = each.key
 }
+

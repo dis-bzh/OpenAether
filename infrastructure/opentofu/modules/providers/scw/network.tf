@@ -25,12 +25,24 @@ resource "scaleway_instance_private_nic" "control_plane" {
   zone               = element(var.additional_zones, count.index)
 }
 
-# Attach worker nodes to private network
+# Reserve IPs for worker nodes via IPAM (VPC v2)
+resource "scaleway_ipam_ip" "worker" {
+  count      = var.worker_count
+  project_id = var.project_id
+  region     = var.region
+
+  source {
+    private_network_id = scaleway_vpc_private_network.this.id
+  }
+}
+
+# Attach worker nodes to private network with reserved IPAM IPs
 resource "scaleway_instance_private_nic" "worker" {
   count = var.worker_count
 
   server_id          = scaleway_instance_server.worker[count.index].id
   private_network_id = scaleway_vpc_private_network.this.id
+  ipam_ip_ids        = [scaleway_ipam_ip.worker[count.index].id]
   zone               = var.zone
 }
 
