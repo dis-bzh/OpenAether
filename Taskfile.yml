@@ -57,9 +57,14 @@ tasks:
       - tofu destroy -var-file="tofu.tfvars"
 
   bootstrap:
-    desc: Apply bootstrap manifests (ArgoCD)
+    desc: Apply bootstrap manifests (ArgoCD) — only needed if inlineManifests failed
     cmds:
-      - kubectl apply -k apps/bootstrap/overlays/local
+      - kubectl apply -k apps/bootstrap/overlays/prod
+
+  render-manifests:
+    desc: Render/update bootstrap manifests (Cilium, ArgoCD)
+    cmds:
+      - ./scripts/render-bootstrap-manifests.sh
 
   secrets:
     desc: Initialize OpenBao secrets

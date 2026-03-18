@@ -1,0 +1,10 @@
+# Placeholder — Generate real manifest with: ./scripts/render-bootstrap-manifests.sh
+# This file should contain the official ArgoCD install manifest from:
+#   https://raw.githubusercontent.com/argoproj/argo-cd/v2.13.3/manifests/install.yaml
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+---
+# PLACEHOLDER: Run ./scripts/render-bootstrap-manifests.sh to generate the full ArgoCD manifest

@@ -1,23 +1,23 @@
 variable "cluster_name" {
-  description = "Name of the cluster"
+  description = "Name of the Talos/Kubernetes cluster"
   type        = string
   default     = "openaether"
 }
 
 variable "talos_version" {
-  description = "Talos version to use"
+  description = "Talos Linux version"
   type        = string
   default     = "v1.12.0"
 }
 
 variable "kubernetes_version" {
-  description = "Kubernetes version to use"
+  description = "Kubernetes version"
   type        = string
   default     = "v1.34.4"
 }
 
 variable "node_distribution" {
-  description = "Distribution of nodes across providers"
+  description = "Distribution of nodes across providers (currently Scaleway only)"
   type = map(object({
     control_planes = number
     workers        = number
@@ -27,41 +27,52 @@ variable "node_distribution" {
     image_id       = optional(string)
     image_name     = optional(string)
     zones          = optional(list(string))
-    subnet_id      = optional(string)
   }))
   default = {}
 }
 
-variable "admin_lb_enabled" {
-  description = "Enable the ephemeral admin LB (ports 6443/50000) for bootstrap or maintenance. Disable after bootstrap to reduce attack surface."
-  type        = bool
-  default     = false
-}
-
 variable "admin_ip" {
-  description = "List of allowed Source IPs/CIDRs for Admin Access (SSH, API)"
+  description = "Allowed source IPs/CIDRs for admin access (SSH, K8s API LB ACL)"
   type        = list(string)
 }
 
 variable "bastion_ssh_keys" {
-  description = "Map de clés SSH publiques pour les bastions par provider"
+  description = "Map of SSH public keys for bastion hosts, keyed by provider name"
   type        = map(string)
   default     = {}
 }
 
+# ==============================================================================
+# GitOps / Bootstrap
+# ==============================================================================
 
+variable "git_repo_url" {
+  description = "Git repository URL for ArgoCD root application"
+  type        = string
+  default     = "https://github.com/dis-bzh/OpenAether.git"
+}
+
+variable "argocd_namespace" {
+  description = "Namespace for ArgoCD installation"
+  type        = string
+  default     = "management-gitops"
+}
+
+# ==============================================================================
+# S3 Backup
+# ==============================================================================
 
 variable "backup_s3_endpoint" {
-  description = "S3 Endpoint for backups (e.g. https://s3.fr-par.scw.cloud)"
+  description = "S3 endpoint for backups (e.g. https://s3.fr-par.scw.cloud)"
   type        = string
 }
 
 variable "backup_s3_region" {
-  description = "S3 Region for backups (e.g. fr-par)"
+  description = "S3 region for backups"
   type        = string
 }
 
 variable "backup_s3_bucket" {
-  description = "S3 Bucket name for backups"
+  description = "S3 bucket name for backups"
   type        = string
 }

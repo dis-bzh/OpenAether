@@ -1,0 +1,21 @@
+# Placeholder — Generate real manifest with: ./scripts/render-bootstrap-manifests.sh
+# This file should contain the output of:
+#   helm template cilium cilium/cilium --version 1.16.5 --namespace kube-system \
+#     --set ipam.mode=kubernetes --set kubeProxyReplacement=true \
+#     --set cgroup.autoMount.enabled=false --set cgroup.hostRoot=/sys/fs/cgroup \
+#     --set k8sServiceHost=localhost --set k8sServicePort=7445 \
+#     --set hubble.enabled=false --set operator.replicas=1
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cilium
+  namespace: kube-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cilium-operator
+  namespace: kube-system
+---
+# PLACEHOLDER: Run ./scripts/render-bootstrap-manifests.sh to generate the full Cilium manifest

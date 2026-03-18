@@ -1,140 +1,141 @@
-# OpenAether Management Cluster (OpenTofu)
+# OpenAether — Talos Kubernetes Cluster (OpenTofu)
 
-This directory contains the OpenTofu (Terraform compatible) code to deploy the OpenAether management cluster on Talos Linux across multiple providers.
+Infrastructure-as-Code for deploying a production Talos Linux Kubernetes cluster on Scaleway.
 
-## Structure
+## Architecture
 
-- `main.tf`: Entry point, orchestrates modules.
-- `modules/`:
-  - `talos/`: Generates Talos machine configuration (secrets, control plane, worker).
-  - `providers/`: Provider-specific implementations.
-    - `scw` (Scaleway): **[Status: Fully Deployed & Validated]** Uses `scaleway_lb` (Managed LB).
-    - `ovh` (OVH): **[Status: Code Ready / Mock Tested]** Uses OpenStack Octavia.
-    - `outscale` (Outscale): **[Status: Code Ready / Mock Tested]** Uses `outscale_load_balancer` (LBU).
-- `tofu.tfvars.example`: Template for configuration.
+```
+tofu apply
+  ├── Scaleway (infrastructure)
+  │     ├── VPC + Private Network + NAT Gateway
+  │     ├── Control Plane instances (private, multi-AZ)
+  │     ├── Worker instances (private)
+  │     ├── Bastion host (SSH access)
+  │     ├── K8s API LB (permanent, 6443, ACL-restricted)
+  │     └── App LB (permanent, 80/443)
+  │
+  ├── Talos (cluster configuration + bootstrap)
+  │     ├── Machine secrets
+  │     ├── Control plane config with inlineManifests:
+  │     │     ├── Cilium CNI
+  │     │     ├── ArgoCD installation
+  │     │     └── ArgoCD root application
+  │     ├── Worker config
+  │     ├── Config apply → bootstrap → kubeconfig
+  │     └── Local files: talosconfig, kubeconfig
+  │
+  └── S3 Backup (encrypted)
+        └── talosconfig, kubeconfig, machine configs
+```
+
+### Network Access Strategy
+
+| Port | Service | Access Method |
+|------|---------|---------------|
+| 6443/TCP | Kubernetes API | K8s LB (permanent, ACL-restricted) |
+| 50000/TCP | Talos API | Bastion SSH tunnel only (**never** via LB) |
+| 80/443 | Applications | App LB (permanent) |
+| 22/TCP | SSH | Bastion only (admin_ip restricted) |
+
+### Bootstrap Flow (Day 0)
+
+1. **`tofu apply`** provisions all infrastructure
+2. Talos machine configs include `inlineManifests` for Cilium, ArgoCD, root app
+3. Control planes bootstrap with CNI + GitOps ready
+4. ArgoCD root app syncs `apps/overlays/prod/` → manages all workloads
+
+### Day 1 / Day 2
+
+- **Day 1**: `tofu apply` is a no-op (idempotent)
+- **Day 2**: Update manifests or config → `tofu apply` applies changes
 
 ## Prerequisites
 
-- [OpenTofu](https://opentofu.org/) installed (`tofu`).
-- Provider credentials exported as environment variables:
-  - **Scaleway**: `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`, `SCW_DEFAULT_PROJECT_ID`
-  - **OVH**: `OS_AUTH_URL`, `OS_TENANT_ID`, `OS_TENANT_NAME`, `OS_USERNAME`, `OS_PASSWORD`, `OS_REGION_NAME`
-  - **Outscale**: `OSC_ACCESS_KEY`, `OSC_SECRET_KEY`, `OSC_REGION`
+- [OpenTofu](https://opentofu.org/) >= 1.11.0
+- Scaleway credentials: `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`, `SCW_DEFAULT_PROJECT_ID`
+- S3 backend: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
+- Encryption: `TF_VAR_encryption_passphrase` (32+ chars)
+- Bootstrap manifests generated (see below)
 
-## Remote State & Security (Production)
+## Quick Start
 
-The state is stored in an **Encrypted S3 Backend** (Scaleway Object Storage) with **Client-Side Encryption** (AES-GCM).
-
-### 1. Export Credentials & Secrets
-To initialize or apply, you **must** export the following variables:
+### 1. Generate Bootstrap Manifests
 
 ```bash
-# S3 Backend & Backup Access
-export AWS_ACCESS_KEY_ID="<SCW_ACCESS_KEY>"
-export AWS_SECRET_ACCESS_KEY="<SCW_SECRET_KEY>"
-export AWS_DEFAULT_REGION="fr-par"
-
-# Encryption Passphrase (Zero-Knowledge & SSE-C Key)
-# Used for Client-Side State encryption AND S3 Object Backups
-export TF_VAR_encryption_passphrase="<YOUR_SECURE_PASSPHRASE>"
+# Requires: helm, curl
+./scripts/render-bootstrap-manifests.sh
 ```
 
-### 2. Configuration Backups (SSE-C)
-Critical cluster artifacts are automatically backed up to Scaleway Object Storage with **Server-Side Encryption with Customer-Provided Keys (SSE-C)**. 
-- **Encryption Key**: Derived from the first 32 characters of your `encryption_passphrase`.
-- **Location**: `s3-openaether-tfstate/backups/`.
-- **Privacy**: Scaleway cannot access the unencrypted data without your passphrase.
+This renders Cilium and ArgoCD install manifests into `bootstrap-manifests/`.
 
-### 2. Usage Sequence
+### 2. Configure
 
-1.  **Initialize**:
-    ```bash
-    tofu init
-    ```
-
-2.  **Configure**:
-    Copy the example variables file and edit it:
-    ```bash
-    cp tofu.tfvars.example tofu.tfvars
-    ```
-    **Scaleway HA Note**: To respect quotas while maintaining HA, we use a hybrid multi-zone distribution (e.g., `["fr-par-1", "fr-par-2", "fr-par-1"]` for 3 control planes).
-
-3.  **Plan & Apply**:
-    ```bash
-    tofu plan -var-file="tofu.tfvars" -out=plan
-    tofu apply "plan"
-    ```
-
-## Talos Bootstrap & Connectivity
-
-The infrastructure is private. To initialize the cluster, the `talos_machine_bootstrap` resource uses an SSH tunnel via the bastion.
-
-### 1. Establish the Tunnel
-Once the bastion is created, open a tunnel to the bootstrap node (default: `172.16.4.4`):
 ```bash
-ssh -i <key> -L 50000:172.16.4.4:50000 ubuntu@<bastion-ip> -N &
+cp tofu.tfvars.example tofu.tfvars
+# Edit tofu.tfvars with your values
 ```
 
-### 2. Finalize Bootstrap
-Run the apply again. OpenTofu will now be able to reach the Talos API on `127.0.0.1:50000` and complete the process:
+### 3. Deploy
+
 ```bash
-tofu apply -var-file="tofu.tfvars"
+# Establish SSH tunnel to bastion for Talos API access
+# (get bastion IP from a previous apply or Scaleway console)
+ssh -i ~/.ssh/key -L 50000:<cp0-private-ip>:50000 ubuntu@<bastion-ip> -N &
+
+# Deploy
+tofu init
+tofu apply -var-file=tofu.tfvars
 ```
 
-## Security Architecture
-
-The infrastructure uses a **zero-trust** approach:
-- **No Public IPs**: Nodes are isolated in a private network.
-- **Bastion Host**: Entry point with asymmetric routing protection (DHCP route overrides disabled).
-- **NAT Gateway**: Outbound access for nodes.
-- **Load Balancer**: Attached to the Private Network for internal/external traffic (Port 6443). ACLs restrict access to `admin_ip`.
-
-## Post-Deployment Access
-
-Once the bootstrap is complete, all configurations are managed in memory (no persistent local files). You can retrieve them securely using Tofu outputs:
+### 4. Access
 
 ```bash
-# Retrieve Kubeconfig
-tofu output -raw kubeconfig > kubeconfig
 export KUBECONFIG=./kubeconfig
-
-# Retrieve Talosconfig
-tofu output -raw talosconfig > talosconfig
-
-# Access Cluster
 kubectl get nodes
+
+export TALOSCONFIG=./talosconfig
+talosctl --endpoints 127.0.0.1 health
 ```
 
-## Troubleshooting
+## Structure
 
-### Connectivity EOF/Reset via Load Balancer
-If `kubectl` returns `EOF` or `connection reset`:
-- Ensure the Load Balancer is attached to the Private Network.
-- Check that LB ACLs allow the NAT Gateway IP (for node-to-LB traffic/hairpinning).
-- Verify that Security Groups allow Scaleway internal health checks (`100.64.0.0/10`).
-
-## Testing & DevTools
-
-### 1. OpenTofu Tests
-We use the native `tofu test` framework. Tests are located in the `tests/` directory.
-```bash
-task test
+```
+├── main.tf                 # Root orchestration
+├── variables.tf            # Input variables
+├── versions.tf             # Provider versions
+├── outputs.tf              # Operational outputs
+├── backup.tf               # S3 encrypted backup
+├── backend.tf              # Remote state config
+├── bootstrap-manifests/    # Static manifests for Talos inlineManifests
+│   ├── cilium.yaml         # Generated via helm template
+│   ├── argocd-install.yaml # Official ArgoCD install manifest
+│   └── argocd-root-app.yaml.tftpl  # Root app template
+├── modules/
+│   ├── talos/              # Talos secrets, config, bootstrap, kubeconfig
+│   └── providers/
+│       └── scw/            # Scaleway infrastructure
+└── tests/                  # OpenTofu test framework
 ```
 
-### 2. Cost Estimation (Terracost)
-To estimate the cost of your infrastructure:
-1. Install [Terracost](https://github.com/cycloidio/terracost).
-2. Run the task:
-```bash
-task cost
-# Then follow instructions in output
-```
+## Security
 
-### 3. Infrastructure Map (Inframap)
-To visualize your infrastructure:
-1. Install [Inframap](https://github.com/cycloidio/inframap).
-2. Run the task:
+- **No public IPs** on cluster nodes
+- **Bastion host** as single SSH entry point
+- **50000/TCP never exposed** on any load balancer
+- **K8s API LB** restricted by ACL to `admin_ip`
+- **State encryption** via AES-GCM with PBKDF2 key derivation
+- **Backup encryption** via S3 SSE (AES-256)
+
+## Upgrading Bootstrap Components
+
 ```bash
-task map
-# Then follow instructions in output
+# Update versions
+export CILIUM_VERSION=1.17.0
+export ARGOCD_VERSION=v2.14.0
+
+# Re-render manifests
+./scripts/render-bootstrap-manifests.sh
+
+# Apply (Talos will update inlineManifests)
+tofu apply -var-file=tofu.tfvars
 ```

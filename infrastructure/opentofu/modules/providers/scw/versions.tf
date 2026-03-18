@@ -4,9 +4,5 @@ terraform {
       source  = "scaleway/scaleway"
       version = ">= 2.40.0"
     }
-    talos = {
-      source  = "siderolabs/talos"
-      version = ">= 0.7.0"
-    }
   }
 }

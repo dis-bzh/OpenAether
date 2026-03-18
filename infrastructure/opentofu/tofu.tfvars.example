@@ -1,45 +1,35 @@
-cluster_name     = "openaether-prod"
-talos_version    = "v1.9.3"
-kubernetes_version = "v1.32.1"
-cluster_endpoint = "1.2.3.4" # Fallback if no LB is provisioned
+cluster_name       = "openaether-prod"
+talos_version      = "v1.12.0"
+kubernetes_version = "v1.34.1"
 
-# Node Distribution Example
+# Node Distribution (Scaleway-first)
 node_distribution = {
   scaleway = {
-    control_planes = 1
-    workers        = 1
+    control_planes = 3
+    workers        = 2
     region         = "fr-par"
-    zone           = "fr-par-1"
+    zone           = "fr-par-2"
     instance_type  = "DEV1-M"
-    image_id       = "SCW-SNAPSHOT-ID" 
-  }
-  
-  ovh = {
-    control_planes = 0
-    workers        = 0
-    image_id       = "OVH-IMAGE-ID"
-  }
-
-  outscale = {
-    control_planes = 0
-    workers        = 0
-    image_id       = "ami-ce7e9d99"
+    image_name     = "talos-scaleway-amd64-v1.12.0"
+    zones          = ["fr-par-1", "fr-par-2", "fr-par-1"] # HA across 2 AZs
   }
 }
 
-# Security Configuration
-admin_ip = "YOUR_PUBLIC_IP/32"  # Ex: "80.14.185.25/32"
-
-bastion_ssh_private_key_path = "~/.ssh/id_rsa"
+# Security — Allowed admin IPs for SSH bastion and K8s API LB ACL
+admin_ip = ["YOUR_IP/32"]
 
 bastion_ssh_keys = {
   scaleway = "ssh-ed25519 AAAA... user@host"
-  # ovh      = "ssh-ed25519 AAAA... user@host"
-  # outscale = "ssh-ed25519 AAAA... user@host"
 }
 
-# Generic S3 Backup Configuration
-# Can be Scaleway Object Storage, AWS S3, MinIO, etc.
+# GitOps — ArgoCD root application source
+git_repo_url     = "https://github.com/dis-bzh/OpenAether.git"
+argocd_namespace = "management-gitops"
+
+# S3 Backup (Scaleway Object Storage or any S3-compatible)
 backup_s3_endpoint = "https://s3.fr-par.scw.cloud"
 backup_s3_region   = "fr-par"
 backup_s3_bucket   = "s3-openaether-tfstate"
+
+# State encryption passphrase (32+ chars)
+# Set via: export TF_VAR_encryption_passphrase="..."

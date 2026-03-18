@@ -1,12 +1,29 @@
+# ==============================================================================
+# Security Groups — Least-privilege inbound, permissive outbound
+#
+# Network access strategy:
+#   - 6443/TCP: Kubernetes API via K8s LB (permanent)
+#   - 50000/TCP: Talos API via bastion only (never via LB)
+#   - 80/443:   App traffic via App LB
+#   - Inter-node: full mesh on private subnets
+# ==============================================================================
+
 resource "scaleway_instance_security_group" "this" {
   for_each    = toset(var.additional_zones)
   name        = "${var.cluster_name}-sg-${each.key}"
-  description = "Security Group for OpenAether Talos Cluster in ${each.key} (Hardened)"
+  description = "Security Group for OpenAether Talos Cluster in ${each.key}"
 
-  # Inbound Rules - Principe du moindre privilège
   inbound_default_policy = "drop"
 
-  # Kubernetes API - Depuis App LB
+  # Kubernetes API — From K8s LB
+  inbound_rule {
+    action   = "accept"
+    port     = 6443
+    ip_range = "${scaleway_lb_ip.k8s.ip_address}/32"
+    protocol = "TCP"
+  }
+
+  # Kubernetes API — From App LB (for internal service communication)
   inbound_rule {
     action   = "accept"
     port     = 6443
@@ -14,29 +31,7 @@ resource "scaleway_instance_security_group" "this" {
     protocol = "TCP"
   }
 
-  # Kubernetes API - Depuis Admin LB (quand actif)
-  dynamic "inbound_rule" {
-    for_each = var.admin_lb_enabled ? [1] : []
-    content {
-      action   = "accept"
-      port     = 6443
-      ip_range = "${scaleway_lb_ip.admin[0].ip_address}/32"
-      protocol = "TCP"
-    }
-  }
-
-  # Talos API - Depuis Admin LB (quand actif)
-  dynamic "inbound_rule" {
-    for_each = var.admin_lb_enabled ? [1] : []
-    content {
-      action   = "accept"
-      port     = 50000
-      ip_range = "${scaleway_lb_ip.admin[0].ip_address}/32"
-      protocol = "TCP"
-    }
-  }
-
-  # Talos API - Depuis Bastion
+  # Talos API — From Bastion ONLY (50000/TCP, never from LB)
   inbound_rule {
     action   = "accept"
     port     = 50000
@@ -44,7 +39,7 @@ resource "scaleway_instance_security_group" "this" {
     protocol = "TCP"
   }
 
-  # Communication inter-nœuds (réseau privé) et Health Checks LB
+  # Inter-node communication (private subnets) + LB health checks
   inbound_rule {
     action   = "accept"
     port     = 0
@@ -62,11 +57,11 @@ resource "scaleway_instance_security_group" "this" {
   inbound_rule {
     action   = "accept"
     port     = 0
-    ip_range = "100.64.0.0/10" # Scaleway internal/LB health checks
+    ip_range = "100.64.0.0/10" # Scaleway internal / LB health checks
     protocol = "ANY"
   }
 
-  # HTTP/HTTPS - Depuis App LB
+  # HTTP/HTTPS — From App LB
   inbound_rule {
     action   = "accept"
     port     = 80
@@ -81,10 +76,9 @@ resource "scaleway_instance_security_group" "this" {
     protocol = "TCP"
   }
 
-  # Outbound Rules
+  # Outbound — Allow all
   outbound_default_policy = "accept"
 
   project_id = var.project_id
   zone       = each.key
 }
-
