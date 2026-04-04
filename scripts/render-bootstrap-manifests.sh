@@ -14,8 +14,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MANIFESTS_DIR="${SCRIPT_DIR}/../infrastructure/opentofu/bootstrap-manifests"
 
 # Versions — update these when upgrading
-CILIUM_VERSION="${CILIUM_VERSION:-1.16.5}"
-ARGOCD_VERSION="${ARGOCD_VERSION:-v2.13.3}"
+CILIUM_VERSION="${CILIUM_VERSION:-1.19.2}"
+ARGOCD_VERSION="${ARGOCD_VERSION:-v3.3.2}"
 
 mkdir -p "${MANIFESTS_DIR}"
 

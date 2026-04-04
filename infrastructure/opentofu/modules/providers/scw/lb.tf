@@ -26,7 +26,7 @@ resource "scaleway_lb_backend" "http" {
   forward_port           = 80
   forward_port_algorithm = "roundrobin"
   forward_protocol       = "tcp"
-  server_ips             = [for ip in scaleway_ipam_ip.worker : ip.address]
+  server_ips             = [for ip in scaleway_ipam_ip.worker : split("/", ip.address)[0]]
 }
 
 resource "scaleway_lb_frontend" "http" {
@@ -42,7 +42,7 @@ resource "scaleway_lb_backend" "https" {
   forward_port           = 443
   forward_port_algorithm = "roundrobin"
   forward_protocol       = "tcp"
-  server_ips             = [for ip in scaleway_ipam_ip.worker : ip.address]
+  server_ips             = [for ip in scaleway_ipam_ip.worker : split("/", ip.address)[0]]
 }
 
 resource "scaleway_lb_frontend" "https" {
@@ -84,7 +84,7 @@ resource "scaleway_lb_backend" "k8s_api" {
   forward_port           = 6443
   forward_port_algorithm = "roundrobin"
   forward_protocol       = "tcp"
-  server_ips             = [for ip in scaleway_ipam_ip.control_plane : ip.address]
+  server_ips             = [for ip in scaleway_ipam_ip.control_plane : split("/", ip.address)[0]]
 
   health_check_delay       = "15s"
   health_check_timeout     = "10s"

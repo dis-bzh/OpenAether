@@ -90,4 +90,3 @@ metadata:
   labels:
     linkerd.io/inject: enabled
     pod-security.kubernetes.io/enforce: baseline
-

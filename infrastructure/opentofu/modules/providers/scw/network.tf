@@ -43,7 +43,7 @@ resource "scaleway_instance_private_nic" "worker" {
   server_id          = scaleway_instance_server.worker[count.index].id
   private_network_id = scaleway_vpc_private_network.this.id
   ipam_ip_ids        = [scaleway_ipam_ip.worker[count.index].id]
-  zone               = var.zone
+  zone               = element(var.additional_zones, count.index)
 }
 
 # Attach bastion to private network (for access to nodes)

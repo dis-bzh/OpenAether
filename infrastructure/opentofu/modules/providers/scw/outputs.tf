@@ -1,12 +1,12 @@
 # Node private IPs (via IPAM)
 output "control_plane_private_ips" {
   description = "Private IPs of control plane nodes"
-  value       = [for ip in scaleway_ipam_ip.control_plane : ip.address]
+  value       = [for ip in scaleway_ipam_ip.control_plane : split("/", ip.address)[0]]
 }
 
 output "worker_private_ips" {
   description = "Private IPs of worker nodes"
-  value       = [for ip in scaleway_ipam_ip.worker : ip.address]
+  value       = [for ip in scaleway_ipam_ip.worker : split("/", ip.address)[0]]
 }
 
 # Load Balancer IPs

@@ -39,6 +39,22 @@ override_data {
 # --- Scaleway resource overrides (computed values) ---
 
 override_resource {
+  target = module.scw.scaleway_ipam_ip.control_plane
+  values = {
+    id      = "ipam-cp"
+    address = "10.0.0.10/24"
+  }
+}
+
+override_resource {
+  target = module.scw.scaleway_ipam_ip.worker
+  values = {
+    id      = "ipam-worker"
+    address = "10.0.0.20/24"
+  }
+}
+
+override_resource {
   target = module.scw.scaleway_lb_ip.app
   values = {
     id         = "11111111-1111-1111-1111-111111111111"
@@ -130,8 +146,11 @@ override_resource {
 # --- Test Variables ---
 
 variables {
-  cluster_name     = "test-cluster"
-  admin_ip         = ["1.2.3.4/32"]
+  cluster_name          = "test-cluster"
+  environment           = "dev"
+  talos_bootstrap       = true
+  encryption_passphrase = "mocked-test-passphrase-must-be-32-chars-long"
+  admin_ip              = ["1.2.3.4/32"]
   bastion_ssh_keys = {
     scaleway = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMpj9y94C3NzaC1lZDI1NTE5AAAAIOMpj9y9"
   }

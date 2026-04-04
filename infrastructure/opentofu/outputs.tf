@@ -55,28 +55,38 @@ output "machine_secrets" {
 
 # --- Operational Instructions ---
 
+output "talos_access_commands" {
+  description = "SSH Tunnel commands to access Talos nodes"
+  value = {
+    for idx, ip in local.control_plane_ips : "cp-${idx}" => "ssh -q -i ~/.ssh/key -L 50000:${ip}:50000 ubuntu@${try(module.scw[0].bastion_ip, "<bastion-ip>")} -N &"
+  }
+}
+
 output "instructions" {
-  description = "Post-deployment access instructions"
+  description = "Operational instructions for multi-env two-phase bootstrap"
   value       = <<-EOT
-    # ─── Access ───────────────────────────────────────────
-    # Kubernetes API:
+    # ─── Multi-Env Two-Phase Bootstrap ──────────────────────────────
+    #
+    # Phase 1: Infra Creation (No Talos Config)
+    #   tofu apply -var-file=envs/dev.tfvars
+    #
+    # Phase 2: Talos Configuration & Bootstrap (Requires Tunnel)
+    #   1. Establish SSH tunnel(s) via the Bastion:
+%{for idx, ip in local.control_plane_ips}    #      ssh -q -i ~/.ssh/key -L 50000:${ip}:50000 ubuntu@${try(module.scw[0].bastion_ip, "<bastion-ip>")} -N &
+%{endfor}
+    #   2. Apply with Talos enabled:
+    #      tofu apply -var-file=envs/dev.tfvars -var talos_bootstrap=true
+    #
+    # ─── Access ──────────────────────────────────────────────────
+    # Kubernetes API (Day 1+):
     #   export KUBECONFIG=./kubeconfig
     #   kubectl get nodes
-
-    # ─── Talos API (via bastion tunnel) ───────────────────
-    #   ssh -i ~/.ssh/key \
-    #     -L 50000:${try(local.control_plane_ips[0], "<cp0-ip>")}:50000 \
-    #     ubuntu@${try(module.scw[0].bastion_ip, "<bastion-ip>")} -N &
     #
+    # Talos API:
     #   export TALOSCONFIG=./talosconfig
     #   talosctl --endpoints 127.0.0.1 health
-
-    # ─── Day 1 (re-apply) ────────────────────────────────
-    #   tofu apply     # Should be no-op
-
-    # ─── Day 2 (upgrades) ────────────────────────────────
-    #   # Update bootstrap-manifests/ with new versions
-    #   ./scripts/render-bootstrap-manifests.sh
-    #   tofu apply     # New configs applied to nodes
+    #
+    # ─── Day 1+ Operations ─────────────────────────────────────────
+    #   tofu apply -var-file=envs/dev.tfvars -var talos_bootstrap=true
   EOT
 }

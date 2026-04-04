@@ -4,6 +4,21 @@ variable "cluster_name" {
   default     = "openaether"
 }
 
+variable "environment" {
+  description = "Deployment environment (e.g., dev, prod)"
+  type        = string
+  validation {
+    condition     = contains(["dev", "prod"], var.environment)
+    error_message = "Environment must be dev or prod."
+  }
+}
+
+variable "talos_bootstrap" {
+  description = "Whether to configure Talos via SSH tunnel (Phase 2). Default false (Phase 1 infra only)."
+  type        = bool
+  default     = false
+}
+
 variable "talos_version" {
   description = "Talos Linux version"
   type        = string

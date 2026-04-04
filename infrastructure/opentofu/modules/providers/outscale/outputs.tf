@@ -9,4 +9,3 @@ output "worker_private_ips" {
 output "bastion_ip" {
   value = outscale_public_ip.bastion.public_ip
 }
-

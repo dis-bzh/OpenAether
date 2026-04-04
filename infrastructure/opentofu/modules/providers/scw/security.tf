@@ -1,9 +1,9 @@
-# ==============================================================================
 # Security Groups — Least-privilege inbound, permissive outbound
 #
 # Network access strategy:
 #   - 6443/TCP: Kubernetes API via K8s LB (permanent)
-#   - 50000/TCP: Talos API via bastion only (never via LB)
+#   - 50000/TCP: Talos API via bastion ONLY. Accessible via SSH tunnels established
+#                through the bastion host. Never exposed via Load Balancers.
 #   - 80/443:   App traffic via App LB
 #   - Inter-node: full mesh on private subnets
 # ==============================================================================

@@ -16,10 +16,11 @@ This directory contains all Kubernetes manifests managed by GitOps (ArgoCD).
 - **`prod/`**: Patches for production (High Availability, Specific Ingress Domains, Cloud Specific Annotations).
 
 ### `bootstrap/` (The "Ignition")
-**Purpose**: ArgoCD installation and root application configuration.
-- **Installation**: Managed by Terraform (`infrastructure/opentofu/helm.tf`)
-- **Root App**: Automatically deployed by Terraform (`infrastructure/opentofu/argocd-root-app.tf`)
-- **Overlays**: 
+**Purpose**: Backup / fallback kustomize definitions for ArgoCD.
+- **Installation**: Normally managed by Terraform via **Talos `inlineManifests`** at cluster bootstrap.
+- **Root App**: Injected at cluster bootstrap via the same `inlineManifests` trick.
+- **Usage**: Run `task bootstrap` ONLY if the Talos inline bootstrap failed or if recovering a cluster.
+- **Overlays**:
   - `local/` - For local development (insecure mode, single replicas)
   - `prod/` - For production (TLS enabled, HA configuration)
 

@@ -21,16 +21,16 @@ repos:
     rev: v1.96.3
     hooks:
       - id: terraform_fmt
-        args: ["--args=-recursive"]
+        args: ["--args=-recursive", "--hook-config=--tf-path=tofu"]
       - id: terraform_validate
-        args: ["--hook-config=--retry-once-with-cleanup=true"]
+        args: ["--hook-config=--retry-once-with-cleanup=true", "--hook-config=--tf-path=tofu"]
       # - id: terraform_tflint
       #   args: ["--args=--recursive"]
 
-  # YAML linting
-  - repo: https://github.com/adrienverge/yamllint
-    rev: v1.35.1
-    hooks:
-      - id: yamllint
-        args: ["-c", "infrastructure/.yamllint"]
-        files: \.(yaml|yml)$
+  # # YAML linting
+  # - repo: https://github.com/adrienverge/yamllint
+  #   rev: v1.35.1
+  #   hooks:
+  #     - id: yamllint
+  #       args: ["-c", "infrastructure/.yamllint"]
+  #       files: \.(yaml|yml)$

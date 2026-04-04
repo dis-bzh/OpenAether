@@ -19,7 +19,7 @@ spec:
   source:
     repoURL: ${git_repo_url}
     targetRevision: HEAD
-    path: apps/overlays/prod
+    path: apps/overlays/${environment}
   destination:
     server: https://kubernetes.default.svc
     namespace: ${namespace}

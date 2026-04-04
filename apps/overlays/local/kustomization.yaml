@@ -35,7 +35,7 @@ patches:
       - op: add
         path: /spec/template/spec/hostNetwork
         value: true
-  
+
   # Configure Keycloak for Local Dev
   - target:
       kind: Deployment
@@ -80,7 +80,7 @@ patches:
       - op: replace
         path: /metadata/labels/pod-security.kubernetes.io~1warn
         value: privileged
-  
+
   # Dev mode for OpenBao (in-memory, auto-unseal)
   - target:
       kind: StatefulSet
@@ -92,7 +92,7 @@ patches:
           - server
           - -dev
           - -dev-listen-address=0.0.0.0:8200
-  
+
   # Reduce VictoriaMetrics Limits
   - target:
       kind: Deployment
@@ -104,5 +104,3 @@ patches:
       - op: replace
         path: /spec/template/spec/containers/0/resources/limits/memory
         value: 256Mi
-
-

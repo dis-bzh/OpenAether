@@ -3,19 +3,23 @@ kind: Kustomization
 
 resources:
   - ../../base/namespaces
-  - ../../base/external-secrets
-  - ../../base/kyverno-policies
-  - ../../base/traefik
-  - ../../base/linkerd
-  - ../../base/cnpg
-  - ../../base/openbao
-  - ../../base/keycloak
-  - ../../base/kyverno
-  - ../../base/keda
-  - ../../base/observability
-  - ../../base/demo-app
-  - ../../base/kubernetes-dashboard
-  - ../../base/storage
+  # [!] À ACTIVER APRÈS LE BOOTSTRAP INITIAL !
+  # Le premier apply 'tofu' va instancier ArgoCD qui synchronisera cet environnement.
+  # Les composants suivants nécessitent une infrastructure de base déjà amorcée.
+  # Dé-commentez-les progressivement ou migrez vers le pattern 'App of Apps'.
+  # - ../../base/external-secrets
+  # - ../../base/kyverno-policies
+  # - ../../base/traefik
+  # - ../../base/linkerd
+  # - ../../base/cnpg
+  # - ../../base/openbao
+  # - ../../base/keycloak
+  # - ../../base/kyverno
+  # - ../../base/keda
+  # - ../../base/observability
+  # - ../../base/demo-app
+  # - ../../base/kubernetes-dashboard
+  # - ../../base/storage
 
 patches:
   # Host Network for Traefik (to work with generic Load Balancers)
@@ -26,7 +30,7 @@ patches:
       - op: add
         path: /spec/template/spec/hostNetwork
         value: true
-  
+
   # Ensure High Availability for Keycloak
   - target:
       kind: Deployment

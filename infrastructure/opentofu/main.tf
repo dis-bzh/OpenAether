@@ -49,7 +49,7 @@ module "scw" {
 
   count = (local.scw_dist.control_planes + local.scw_dist.workers) > 0 ? 1 : 0
 
-  cluster_name        = var.cluster_name
+  cluster_name        = "${var.cluster_name}-${var.environment}"
   control_plane_count = local.scw_dist.control_planes
   worker_count        = local.scw_dist.workers
 
@@ -87,7 +87,18 @@ locals {
   root_app_manifest = templatefile("${path.module}/bootstrap-manifests/argocd-root-app.yaml.tftpl", {
     namespace    = var.argocd_namespace
     git_repo_url = var.git_repo_url
+    environment  = var.environment
   })
+}
+
+# ==============================================================================
+# Validation
+# ==============================================================================
+check "manifests_rendered" {
+  assert {
+    condition     = !strcontains(local.cilium_manifest, "Placeholder")
+    error_message = "Cilium manifest is a placeholder. Please run ./scripts/render-bootstrap-manifests.sh first."
+  }
 }
 
 # ==============================================================================
@@ -97,17 +108,18 @@ locals {
 module "talos" {
   source = "./modules/talos"
 
-  cluster_name       = var.cluster_name
+  cluster_name       = "${var.cluster_name}-${var.environment}"
   cluster_endpoint   = "https://${local.k8s_lb_ip}:6443"
   kubernetes_version = var.kubernetes_version
   talos_version      = var.talos_version
 
-  control_plane_count = local.scw_dist.control_planes
-  worker_count        = local.scw_dist.workers
+  # Phase 2 apply sets talos_bootstrap = true
+  control_plane_count = var.talos_bootstrap ? local.scw_dist.control_planes : 0
+  worker_count        = var.talos_bootstrap ? local.scw_dist.workers : 0
 
   k8s_lb_ip         = local.k8s_lb_ip
-  control_plane_ips  = local.control_plane_ips
-  worker_ips         = local.worker_ips
+  control_plane_ips = local.control_plane_ips
+  worker_ips        = local.worker_ips
 
   # Bootstrap manifests injected via Talos inlineManifests
   cilium_manifest   = local.cilium_manifest
