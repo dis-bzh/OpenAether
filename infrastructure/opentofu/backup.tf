@@ -1,9 +1,12 @@
 # ==============================================================================
 # S3-Compatible Encrypted Backup
-# Backs up critical cluster artifacts to S3 (Scaleway Object Storage)
+# Backs up critical cluster artifacts to S3 (Scaleway Object Storage).
+# Disabled when backup_enabled=false (e.g., local Docker testing).
 # ==============================================================================
 
 resource "aws_s3_object" "talosconfig" {
+  count = var.backup_enabled ? 1 : 0
+
   provider               = aws.backup
   bucket                 = var.backup_s3_bucket
   key                    = "backups/talosconfig"
@@ -12,7 +15,7 @@ resource "aws_s3_object" "talosconfig" {
 }
 
 resource "aws_s3_object" "kubeconfig" {
-  count = length(local.control_plane_ips) > 0 ? 1 : 0
+  count = var.backup_enabled && length(local.control_plane_ips) > 0 ? 1 : 0
 
   provider               = aws.backup
   bucket                 = var.backup_s3_bucket
@@ -22,7 +25,7 @@ resource "aws_s3_object" "kubeconfig" {
 }
 
 resource "aws_s3_object" "controlplane_yaml" {
-  count = length(local.control_plane_ips) > 0 ? 1 : 0
+  count = var.backup_enabled && length(local.control_plane_ips) > 0 ? 1 : 0
 
   provider               = aws.backup
   bucket                 = var.backup_s3_bucket
@@ -32,7 +35,7 @@ resource "aws_s3_object" "controlplane_yaml" {
 }
 
 resource "aws_s3_object" "worker_yaml" {
-  count = length(local.worker_ips) > 0 ? 1 : 0
+  count = var.backup_enabled && length(local.worker_ips) > 0 ? 1 : 0
 
   provider               = aws.backup
   bucket                 = var.backup_s3_bucket

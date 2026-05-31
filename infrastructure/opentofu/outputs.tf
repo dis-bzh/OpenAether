@@ -2,16 +2,33 @@
 # Operational Outputs
 # ==============================================================================
 
+# --- Cluster Identity ---
+
+output "active_provider" {
+  description = "Cloud provider used for this cluster"
+  value       = local.active_provider
+}
+
+output "cluster_role" {
+  description = "Role of this cluster (management or workload)"
+  value       = var.cluster_role
+}
+
 # --- Cluster Access ---
 
 output "k8s_lb_ip" {
-  description = "Public IP of the Kubernetes API LB (6443)"
+  description = "Public IP (or DNS name) of the Kubernetes API LB (6443)"
   value       = local.k8s_lb_ip
 }
 
 output "app_lb_ip" {
-  description = "Public IP of the App LB (80/443)"
-  value       = try(module.scw[0].app_lb_ip, null)
+  description = "Public IP (or DNS name) of the App LB (80/443)"
+  value = coalesce(
+    try(module.scw[0].app_lb_ip, null),
+    try(module.ovh[0].app_lb_ip, null),
+    try(module.outscale[0].app_lb_ip, null),
+    "N/A"
+  )
 }
 
 output "kubeconfig" {
@@ -42,7 +59,12 @@ output "worker_private_ips" {
 
 output "bastion_ip" {
   description = "Public IP of the bastion host"
-  value       = try(module.scw[0].bastion_ip, null)
+  value = coalesce(
+    try(module.scw[0].bastion_ip, null),
+    try(module.ovh[0].bastion_ip, null),
+    try(module.outscale[0].bastion_ip, null),
+    "N/A"
+  )
 }
 
 # --- Secrets (for backup/DR) ---
@@ -56,37 +78,31 @@ output "machine_secrets" {
 # --- Operational Instructions ---
 
 output "talos_access_commands" {
-  description = "SSH Tunnel commands to access Talos nodes"
+  description = "SSH Tunnel commands to access Talos nodes via bastion"
   value = {
-    for idx, ip in local.control_plane_ips : "cp-${idx}" => "ssh -q -i ~/.ssh/key -L 50000:${ip}:50000 ubuntu@${try(module.scw[0].bastion_ip, "<bastion-ip>")} -N &"
+    for idx, ip in local.control_plane_ips : "cp-${idx}" => "ssh -q -i ~/.ssh/key -L 50000:${ip}:50000 ubuntu@${coalesce(try(module.scw[0].bastion_ip, null), try(module.ovh[0].bastion_ip, null), try(module.outscale[0].bastion_ip, null), "<bastion-ip>")} -N &"
   }
 }
 
 output "instructions" {
   description = "Operational instructions for multi-env two-phase bootstrap"
   value       = <<-EOT
-    # ─── Multi-Env Two-Phase Bootstrap ──────────────────────────────
+    # ─── Cluster: ${var.cluster_name}-${var.environment} (${var.cluster_role}) on ${local.active_provider} ──────
     #
-    # Phase 1: Infra Creation (No Talos Config)
-    #   tofu apply -var-file=envs/dev.tfvars
+    # Phase 1: Infra Creation
+    #   tofu apply -var-file=envs/<cluster>.tfvars
     #
-    # Phase 2: Talos Configuration & Bootstrap (Requires Tunnel)
-    #   1. Establish SSH tunnel(s) via the Bastion:
-%{for idx, ip in local.control_plane_ips}    #      ssh -q -i ~/.ssh/key -L 50000:${ip}:50000 ubuntu@${try(module.scw[0].bastion_ip, "<bastion-ip>")} -N &
-%{endfor}
-    #   2. Apply with Talos enabled:
-    #      tofu apply -var-file=envs/dev.tfvars -var talos_bootstrap=true
+    # Phase 2: Talos Bootstrap (Requires SSH tunnel via Bastion)
+    #   1. Open tunnels (one per control plane):
+    %{for idx, ip in local.control_plane_ips}#      ssh -q -i ~/.ssh/key -L 5000${idx}:${ip}:50000 ubuntu@${coalesce(try(module.scw[0].bastion_ip, null), try(module.ovh[0].bastion_ip, null), try(module.outscale[0].bastion_ip, null), "<bastion-ip>")} -N &
+    %{endfor}#
+    #   2. Bootstrap:
+    #      tofu apply -var-file=envs/<cluster>.tfvars -var talos_bootstrap=true
     #
-    # ─── Access ──────────────────────────────────────────────────
-    # Kubernetes API (Day 1+):
-    #   export KUBECONFIG=./kubeconfig
-    #   kubectl get nodes
+    # ─── Register as ArgoCD spoke (workload clusters only) ──────────
+    #   task register-spoke CLUSTER=${var.cluster_name}-${var.environment} PROVIDER=${local.active_provider}
     #
-    # Talos API:
-    #   export TALOSCONFIG=./talosconfig
-    #   talosctl --endpoints 127.0.0.1 health
-    #
-    # ─── Day 1+ Operations ─────────────────────────────────────────
-    #   tofu apply -var-file=envs/dev.tfvars -var talos_bootstrap=true
+    # ─── DRP (rebuild management on another provider) ───────────────
+    #   task drp PROVIDER=ovh
   EOT
 }
