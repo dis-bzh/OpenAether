@@ -58,6 +58,14 @@ worker.yaml
 *.tfplan
 plan
 
+# Local test cluster (state + generated configs)
+infrastructure/opentofu-local/.terraform/
+infrastructure/opentofu-local/.terraform.lock.hcl
+infrastructure/opentofu-local/terraform.tfstate*
+infrastructure/opentofu-local/kubeconfig
+infrastructure/opentofu-local/talosconfig
+infrastructure/opentofu/bootstrap-manifests/cilium-local.yaml
+
 # Editor/IDE
 .idea/
 .vscode/

@@ -1,0 +1,45 @@
+# ==============================================================================
+# Workload Cluster — OVH Public Cloud (spoke)
+# Client applications cluster. Managed by the management cluster via ArgoCD hub.
+#
+# Prerequisites:
+#   export OS_AUTH_URL=https://auth.cloud.ovh.net/v3
+#   export OS_USERNAME=<ovh_user>
+#   export OS_PASSWORD=<ovh_password>
+#   export OS_PROJECT_ID=<ovh_project_id>
+#   export OS_REGION_NAME=GRA11
+# ==============================================================================
+
+cluster_name       = "openaether-ovh"
+environment        = "prod"
+cluster_role       = "workload"
+talos_version      = "v1.12.6"
+kubernetes_version = "v1.35.3"
+talos_bootstrap    = false # Set to true for Phase 2
+
+node_distribution = {
+  ovh = {
+    control_planes     = 3
+    workers            = 3
+    region             = "GRA11"
+    flavor_name        = "b2-7"
+    image_id           = "TALOS_IMAGE_ID" # Replace with actual OVH image UUID
+    network_name       = "Ext-Net"
+    availability_zones = ["nova"]
+    bastion_image_id   = "Ubuntu 22.04"
+  }
+}
+
+admin_ip = ["YOUR_IP/32"]
+
+bastion_ssh_keys = {
+  ovh = "ssh-ed25519 AAAA... user@host"
+}
+
+git_repo_url     = "https://github.com/dis-bzh/OpenAether.git"
+argocd_namespace = "management-gitops"
+
+# OVH S3-compatible Object Storage (Swift/S3 API)
+backup_s3_endpoint = "https://s3.gra.io.cloud.ovh.net"
+backup_s3_region   = "GRA"
+backup_s3_bucket   = "s3-openaether-tfstate-workload-ovh"

@@ -1,0 +1,37 @@
+# ==============================================================================
+# Management Cluster — Scaleway HA (3 zones)
+# This cluster hosts ArgoCD (hub), OpenBao, Keycloak, VictoriaMetrics.
+# It is NOT in the data path of client workloads.
+# ==============================================================================
+
+cluster_name       = "openaether"
+environment        = "prod"
+cluster_role       = "management"
+talos_version      = "v1.12.6"
+kubernetes_version = "v1.35.3"
+talos_bootstrap    = false # Set to true for Phase 2
+
+node_distribution = {
+  scaleway = {
+    control_planes = 3
+    workers        = 2
+    region         = "fr-par"
+    zone           = "fr-par-1"
+    instance_type  = "DEV1-M"
+    image_name     = "talos-scaleway-amd64-v1.12.6"
+    zones          = ["fr-par-1", "fr-par-2", "fr-par-3"]
+  }
+}
+
+admin_ip = ["YOUR_IP/32"]
+
+bastion_ssh_keys = {
+  scaleway = "ssh-ed25519 AAAA... user@host"
+}
+
+git_repo_url     = "https://github.com/dis-bzh/OpenAether.git"
+argocd_namespace = "management-gitops"
+
+backup_s3_endpoint = "https://s3.fr-par.scw.cloud"
+backup_s3_region   = "fr-par"
+backup_s3_bucket   = "s3-openaether-tfstate-management"

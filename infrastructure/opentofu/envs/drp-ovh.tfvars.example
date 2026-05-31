@@ -1,0 +1,48 @@
+# ==============================================================================
+# DRP — Management Cluster on OVH (fallback)
+# Used when Scaleway management cluster is unreachable.
+# Rebuilds a full management cluster on OVH in ~30 min.
+#
+# Usage:
+#   task drp PROVIDER=ovh
+#   (or manually: tofu apply -var-file=envs/drp-ovh.tfvars -var talos_bootstrap=true)
+#
+# After rebuild:
+#   1. ArgoCD bootstrap → syncs from Git automatically
+#   2. Re-register spoke clusters: task register-spoke CLUSTER=<name> PROVIDER=<provider>
+#   3. Update DNS for management endpoints (if using ExternalDNS — automated in Phase 4)
+# ==============================================================================
+
+cluster_name       = "openaether"
+environment        = "prod"
+cluster_role       = "management"
+talos_version      = "v1.12.6"
+kubernetes_version = "v1.35.3"
+talos_bootstrap    = false # Set to true after infra is up
+
+node_distribution = {
+  ovh = {
+    control_planes     = 3
+    workers            = 2
+    region             = "GRA11"
+    flavor_name        = "b2-7"
+    image_id           = "TALOS_IMAGE_ID" # Replace with actual OVH image UUID
+    network_name       = "Ext-Net"
+    availability_zones = ["nova"]
+    bastion_image_id   = "Ubuntu 22.04"
+  }
+}
+
+admin_ip = ["YOUR_IP/32"]
+
+bastion_ssh_keys = {
+  ovh = "ssh-ed25519 AAAA... user@host"
+}
+
+git_repo_url     = "https://github.com/dis-bzh/OpenAether.git"
+argocd_namespace = "management-gitops"
+
+# Reuse Scaleway S3 for tfstate (accessible cross-provider)
+backup_s3_endpoint = "https://s3.fr-par.scw.cloud"
+backup_s3_region   = "fr-par"
+backup_s3_bucket   = "s3-openaether-tfstate-management"

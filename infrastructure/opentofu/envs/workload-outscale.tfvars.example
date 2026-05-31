@@ -1,0 +1,41 @@
+# ==============================================================================
+# Workload Cluster — Outscale / Numspot (spoke)
+# Client applications cluster. Managed by the management cluster via ArgoCD hub.
+#
+# Prerequisites:
+#   export OSC_ACCESS_KEY=<outscale_access_key>
+#   export OSC_SECRET_KEY=<outscale_secret_key>
+#   export OSC_REGION=eu-west-2
+# ==============================================================================
+
+cluster_name       = "openaether-outscale"
+environment        = "prod"
+cluster_role       = "workload"
+talos_version      = "v1.12.6"
+kubernetes_version = "v1.35.3"
+talos_bootstrap    = false # Set to true for Phase 2
+
+node_distribution = {
+  outscale = {
+    control_planes     = 3
+    workers            = 3
+    region             = "eu-west-2"
+    instance_type      = "tinav5.c2r4p1"
+    image_id           = "TALOS_OMI_ID" # Replace with actual Outscale OMI ID
+    availability_zones = ["eu-west-2a", "eu-west-2b", "eu-west-2c"]
+  }
+}
+
+admin_ip = ["YOUR_IP/32"]
+
+bastion_ssh_keys = {
+  outscale = "ssh-ed25519 AAAA... user@host"
+}
+
+git_repo_url     = "https://github.com/dis-bzh/OpenAether.git"
+argocd_namespace = "management-gitops"
+
+# Outscale Object Storage (OOS - S3-compatible)
+backup_s3_endpoint = "https://oos.eu-west-2.outscale.com"
+backup_s3_region   = "eu-west-2"
+backup_s3_bucket   = "s3-openaether-tfstate-workload-outscale"
