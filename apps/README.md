@@ -1,39 +1,85 @@
-# Applications & Workloads (`apps/`)
+# Apps (`apps/`)
 
-This directory contains all Kubernetes manifests managed by GitOps (ArgoCD).
+Kubernetes manifests managed by ArgoCD (GitOps). All workloads are defined here
+and deployed to the appropriate clusters by the ArgoCD ApplicationSet on the
+management cluster.
+
+## Multi-cluster Routing
+
+The ArgoCD ApplicationSet (`bootstrap/overlays/prod/root-appset.yaml`) routes
+deployments based on the `openaether.io/role` label on each cluster secret:
+
+| Label value | Overlay deployed | Cluster type |
+|-------------|-----------------|--------------|
+| `management` | `overlays/management/` | Management hub (OpenBao, Keycloak, VictoriaMetrics) |
+| `workload` | `overlays/workload-base/` | Spoke clusters (client apps) |
 
 ## Directory Structure
 
-### `base/` (The "What")
-**Purpose**: Contains the **agnostic** definitions of services and applications.
-- **Rule**: These files should be runnable in ANY environment (Local, Dev, Prod, Azure, AWS, On-Prem).
-- **Content**: Deployment definitions, Services, default RBAC.
-- **HA & Spreading**: By default, components here include `topologySpreadConstraints` for high availability across zones/nodes.
+### `base/` — Provider-agnostic definitions
 
-### `overlays/` (The "Context")
-**Purpose**: Modifications specific to an environment.
-- **`local/`**: Patches for the local environment (e.g., specific Hostnames, Replicas=1, simplified security).
-- **`prod/`**: Patches for production (High Availability, Specific Ingress Domains, Cloud Specific Annotations).
+All manifests here are environment-agnostic and runnable on any cluster.
 
-### `bootstrap/` (The "Ignition")
-**Purpose**: Backup / fallback kustomize definitions for ArgoCD.
-- **Installation**: Normally managed by Terraform via **Talos `inlineManifests`** at cluster bootstrap.
-- **Root App**: Injected at cluster bootstrap via the same `inlineManifests` trick.
-- **Usage**: Run `task bootstrap` ONLY if the Talos inline bootstrap failed or if recovering a cluster.
-- **Overlays**:
-  - `local/` - For local development (insecure mode, single replicas)
-  - `prod/` - For production (TLS enabled, HA configuration)
+| Service | Directory | Status |
+|---------|-----------|--------|
+| Namespaces | `base/namespaces/` | ✅ |
+| Traefik (Gateway API) | `base/traefik/` | ✅ |
+| OpenBao (secrets) | `base/openbao/` | ✅ Management only |
+| Keycloak + CNPG | `base/keycloak/`, `base/cnpg/` | ✅ Management only |
+| External Secrets | `base/external-secrets/` | ✅ All clusters |
+| Kyverno + policies | `base/kyverno/`, `base/kyverno-policies/` | ✅ All clusters |
+| KEDA (autoscaling) | `base/keda/` | ✅ Workload clusters |
+| VictoriaMetrics + Grafana | `base/observability/` | ✅ Management only |
+| Storage (local-path) | `base/storage/` | ✅ All clusters |
+| Linkerd | `base/linkerd/` | ⚠️ Deprecated → replacing with Cilium SM (Phase 4) |
+| ArgoCD hub config | `base/argocd-hub/` | 🚧 Phase 4 |
 
-## Multi-Cloud & High Availability
-All key services in `base/` are configured with `topologySpreadConstraints` to ensure:
-1. **Zone Redundancy**: Pods are spread across availability zones (`topology.kubernetes.io/zone`).
-2. **Node Distribution**: Pods are spread across different nodes (`kubernetes.io/hostname`).
+### `overlays/` — Environment-specific configurations
 
-### Local Simulation
-On local clusters (likely single node or virtual multi-node), these constraints might prevent scheduling if not handled.
-- **Solution**: The `local` overlay may patch these constraints out OR we verify the local cluster nodes have appropriate fake labels.
+```
+overlays/
+├── management/        # Management cluster: OpenBao, Keycloak, Grafana, ...
+├── workload-base/     # Workload cluster base: Traefik, ESO, Kyverno, KEDA, ...
+├── local/             # Local development: dev mode, single replicas
+└── prod/              # Legacy: single-cluster production (pre-Phase 3)
+```
 
-## Flow
-1. **Bootstrap**: `task bootstrap` -> Installs ArgoCD.
-2. **Sync**: ArgoCD wakes up -> Reads `apps/bootstrap/overlays/local/root-app.yaml` -> Points to `apps/overlays/local`.
-3. **Deploy**: ArgoCD applies `apps/overlays/local` -> Which pulls `apps/base/*` + applied patches.
+### `bootstrap/` — ArgoCD bootstrap manifests
+
+Applied once at cluster creation via Talos `inlineManifests`. Do NOT apply
+manually unless the initial bootstrap failed.
+
+```
+bootstrap/overlays/prod/
+├── root-appset.yaml          # ApplicationSet — deploys overlays to all clusters
+├── local-cluster-secret.yaml # Registers the management cluster in ArgoCD
+└── argocd-cmd-params-cm.yaml # ArgoCD server configuration
+```
+
+**Bootstrap flow:**
+1. `tofu apply ... -var talos_bootstrap=true` → Talos injects ArgoCD + root app via inlineManifests
+2. ArgoCD boots → syncs `apps/bootstrap/overlays/prod/`
+3. ApplicationSet discovers registered clusters → deploys appropriate overlay to each
+4. Management cluster gets `overlays/management/`, workload clusters get `overlays/workload-base/`
+
+## Adding a New Workload Cluster
+
+```bash
+# 1. Provision the cluster
+task deploy-workload PROVIDER=ovh
+
+# 2. Bootstrap Talos
+task bootstrap-workload PROVIDER=ovh
+
+# 3. Register in ArgoCD hub (creates a cluster secret with openaether.io/role=workload)
+task register-spoke CLUSTER=openaether-ovh-prod PROVIDER=ovh
+
+# 4. ArgoCD automatically deploys overlays/workload-base/ to the new cluster
+```
+
+## Adding a New Service to the Platform
+
+To add a service available on all workload clusters:
+1. Add manifests to `apps/base/<service>/` with a `kustomization.yaml`
+2. Add `- ../../base/<service>` to `apps/overlays/workload-base/kustomization.yaml`
+3. Commit and push → ArgoCD ApplicationSet deploys to all clusters automatically

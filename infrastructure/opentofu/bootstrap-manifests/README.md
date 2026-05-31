@@ -1,45 +1,63 @@
 # Bootstrap Manifests
 
-This directory contains the Kubernetes manifests injected at cluster bootstrap
-via **Talos `inlineManifests`** in the control plane machine configuration.
+Static Kubernetes manifests injected at cluster creation via **Talos `inlineManifests`**.
 
 ## Files
 
-| File | Source | Purpose |
-|------|--------|---------|
-| `cilium.yaml` | Generated via `helm template` | CNI — injected before kubelet starts |
-| `argocd-install.yaml` | ArgoCD official `install.yaml` | ArgoCD server installation |
-| `argocd-root-app.yaml.tftpl` | Template (OpenTofu) | Root Application that seeds GitOps |
+| File | Source | Injected when |
+|------|--------|---------------|
+| `cilium.yaml` | `helm template cilium/cilium` | Always (CNI is required) |
+| `argocd-install.yaml` | Official ArgoCD `install.yaml` | `talos_bootstrap=true` (initial bootstrap only) |
+| `argocd-root-app.yaml.tftpl` | OpenTofu template | `talos_bootstrap=true` (initial bootstrap only) |
 
-## Generating / Updating Manifests
+## Regenerating Manifests
 
-Run the render script to generate or update the static manifests:
+Run whenever upgrading Cilium or ArgoCD:
 
 ```bash
-../../scripts/render-bootstrap-manifests.sh
+# Default versions (from script)
+./scripts/render-bootstrap-manifests.sh
+
+# Override versions
+CILIUM_VERSION=1.20.0 ARGOCD_VERSION=v3.4.0 ./scripts/render-bootstrap-manifests.sh
 ```
 
-This downloads and renders:
-- **Cilium**: `helm template` with Talos-specific values (no kube-proxy, kubePrism endpoint)
-- **ArgoCD**: Official install manifest for the target version
+Then commit the updated files. OpenTofu reads them at apply time.
 
-### When to regenerate
+## Current Versions
 
-- Upgrading Cilium version
-- Upgrading ArgoCD version
-- Changing Cilium configuration (e.g., enabling Hubble, WireGuard)
+| Component | Version |
+|-----------|---------|
+| Cilium | 1.19.2 |
+| ArgoCD | v3.3.2 |
 
-## Architecture
+## Bootstrap Flow
 
 ```
-tofu apply
-  └─► Talos machine config (control planes)
+tofu apply -var talos_bootstrap=true
+  └─► Talos control plane config
         └─► inlineManifests:
-              ├── cilium.yaml          ← CNI bootstrap (Day 0)
-              ├── argocd-install.yaml  ← ArgoCD installation (Day 0)
-              └── argocd-root-app      ← Root App (templated, Day 0)
-                    └─► ArgoCD manages everything else (Day 1+)
+              ├── cilium.yaml              # CNI — nodes can communicate
+              ├── argocd-install.yaml      # ArgoCD server + CRDs
+              └── argocd-root-app          # Application → apps/bootstrap/overlays/prod/
+                    └─► ArgoCD syncs bootstrap overlay
+                          └─► ApplicationSet discovers clusters
+                                ├── management cluster → apps/overlays/management/
+                                └── spoke clusters    → apps/overlays/workload-base/
 ```
 
-After bootstrap, **ArgoCD takes over** and manages all other workloads
-defined in `apps/overlays/prod/`.
+## ArgoCD Root App Template Variables
+
+The `argocd-root-app.yaml.tftpl` template receives:
+- `namespace` — ArgoCD namespace (default: `management-gitops`)
+- `git_repo_url` — Repository URL
+- `cluster_role` — `management` or `workload` (routes to correct overlay)
+
+## Important Notes
+
+- **Never commit real credentials** — these files contain no secrets
+- **Cilium is always injected** — required for node networking before kubelet starts
+- **ArgoCD is only injected on initial bootstrap** — on upgrades/DRP, ArgoCD already runs
+  and manages itself via GitOps. Re-injecting would cause conflicts.
+- **Upgrade path**: Update versions in `render-bootstrap-manifests.sh`, regenerate,
+  then `tofu apply` with the new manifests

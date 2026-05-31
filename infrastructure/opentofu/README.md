@@ -1,141 +1,175 @@
-# OpenAether — Talos Kubernetes Cluster (OpenTofu)
+# OpenAether — OpenTofu Infrastructure
 
-Infrastructure-as-Code for deploying a production Talos Linux Kubernetes cluster on Scaleway.
+Multi-cloud Talos Kubernetes cluster provisioning. Supports Scaleway, OVH, and Outscale
+with a provider-agnostic architecture via a provider contract.
 
 ## Architecture
 
 ```
-tofu apply
-  ├── Scaleway (infrastructure)
-  │     ├── VPC + Private Network + NAT Gateway
-  │     ├── Control Plane instances (private, multi-AZ)
-  │     ├── Worker instances (private)
-  │     ├── Bastion host (SSH access)
-  │     ├── K8s API LB (permanent, 6443, ACL-restricted)
-  │     └── App LB (permanent, 80/443)
+tofu apply -var-file=envs/<cluster>.tfvars
+  ├── Provider module (one active at a time)
+  │     ├── VPC / private network
+  │     ├── Control plane VMs (private IPs, multi-AZ)
+  │     ├── Worker VMs (private IPs)
+  │     ├── Bastion host (SSH access, public IP)
+  │     ├── K8s API LB (public, 6443, ACL-restricted to admin_ip)
+  │     └── App LB (public, 80/443)
   │
-  ├── Talos (cluster configuration + bootstrap)
-  │     ├── Machine secrets
-  │     ├── Control plane config with inlineManifests:
-  │     │     ├── Cilium CNI
-  │     │     ├── ArgoCD installation
-  │     │     └── ArgoCD root application
+  ├── Talos module (cloud-agnostic)
+  │     ├── Machine secrets (prevent_destroy=true)
+  │     ├── Control plane config + inlineManifests:
+  │     │     ├── Cilium CNI (always injected)
+  │     │     ├── ArgoCD install (bootstrap only)
+  │     │     └── ArgoCD root Application (bootstrap only)
   │     ├── Worker config
-  │     ├── Config apply → bootstrap → kubeconfig
-  │     └── Local files: talosconfig, kubeconfig
+  │     └── Config apply → bootstrap → health check → kubeconfig
   │
-  └── S3 Backup (encrypted)
-        └── talosconfig, kubeconfig, machine configs
+  └── S3 backup (AES-GCM encrypted)
+        ├── talosconfig
+        ├── kubeconfig
+        └── machine configs
 ```
 
-### Network Access Strategy
+### Provider Contract
 
-| Port | Service | Access Method |
-|------|---------|---------------|
-| 6443/TCP | Kubernetes API | K8s LB (permanent, ACL-restricted) |
-| 50000/TCP | Talos API | Bastion SSH tunnel only (**never** via LB) |
-| 80/443 | Applications | App LB (permanent) |
-| 22/TCP | SSH | Bastion only (admin_ip restricted) |
+Every provider module in `modules/providers/<name>/` must implement the
+[provider contract](modules/providers/provider-contract.md). The root module's
+junction point uses `coalesce()` to select the active provider's outputs.
 
-### Bootstrap Flow (Day 0)
+**Adding a new provider = implementing the contract interface.** The Talos module
+and junction point work without modification.
 
-1. **`tofu apply`** provisions all infrastructure
-2. Talos machine configs include `inlineManifests` for Cilium, ArgoCD, root app
-3. Control planes bootstrap with CNI + GitOps ready
-4. ArgoCD root app syncs `apps/overlays/prod/` → manages all workloads
+### Two-Phase Bootstrap
 
-### Day 1 / Day 2
+| Phase | Command | What happens |
+|-------|---------|--------------|
+| Phase 1 | `tofu apply -var-file=envs/<cluster>.tfvars` | VMs, networking, LBs |
+| Phase 2 | `... -var talos_bootstrap=true` | Talos config, bootstrap, ArgoCD |
 
-- **Day 1**: `tofu apply` is a no-op (idempotent)
-- **Day 2**: Update manifests or config → `tofu apply` applies changes
+Between phases, establish SSH tunnels via the bastion for Talos API access (port 50000).
 
 ## Prerequisites
 
-- [OpenTofu](https://opentofu.org/) >= 1.11.0
-- Scaleway credentials: `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`, `SCW_DEFAULT_PROJECT_ID`
-- S3 backend: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
-- Encryption: `TF_VAR_encryption_passphrase` (32+ chars)
-- Bootstrap manifests generated (see below)
+| Tool | Required for |
+|------|-------------|
+| OpenTofu >= 1.12.0 | Infrastructure provisioning |
+| `talosctl` | Cluster access + validation |
+| `kubectl` | App deployment |
+| `helm` | Rendering bootstrap manifests |
+| `jq` | DRP and register-spoke scripts |
 
-## Quick Start
+**Credentials per provider:**
 
-### 1. Generate Bootstrap Manifests
+| Provider | Environment Variables |
+|----------|-----------------------|
+| Scaleway | `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`, `SCW_DEFAULT_PROJECT_ID` |
+| OVH | `OS_AUTH_URL`, `OS_USERNAME`, `OS_PASSWORD`, `OS_PROJECT_ID`, `OS_REGION_NAME` |
+| Outscale | `OSC_ACCESS_KEY`, `OSC_SECRET_KEY`, `OSC_REGION` |
+| All | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (S3 backup), `TF_VAR_encryption_passphrase` |
+
+## Environment Files
+
+One file = one cluster. State is stored separately per cluster in S3.
+
+Only the `*.tfvars.example` templates are versioned; copy one to its real name
+(`cp envs/management-scw.tfvars.example envs/management-scw.tfvars`) and fill in
+`admin_ip`, `bastion_ssh_keys`, `image_name`, etc. The real `*.tfvars` are
+git-ignored so credentials never get committed.
+
+| Template | Cluster | Provider | Role |
+|----------|---------|----------|------|
+| `envs/management-scw.tfvars.example` | `openaether-prod` | Scaleway | management |
+| `envs/workload-scw.tfvars.example` | `openaether-scw-prod` | Scaleway | workload |
+| `envs/workload-ovh.tfvars.example` | `openaether-ovh-prod` | OVH | workload |
+| `envs/workload-outscale.tfvars.example` | `openaether-outscale-prod` | Outscale | workload |
+| `envs/drp-ovh.tfvars.example` | `openaether-prod` | OVH | management (DRP fallback) |
+
+## Workflow
+
+### Deploy management cluster
 
 ```bash
-# Requires: helm, curl
+# Generate bootstrap manifests first (Cilium, ArgoCD)
 ./scripts/render-bootstrap-manifests.sh
+
+# Phase 1
+tofu apply -var-file=envs/management-scw.tfvars
+
+# Open SSH tunnels (see: tofu output instructions)
+# Then Phase 2
+tofu apply -var-file=envs/management-scw.tfvars -var talos_bootstrap=true
 ```
 
-This renders Cilium and ArgoCD install manifests into `bootstrap-manifests/`.
-
-### 2. Configure
+### Deploy workload cluster
 
 ```bash
-cp tofu.tfvars.example tofu.tfvars
-# Edit tofu.tfvars with your values
+tofu apply -var-file=envs/workload-ovh.tfvars
+# Tunnels...
+tofu apply -var-file=envs/workload-ovh.tfvars -var talos_bootstrap=true
 ```
 
-### 3. Deploy
+### DRP — Rebuild management cluster
 
 ```bash
-# Establish SSH tunnel to bastion for Talos API access
-# (get bastion IP from a previous apply or Scaleway console)
-ssh -i ~/.ssh/key -L 50000:<cp0-private-ip>:50000 ubuntu@<bastion-ip> -N &
-
-# Deploy
-tofu init
-tofu apply -var-file=tofu.tfvars
+# If Scaleway is unavailable:
+./scripts/drp-management.sh ovh
+# RTO: ~30 minutes. Workload clusters are unaffected.
 ```
 
-### 4. Access
+### Upgrade Cilium or ArgoCD
 
 ```bash
-export KUBECONFIG=./kubeconfig
-kubectl get nodes
-
-export TALOSCONFIG=./talosconfig
-talosctl --endpoints 127.0.0.1 health
+export CILIUM_VERSION=1.20.0
+export ARGOCD_VERSION=v3.4.0
+./scripts/render-bootstrap-manifests.sh
+tofu apply -var-file=envs/management-scw.tfvars -var talos_bootstrap=true
 ```
 
-## Structure
+## Module Structure
 
 ```
-├── main.tf                 # Root orchestration
-├── variables.tf            # Input variables
-├── versions.tf             # Provider versions
-├── outputs.tf              # Operational outputs
-├── backup.tf               # S3 encrypted backup
-├── backend.tf              # Remote state config
-├── bootstrap-manifests/    # Static manifests for Talos inlineManifests
-│   ├── cilium.yaml         # Generated via helm template
-│   ├── argocd-install.yaml # Official ArgoCD install manifest
-│   └── argocd-root-app.yaml.tftpl  # Root app template
-├── modules/
-│   ├── talos/              # Talos secrets, config, bootstrap, kubeconfig
-│   └── providers/
-│       └── scw/            # Scaleway infrastructure
-└── tests/                  # OpenTofu test framework
+modules/
+├── talos/                 # Cloud-agnostic Talos cluster module
+│   ├── main.tf            # Secrets, config, bootstrap, health check, kubeconfig
+│   ├── variables.tf
+│   └── outputs.tf
+└── providers/
+    ├── provider-contract.md   # Interface specification
+    ├── scw/               # Scaleway (reference implementation)
+    │   ├── main.tf        # Compute instances
+    │   ├── network.tf     # VPC, IPAM, NAT gateway
+    │   ├── security.tf    # Security groups
+    │   ├── lb.tf          # K8s + App load balancers
+    │   └── bastion.tf     # Bastion host
+    ├── ovh/               # OVH / OpenStack
+    │   └── (same structure as scw/)
+    └── outscale/          # Outscale / Numspot
+        └── (same structure as scw/)
+```
+
+## Tests
+
+```bash
+# All unit tests (26 tests, mock providers — no cloud credentials needed)
+tofu test
+
+# Individual test suites
+tofu test -filter=tests/scaleway.tftest.hcl       # SCW module (9 tests)
+tofu test -filter=tests/talos-config.tftest.hcl   # Talos config logic (10 tests)
+tofu test -filter=tests/provider-contract.tftest.hcl  # Junction point (7 tests)
+
+# Full local validation (tests + kustomize + talosctl + yamllint)
+./scripts/test-local-stack.sh
 ```
 
 ## Security
 
-- **No public IPs** on cluster nodes
-- **Bastion host** as single SSH entry point
-- **50000/TCP never exposed** on any load balancer
-- **K8s API LB** restricted by ACL to `admin_ip`
-- **State encryption** via AES-GCM with PBKDF2 key derivation
-- **Backup encryption** via S3 SSE (AES-256)
-
-## Upgrading Bootstrap Components
-
-```bash
-# Update versions
-export CILIUM_VERSION=1.17.0
-export ARGOCD_VERSION=v2.14.0
-
-# Re-render manifests
-./scripts/render-bootstrap-manifests.sh
-
-# Apply (Talos will update inlineManifests)
-tofu apply -var-file=tofu.tfvars
-```
+| Control | Mechanism |
+|---------|-----------|
+| No public IPs on nodes | Private VPC only |
+| Talos API | SSH tunnel via bastion (50000/TCP, never on LB) |
+| Kubernetes API | LB ACL restricted to `admin_ip` |
+| State encryption | AES-GCM + PBKDF2 (backend.tf) |
+| Backup encryption | S3 server-side encryption |
+| Inter-node | Cilium WireGuard |
+| Machine secrets | `prevent_destroy = true` lifecycle guard |
