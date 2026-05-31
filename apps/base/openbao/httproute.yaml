@@ -5,14 +5,14 @@ metadata:
   namespace: security
 spec:
   parentRefs:
-  - name: openaether-gateway
+    - name: openaether-gateway
   hostnames:
-  - "vault.localhost"
+    - "vault.localhost"
   rules:
-  - matches:
-    - path:
-        type: PathPrefix
-        value: /
-    backendRefs:
-    - name: openbao
-      port: 8200
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: openbao
+          port: 8200

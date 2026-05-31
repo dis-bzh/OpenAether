@@ -1,10 +1,16 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+# DEPRECATED — Linkerd is being replaced by Cilium Service Mesh (Phase 4).
+# Cilium already handles WireGuard encryption between nodes.
+# Cilium SM will replace Linkerd for mTLS and traffic management.
+# Do NOT enable this overlay until migration plan is validated.
+# See: roadmap Phase 4 → Cilium Service Mesh evaluation.
+
 namespace: foundation-service-mesh
 
 resources:
-  # Linkerd CRDs (Generated locally)
+  # Linkerd CRDs (Generated locally — stable-2.14.0)
   - linkerd-crds.yaml
-  # Linkerd Control Plane (Generated locally)
+  # Linkerd Control Plane (Generated locally — stable-2.14.0)
   - linkerd-control-plane.yaml
