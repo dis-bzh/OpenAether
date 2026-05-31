@@ -25,3 +25,9 @@ output "bastion_ip" {
   description = "Public IP of the bastion host (SSH access)"
   value       = scaleway_instance_ip.bastion.address
 }
+
+# NAT Gateway
+output "nat_gateway_ip" {
+  description = "Public IP of the NAT gateway (for LB ACL whitelisting)"
+  value       = scaleway_vpc_public_gateway_ip.this.address
+}

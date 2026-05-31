@@ -4,9 +4,5 @@ terraform {
       source  = "terraform-provider-openstack/openstack"
       version = ">= 1.53.0"
     }
-    talos = {
-      source  = "siderolabs/talos"
-      version = ">= 0.7.0"
-    }
   }
 }

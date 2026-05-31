@@ -1,83 +1,74 @@
 variable "cluster_name" {
-  type = string
+  description = "Name of the cluster"
+  type        = string
 }
 
 variable "region" {
-  type    = string
-  default = "GRA11"
+  description = "OVH/OpenStack region"
+  type        = string
+  default     = "GRA11"
 }
 
 variable "flavor_name" {
-  type    = string
-  default = "b2-7"
+  description = "OpenStack flavor for cluster nodes"
+  type        = string
+  default     = "b2-7"
 }
 
 variable "image_id" {
+  description = "OpenStack image ID for Talos Linux"
   type        = string
-  description = "OpenStack Image ID for Talos"
 }
 
 variable "network_name" {
-  type    = string
-  default = "Ext-Net" # Usually Ext-Net for public IPs
-}
-
-variable "availability_zones" {
-  type    = list(string)
-  default = ["nova"] # Default OpenStack AZ
-}
-
-variable "control_plane_count" {
-  type    = number
-  default = 0
-}
-
-variable "worker_count" {
-  type    = number
-  default = 0
-}
-
-variable "machine_secrets" {
-  description = "Talos machine secrets"
-  sensitive   = true
-}
-
-variable "cluster_endpoint" {
-  type = string
-}
-
-variable "talos_version" {
-  type = string
-}
-
-variable "kubernetes_version" {
-  type = string
+  description = "Network name for instances (usually Ext-Net for public)"
+  type        = string
+  default     = "Ext-Net"
 }
 
 variable "network_id" {
+  description = "Network ID for port-based networking (required for LB VIP)"
   type        = string
-  description = "ID of the network for the LB VIP (Required for Octavia)"
   default     = ""
 }
 
 variable "subnet_id" {
+  description = "Subnet ID for LB members (required for Octavia)"
   type        = string
-  description = "Subnet ID for LB members (Required for Octavia)"
   default     = ""
 }
 
+variable "availability_zones" {
+  description = "Availability zones for node distribution"
+  type        = list(string)
+  default     = ["nova"]
+}
+
+variable "control_plane_count" {
+  description = "Number of control plane nodes"
+  type        = number
+  default     = 0
+}
+
+variable "worker_count" {
+  description = "Number of worker nodes"
+  type        = number
+  default     = 0
+}
+
+# Security
 variable "admin_ip" {
-  description = "List of allowed Source IPs/CIDRs for Admin Access (SSH, API)"
+  description = "Allowed source IPs/CIDRs for admin access (SSH, K8s API)"
   type        = list(string)
 }
 
 variable "bastion_ssh_key" {
-  description = "SSH Public Key for the Bastion"
+  description = "SSH public key for bastion access"
   type        = string
 }
 
 variable "bastion_image_id" {
-  description = "Image ID or Name for Bastion (e.g. Ubuntu 22.04)"
+  description = "Image ID or name for the bastion host"
   type        = string
   default     = "Ubuntu 22.04"
 }

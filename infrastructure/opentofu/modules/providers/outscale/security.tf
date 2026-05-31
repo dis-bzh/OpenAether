@@ -1,10 +1,25 @@
+# ==============================================================================
+# Outscale — Security Groups
+# inbound_default = drop. Only required ports explicitly opened.
+# ==============================================================================
+
 resource "outscale_security_group" "this" {
-  description         = "Security Group for OpenAether Talos Cluster"
-  security_group_name = "${var.cluster_name}-sg"
+  description         = "OpenAether cluster nodes — least-privilege inbound"
+  security_group_name = "${var.cluster_name}-cluster-sg"
+  net_id              = outscale_net.this.net_id
 }
 
-# Kubernetes API (TCP 6443) - Restricted to Admin IPs only
-resource "outscale_security_group_rule" "k8s_api" {
+# Kubernetes API — from LB subnet (health checks) + admin IPs
+resource "outscale_security_group_rule" "k8s_api_private" {
+  flow              = "Inbound"
+  security_group_id = outscale_security_group.this.security_group_id
+  from_port_range   = 6443
+  to_port_range     = 6443
+  ip_protocol       = "tcp"
+  ip_range          = "10.0.0.0/24"
+}
+
+resource "outscale_security_group_rule" "k8s_api_admin" {
   for_each          = toset(var.admin_ip)
   flow              = "Inbound"
   security_group_id = outscale_security_group.this.security_group_id
@@ -14,7 +29,7 @@ resource "outscale_security_group_rule" "k8s_api" {
   ip_range          = each.value
 }
 
-# Talos API (TCP 50000) - Restricted to Bastion SG
+# Talos API — from bastion security group only
 resource "outscale_security_group_rule" "talos_api" {
   flow              = "Inbound"
   security_group_id = outscale_security_group.this.security_group_id
@@ -29,14 +44,14 @@ resource "outscale_security_group_rule" "talos_api" {
   }
 }
 
-# HTTP/HTTPS - Open for ingress traffic
+# HTTP/HTTPS — from LB subnet
 resource "outscale_security_group_rule" "http" {
   flow              = "Inbound"
   security_group_id = outscale_security_group.this.security_group_id
   from_port_range   = 80
   to_port_range     = 80
   ip_protocol       = "tcp"
-  ip_range          = "0.0.0.0/0"
+  ip_range          = "10.0.0.0/24"
 }
 
 resource "outscale_security_group_rule" "https" {
@@ -45,10 +60,10 @@ resource "outscale_security_group_rule" "https" {
   from_port_range   = 443
   to_port_range     = 443
   ip_protocol       = "tcp"
-  ip_range          = "0.0.0.0/0"
+  ip_range          = "10.0.0.0/24"
 }
 
-# WireGuard / Cilium (UDP 51820) - Restricted to cluster SG (inter-node only)
+# WireGuard — Cilium inter-node encryption (UDP 51820)
 resource "outscale_security_group_rule" "wireguard" {
   flow              = "Inbound"
   security_group_id = outscale_security_group.this.security_group_id
@@ -63,8 +78,8 @@ resource "outscale_security_group_rule" "wireguard" {
   }
 }
 
-# Internal Traffic - Allow all from cluster SG members (self-referencing)
-resource "outscale_security_group_rule" "internal" {
+# Inter-node — full mesh (etcd, kubelet, Cilium)
+resource "outscale_security_group_rule" "inter_node" {
   flow              = "Inbound"
   security_group_id = outscale_security_group.this.security_group_id
 

@@ -1,20 +1,31 @@
+# ==============================================================================
+# OVH / OpenStack — Security Groups
+# inbound_default = drop (delete_default_rules). Only required ports opened.
+#
+# OVH Octavia health checks originate from the LB VIP subnet CIDR.
+# We allow the full private subnet (10.0.0.0/24) for LB + inter-node traffic.
+# K8s API is further restricted by the Octavia listener allowed_cidrs.
+# ==============================================================================
+
 resource "openstack_networking_secgroup_v2" "this" {
-  name        = "${var.cluster_name}-sg"
-  description = "Security Group for OpenAether Talos Cluster"
+  name                 = "${var.cluster_name}-cluster-sg"
+  description          = "OpenAether cluster nodes — least-privilege inbound"
+  delete_default_rules = true
 }
 
-# Kubernetes API (TCP 6443) - Restricted to LB for defense in depth
+# Kubernetes API — from private subnet (LB health checks + inter-node)
+# Additional restriction enforced at LB listener level (allowed_cidrs)
 resource "openstack_networking_secgroup_rule_v2" "k8s_api" {
   direction         = "ingress"
   ethertype         = "IPv4"
   protocol          = "tcp"
   port_range_min    = 6443
   port_range_max    = 6443
-  remote_ip_prefix  = "${openstack_networking_floatingip_v2.vip.address}/32"
+  remote_ip_prefix  = "10.0.0.0/24"
   security_group_id = openstack_networking_secgroup_v2.this.id
 }
 
-# Talos API (TCP 50000) - Restricted to Bastion (if exists) or Admin
+# Talos API — from bastion security group only
 resource "openstack_networking_secgroup_rule_v2" "talos_api" {
   direction         = "ingress"
   ethertype         = "IPv4"
@@ -25,14 +36,14 @@ resource "openstack_networking_secgroup_rule_v2" "talos_api" {
   security_group_id = openstack_networking_secgroup_v2.this.id
 }
 
-# HTTP/HTTPS - Open via LB
+# HTTP/HTTPS — from private subnet (App LB health checks)
 resource "openstack_networking_secgroup_rule_v2" "http" {
   direction         = "ingress"
   ethertype         = "IPv4"
   protocol          = "tcp"
   port_range_min    = 80
   port_range_max    = 80
-  remote_ip_prefix  = "${openstack_networking_floatingip_v2.vip.address}/32"
+  remote_ip_prefix  = "10.0.0.0/24"
   security_group_id = openstack_networking_secgroup_v2.this.id
 }
 
@@ -42,11 +53,11 @@ resource "openstack_networking_secgroup_rule_v2" "https" {
   protocol          = "tcp"
   port_range_min    = 443
   port_range_max    = 443
-  remote_ip_prefix  = "${openstack_networking_floatingip_v2.vip.address}/32"
+  remote_ip_prefix  = "10.0.0.0/24"
   security_group_id = openstack_networking_secgroup_v2.this.id
 }
 
-# WireGuard / Cilium (UDP 51820) - Restricted to cluster SG (inter-node only)
+# WireGuard — Cilium inter-node encryption (UDP 51820)
 resource "openstack_networking_secgroup_rule_v2" "wireguard" {
   direction         = "ingress"
   ethertype         = "IPv4"
@@ -57,11 +68,23 @@ resource "openstack_networking_secgroup_rule_v2" "wireguard" {
   security_group_id = openstack_networking_secgroup_v2.this.id
 }
 
-# Internal Traffic (Allow all from self)
-resource "openstack_networking_secgroup_rule_v2" "internal" {
+# Inter-node — full mesh TCP (etcd, kubelet, Cilium)
+resource "openstack_networking_secgroup_rule_v2" "inter_node" {
   direction         = "ingress"
   ethertype         = "IPv4"
-  protocol          = "tcp" # Or explicitly match rules, but self-referencing SG is cleaner if supported
   remote_group_id   = openstack_networking_secgroup_v2.this.id
+  security_group_id = openstack_networking_secgroup_v2.this.id
+}
+
+# Outbound — allow all
+resource "openstack_networking_secgroup_rule_v2" "egress_v4" {
+  direction         = "egress"
+  ethertype         = "IPv4"
+  security_group_id = openstack_networking_secgroup_v2.this.id
+}
+
+resource "openstack_networking_secgroup_rule_v2" "egress_v6" {
+  direction         = "egress"
+  ethertype         = "IPv6"
   security_group_id = openstack_networking_secgroup_v2.this.id
 }

@@ -1,13 +1,13 @@
-data "outscale_images" "ubuntu" {
-  filter {
-    name   = "image_name"
-    values = ["Ubuntu-22.04-LTS*"]
-  }
-}
+# ==============================================================================
+# Outscale — Bastion Host
+# Private subnet + public IP for SSH admin access.
+# Provides SSH jump to cluster nodes on port 50000 (Talos) and 6443 (K8s).
+# ==============================================================================
 
 resource "outscale_security_group" "bastion" {
-  description         = "Security Group for Bastion Host"
+  description         = "OpenAether bastion — SSH from admin IPs only"
   security_group_name = "${var.cluster_name}-bastion-sg"
+  net_id              = outscale_net.this.net_id
 }
 
 resource "outscale_security_group_rule" "bastion_ssh" {
@@ -20,28 +20,21 @@ resource "outscale_security_group_rule" "bastion_ssh" {
   ip_range          = each.value
 }
 
-resource "outscale_public_ip" "bastion" {
-}
+resource "outscale_public_ip" "bastion" {}
 
 resource "outscale_vm" "bastion" {
-  image_id = coalesce(var.bastion_image_id, try(data.outscale_images.ubuntu.images[0].image_id, "ami-12345678")) # Try finding, fallback if empty
-  vm_type  = "tinav5.c2r4p1"
-
+  image_id           = coalesce(var.bastion_image_id, try(data.outscale_images.ubuntu.images[0].image_id, null))
+  vm_type            = "tinav5.c2r4p1"
+  subnet_id          = outscale_subnet.private.subnet_id
   security_group_ids = [outscale_security_group.bastion.security_group_id]
 
   user_data = base64encode(<<-EOT
     #cloud-config
     ssh_authorized_keys:
       - ${var.bastion_ssh_key}
-
     packages:
-      - curl
-      - wget
-      - netcat
+      - netcat-openbsd
       - tcpdump
-
-    runcmd:
-      - echo "Bastion initialized" > /etc/motd
   EOT
   )
 
@@ -54,4 +47,11 @@ resource "outscale_vm" "bastion" {
 resource "outscale_public_ip_link" "bastion" {
   vm_id     = outscale_vm.bastion.vm_id
   public_ip = outscale_public_ip.bastion.public_ip
+}
+
+data "outscale_images" "ubuntu" {
+  filter {
+    name   = "image_name"
+    values = ["Ubuntu-22.04-LTS*"]
+  }
 }
