@@ -40,7 +40,7 @@ jobs:
         run: pip install yamllint
 
       - name: Run yamllint
-        run: yamllint -c infrastructure/.yamllint apps/ infrastructure/
+        run: yamllint -c infrastructure/.yamllint apps/ infrastructure/opentofu/bootstrap-manifests/
 
   validate:
     name: Validate
@@ -54,12 +54,24 @@ jobs:
           tofu_version: "1.12.2"
 
       - name: Initialize OpenTofu (no backend)
-        run: tofu init -backend=false
+        run: |
+          rm -f .terraform/terraform.tfstate
+          tofu init -backend=false
         working-directory: infrastructure/opentofu
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: mock
+          AWS_SECRET_ACCESS_KEY: mock
+          TF_VAR_encryption_passphrase: ci-mock-passphrase-for-validation-only-ci
 
       - name: Validate configuration
         run: tofu validate
         working-directory: infrastructure/opentofu
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: mock
+          AWS_SECRET_ACCESS_KEY: mock
+          TF_VAR_encryption_passphrase: ci-mock-passphrase-for-validation-only-ci
 
   test:
     name: OpenTofu Tests
@@ -74,12 +86,24 @@ jobs:
           tofu_version: "1.12.2"
 
       - name: Initialize OpenTofu (no backend)
-        run: tofu init -backend=false
+        run: |
+          rm -f .terraform/terraform.tfstate
+          tofu init -backend=false
         working-directory: infrastructure/opentofu
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: mock
+          AWS_SECRET_ACCESS_KEY: mock
+          TF_VAR_encryption_passphrase: ci-mock-passphrase-for-validation-only-ci
 
-      - name: Run tests
+      - name: Run all OpenTofu tests
         run: tofu test
         working-directory: infrastructure/opentofu
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: mock
+          AWS_SECRET_ACCESS_KEY: mock
+          TF_VAR_encryption_passphrase: ci-mock-passphrase-for-validation-only-ci
 
   kustomize:
     name: Validate Kustomize
@@ -90,11 +114,55 @@ jobs:
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
 
+      - name: Validate bootstrap prod overlay
+        run: kubectl kustomize apps/bootstrap/overlays/prod/ > /dev/null
+
+      - name: Validate bootstrap local overlay
+        run: kubectl kustomize apps/bootstrap/overlays/local/ > /dev/null
+
+      - name: Validate management overlay
+        run: kubectl kustomize apps/overlays/management/ > /dev/null
+
+      - name: Validate workload-base overlay
+        run: kubectl kustomize apps/overlays/workload-base/ > /dev/null
+
       - name: Validate local overlay
         run: kubectl kustomize apps/overlays/local/ > /dev/null
 
-      - name: Validate bootstrap overlay
-        run: kubectl kustomize apps/bootstrap/overlays/local/ > /dev/null
+      - name: Validate prod overlay
+        run: kubectl kustomize apps/overlays/prod/ > /dev/null
+
+  talos:
+    name: Talos Config Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install talosctl
+        run: |
+          curl -sL https://talos.dev/install | sh
+          talosctl version --client
+
+      - name: Generate Talos secrets
+        run: talosctl gen secrets --output-file /tmp/talos-secrets.yaml
+
+      - name: Generate Talos configs
+        run: |
+          talosctl gen config \
+            --with-secrets /tmp/talos-secrets.yaml \
+            --output /tmp/talos-configs \
+            --output-types controlplane,worker \
+            ci-test-cluster https://127.0.0.1:6443
+
+      - name: Validate control plane config
+        run: talosctl validate --config /tmp/talos-configs/controlplane.yaml --mode metal
+
+      - name: Validate worker config
+        run: talosctl validate --config /tmp/talos-configs/worker.yaml --mode metal
+
+      - name: Check kube-proxy is disabled
+        run: |
+          grep -q 'disabled: true' /tmp/talos-configs/controlplane.yaml
 
   security:
     name: IaC Security Scan
@@ -115,4 +183,4 @@ jobs:
         with:
           directory: infrastructure/opentofu
           framework: terraform
-          soft_fail: true  # Advisory for now, switch to hard fail when stable
+          soft_fail: true

@@ -8,7 +8,6 @@ tasks:
 
   setup:
     desc: Install dependencies (OpenTofu, Talosctl, Kubectl, Task, pre-commit)
-    # Note: For initial setup (when task is not installed yet), run ./scripts/setup.sh directly
     cmds:
       - ./scripts/setup.sh
 
@@ -42,22 +41,123 @@ tasks:
     desc: Run OpenTofu tests
     dir: infrastructure/opentofu
     cmds:
-      - tofu test -var-file="tofu.tfvars"
+      - tofu test
 
-  deploy:
-    desc: Deploy the cluster using OpenTofu
+  # ===========================================================================
+  # Cluster Lifecycle
+  # ===========================================================================
+
+  deploy-management:
+    desc: "Deploy the management cluster (SCW HA). PROVIDER env file: envs/management-scw.tfvars"
     dir: infrastructure/opentofu
     cmds:
-      - tofu apply -var-file="tofu.tfvars"
+      - tofu apply -var-file="envs/management-scw.tfvars"
 
-  destroy:
-    desc: Destroy the cluster
+  deploy-workload:
+    desc: "Deploy a workload cluster. Usage: task deploy-workload PROVIDER=ovh"
+    dir: infrastructure/opentofu
+    vars:
+      PROVIDER: '{{.PROVIDER | default "scw"}}'
+    cmds:
+      - tofu apply -var-file="envs/workload-{{.PROVIDER}}.tfvars"
+
+  bootstrap-management:
+    desc: "Phase 2: Apply Talos config and bootstrap the management cluster (requires SSH tunnel)"
     dir: infrastructure/opentofu
     cmds:
-      - tofu destroy -var-file="tofu.tfvars"
+      - tofu apply -var-file="envs/management-scw.tfvars" -var talos_bootstrap=true
+
+  bootstrap-workload:
+    desc: "Phase 2: Bootstrap a workload cluster. Usage: task bootstrap-workload PROVIDER=ovh"
+    dir: infrastructure/opentofu
+    vars:
+      PROVIDER: '{{.PROVIDER | default "scw"}}'
+    cmds:
+      - tofu apply -var-file="envs/workload-{{.PROVIDER}}.tfvars" -var talos_bootstrap=true
+
+  destroy-workload:
+    desc: "Destroy a workload cluster. Usage: task destroy-workload PROVIDER=ovh"
+    dir: infrastructure/opentofu
+    vars:
+      PROVIDER: '{{.PROVIDER | default "scw"}}'
+    cmds:
+      - tofu destroy -var-file="envs/workload-{{.PROVIDER}}.tfvars"
+
+  # ===========================================================================
+  # Multi-Cluster Management
+  # ===========================================================================
+
+  register-spoke:
+    desc: "Register a spoke cluster in ArgoCD hub. Usage: task register-spoke CLUSTER=openaether-ovh-prod PROVIDER=ovh"
+    vars:
+      CLUSTER: '{{.CLUSTER | default ""}}'
+      PROVIDER: '{{.PROVIDER | default ""}}'
+    cmds:
+      - ./scripts/register-spoke.sh "{{.CLUSTER}}" "{{.PROVIDER}}"
+
+  drp:
+    desc: "DRP: Rebuild management cluster on fallback provider. Usage: task drp PROVIDER=ovh"
+    vars:
+      PROVIDER: '{{.PROVIDER | default "ovh"}}'
+    cmds:
+      - ./scripts/drp-management.sh "{{.PROVIDER}}"
+
+  # ===========================================================================
+  # Local Testing (Docker / WSL2)
+  # ===========================================================================
+
+  local-render-manifests:
+    desc: "Render simplified Cilium manifest for local Docker testing (no WireGuard)"
+    cmds:
+      - ./scripts/render-bootstrap-manifests.sh --local
+
+  local-up:
+    desc: "Deploy the local 3-CP Talos cluster (config + containers + bootstrap + kubeconfig)"
+    dir: infrastructure/opentofu-local
+    cmds:
+      - tofu init -upgrade > /dev/null 2>&1 || tofu init > /dev/null
+      - |
+        export TF_VAR_cilium_manifest="$(cat ../opentofu/bootstrap-manifests/cilium-local.yaml 2>/dev/null || echo 'placeholder')"
+        tofu apply -var talos_bootstrap=true -auto-approve
+
+  local-test:
+    desc: "Full end-to-end local test: 3-CP cluster + etcd quorum + Cilium + ArgoCD + GitOps"
+    cmds:
+      - ./scripts/test-talos-local.sh
+
+  local-status:
+    desc: "Check local cluster health (3 CPs)"
+    cmds:
+      - |
+        export KUBECONFIG=infrastructure/opentofu-local/kubeconfig
+        export TALOSCONFIG=infrastructure/opentofu-local/talosconfig
+        echo "=== etcd quorum ===" && talosctl --nodes 10.5.0.10 --endpoints 127.0.0.1:50000 etcd members || true
+        echo "=== Kubernetes nodes ===" && kubectl get nodes -o wide || true
+        echo "=== kube-system pods ===" && kubectl get pods -n kube-system || true
+        echo "=== ArgoCD ===" && kubectl get applications -n management-gitops 2>/dev/null || echo "not deployed yet"
+
+  local-argocd:
+    desc: "Port-forward ArgoCD UI to localhost:8080"
+    cmds:
+      - |
+        export KUBECONFIG=infrastructure/opentofu-local/kubeconfig
+        echo "ArgoCD UI → https://localhost:8080"
+        kubectl -n management-gitops port-forward svc/argocd-server 8080:443
+
+  local-down:
+    desc: "Destroy local Talos cluster and Docker containers"
+    dir: infrastructure/opentofu-local
+    cmds:
+      - |
+        export TF_VAR_cilium_manifest="placeholder"
+        tofu destroy -auto-approve 2>/dev/null || true
+
+  # ===========================================================================
+  # Bootstrap & Secrets
+  # ===========================================================================
 
   bootstrap:
-    desc: Apply bootstrap manifests (ArgoCD) — only needed if inlineManifests failed
+    desc: Apply ArgoCD bootstrap manifests (if inlineManifests failed)
     cmds:
       - kubectl apply -k apps/bootstrap/overlays/prod
 
@@ -72,8 +172,9 @@ tasks:
       - ./scripts/init_secrets.sh
 
   kubeconfig:
-    desc: Retrieve kubeconfig
+    desc: Retrieve kubeconfig from OpenTofu outputs
     dir: infrastructure/opentofu
     cmds:
+      - tofu output -raw kubeconfig > kubeconfig
       - tofu output -raw talosconfig > talosconfig
-      - echo "Use talosctl to retrieve kubeconfig using the talosconfig"
+      - echo "KUBECONFIG and TALOSCONFIG written to infrastructure/opentofu/"
