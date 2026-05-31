@@ -3,7 +3,8 @@ kind: Kustomization
 
 resources:
   - ../../base
-  - root-app.yaml
+  - root-appset.yaml
+  - local-cluster-secret.yaml
 
 patches:
   - path: argocd-cmd-params-cm.yaml

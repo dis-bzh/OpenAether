@@ -6,7 +6,7 @@ resources:
   - ../../base/external-secrets
   - ../../base/kyverno-policies
   - ../../base/traefik
-  - ../../base/linkerd
+  # linkerd removed — deprecated, replacing with Cilium Service Mesh (Phase 4)
   - ../../base/cnpg
 
   - ../../base/openbao
