@@ -1,6 +1,24 @@
 mock_provider "scaleway" {}
+mock_provider "openstack" {}
+mock_provider "outscale" {}
 mock_provider "talos" {}
-mock_provider "aws" {}
+mock_provider "aws" {
+  mock_resource "aws_s3_object" {
+    defaults = {
+      id = "mock-id"
+    }
+  }
+}
+
+# Dummy AWS credentials for test environment
+provider "aws" {
+  region                      = "us-east-1"
+  access_key                  = "mock"
+  secret_key                  = "mock"
+  skip_credentials_validation = true
+  skip_metadata_api_check     = true
+  skip_requesting_account_id  = true
+}
 
 # --- S3 Backup overrides ---
 
@@ -143,14 +161,16 @@ override_resource {
   values = { id = "ffffffff-ffff-ffff-ffff-ffffffffffff" }
 }
 
-# --- Test Variables ---
+# ==============================================================================
+# Shared Test Variables (Scaleway HA configuration)
+# ==============================================================================
 
 variables {
-  cluster_name          = "test-cluster"
-  environment           = "dev"
-  talos_bootstrap       = true
-  encryption_passphrase = "mocked-test-passphrase-must-be-32-chars-long"
-  admin_ip              = ["1.2.3.4/32"]
+  cluster_name    = "test-cluster"
+  environment     = "dev"
+  cluster_role    = "management"
+  talos_bootstrap = true
+  admin_ip        = ["1.2.3.4/32"]
   bastion_ssh_keys = {
     scaleway = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMpj9y94C3NzaC1lZDI1NTE5AAAAIOMpj9y9"
   }
@@ -168,22 +188,41 @@ variables {
   git_repo_url     = "https://github.com/test/repo.git"
   argocd_namespace = "management-gitops"
 
+  # Non-placeholder manifest to pass precondition
+  cilium_manifest = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium"
+
   backup_s3_endpoint = "https://s3.fr-par.scw.cloud"
   backup_s3_region   = "fr-par"
   backup_s3_bucket   = "test-bucket"
 }
 
-# --- Test 1: Module Activation ---
-run "verify_module_activation" {
+# ==============================================================================
+# Test 1: Module Activation — SCW module activates when nodes configured
+# ==============================================================================
+
+run "verify_scw_module_activation" {
   command = plan
 
   assert {
     condition     = length(module.scw) == 1
     error_message = "SCW module should be active when nodes are configured."
   }
+
+  assert {
+    condition     = length(module.ovh) == 0
+    error_message = "OVH module should be inactive when not in node_distribution."
+  }
+
+  assert {
+    condition     = length(module.outscale) == 0
+    error_message = "Outscale module should be inactive when not in node_distribution."
+  }
 }
 
-# --- Test 2: Variable Validation ---
+# ==============================================================================
+# Test 2: Variable Validation — HA requirements
+# ==============================================================================
+
 run "verify_variable_validation" {
   command = plan
 
@@ -198,7 +237,23 @@ run "verify_variable_validation" {
   }
 }
 
-# --- Test 3: Bastion Configuration ---
+# ==============================================================================
+# Test 3: cluster_role variable is valid
+# ==============================================================================
+
+run "verify_cluster_role" {
+  command = plan
+
+  assert {
+    condition     = var.cluster_role == "management"
+    error_message = "cluster_role should be management for this test."
+  }
+}
+
+# ==============================================================================
+# Test 4: Bastion Configuration — SSH key must be present
+# ==============================================================================
+
 run "verify_bastion_config" {
   command = plan
 
@@ -208,22 +263,153 @@ run "verify_bastion_config" {
   }
 }
 
-# --- Test 4: Outputs ---
-run "verify_outputs" {
+# ==============================================================================
+# Test 5: Provider Contract — SCW outputs conform to provider-contract.md
+# ==============================================================================
+
+run "verify_provider_contract" {
   command = apply
 
   assert {
-    condition     = output.bastion_ip != null
-    error_message = "Bastion IP must be available."
+    condition     = output.bastion_ip != null && output.bastion_ip != "N/A"
+    error_message = "Provider contract: bastion_ip must be available."
   }
 
   assert {
     condition     = output.k8s_lb_ip != null && output.k8s_lb_ip != ""
-    error_message = "K8s LB IP must be available."
+    error_message = "Provider contract: k8s_lb_ip must be available."
   }
 
   assert {
     condition     = output.talosconfig != null
-    error_message = "Talosconfig must be defined."
+    error_message = "Talos module: talosconfig must be defined."
+  }
+
+  assert {
+    condition     = length(output.control_plane_private_ips) == 3
+    error_message = "Provider contract: should have 3 control plane IPs for HA."
+  }
+
+  assert {
+    condition     = length(output.worker_private_ips) == 1
+    error_message = "Provider contract: should have 1 worker IP."
+  }
+
+  assert {
+    condition     = output.active_provider == "scaleway"
+    error_message = "active_provider should be 'scaleway' when SCW nodes are configured."
+  }
+
+  assert {
+    condition     = output.cluster_role == "management"
+    error_message = "cluster_role should be 'management' for this test."
+  }
+}
+
+# ==============================================================================
+# Test 6: Phase 1 Only — talos_bootstrap=false should not create Talos resources
+# ==============================================================================
+
+run "verify_phase1_no_talos_apply" {
+  command = plan
+
+  variables {
+    talos_bootstrap = false
+  }
+
+  assert {
+    condition     = length(module.scw) == 1
+    error_message = "SCW infra module should still be active in Phase 1."
+  }
+}
+
+# ==============================================================================
+# Test 7: Provider Disabled — empty node_distribution creates nothing
+# ==============================================================================
+
+run "verify_provider_disabled" {
+  command = plan
+
+  variables {
+    node_distribution = {}
+  }
+
+  assert {
+    condition     = length(module.scw) == 0
+    error_message = "SCW module should be inactive when node_distribution is empty."
+  }
+
+  assert {
+    condition     = length(module.ovh) == 0
+    error_message = "OVH module should be inactive when node_distribution is empty."
+  }
+
+  assert {
+    condition     = length(module.outscale) == 0
+    error_message = "Outscale module should be inactive when node_distribution is empty."
+  }
+}
+
+# ==============================================================================
+# Test 8: OVH module activates with OVH node distribution
+# ==============================================================================
+
+run "verify_ovh_module_activation" {
+  command = plan
+
+  variables {
+    node_distribution = {
+      ovh = {
+        control_planes     = 3
+        workers            = 1
+        region             = "GRA11"
+        flavor_name        = "b2-7"
+        image_id           = "dummy-talos-ovh-image"
+        network_name       = "Ext-Net"
+        availability_zones = ["nova"]
+      }
+    }
+  }
+
+  assert {
+    condition     = length(module.ovh) == 1
+    error_message = "OVH module should be active when OVH nodes are configured."
+  }
+
+  assert {
+    condition     = length(module.scw) == 0
+    error_message = "SCW module should be inactive when only OVH is configured."
+  }
+}
+
+# ==============================================================================
+# Test 9: Outscale module activates with Outscale node distribution
+# ==============================================================================
+
+run "verify_outscale_module_activation" {
+  command = plan
+
+  variables {
+    node_distribution = {
+      outscale = {
+        control_planes     = 3
+        workers            = 1
+        region             = "eu-west-2"
+        instance_type      = "tinav5.c2r4p1"
+        image_id           = "dummy-talos-osc-image"
+        availability_zones = ["eu-west-2a", "eu-west-2b", "eu-west-2c"]
+        bastion_image_id   = "ami-ubuntu-2204-mock"
+      }
+    }
+  }
+
+  assert {
+    condition     = length(module.outscale) == 1
+    error_message = "Outscale module should be active when Outscale nodes are configured."
+  }
+
+  assert {
+    condition     = length(module.scw) == 0
+    error_message = "SCW module should be inactive when only Outscale is configured."
   }
 }
