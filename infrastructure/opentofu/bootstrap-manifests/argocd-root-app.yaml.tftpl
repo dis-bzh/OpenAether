@@ -19,7 +19,8 @@ spec:
   source:
     repoURL: ${git_repo_url}
     targetRevision: HEAD
-    path: apps/overlays/${environment}
+    # Deploys ArgoCD self-config + ApplicationSet which then manages all clusters
+    path: apps/bootstrap/overlays/prod
   destination:
     server: https://kubernetes.default.svc
     namespace: ${namespace}
