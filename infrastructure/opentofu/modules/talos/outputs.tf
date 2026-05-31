@@ -33,3 +33,33 @@ output "worker_config" {
   value       = length(data.talos_machine_configuration.worker) > 0 ? data.talos_machine_configuration.worker[0].machine_configuration : null
   sensitive   = true
 }
+
+# Expose for testing and observability
+output "cluster_endpoint" {
+  description = "Kubernetes API cluster endpoint (https://<lb_ip>:6443)"
+  value       = var.cluster_endpoint
+}
+
+output "bootstrap_manifests_enabled" {
+  description = "Whether bootstrap manifests (ArgoCD) are injected via inlineManifests"
+  value       = var.bootstrap_manifests_enabled
+}
+
+output "control_plane_count" {
+  description = "Number of control plane nodes configured"
+  value       = var.control_plane_count
+}
+
+# Per-node generated machine configs — consumed by the provider module to inject
+# via USERDATA when config_delivery = "userdata" (Docker/container platforms).
+output "control_plane_machine_configs" {
+  description = "Generated control plane machine configurations (one per node)"
+  value       = [for c in data.talos_machine_configuration.control_plane : c.machine_configuration]
+  sensitive   = true
+}
+
+output "worker_machine_configs" {
+  description = "Generated worker machine configurations (one per node)"
+  value       = [for c in data.talos_machine_configuration.worker : c.machine_configuration]
+  sensitive   = true
+}
