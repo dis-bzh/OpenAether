@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Management cluster overlay
+# Activates: OpenBao, Keycloak, VictoriaMetrics, ExternalDNS (Phase 4)
+# NOT for workload clusters — use apps/overlays/workload-base/ for those.
+
+resources:
+  - ../../base/namespaces
+  - ../../base/external-secrets
+  - ../../base/kyverno
+  - ../../base/kyverno-policies
+  - ../../base/traefik
+  - ../../base/openbao
+  - ../../base/keycloak
+  - ../../base/cnpg
+  - ../../base/observability
+  - ../../base/storage

@@ -4,10 +4,25 @@ metadata:
   name: traefik-gateway-role
 rules:
   - apiGroups: ["gateway.networking.k8s.io"]
-    resources: ["gateways", "gatewayclasses", "httproutes", "tcproutes", "udproutes", "tlsroutes", "referencegrants", "grpcroutes"]
+    resources:
+      - gateways
+      - gatewayclasses
+      - httproutes
+      - tcproutes
+      - udproutes
+      - tlsroutes
+      - referencegrants
+      - grpcroutes
     verbs: ["list", "watch", "get"]
   - apiGroups: ["gateway.networking.k8s.io"]
-    resources: ["gateways/status", "gatewayclasses/status", "httproutes/status", "tcproutes/status", "udproutes/status", "tlsroutes/status", "grpcroutes/status"]
+    resources:
+      - gateways/status
+      - gatewayclasses/status
+      - httproutes/status
+      - tcproutes/status
+      - udproutes/status
+      - tlsroutes/status
+      - grpcroutes/status
     verbs: ["update", "patch"]
   - apiGroups: [""]
     resources: ["services", "endpoints", "secrets", "namespaces"]

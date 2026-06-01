@@ -2,7 +2,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: openaether-platform
-  namespace: argocd
+  namespace: management-gitops
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -13,10 +13,10 @@ spec:
     path: apps/overlays/local
   destination:
     server: https://kubernetes.default.svc
-    namespace: default
+    namespace: management-gitops
   syncPolicy:
     automated:
-      prune: true
+      prune: false
       selfHeal: true
     syncOptions:
       - CreateNamespace=true

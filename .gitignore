@@ -58,9 +58,26 @@ worker.yaml
 *.tfplan
 plan
 
+# Talos image builder (state + downloaded/converted image artifacts)
+infrastructure/talos-image/.terraform/
+infrastructure/talos-image/.terraform.lock.hcl
+infrastructure/talos-image/terraform.tfstate*
+infrastructure/talos-image/.talos-image-cache/
+
+# Local test cluster (state + generated configs)
+infrastructure/opentofu-local/.terraform/
+infrastructure/opentofu-local/.terraform.lock.hcl
+infrastructure/opentofu-local/terraform.tfstate*
+infrastructure/opentofu-local/kubeconfig
+infrastructure/opentofu-local/talosconfig
+infrastructure/opentofu/bootstrap-manifests/cilium-local.yaml
+
 # Editor/IDE
 .idea/
 .vscode/
 *.swp
 *.swo
 .DS_Store
+
+# Phase 2 SSH tunnel PIDs (Talos API via bastion)
+infrastructure/opentofu/.talos-tunnels.pids

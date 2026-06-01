@@ -9,7 +9,7 @@ data "scaleway_instance_image" "talos" {
 data "scaleway_instance_image" "worker" {
   count = var.worker_count
   name  = var.image_name
-  zone  = var.zone
+  zone  = element(var.additional_zones, count.index)
 }
 
 resource "scaleway_instance_server" "control_plane" {
@@ -21,16 +21,12 @@ resource "scaleway_instance_server" "control_plane" {
   project_id = var.project_id
 
   root_volume {
+    volume_type           = var.root_volume_type
     size_in_gb            = 20
     delete_on_termination = true
   }
 
   # No public IP - private network only
-
-  # User data for Talos config
-  user_data = {
-    "cloud-init" = data.talos_machine_configuration.control_plane.machine_configuration
-  }
 
   security_group_id = scaleway_instance_security_group.this[element(var.additional_zones, count.index)].id
 
@@ -42,22 +38,18 @@ resource "scaleway_instance_server" "worker" {
   name       = "${var.cluster_name}-worker-${count.index}"
   type       = var.instance_type
   image      = coalesce(var.image_id, data.scaleway_instance_image.worker[count.index].id)
-  zone       = var.zone
+  zone       = element(var.additional_zones, count.index)
   project_id = var.project_id
 
   root_volume {
+    volume_type           = var.root_volume_type
     size_in_gb            = 20
     delete_on_termination = true
   }
 
   # No public IP - private network only
 
-  # User data for Talos config
-  user_data = {
-    "cloud-init" = data.talos_machine_configuration.worker.machine_configuration
-  }
-
-  security_group_id = scaleway_instance_security_group.this[var.zone].id
+  security_group_id = scaleway_instance_security_group.this[element(var.additional_zones, count.index)].id
 
   tags = ["talos", "worker", var.cluster_name]
 }

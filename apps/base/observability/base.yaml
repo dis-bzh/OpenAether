@@ -29,7 +29,7 @@ spec:
     spec:
       containers:
       - name: victoriametrics
-        image: victoriametrics/victoria-metrics:v1.93.0
+        image: victoriametrics/victoria-metrics:v1.102.0
         args:
           - "-promscrape.config=/config/scrape.yml"
           - "-storageDataPath=/storage"
@@ -113,14 +113,27 @@ spec:
     spec:
       containers:
       - name: grafana
-        image: grafana/grafana:10.0.0
+        image: grafana/grafana:11.2.0
         ports:
           - containerPort: 3000
         env:
           - name: GF_AUTH_ANONYMOUS_ENABLED
-            value: "true" # For ease of demo
-          - name: GF_AUTH_ANONYMOUS_ORG_ROLE
-            value: "Admin"
+            value: "false"
+          - name: GF_AUTH_DISABLE_LOGIN_FORM
+            value: "false"
+          - name: GF_SECURITY_ADMIN_PASSWORD__FILE
+            value: /run/secrets/grafana-admin-password
+        volumeMounts:
+          - name: grafana-admin-secret
+            mountPath: /run/secrets
+            readOnly: true
+      volumes:
+        - name: grafana-admin-secret
+          secret:
+            secretName: grafana-admin
+            items:
+              - key: password
+                path: grafana-admin-password
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute

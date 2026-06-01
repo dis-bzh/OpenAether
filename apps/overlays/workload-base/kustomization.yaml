@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Workload cluster base overlay
+# Deployed by ArgoCD ApplicationSet to all registered spoke clusters.
+# Contains the minimal set needed on a workload cluster:
+#   - Namespaces
+#   - External Secrets (syncs secrets from management cluster's OpenBao)
+#   - Traefik (ingress for client apps)
+#   - Kyverno (policy enforcement)
+#   - KEDA (autoscaling)
+#   - Observability (VictoriaMetrics remote_write → management cluster)
+
+resources:
+  - ../../base/namespaces
+  - ../../base/external-secrets
+  - ../../base/kyverno
+  - ../../base/kyverno-policies
+  - ../../base/traefik
+  - ../../base/keda
+  - ../../base/storage
