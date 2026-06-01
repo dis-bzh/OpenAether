@@ -79,6 +79,44 @@ install_task() {
     fi
 }
 
+install_awscli_bundle() {
+    echo "Installing AWS CLI v2 from the official bundle..."
+    command -v unzip &> /dev/null || sudo apt-get install -y unzip
+    local tmp
+    tmp="$(mktemp -d)"
+    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o "$tmp/aws.zip"
+    (cd "$tmp" && unzip -q aws.zip && sudo ./aws/install --update)
+    rm -rf "$tmp"
+}
+
+install_image_tools() {
+    echo "Installing Talos image build tools (zstd, qemu-img, aws)..."
+
+    # zstd + qemu-img (qemu-utils) — installed separately so a missing aws
+    # package never blocks them (Ubuntu 24.04 dropped awscli from apt).
+    if command -v apt-get &> /dev/null; then
+        sudo apt-get update && sudo apt-get install -y zstd qemu-utils
+    elif command -v brew &> /dev/null; then
+        brew install zstd qemu
+    elif command -v dnf &> /dev/null; then
+        sudo dnf install -y zstd qemu-img
+    else
+        echo "⚠️  Could not auto-install zstd/qemu-img. Install them manually."
+    fi
+
+    # AWS CLI — not in every distro's repos; try brew, then snap, then the
+    # official v2 bundle (used to upload the image to Object Storage).
+    if ! command -v aws &> /dev/null; then
+        if command -v brew &> /dev/null; then
+            brew install awscli
+        elif command -v snap &> /dev/null; then
+            sudo snap install aws-cli --classic 2>/dev/null || install_awscli_bundle
+        else
+            install_awscli_bundle
+        fi
+    fi
+}
+
 install_precommit() {
     echo "Installing pre-commit..."
     if command -v apt-get &> /dev/null; then
@@ -119,7 +157,16 @@ if ! check_cmd task; then
     install_task
 fi
 
-# 6. Check pre-commit (optional but recommended)
+# 6. Check Talos image build tools (zstd, qemu-img, aws) — used by `task talos-image`
+MISSING_IMG_TOOLS=0
+for t in curl zstd qemu-img aws; do
+    check_cmd "$t" || MISSING_IMG_TOOLS=1
+done
+if [ "$MISSING_IMG_TOOLS" -eq 1 ]; then
+    install_image_tools
+fi
+
+# 7. Check pre-commit (optional but recommended)
 if ! check_cmd pre-commit; then
     echo -e "${RED}⚠ pre-commit is not installed (recommended for DevSecOps)${NC}"
     read -p "Install pre-commit? (y/N) " -n 1 -r
@@ -132,10 +179,11 @@ fi
 
 echo -e "\n${GREEN}🚀 Environment ready!${NC}"
 echo ""
-echo "Next steps:"
-echo "  1. cd infrastructure/opentofu"
-echo "  2. cp tofu.tfvars.example tofu.tfvars  # Edit with your config"
-echo "  3. export AWS_ACCESS_KEY_ID=<KEY>"
-echo "  4. export AWS_SECRET_ACCESS_KEY=<SECRET>"
-echo "  5. export TF_VAR_encryption_passphrase=<PASSPHRASE>"
-echo "  6. tofu init && tofu plan -var-file=tofu.tfvars"
+echo "Next steps (one env file == one cluster):"
+echo "  1. export SCW_ACCESS_KEY / SCW_SECRET_KEY / SCW_DEFAULT_PROJECT_ID"
+echo "  2. export AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (= your Scaleway keys, for S3)"
+echo "  3. export TF_VAR_encryption_passphrase=<32+ chars>"
+echo "  4. Build the Talos image once:  task talos-image PROVIDER=scaleway"
+echo "  5. cd infrastructure/opentofu"
+echo "  6. cp envs/management-scw.tfvars.example envs/management-scw.tfvars  # then edit"
+echo "  7. tofu init && tofu plan -var-file=envs/management-scw.tfvars"
