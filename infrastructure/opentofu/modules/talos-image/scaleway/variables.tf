@@ -1,0 +1,57 @@
+# ==============================================================================
+# Talos image — Scaleway
+# Downloads the Talos Image Factory artifact for the `scaleway` platform,
+# converts it to QCOW2, uploads it to Object Storage, imports it as a snapshot
+# and turns that snapshot into a bootable Instance Image.
+# ==============================================================================
+
+variable "talos_version" {
+  description = "Talos version tag (e.g. v1.13.3) — must match an Image Factory release."
+  type        = string
+}
+
+variable "arch" {
+  description = "Image architecture (amd64 or arm64)."
+  type        = string
+  default     = "amd64"
+
+  validation {
+    condition     = contains(["amd64", "arm64"], var.arch)
+    error_message = "arch must be amd64 or arm64."
+  }
+}
+
+variable "schematic_id" {
+  description = "Image Factory schematic ID (resolved by the root from schematic.yaml)."
+  type        = string
+}
+
+variable "image_name" {
+  description = "Name of the resulting Scaleway Instance Image (the cluster module looks it up by this name)."
+  type        = string
+}
+
+variable "bucket_name" {
+  description = "Object Storage bucket used to stage the QCOW2 for the snapshot import."
+  type        = string
+}
+
+variable "region" {
+  description = "Scaleway region for the bucket (e.g. fr-par)."
+  type        = string
+}
+
+variable "zones" {
+  description = "Scaleway zones to publish the image into. Scaleway images are zonal, so list every zone the cluster spreads across (e.g. fr-par-1/2/3)."
+  type        = list(string)
+}
+
+variable "s3_endpoint" {
+  description = "S3-compatible endpoint for the Object Storage upload (e.g. https://s3.fr-par.scw.cloud)."
+  type        = string
+}
+
+variable "cache_dir" {
+  description = "Local directory used to stage the downloaded/converted image."
+  type        = string
+}

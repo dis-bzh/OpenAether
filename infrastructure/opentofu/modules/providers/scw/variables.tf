@@ -1,86 +1,81 @@
 variable "cluster_name" {
-  type = string
-}
-
-variable "machine_secrets" {
-  description = "Talos machine secrets"
-  sensitive   = true
-}
-
-variable "cluster_endpoint" {
-  type = string
-}
-
-variable "talos_version" {
-  type = string
-}
-
-variable "kubernetes_version" {
-  type = string
+  description = "Name of the cluster"
+  type        = string
 }
 
 variable "region" {
-  type    = string
-  default = "fr-par"
+  description = "Scaleway region (e.g. fr-par)"
+  type        = string
+  default     = "fr-par"
 }
 
 variable "zone" {
-  type    = string
-  default = "fr-par-1"
+  description = "Scaleway primary zone (e.g. fr-par-1)"
+  type        = string
+  default     = "fr-par-1"
 }
 
 variable "additional_zones" {
-  type    = list(string)
-  default = ["fr-par-1", "fr-par-2", "fr-par-3"]
+  description = "Zones for multi-AZ distribution of nodes"
+  type        = list(string)
+  default     = ["fr-par-1", "fr-par-2", "fr-par-3"]
 }
 
 variable "project_id" {
+  description = "Scaleway Project ID (null = provider default)"
   type        = string
-  description = "Scaleway Project ID"
-  default     = null # If null, uses provider default
+  default     = null
 }
 
 variable "control_plane_count" {
-  type    = number
-  default = 0
+  description = "Number of control plane nodes"
+  type        = number
+  default     = 0
 }
 
 variable "worker_count" {
-  type    = number
-  default = 0
+  description = "Number of worker nodes"
+  type        = number
+  default     = 0
 }
 
 variable "instance_type" {
-  type    = string
-  default = "DEV1-S"
+  description = "Instance type for cluster nodes"
+  type        = string
+  default     = "DEV1-S"
+}
+
+variable "root_volume_type" {
+  description = "Root volume type. 'sbs_volume' for block-storage instances (PRO2/POP2, recommended); 'l_ssd' for local-SSD instances (DEV1/GP1)."
+  type        = string
+  default     = "sbs_volume"
 }
 
 variable "image_id" {
+  description = "Talos image ID (zonal, overrides image_name)"
   type        = string
-  description = "ID of the Talos image (zonal)"
   default     = null
 }
 
 variable "image_name" {
+  description = "Talos image name (looked up across zones)"
   type        = string
-  description = "Name of the Talos image (to find across zones)"
   default     = "talos"
 }
 
-# Config will be generated locally in config.tf
-
+# Security
 variable "admin_ip" {
+  description = "Allowed source IPs/CIDRs for admin access (SSH, K8s API)"
   type        = list(string)
-  description = "List of allowed Source IPs/CIDRs for Admin Access (SSH, API)"
 }
 
 variable "bastion_ssh_key" {
+  description = "SSH public key for bastion access"
   type        = string
-  description = "Clé SSH publique pour le bastion"
 }
 
 variable "bastion_image_id" {
+  description = "Image ID for the bastion host"
   type        = string
-  description = "Image ID pour le bastion (Ubuntu/Debian)"
-  default     = "ubuntu_jammy" # Ubuntu 22.04 LTS
+  default     = "ubuntu_jammy"
 }

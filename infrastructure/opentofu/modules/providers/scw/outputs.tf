@@ -1,13 +1,33 @@
-# Nodes no longer have public IPs - private only
+# Node private IPs (via IPAM)
 output "control_plane_private_ips" {
-  value = [for s in scaleway_instance_server.control_plane : s.private_ips[0].address if length(s.private_ips) > 0]
+  description = "Private IPs of control plane nodes"
+  value       = [for ip in scaleway_ipam_ip.control_plane : split("/", ip.address)[0]]
 }
 
 output "worker_private_ips" {
-  value = [for s in scaleway_instance_server.worker : s.private_ips[0].address if length(s.private_ips) > 0]
+  description = "Private IPs of worker nodes"
+  value       = [for ip in scaleway_ipam_ip.worker : split("/", ip.address)[0]]
 }
 
-# Bastion public IP for SSH access
+# Load Balancer IPs
+output "k8s_lb_ip" {
+  description = "Public IP of the Kubernetes API LB (6443)"
+  value       = scaleway_lb_ip.k8s.ip_address
+}
+
+output "app_lb_ip" {
+  description = "Public IP of the App LB (80/443)"
+  value       = scaleway_lb_ip.app.ip_address
+}
+
+# Bastion
 output "bastion_ip" {
-  value = scaleway_instance_ip.bastion.address
+  description = "Public IP of the bastion host (SSH access)"
+  value       = scaleway_instance_ip.bastion.address
+}
+
+# NAT Gateway
+output "nat_gateway_ip" {
+  description = "Public IP of the NAT gateway (for LB ACL whitelisting)"
+  value       = scaleway_vpc_public_gateway_ip.this.address
 }

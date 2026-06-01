@@ -16,4 +16,3 @@ spec:
   clusterIP: None
   selector:
     app: openbao
-

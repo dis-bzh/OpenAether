@@ -30,38 +30,40 @@ spec:
             matchLabels:
               app: openbao
       containers:
-      - name: openbao
-        image: openbao/openbao:2.0.0
-        args:
-          - "server"
-          - "-config=/bao/config/config.hcl"
-        env:
-          - name: POD_IP
-            valueFrom:
-              fieldRef:
-                fieldPath: status.podIP
-        ports:
-          - containerPort: 8200
-            name: http
-          - containerPort: 8201
-            name: cluster
-        securityContext:
-          capabilities:
-            add: ["IPC_LOCK"] # Often needed for mlock, verify if can run without
-        volumeMounts:
-          - name: data
-            mountPath: /bao/data
-          - name: config
-            mountPath: /bao/config
+        - name: openbao
+          image: openbao/openbao:2.2.0
+          args:
+            - "server"
+            - "-config=/bao/config/config.hcl"
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          ports:
+            - containerPort: 8200
+              name: http
+            - containerPort: 8201
+              name: cluster
+          securityContext:
+            capabilities:
+              add:
+                - IPC_LOCK
+          volumeMounts:
+            - name: data
+              mountPath: /bao/data
+            - name: config
+              mountPath: /bao/config
       volumes:
         - name: config
           configMap:
             name: openbao-config
   volumeClaimTemplates:
-  - metadata:
-      name: data
-    spec:
-      accessModes: [ "ReadWriteOnce" ]
-      resources:
-        requests:
-          storage: 1Gi
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi

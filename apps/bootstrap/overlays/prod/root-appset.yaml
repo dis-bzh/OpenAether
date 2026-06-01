@@ -1,0 +1,43 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: openaether-platform
+  namespace: management-gitops
+  annotations:
+    # This ApplicationSet auto-deploys the correct overlay to each cluster
+    # based on the openaether.io/role label set on the ArgoCD cluster secret.
+    # To add a new cluster: task register-spoke CLUSTER=<name> PROVIDER=<provider>
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            openaether.io/managed: "true"
+
+  template:
+    metadata:
+      name: '{{.name}}-platform'
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/dis-bzh/OpenAether.git
+        targetRevision: HEAD
+        # Cluster role determines which overlay is deployed:
+        #   management → apps/overlays/management/
+        #   workload   → apps/overlays/workload-base/
+        path: 'apps/overlays/{{index .metadata.labels "openaether.io/role"}}'
+      destination:
+        server: '{{.server}}'
+        namespace: management-gitops
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
