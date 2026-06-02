@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# OpenAether — DRP Management Cluster
+# OpenAether — Failover Management Cluster (cross-provider)
 #
-# Reconstructs the management cluster on a fallback provider when the primary
-# (Scaleway) management cluster is unreachable.
+# Stands up a SECOND management cluster on a DIFFERENT cloud when your primary
+# management provider is unreachable. (Re-running your own management-<provider>
+# on the same provider is the everyday recovery — this is the cross-provider case.)
 #
 # Target RTO: ~30 minutes (Phase 3). Will improve to <5 min in Phase 4b.
 #
 # Usage:
-#   ./scripts/drp-management.sh <provider>
-#   task drp PROVIDER=ovh
+#   ./scripts/failover-management.sh <provider>
+#   task failover PROVIDER=ovh
 #
-# Supported fallback providers: ovh, outscale
+# Supported providers: scw, ovh, outscale (pick one that is NOT your primary)
 #
 # Prerequisites:
 #   - tofu CLI available
@@ -25,23 +26,23 @@ PROVIDER="${1:-${PROVIDER:-}}"
 
 if [[ -z "$PROVIDER" ]]; then
   echo "Usage: $0 <provider>"
-  echo "       Supported: ovh, outscale"
+  echo "       Supported: scw, ovh, outscale (pick one that is NOT your primary)"
   exit 1
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOFU_DIR="${SCRIPT_DIR}/../infrastructure/opentofu"
-ENVFILE="${TOFU_DIR}/envs/drp-${PROVIDER}.tfvars"
+ENVFILE="${TOFU_DIR}/envs/failover-${PROVIDER}.tfvars"
 
 if [[ ! -f "${ENVFILE}" ]]; then
-  echo "❌ DRP env file not found: ${ENVFILE}"
+  echo "❌ Failover env file not found: ${ENVFILE}"
   echo "   Create it from the template:"
-  echo "     cp ${TOFU_DIR}/envs/drp-${PROVIDER}.tfvars.example ${ENVFILE}"
-  echo "   then fill in your fallback provider config."
+  echo "     cp ${TOFU_DIR}/envs/failover-${PROVIDER}.tfvars.example ${ENVFILE}"
+  echo "   then fill in your failover provider config."
   exit 1
 fi
 
-echo "🚨 OpenAether DRP — Rebuilding management cluster on ${PROVIDER}"
+echo "🚨 OpenAether Failover — Standing up a management cluster on ${PROVIDER}"
 echo "   Env file: ${ENVFILE}"
 echo ""
 echo "⚠️  This will deploy a NEW management cluster. Workload clusters continue"
@@ -59,7 +60,11 @@ cd "${TOFU_DIR}"
 # ─── Phase 1: Infrastructure ──────────────────────────────────────────────────
 echo ""
 echo "▶ Phase 1: Provisioning infrastructure on ${PROVIDER}..."
-tofu init -reconfigure
+# Ensure the backup buckets exist before init (the S3 backend won't create them).
+"${SCRIPT_DIR}/ensure-buckets.sh" "${ENVFILE}"
+# Partial backend derived from the tfvars (single source of truth): the failover
+# cluster's state lives on its own provider, reachable when the primary is down.
+tofu init -reconfigure $("${SCRIPT_DIR}/tf-backend.sh" "${ENVFILE}")
 tofu apply -var-file="${ENVFILE}" -auto-approve
 
 BASTION_IP=$(tofu output -raw bastion_ip)
@@ -98,6 +103,10 @@ tofu apply -var-file="${ENVFILE}" -var talos_bootstrap=true -auto-approve
 
 echo "  ✅ Talos cluster bootstrapped"
 
+# Replicate the rebuilt cluster's (encrypted) state to its -backup store. Set
+# BACKUP_AWS_* to the recovering primary's creds to push it back there.
+"${SCRIPT_DIR}/backup-state.sh" "${TOFU_DIR}" || echo "  ⚠️  state replication skipped"
+
 # ─── Phase 4: Verify & Instructions ──────────────────────────────────────────
 echo ""
 echo "▶ Phase 4: Cluster health check..."
@@ -108,7 +117,7 @@ talosctl health --endpoints 127.0.0.1 || echo "  ⚠️  Health check failed —
 
 echo ""
 echo "════════════════════════════════════════════════════════════════"
-echo "✅ DRP complete — Management cluster rebuilt on ${PROVIDER}"
+echo "✅ Failover complete — Management cluster running on ${PROVIDER}"
 echo "════════════════════════════════════════════════════════════════"
 echo ""
 echo "Next steps:"
