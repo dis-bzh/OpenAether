@@ -2,17 +2,6 @@ mock_provider "scaleway" {}
 mock_provider "openstack" {}
 mock_provider "outscale" {}
 mock_provider "talos" {}
-mock_provider "aws" {}
-
-# Dummy AWS credentials for test environment
-provider "aws" {
-  region                      = "us-east-1"
-  access_key                  = "mock"
-  secret_key                  = "mock"
-  skip_credentials_validation = true
-  skip_metadata_api_check     = true
-  skip_requesting_account_id  = true
-}
 
 # --- Scaleway image data sources ---
 
@@ -164,9 +153,10 @@ variables {
   # Non-placeholder manifest to pass precondition
   cilium_manifest = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium"
 
-  backup_s3_endpoint = "https://s3.fr-par.scw.cloud"
-  backup_s3_region   = "fr-par"
-  backup_s3_bucket   = "test-bucket"
+  s3_primary_endpoint = "https://s3.fr-par.scw.cloud"
+  s3_primary_region   = "fr-par"
+  s3_replica_endpoint = "https://s3.fr-par.scw.cloud"
+  s3_replica_region   = "fr-par"
 }
 
 # ==============================================================================

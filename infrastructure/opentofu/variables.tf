@@ -137,20 +137,38 @@ variable "root_app_manifest" {
 }
 
 # ==============================================================================
-# S3 Backup
+# S3 Backup / Disaster Recovery
+#
+# Every DR artifact lives in TWO object stores: a PRIMARY (the cluster's own
+# provider, reached with the apply's AWS_* creds) and a REPLICA (the "-backup"
+# bucket — in prod a *different* provider, reached with BACKUP_AWS_* creds, which
+# default to the primary creds when unset, e.g. for dev).
+#
+#   tfstate              -> s3-<cluster>-tfstate-<env>      (+ -backup)
+#   kubeconfig/talosconfig -> s3-<cluster>-<role>-<env>     (+ -backup)
+#
+# Bucket names are DERIVED from this convention (see locals in backup.tf), so you
+# only provide the endpoints/regions of the two stores here. tfstate client-side
+# encryption is the backend's encryption{} block (AES-GCM); the artifacts are
+# client-side encrypted with gpg (AES-256) by scripts/backup-artifacts.sh.
 # ==============================================================================
 
-variable "backup_s3_endpoint" {
-  description = "S3 endpoint for backups (e.g. https://s3.fr-par.scw.cloud)"
+variable "s3_primary_endpoint" {
+  description = "S3 endpoint of the PRIMARY store (the cluster's own provider, e.g. https://s3.fr-par.scw.cloud)"
   type        = string
 }
 
-variable "backup_s3_region" {
-  description = "S3 region for backups"
+variable "s3_primary_region" {
+  description = "S3 region of the primary store (e.g. fr-par)"
   type        = string
 }
 
-variable "backup_s3_bucket" {
-  description = "S3 bucket name for backups"
+variable "s3_replica_endpoint" {
+  description = "S3 endpoint of the REPLICA/backup store. Prod: a different provider (e.g. OVH https://s3.gra.io.cloud.ovh.net); dev: reuse the primary endpoint."
+  type        = string
+}
+
+variable "s3_replica_region" {
+  description = "S3 region of the replica/backup store (prod: e.g. gra)"
   type        = string
 }

@@ -11,16 +11,6 @@ mock_provider "scaleway" {}
 mock_provider "openstack" {}
 mock_provider "outscale" {}
 mock_provider "talos" {}
-mock_provider "aws" {}
-
-provider "aws" {
-  region                      = "us-east-1"
-  access_key                  = "mock"
-  secret_key                  = "mock"
-  skip_credentials_validation = true
-  skip_metadata_api_check     = true
-  skip_requesting_account_id  = true
-}
 
 
 # Scaleway overrides (always needed even when not active in some tests)
@@ -130,14 +120,15 @@ variables {
       zones          = ["fr-par-1", "fr-par-2", "fr-par-1"]
     }
   }
-  git_repo_url       = "https://github.com/test/repo.git"
-  argocd_namespace   = "management-gitops"
-  cilium_manifest    = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium-config\n  namespace: kube-system"
-  argocd_manifest    = "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: management-gitops"
-  root_app_manifest  = "apiVersion: argoproj.io/v1alpha1\nkind: Application\nmetadata:\n  name: test-root"
-  backup_s3_endpoint = "https://s3.fr-par.scw.cloud"
-  backup_s3_region   = "fr-par"
-  backup_s3_bucket   = "test-bucket"
+  git_repo_url        = "https://github.com/test/repo.git"
+  argocd_namespace    = "management-gitops"
+  cilium_manifest     = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium-config\n  namespace: kube-system"
+  argocd_manifest     = "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: management-gitops"
+  root_app_manifest   = "apiVersion: argoproj.io/v1alpha1\nkind: Application\nmetadata:\n  name: test-root"
+  s3_primary_endpoint = "https://s3.fr-par.scw.cloud"
+  s3_primary_region   = "fr-par"
+  s3_replica_endpoint = "https://s3.fr-par.scw.cloud"
+  s3_replica_region   = "fr-par"
 }
 
 # ==============================================================================

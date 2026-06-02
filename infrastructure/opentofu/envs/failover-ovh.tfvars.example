@@ -1,0 +1,59 @@
+# ==============================================================================
+# Failover Management Cluster on OVH (cross-provider)
+# A SECOND management cluster, on OVH, for when your PRIMARY management provider
+# is lost/unavailable. Rebuilds a full management cluster in ~30 min.
+# Use this only when OVH is NOT your primary provider.
+#
+# Note on terminology: re-running your own management-<provider>.tfvars rebuilds
+# the cluster on the SAME provider (the everyday recovery). This file is the
+# CROSS-provider failover — same role, different cloud.
+#
+# Usage:
+#   task failover PROVIDER=ovh
+#   (or manually: tofu apply -var-file=envs/failover-ovh.tfvars -var talos_bootstrap=true)
+#
+# After rebuild:
+#   1. ArgoCD bootstrap → syncs from Git automatically
+#   2. Re-register spoke clusters: task register-spoke CLUSTER=<name> PROVIDER=<provider>
+#   3. Update DNS for management endpoints (if using ExternalDNS — automated in Phase 4)
+# ==============================================================================
+
+cluster_name       = "openaether"
+environment        = "prod"
+cluster_role       = "management"
+talos_version      = "v1.13.3"
+kubernetes_version = "v1.35.3"
+talos_bootstrap    = false # Set to true after infra is up
+
+node_distribution = {
+  ovh = {
+    control_planes     = 3
+    workers            = 2
+    region             = "GRA11"
+    flavor_name        = "b2-7"
+    image_id           = "TALOS_IMAGE_ID" # Replace with actual OVH image UUID
+    network_name       = "Ext-Net"
+    availability_zones = ["nova"]
+    bastion_image_id   = "Ubuntu 22.04"
+  }
+}
+
+admin_ip = ["YOUR_IP/32"]
+
+bastion_ssh_keys = {
+  ovh = "ssh-ed25519 AAAA... user@host"
+}
+
+git_repo_url     = "https://github.com/dis-bzh/OpenAether.git"
+argocd_namespace = "management-gitops"
+
+# --- Backup / DR object stores ------------------------------------------------
+# This failover cluster runs when your primary provider is DOWN, so its PRIMARY
+# state lives on OVH (reachable), and it replicates BACK to the primary once it
+# recovers. Derived buckets: state -> s3-openaether-ovh-tfstate-prod + -backup;
+# kube/talos -> s3-openaether-ovh-management-prod (+ -backup). Export BACKUP_AWS_*
+# with the primary provider's creds for the replica.
+s3_primary_endpoint = "https://s3.gra.io.cloud.ovh.net" # failover state on OVH (your primary is down)
+s3_primary_region   = "gra"
+s3_replica_endpoint = "https://s3.fr-par.scw.cloud"     # replicate back to Scaleway on recovery
+s3_replica_region   = "fr-par"

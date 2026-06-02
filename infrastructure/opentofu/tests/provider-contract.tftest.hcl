@@ -8,16 +8,6 @@ mock_provider "scaleway" {}
 mock_provider "openstack" {}
 mock_provider "outscale" {}
 mock_provider "talos" {}
-mock_provider "aws" {}
-
-provider "aws" {
-  region                      = "us-east-1"
-  access_key                  = "mock"
-  secret_key                  = "mock"
-  skip_credentials_validation = true
-  skip_metadata_api_check     = true
-  skip_requesting_account_id  = true
-}
 
 # Scaleway overrides (needed even when inactive to avoid errors if module is not count=0)
 override_data {
@@ -106,19 +96,20 @@ override_resource {
 # ==============================================================================
 
 variables {
-  cluster_name       = "contract-test"
-  environment        = "dev"
-  cluster_role       = "workload"
-  talos_bootstrap    = false
-  backup_enabled     = false # backups run a local-exec (aws s3 cp); skip in tests
-  admin_ip           = ["10.0.0.1/32"]
-  bastion_ssh_keys   = { scaleway = "ssh-ed25519 test" }
-  git_repo_url       = "https://github.com/test/repo.git"
-  argocd_namespace   = "management-gitops"
-  cilium_manifest    = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium-test"
-  backup_s3_endpoint = "https://s3.fr-par.scw.cloud"
-  backup_s3_region   = "fr-par"
-  backup_s3_bucket   = "test-bucket"
+  cluster_name        = "contract-test"
+  environment         = "dev"
+  cluster_role        = "workload"
+  talos_bootstrap     = false
+  backup_enabled      = false # backups run a local-exec (aws s3 cp); skip in tests
+  admin_ip            = ["10.0.0.1/32"]
+  bastion_ssh_keys    = { scaleway = "ssh-ed25519 test" }
+  git_repo_url        = "https://github.com/test/repo.git"
+  argocd_namespace    = "management-gitops"
+  cilium_manifest     = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium-test"
+  s3_primary_endpoint = "https://s3.fr-par.scw.cloud"
+  s3_primary_region   = "fr-par"
+  s3_replica_endpoint = "https://s3.fr-par.scw.cloud"
+  s3_replica_region   = "fr-par"
 }
 
 # ==============================================================================
