@@ -5,7 +5,7 @@
 
 ## Version
 
-**v0.3.0** — Multi-cloud infrastructure with hub/spoke GitOps and DRP automation.
+**v0.3.2** — Multi-cloud infrastructure with hub/spoke GitOps, cross-provider failover, and client-side-encrypted dual-store backups.
 
 ## Architecture
 
@@ -23,7 +23,7 @@ SCW Workload Cluster     OVH Workload Cluster     Outscale Workload Cluster
 (spoke — client apps)    (spoke — client apps)    (spoke — client apps)
 ```
 
-**Design principle:** The management cluster is NOT in the client data path. If the management cluster is temporarily unavailable, client workloads continue running unaffected. Management plane RTO: ~30 min (DRP) → Phase 4 target: <5 min.
+**Design principle:** The management cluster is NOT in the client data path. If the management cluster is temporarily unavailable, client workloads continue running unaffected. Management plane RTO: ~30 min (cross-provider failover) → Phase 4 target: <5 min.
 
 ## Layer Status
 
@@ -56,12 +56,10 @@ OpenAether/
 │   └── opentofu/                    # Infrastructure as Code
 │       ├── main.tf                  # Provider orchestration + junction point
 │       ├── variables.tf             # node_distribution, cluster_role, etc.
-│       ├── envs/                    # Per-cluster tfvars files
-│       │   ├── management-scw.tfvars
-│       │   ├── workload-scw.tfvars
-│       │   ├── workload-ovh.tfvars
-│       │   ├── workload-outscale.tfvars
-│       │   └── drp-ovh.tfvars       # DRP management cluster
+│       ├── envs/                    # Per-cluster config (<kind>-<provider>)
+│       │   ├── management-{scw,ovh,outscale}.tfvars(.example)
+│       │   ├── workload-{scw,ovh,outscale}.tfvars(.example)
+│       │   └── failover-{scw,ovh,outscale}.tfvars(.example)   # cross-provider failover mgmt
 │       ├── modules/
 │       │   ├── talos/               # Cluster secrets, config, bootstrap
 │       │   └── providers/
@@ -88,7 +86,11 @@ OpenAether/
     ├── setup.sh
     ├── render-bootstrap-manifests.sh
     ├── register-spoke.sh            # Register spoke cluster in ArgoCD hub
-    ├── drp-management.sh            # Rebuild management cluster (~30 min)
+    ├── failover-management.sh       # Stand up management on another cloud (~30 min)
+    ├── ensure-buckets.sh            # Create the per-cluster backup buckets (idempotent)
+    ├── tf-backend.sh                # Derive the S3 backend config from a cluster's tfvars
+    ├── backup-state.sh              # Replicate the encrypted tfstate to the -backup store
+    ├── backup-artifacts.sh          # gpg-encrypt + upload kube/talosconfig (OpenTofu local-exec)
     └── test-local-stack.sh          # Full local validation (no cloud needed)
 ```
 
@@ -106,26 +108,21 @@ OpenAether/
 ### Deploy the Management Cluster (Scaleway)
 
 ```bash
-cd infrastructure/opentofu
+# 1. Export creds: SCW_* + AWS_* (= your SCW S3 keys) + TF_VAR_encryption_passphrase (>=32).
+#    Prod cross-provider backup: also export BACKUP_AWS_ACCESS_KEY_ID/SECRET.
 
-# 1. Initialize
-tofu init
+# 2. Configure your cluster (copy the template, then edit)
+cp infrastructure/opentofu/envs/management-scw.tfvars.example infrastructure/opentofu/envs/management-scw.tfvars
+# Edit: admin_ip, bastion_ssh_keys, s3_primary_*/s3_replica_*, etc.
+# Real envs/*.tfvars are git-ignored; only the *.tfvars.example are versioned.
 
-# 2. Configure your environment (copy the template, then edit)
-cp envs/management-scw.tfvars.example envs/management-scw.tfvars
-# Edit: admin_ip, bastion_ssh_keys, backup_s3_bucket, etc.
-# The real envs/*.tfvars are git-ignored; only the *.tfvars.example are versioned.
+# 3. Phase 1 — ensures the backup buckets, derives + inits the backend, provisions
+#    the infra, replicates the state. PROVIDER defaults to scw (also ovh, outscale).
+task infra-management
 
-# 3. Phase 1 — Provision infrastructure
-task deploy-management
-# or: tofu apply -var-file=envs/management-scw.tfvars -var talos_bootstrap=false
-
-# 4. Establish SSH tunnels via bastion (one per control plane)
-# See: tofu output instructions
-
-# 5. Phase 2 — Bootstrap Talos + ArgoCD
-task bootstrap-management
-# or: tofu apply -var-file=envs/management-scw.tfvars -var talos_bootstrap=true
+# 4. Phase 2 — opens the SSH tunnels (from state), bootstraps Talos + ArgoCD, and
+#    pushes the client-side-encrypted backups (kube/talosconfig + state replica).
+task management KEY=~/.ssh/yourkey
 ```
 
 ### Deploy a Workload Cluster
@@ -135,22 +132,21 @@ task bootstrap-management
 export OS_AUTH_URL=https://auth.cloud.ovh.net/v3
 export OS_USERNAME=...
 
-# cp envs/workload-ovh.tfvars.example envs/workload-ovh.tfvars
-# Edit envs/workload-ovh.tfvars with your image_id and credentials
+# cp infrastructure/opentofu/envs/workload-ovh.tfvars.example infrastructure/opentofu/envs/workload-ovh.tfvars
+# Edit it with your image_id and credentials
 
-task deploy-workload PROVIDER=ovh
-# After SSH tunnels:
-task bootstrap-workload PROVIDER=ovh
+task infra-workload PROVIDER=ovh
+task workload PROVIDER=ovh KEY=~/.ssh/yourkey
 
 # Register the new cluster in ArgoCD hub
 task register-spoke CLUSTER=openaether-ovh-prod PROVIDER=ovh
 ```
 
-### DRP — Management Cluster Recovery
+### Cross-provider failover — second management on another cloud
 
 ```bash
-# If Scaleway is unavailable, rebuild management cluster on OVH
-task drp PROVIDER=ovh
+# If your primary management provider is unavailable, stand one up elsewhere:
+task failover PROVIDER=ovh
 # RTO: ~30 minutes. Client workloads are unaffected during recovery.
 ```
 
@@ -170,8 +166,9 @@ task drp PROVIDER=ovh
 |---------|----------------|
 | No public IPs on cluster nodes | VPC-only, bastion SSH tunnel |
 | Bastion SSH | Dedicated unprivileged user, key-only (root login & passwords disabled) |
-| State encryption | AES-GCM + PBKDF2 in S3 |
-| Artifact backup encryption | S3 SSE-S3 (AES256) |
+| State encryption | Client-side AES-GCM + PBKDF2 (OpenTofu `encryption{}`) before S3 |
+| Artifact backup encryption | Client-side gpg AES-256 (authenticated) + S3 SSE on top |
+| Backup replication / DR | State + artifacts mirrored to a `-backup` store (prod: a different provider, separate creds) |
 | Kubernetes API access | LB ACL restricted to `admin_ip` |
 | Talos API access | SSH tunnel only (port 50000, never on LB) |
 | Inter-node encryption | Cilium WireGuard |
@@ -181,7 +178,7 @@ task drp PROVIDER=ovh
 
 | Phase | Deliverable | Status |
 |-------|-------------|--------|
-| **3** | OVH + Outscale active, ArgoCD hub/spoke, DRP automated | ✅ Done |
+| **3** | OVH + Outscale active, ArgoCD hub/spoke, cross-provider failover | ✅ Done |
 | **4** | DNS failover (ExternalDNS + k8GB), OpenBao auto-unseal | ⏳ Planned |
 | **4b** | Warm standby management on OVH (<5 min RTO) | ⏳ Planned |
 | **5** | Service catalogue (Kratix / Backstage) | ⏳ Planned |

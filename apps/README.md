@@ -66,10 +66,10 @@ bootstrap/overlays/prod/
 
 ```bash
 # 1. Provision the cluster
-task deploy-workload PROVIDER=ovh
+task infra-workload PROVIDER=ovh
 
-# 2. Bootstrap Talos
-task bootstrap-workload PROVIDER=ovh
+# 2. Bootstrap Talos (open tunnels + apply)
+task workload PROVIDER=ovh KEY=~/.ssh/yourkey
 
 # 3. Register in ArgoCD hub (creates a cluster secret with openaether.io/role=workload)
 task register-spoke CLUSTER=openaether-ovh-prod PROVIDER=ovh
