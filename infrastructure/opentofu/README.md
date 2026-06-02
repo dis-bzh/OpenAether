@@ -24,10 +24,10 @@ tofu apply -var-file=envs/<cluster>.tfvars
   │     ├── Worker config
   │     └── Config apply → bootstrap → health check → kubeconfig
   │
-  └── S3 backup (AES-GCM encrypted)
-        ├── talosconfig
-        ├── kubeconfig
-        └── machine configs
+  └── Encrypted backup → primary + replica stores
+        ├── tfstate     (client AES-GCM, replicated post-apply by backup-state.sh)
+        ├── talosconfig (client gpg AES-256 + SSE, by backup-artifacts.sh)
+        └── kubeconfig  (client gpg AES-256 + SSE, by backup-artifacts.sh)
 ```
 
 ### Provider Contract
@@ -56,7 +56,9 @@ Between phases, establish SSH tunnels via the bastion for Talos API access (port
 | `talosctl` | Cluster access + validation |
 | `kubectl` | App deployment |
 | `helm` | Rendering bootstrap manifests |
-| `jq` | DRP and register-spoke scripts |
+| `jq` | failover, register-spoke, backup-state scripts |
+| `gpg` (GnuPG >= 2.4) | Client-side encryption of the backed-up artifacts |
+| `aws` (CLI) | Streaming the encrypted backups to S3-compatible stores |
 
 **Credentials per provider:**
 
@@ -65,7 +67,8 @@ Between phases, establish SSH tunnels via the bastion for Talos API access (port
 | Scaleway | `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`, `SCW_DEFAULT_PROJECT_ID` |
 | OVH | `OS_AUTH_URL`, `OS_USERNAME`, `OS_PASSWORD`, `OS_PROJECT_ID`, `OS_REGION_NAME` |
 | Outscale | `OSC_ACCESS_KEY`, `OSC_SECRET_KEY`, `OSC_REGION` |
-| All | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (S3 backup), `TF_VAR_encryption_passphrase` |
+| All | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (primary S3 store), `TF_VAR_encryption_passphrase` (encrypts state **and** backups) |
+| Backup replica (prod) | `BACKUP_AWS_ACCESS_KEY_ID`, `BACKUP_AWS_SECRET_ACCESS_KEY` — creds for the `-backup` store on a *different* provider. Default to `AWS_*` when unset (dev). |
 
 ## Environment Files
 
@@ -74,17 +77,25 @@ Each file describes a single cluster (provider + role + sizing). There is no
 "global" tfvars — pick the file for the cluster you are acting on. The Talos
 **image** is built separately (see [Phase 0](#workflow)) and is *not* an env file.
 
-These five templates are the complete, current set (no legacy generic file):
+**`<kind>-<provider>` matrix** — every kind runs on any provider (`scw`, `ovh`,
+`outscale`). Each cluster is a single `.tfvars` (the source of truth); the S3
+backend config is **derived from it** by `scripts/tf-backend.sh` (no separate
+backend file, so dev/prod never drift):
 
-| Template | Cluster | Provider | Role |
-|----------|---------|----------|------|
-| `envs/management-scw.tfvars.example` | `openaether-prod` | Scaleway | management (hub) |
-| `envs/workload-scw.tfvars.example` | `openaether-scw-prod` | Scaleway | workload (spoke) |
-| `envs/workload-ovh.tfvars.example` | `openaether-ovh-prod` | OVH | workload (spoke) |
-| `envs/workload-outscale.tfvars.example` | `openaether-outscale-prod` | Outscale | workload (spoke) |
-| `envs/drp-ovh.tfvars.example` | `openaether-prod` | OVH | management (DRP fallback) |
+| Kind | Role | Template |
+|------|------|----------|
+| `management-<provider>` | management (hub) | `envs/management-{scw,ovh,outscale}.tfvars.example` |
+| `workload-<provider>` | workload (spoke) | `envs/workload-{scw,ovh,outscale}.tfvars.example` |
+| `failover-<provider>` | management (cross-provider failover) | `envs/failover-{scw,ovh,outscale}.tfvars.example` |
 
-Only the `*.tfvars.example` templates are versioned. Copy one to its real name
+> **`failover-*` vs everyday recovery.** Re-running your own `management-<provider>`
+> rebuilds the cluster on the **same** provider (fresh PKI / from state) — that's
+> the routine disaster recovery. A `failover-<provider>` file is the **cross-provider
+> failover**: a *second* management cluster on a **different** cloud, for when a
+> whole provider is unavailable. Same role, different cloud — so use a `failover-*`
+> provider that is **not** your primary.
+
+Only the `*.tfvars.example` templates are versioned. Copy an example to its real name
 (`cp envs/management-scw.tfvars.example envs/management-scw.tfvars`) and fill in
 `admin_ip`, `bastion_ssh_keys`, etc. The real `*.tfvars` are git-ignored so
 credentials never get committed.
@@ -103,11 +114,17 @@ task talos-image PROVIDER=scaleway          # -> image "talos-scaleway-amd64-v1.
 # Generate bootstrap manifests (Cilium, ArgoCD)
 ./scripts/render-bootstrap-manifests.sh
 
-# Phase 1 — infra (IPs land in the state)
-task infra-management           # or: tofu apply -var-file=envs/management-scw.tfvars -var talos_bootstrap=false
+# Phase 1 — infra (IPs land in the state). The task ensures the buckets + inits the
+# per-cluster backend for you. PROVIDER defaults to scw (also ovh, outscale).
+task infra-management                      # or: task infra-management PROVIDER=ovh
+#   manual equivalent:
+#     ./scripts/ensure-buckets.sh envs/management-scw.tfvars
+#     tofu init -reconfigure $(./scripts/tf-backend.sh envs/management-scw.tfvars)
+#     tofu apply -var-file=envs/management-scw.tfvars -var talos_bootstrap=false
+#     ./scripts/backup-state.sh infrastructure/opentofu   # replicate state to the -backup store
 
 # Phase 2 — `task management` opens the SSH tunnels (read from the state) then bootstraps
-task management KEY=~/.ssh/yourkey
+task management KEY=~/.ssh/yourkey         # or: task management PROVIDER=ovh KEY=~/.ssh/yourkey
 # (manual equivalent: open one tunnel per node per `tofu output instructions`, then
 #  tofu apply -var-file=envs/management-scw.tfvars -var talos_bootstrap=true)
 
@@ -122,11 +139,11 @@ task infra-workload PROVIDER=ovh
 task workload PROVIDER=ovh KEY=~/.ssh/yourkey
 ```
 
-### DRP — Rebuild management cluster
+### Cross-provider failover — second management on another cloud
 
 ```bash
-# If Scaleway is unavailable:
-./scripts/drp-management.sh ovh
+# If your primary management provider is unavailable, stand one up elsewhere:
+./scripts/failover-management.sh ovh        # or: task failover PROVIDER=ovh
 # RTO: ~30 minutes. Workload clusters are unaffected.
 ```
 
@@ -158,6 +175,62 @@ tofu destroy -var-file=envs/management-scw.tfvars -var talos_bootstrap=false
 
 A later rebuild regenerates fresh machine secrets (new PKI). For a workload cluster,
 swap the env file (`envs/workload-<provider>.tfvars`).
+
+## Backup & Restore (DR)
+
+Every DR artifact lives in **two** object stores: a **primary** (the cluster's own
+provider, `AWS_*` creds) and a **replica** — the `-backup` store, in prod a
+*different* provider reached with `BACKUP_AWS_*` creds (these default to `AWS_*`
+when unset, e.g. for dev). Bucket names are derived from the cluster:
+
+| Artifact | Primary | Replica | Client encryption |
+|----------|---------|---------|-------------------|
+| tfstate | `s3-<project>-<provider>-tfstate-<env>` | `…-backup` | OpenTofu `encryption{}` (AES-GCM + PBKDF2) |
+| talosconfig / kubeconfig | `s3-<project>-<provider>-<role>-<env>` | `…-backup` | gpg `--symmetric` AES-256 (authenticated) |
+
+where `<project>` is `cluster_name`'s first segment (`openaether`) and `<provider>`
+is the cluster's active provider (`scw`/`ovh`/`outscale`).
+
+Both reuse the **same** `TF_VAR_encryption_passphrase`. Artifacts are pushed during
+the Phase-2 apply (`backup-artifacts.sh`); the state is replicated **after** the
+apply (`backup-state.sh` / `task backup-state`), because the backend only flushes
+the new state on apply exit.
+
+The four buckets are **auto-provisioned** (idempotent) by `task infra-management` /
+`task infra-workload` before `tofu init` — `scripts/ensure-buckets.sh` derives their
+names from the cluster's tfvars and `aws s3 mb`s any that are missing (primary with
+`AWS_*`, replicas with `BACKUP_AWS_*`). Manual equivalent:
+`./scripts/ensure-buckets.sh envs/<cluster>.tfvars`.
+
+```bash
+# In prod, point the replica at a different provider and give it its own creds:
+export BACKUP_AWS_ACCESS_KEY_ID=...      # the -backup store (e.g. OVH)
+export BACKUP_AWS_SECRET_ACCESS_KEY=...
+# then set s3_replica_endpoint / s3_replica_region in the env file.
+```
+
+### Restore a backup
+
+```bash
+# 1. Decrypt a backed-up artifact (same passphrase as the tfstate):
+aws s3 cp s3://s3-openaether-scw-management-prod/backups/kubeconfig.gpg - \
+  --endpoint-url https://s3.fr-par.scw.cloud --region fr-par | \
+  gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 3 \
+      -d -o kubeconfig 3< <(printf '%s' "$TF_VAR_encryption_passphrase")
+# (swap the bucket/endpoint for the -backup store if the primary is unavailable)
+
+# 2. Recover the tfstate from the -backup store (primary provider down):
+#    re-init against the replica bucket, then operate normally.
+tofu init -reconfigure \
+  -backend-config="bucket=s3-openaether-scw-tfstate-prod-backup" \
+  -backend-config="key=openaether.tfstate" \
+  -backend-config="region=<replica-region>" \
+  -backend-config="endpoint=<replica-endpoint>"
+```
+
+> Rebuilding from scratch on another provider instead? That's the failover path
+> (`./scripts/failover-management.sh <provider>` / `task failover`) — a fresh
+> management cluster (new PKI), independent of these backups.
 
 ## Module Structure
 
@@ -203,7 +276,7 @@ tofu test -filter=tests/provider-contract.tftest.hcl  # Junction point (7 tests)
 | No public IPs on nodes | Private VPC only |
 | Talos API | SSH tunnel via bastion (50000/TCP, never on LB) |
 | Kubernetes API | LB ACL restricted to `admin_ip` |
-| State encryption | AES-GCM + PBKDF2 (backend.tf) |
-| Backup encryption | S3 server-side encryption |
+| State encryption | Client-side AES-GCM + PBKDF2 (backend.tf `encryption{}`) before S3 |
+| Backup encryption | Client-side gpg AES-256 (authenticated) + S3 SSE; mirrored to a `-backup` store |
 | Inter-node | Cilium WireGuard |
 | Machine secrets | `prevent_destroy = true` lifecycle guard |
