@@ -63,10 +63,15 @@ tasks:
   # ===========================================================================
 
   infra-management:
-    desc: "Deploy the management cluster (SCW HA). PROVIDER env file: envs/management-scw.tfvars"
+    desc: "Deploy the management cluster. Usage: task infra-management [PROVIDER=scw|ovh|outscale]"
     dir: infrastructure/opentofu
+    vars:
+      PROVIDER: '{{.PROVIDER | default "scw"}}'
     cmds:
-      - tofu apply -var-file="envs/management-scw.tfvars" -var talos_bootstrap=false
+      - ../../scripts/ensure-buckets.sh envs/management-{{.PROVIDER}}.tfvars
+      - tofu init -reconfigure $(../../scripts/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
+      - tofu apply -var-file="envs/management-{{.PROVIDER}}.tfvars" -var talos_bootstrap=false
+      - ../../scripts/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
 
   infra-workload:
     desc: "Deploy a workload cluster. Usage: task infra-workload PROVIDER=ovh"
@@ -74,16 +79,22 @@ tasks:
     vars:
       PROVIDER: '{{.PROVIDER | default "scw"}}'
     cmds:
+      - ../../scripts/ensure-buckets.sh envs/workload-{{.PROVIDER}}.tfvars
+      - tofu init -reconfigure $(../../scripts/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
       - tofu apply -var-file="envs/workload-{{.PROVIDER}}.tfvars" -var talos_bootstrap=false
+      - ../../scripts/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
 
   management:
-    desc: "Phase 2: open SSH tunnels (from state) + bootstrap the management cluster. Set your key: KEY=~/.ssh/yourkey"
+    desc: "Phase 2: open SSH tunnels (from state) + bootstrap the management cluster. Usage: task management [PROVIDER=scw|ovh|outscale] KEY=~/.ssh/yourkey"
     dir: infrastructure/opentofu
     vars:
+      PROVIDER: '{{.PROVIDER | default "scw"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
     cmds:
+      - tofu init -reconfigure $(../../scripts/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
       - SSH_KEY="{{.KEY}}" ../../scripts/talos-tunnels.sh open .
-      - tofu apply -var-file="envs/management-scw.tfvars" -var talos_bootstrap=true
+      - tofu apply -var-file="envs/management-{{.PROVIDER}}.tfvars" -var talos_bootstrap=true
+      - ../../scripts/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
 
   workload:
     desc: "Phase 2: open tunnels + bootstrap a workload cluster. Usage: task workload PROVIDER=ovh KEY=~/.ssh/yourkey"
@@ -92,13 +103,20 @@ tasks:
       PROVIDER: '{{.PROVIDER | default "scw"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
     cmds:
+      - tofu init -reconfigure $(../../scripts/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
       - SSH_KEY="{{.KEY}}" ../../scripts/talos-tunnels.sh open .
       - tofu apply -var-file="envs/workload-{{.PROVIDER}}.tfvars" -var talos_bootstrap=true
+      - ../../scripts/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
 
   close-tunnels:
     desc: "Close the Talos API SSH tunnels opened for Phase 2"
     cmds:
       - ./scripts/talos-tunnels.sh close infrastructure/opentofu
+
+  backup-state:
+    desc: "Replicate the (encrypted) tfstate to the -backup store (post-apply). Set BACKUP_AWS_* for a cross-provider replica."
+    cmds:
+      - ./scripts/backup-state.sh infrastructure/opentofu
 
   destroy-workload:
     desc: "Destroy a workload cluster. Usage: task destroy-workload PROVIDER=ovh"
@@ -106,6 +124,7 @@ tasks:
     vars:
       PROVIDER: '{{.PROVIDER | default "scw"}}'
     cmds:
+      - tofu init -reconfigure $(../../scripts/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
       - tofu destroy -var-file="envs/workload-{{.PROVIDER}}.tfvars"
 
   # ===========================================================================
@@ -120,12 +139,12 @@ tasks:
     cmds:
       - ./scripts/register-spoke.sh "{{.CLUSTER}}" "{{.PROVIDER}}"
 
-  drp:
-    desc: "DRP: Rebuild management cluster on fallback provider. Usage: task drp PROVIDER=ovh"
+  failover:
+    desc: "Cross-provider failover: stand up a 2nd management cluster on another cloud. Usage: task failover PROVIDER=ovh"
     vars:
       PROVIDER: '{{.PROVIDER | default "ovh"}}'
     cmds:
-      - ./scripts/drp-management.sh "{{.PROVIDER}}"
+      - ./scripts/failover-management.sh "{{.PROVIDER}}"
 
   # ===========================================================================
   # Local Testing (Docker / WSL2)
