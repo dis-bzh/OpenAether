@@ -31,6 +31,15 @@ bastion_ssh_keys = {
 git_repo_url     = "https://github.com/dis-bzh/OpenAether.git"
 argocd_namespace = "management-gitops"
 
-backup_s3_endpoint = "https://s3.fr-par.scw.cloud"
-backup_s3_region   = "fr-par"
-backup_s3_bucket   = "s3-openaether-tfstate-management"
+# --- Backup / DR object stores ------------------------------------------------
+# Derived buckets (you don't set them):
+#   state          -> s3-openaether-scw-tfstate-prod      (+ -backup)
+#   kube/talosconfig -> s3-openaether-scw-management-prod  (+ -backup)
+# PRIMARY = this cluster's provider (uses AWS_*). REPLICA = the "-backup" store.
+# In PROD, point the replica at a DIFFERENT provider and export
+# BACKUP_AWS_ACCESS_KEY_ID / BACKUP_AWS_SECRET_ACCESS_KEY for it. In dev, leave
+# the replica equal to the primary (replica creds then default to AWS_*).
+s3_primary_endpoint = "https://s3.fr-par.scw.cloud"
+s3_primary_region   = "fr-par"
+s3_replica_endpoint = "https://s3.fr-par.scw.cloud" # prod: e.g. OVH https://s3.gra.io.cloud.ovh.net
+s3_replica_region   = "fr-par"                       # prod: e.g. gra

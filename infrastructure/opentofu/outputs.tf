@@ -75,6 +75,23 @@ output "machine_secrets" {
   sensitive   = true
 }
 
+# --- Backup / DR targets (consumed by scripts/backup-state.sh) ---
+
+output "backup_targets" {
+  description = "Derived buckets + endpoints for the state and artifact backups (non-sensitive)."
+  value = {
+    state_bucket_primary    = local.state_bucket_primary
+    state_bucket_replica    = local.state_bucket_replica
+    state_key               = local.state_key
+    artifact_bucket_primary = local.artifact_bucket_primary
+    artifact_bucket_replica = local.artifact_bucket_replica
+    primary_endpoint        = var.s3_primary_endpoint
+    primary_region          = var.s3_primary_region
+    replica_endpoint        = var.s3_replica_endpoint
+    replica_region          = var.s3_replica_region
+  }
+}
+
 # --- Operational Instructions ---
 
 output "talos_access_commands" {
@@ -105,7 +122,7 @@ output "instructions" {
     # ─── Register as ArgoCD spoke (workload clusters only) ──────────
     #   task register-spoke CLUSTER=${var.cluster_name}-${var.environment} PROVIDER=${local.active_provider}
     #
-    # ─── DRP (rebuild management on another provider) ───────────────
-    #   task drp PROVIDER=ovh
+    # ─── Cross-provider failover (2nd management on another cloud) ──
+    #   task failover PROVIDER=ovh
   EOT
 }
