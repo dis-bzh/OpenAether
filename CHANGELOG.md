@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.2] — 2026-06-02
+
+### Changed — backup & DR storage model (client-side encryption + dual store)
+
+Every DR artifact now lives in **two** object stores — a **primary** (the
+cluster's own provider) and a **replica** (`-backup`; in prod a *different*
+provider, different creds) — and is **client-side encrypted** before it ever
+reaches storage.
+
+### Added
+
+- **Client-side encrypted artifact backups** — `scripts/backup-artifacts.sh`
+  encrypts talosconfig/kubeconfig with **gpg `--symmetric` AES-256** (authenticated,
+  hardened S2K) using the same `encryption_passphrase` as the tfstate, then uploads
+  to the primary **and** replica stores with S3 SSE on top. Replaces the previous
+  SSE-only (server-side) backup.
+- **tfstate replication** — `scripts/backup-state.sh` copies the already
+  client-encrypted state (AES-GCM) to the `-backup` store after each apply (the
+  backend only flushes state on apply exit, so this is a post-apply step). Wired
+  into the cluster tasks + a standalone `task backup-state`.
+- **Per-cluster encrypted state** — the S3 backend is now **partial**
+  (`backend.tf`); its bucket/key/region/endpoint are **derived from the cluster's
+  tfvars** by `scripts/tf-backend.sh` (single source of truth, so dev/prod never
+  drift — no separate backend file). Each cluster gets its own state following
+  `s3-<project>-<provider>-tfstate-<env>` (key `<cluster_name>.tfstate`).
+  Artifacts follow `s3-<project>-<provider>-<role>-<env>`.
+- **Cross-provider backup creds** — `BACKUP_AWS_ACCESS_KEY_ID` /
+  `BACKUP_AWS_SECRET_ACCESS_KEY` for the replica store (default to the primary
+  `AWS_*` in dev). `setup.sh` now installs/checks `gpg` + `jq`.
+- **Bucket auto-provisioning** — `scripts/ensure-buckets.sh` derives the bucket
+  names from a cluster's tfvars and creates any that are missing (idempotent),
+  wired into `task infra-management` / `infra-workload` before `tofu init` (the
+  S3 backend doesn't create its own bucket). Only the **state primary** bucket is
+  required pre-`init` (fatal); the backups are best-effort and never block deploy.
+- **Provider in the bucket names** — convention is now
+  `s3-<project>-<provider>-{tfstate|<role>}-<env>(-backup)` (provider explicit,
+  derived from the active provider), consistent across management and workload.
+- **Provider-generic management & failover** — `task infra-management` /
+  `management` now take `PROVIDER` (scw/ovh/outscale), like the workload tasks.
+  Full env matrix added: `management-{scw,ovh,outscale}`,
+  `failover-{scw,ovh,outscale}` (each a `.tfvars.example`).
+  A `failover-*` cluster is the **cross-provider failover** (a second management
+  on another cloud) — distinct from the everyday recovery of re-applying your own
+  `management-<provider>` on the same provider.
+
+### Renamed
+
+- **`drp-*` → `failover-*`** to match what it is: a *second* management cluster on
+  a **different** cloud (provider loss), not the everyday disaster recovery (which
+  is just re-applying your own `management-<provider>`). `scripts/drp-management.sh`
+  → `scripts/failover-management.sh`, `task drp` → `task failover`,
+  `envs/drp-*` → `envs/failover-*`.
+
+### Removed
+
+- Dead `aws` provider + `backup_s3_{endpoint,region,bucket}` variables (the
+  backup path is CLI-only now). New inputs: `s3_primary_{endpoint,region}` and
+  `s3_replica_{endpoint,region}`; bucket names are derived from the convention.
+
+### Documented
+
+- Backup/restore (DR) procedure — decrypting a backed-up artifact with the same
+  passphrase; recovering state from the `-backup` store.
+
+---
+
 ## [0.3.1] — 2026-06-01
 
 ### Validated — first end-to-end cloud deployment (Scaleway)
