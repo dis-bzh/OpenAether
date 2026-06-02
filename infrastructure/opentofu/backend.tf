@@ -27,11 +27,14 @@ terraform {
     }
   }
 
+  # Partial backend: bucket / key / region / endpoint are DERIVED from the
+  # cluster's tfvars (the single source of truth) so each cluster gets its OWN
+  # encrypted state, following s3-<project>-<provider>-tfstate-<env> (key
+  # <cluster_name>.tfstate). Initialise with:
+  #   tofu init -reconfigure $(scripts/tf-backend.sh envs/<cluster>.tfvars)
+  # The Taskfile does this for you. The state payload is client-encrypted by the
+  # encryption{} block above before it ever reaches S3.
   backend "s3" {
-    bucket                      = "s3-openaether-tfstate"
-    key                         = "openaether.tfstate"
-    region                      = "fr-par"
-    endpoint                    = "https://s3.fr-par.scw.cloud"
     skip_credentials_validation = true
     skip_region_validation      = true
   }

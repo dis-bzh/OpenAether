@@ -14,21 +14,10 @@ provider "openstack" {
 
 provider "outscale" {}
 
-# S3-compatible provider for backups (Scaleway Object Storage)
-provider "aws" {
-  alias  = "backup"
-  region = var.backup_s3_region
-
-  endpoints {
-    s3 = var.backup_s3_endpoint
-  }
-
-  skip_credentials_validation = true
-  skip_region_validation      = true
-  skip_metadata_api_check     = true
-  skip_requesting_account_id  = true
-  s3_use_path_style           = true
-}
+# Backups go through the AWS CLI (scripts/backup-artifacts.sh + backup-state.sh),
+# not a Terraform provider — the artifacts/state are streamed to S3-compatible
+# stores with per-call creds/endpoints (primary + cross-provider replica), which
+# the aws provider can't express cleanly. So there is intentionally no aws provider.
 
 # ==============================================================================
 # Provider Distribution Locals
