@@ -28,6 +28,10 @@ TFVARS="${1:?usage: ensure-buckets.sh <cluster.tfvars>}"
 [ -f "$TFVARS" ] || { echo "✗ tfvars not found: $TFVARS"; exit 1; }
 command -v aws >/dev/null 2>&1 || { echo "✗ aws CLI required"; exit 1; }
 
+# S3-compatible stores reject the AWS CLI v2.23+ default trailing checksum.
+export AWS_REQUEST_CHECKSUM_CALCULATION="${AWS_REQUEST_CHECKSUM_CALCULATION:-when_required}"
+export AWS_RESPONSE_CHECKSUM_VALIDATION="${AWS_RESPONSE_CHECKSUM_VALIDATION:-when_required}"
+
 # Pull a top-level string assignment (key = "value"), ignoring inline comments.
 val() {
   grep -E "^[[:space:]]*$1[[:space:]]*=" "$TFVARS" 2>/dev/null | head -1 \
