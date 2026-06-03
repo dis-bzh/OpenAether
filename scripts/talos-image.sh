@@ -23,7 +23,7 @@ RAW="${1:?usage: talos-image.sh <scaleway|ovh|outscale> [talos_version]}"
 VERSION="${2:-v1.13.3}"
 P="$(printf '%s' "$RAW" | tr '[:upper:]' '[:lower:]')"
 case "$P" in
-  scw | scaleway) P=scw; TGT=scaleway; SREGION=fr-par;    SEP="https://s3.fr-par.scw.cloud" ;;
+  scw | scaleway) P=scaleway; TGT=scaleway; SREGION=fr-par;    SEP="https://s3.fr-par.scw.cloud" ;;
   ovh)            TGT=ovh;      SREGION=eu-west-par;        SEP="https://s3.eu-west-par.io.cloud.ovh.net" ;;
   outscale)       TGT=outscale; SREGION=eu-west-2; SEP="https://oos.eu-west-2.outscale.com" ;;
   *) echo "✗ unknown provider: $RAW (expected scaleway|ovh|outscale)"; exit 1 ;;

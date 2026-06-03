@@ -66,9 +66,9 @@ tasks:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
     env:
       AWS_ACCESS_KEY_ID:
-        sh: ./scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
+        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
       AWS_SECRET_ACCESS_KEY:
-        sh: ./scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
+        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
     cmds:
       - ../../../scripts/ensure-buckets.sh envs/management-{{.PROVIDER}}.tfvars
       - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
@@ -82,9 +82,9 @@ tasks:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
     env:
       AWS_ACCESS_KEY_ID:
-        sh: ./scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
+        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
       AWS_SECRET_ACCESS_KEY:
-        sh: ./scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
+        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
     cmds:
       - ../../../scripts/ensure-buckets.sh envs/workload-{{.PROVIDER}}.tfvars
       - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
@@ -99,9 +99,9 @@ tasks:
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
     env:
       AWS_ACCESS_KEY_ID:
-        sh: ./scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
+        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
       AWS_SECRET_ACCESS_KEY:
-        sh: ./scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
+        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
     cmds:
       - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
       - SSH_KEY="{{.KEY}}" ../../../scripts/talos-tunnels.sh open .
@@ -116,9 +116,9 @@ tasks:
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
     env:
       AWS_ACCESS_KEY_ID:
-        sh: ./scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
+        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
       AWS_SECRET_ACCESS_KEY:
-        sh: ./scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
+        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
     cmds:
       - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
       - SSH_KEY="{{.KEY}}" ../../../scripts/talos-tunnels.sh open .
@@ -142,9 +142,9 @@ tasks:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
     env:
       AWS_ACCESS_KEY_ID:
-        sh: ./scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
+        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
       AWS_SECRET_ACCESS_KEY:
-        sh: ./scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
+        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
     cmds:
       - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
       - tofu destroy -var-file="envs/workload-{{.PROVIDER}}.tfvars"

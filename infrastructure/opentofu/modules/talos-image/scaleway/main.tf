@@ -22,6 +22,7 @@ resource "terraform_data" "build_and_upload" {
     schematic = var.schematic_id
     version   = var.talos_version
     key       = local.object_key
+    bucket    = var.bucket_name # re-upload if the staging bucket name changes
   }
 
   provisioner "local-exec" {
