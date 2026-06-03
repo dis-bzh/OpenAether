@@ -4,7 +4,7 @@
 # ==============================================================================
 
 resource "outscale_security_group" "this" {
-  description         = "OpenAether cluster nodes — least-privilege inbound"
+  description         = "OpenAether cluster nodes - least-privilege inbound"
   security_group_name = "${var.cluster_name}-cluster-sg"
   net_id              = outscale_net.this.net_id
 }
@@ -16,7 +16,7 @@ resource "outscale_security_group_rule" "k8s_api_private" {
   from_port_range   = 6443
   to_port_range     = 6443
   ip_protocol       = "tcp"
-  ip_range          = "10.0.0.0/24"
+  ip_range          = outscale_subnet.public.ip_range
 }
 
 resource "outscale_security_group_rule" "k8s_api_admin" {
@@ -51,7 +51,7 @@ resource "outscale_security_group_rule" "http" {
   from_port_range   = 80
   to_port_range     = 80
   ip_protocol       = "tcp"
-  ip_range          = "10.0.0.0/24"
+  ip_range          = outscale_subnet.public.ip_range
 }
 
 resource "outscale_security_group_rule" "https" {
@@ -60,7 +60,7 @@ resource "outscale_security_group_rule" "https" {
   from_port_range   = 443
   to_port_range     = 443
   ip_protocol       = "tcp"
-  ip_range          = "10.0.0.0/24"
+  ip_range          = outscale_subnet.public.ip_range
 }
 
 # WireGuard — Cilium inter-node encryption (UDP 51820)

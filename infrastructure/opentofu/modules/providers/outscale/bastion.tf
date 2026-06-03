@@ -5,7 +5,7 @@
 # ==============================================================================
 
 resource "outscale_security_group" "bastion" {
-  description         = "OpenAether bastion — SSH from admin IPs only"
+  description         = "OpenAether bastion - SSH from admin IPs only"
   security_group_name = "${var.cluster_name}-bastion-sg"
   net_id              = outscale_net.this.net_id
 }
@@ -23,9 +23,9 @@ resource "outscale_security_group_rule" "bastion_ssh" {
 resource "outscale_public_ip" "bastion" {}
 
 resource "outscale_vm" "bastion" {
-  image_id           = coalesce(var.bastion_image_id, try(data.outscale_images.ubuntu.images[0].image_id, null))
+  image_id           = coalesce(var.bastion_image_id, try(data.outscale_image.ubuntu.image_id, null))
   vm_type            = "tinav5.c2r4p1"
-  subnet_id          = outscale_subnet.private.subnet_id
+  subnet_id          = outscale_subnet.public.subnet_id
   security_group_ids = [outscale_security_group.bastion.security_group_id]
 
   user_data = base64encode(<<-EOT
@@ -49,9 +49,9 @@ resource "outscale_public_ip_link" "bastion" {
   public_ip = outscale_public_ip.bastion.public_ip
 }
 
-data "outscale_images" "ubuntu" {
+data "outscale_image" "ubuntu" {
   filter {
-    name   = "image_name"
-    values = ["Ubuntu-22.04-LTS*"]
+    name   = "image_ids"
+    values = ["ami-b29cea33"]
   }
 }
