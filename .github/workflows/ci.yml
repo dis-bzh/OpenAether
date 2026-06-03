@@ -40,7 +40,7 @@ jobs:
         run: pip install yamllint
 
       - name: Run yamllint
-        run: yamllint -c infrastructure/.yamllint apps/ infrastructure/opentofu/bootstrap-manifests/
+        run: yamllint -c infrastructure/.yamllint apps/ infrastructure/opentofu/cluster/bootstrap-manifests/
 
   validate:
     name: Validate

@@ -53,24 +53,27 @@ SCW Workload Cluster     OVH Workload Cluster     Outscale Workload Cluster
 ```
 OpenAether/
 ├── infrastructure/
-│   └── opentofu/                    # Infrastructure as Code
-│       ├── main.tf                  # Provider orchestration + junction point
-│       ├── variables.tf             # node_distribution, cluster_role, etc.
-│       ├── envs/                    # Per-cluster config (<kind>-<provider>)
-│       │   ├── management-{scw,ovh,outscale}.tfvars(.example)
-│       │   ├── workload-{scw,ovh,outscale}.tfvars(.example)
-│       │   └── failover-{scw,ovh,outscale}.tfvars(.example)   # cross-provider failover mgmt
-│       ├── modules/
-│       │   ├── talos/               # Cluster secrets, config, bootstrap
-│       │   └── providers/
-│       │       ├── scw/             # Scaleway (reference implementation)
-│       │       ├── ovh/             # OVH / OpenStack
-│       │       ├── outscale/        # Outscale / Numspot
-│       │       └── provider-contract.md
-│       └── tests/                   # OpenTofu unit tests (26 tests total)
-│           ├── scaleway.tftest.hcl
-│           ├── talos-config.tftest.hcl
-│           └── provider-contract.tftest.hcl
+│   └── opentofu/                    # All Infrastructure as Code
+│       ├── cluster/                 # Cluster root (management + workload)
+│       │   ├── main.tf, backup.tf, backend.tf, variables.tf, outputs.tf
+│       │   ├── envs/                # Per-cluster config (<kind>-<provider>)
+│       │   │   ├── management-{scw,ovh,outscale}.tfvars(.example)
+│       │   │   ├── workload-{scw,ovh,outscale}.tfvars(.example)
+│       │   │   └── failover-{scw,ovh,outscale}.tfvars(.example)
+│       │   └── tests/               # OpenTofu unit tests (26 tests total)
+│       ├── talos-image/             # Image builder root (one-off per version)
+│       │   ├── main.tf, backend.tf, variables.tf
+│       │   └── schematic.yaml       # Image Factory schematic
+│       └── modules/                 # Shared modules (both roots)
+│           ├── talos/               # Cluster secrets, config, bootstrap
+│           ├── providers/
+│           │   ├── scw/             # Scaleway (reference implementation)
+│           │   ├── ovh/             # OVH / OpenStack
+│           │   └── outscale/        # Outscale / Numspot
+│           └── talos-image/
+│               ├── scaleway/        # qcow2 → snapshot → instance image
+│               ├── ovh/             # local qcow2 → Glance
+│               └── outscale/        # raw → OOS → snapshot → OMI
 ├── apps/                            # Kubernetes manifests (GitOps)
 │   ├── base/                        # Provider-agnostic service definitions
 │   ├── overlays/
@@ -112,7 +115,7 @@ OpenAether/
 #    Prod cross-provider backup: also export BACKUP_AWS_ACCESS_KEY_ID/SECRET.
 
 # 2. Configure your cluster (copy the template, then edit)
-cp infrastructure/opentofu/envs/management-scw.tfvars.example infrastructure/opentofu/envs/management-scw.tfvars
+cp infrastructure/opentofu/cluster/envs/management-scw.tfvars.example infrastructure/opentofu/cluster/envs/management-scw.tfvars
 # Edit: admin_ip, bastion_ssh_keys, s3_primary_*/s3_replica_*, etc.
 # Real envs/*.tfvars are git-ignored; only the *.tfvars.example are versioned.
 
@@ -132,7 +135,7 @@ task management KEY=~/.ssh/yourkey
 export OS_AUTH_URL=https://auth.cloud.ovh.net/v3
 export OS_USERNAME=...
 
-# cp infrastructure/opentofu/envs/workload-ovh.tfvars.example infrastructure/opentofu/envs/workload-ovh.tfvars
+# cp infrastructure/opentofu/cluster/envs/workload-ovh.tfvars.example infrastructure/opentofu/cluster/envs/workload-ovh.tfvars
 # Edit it with your image_id and credentials
 
 task infra-workload PROVIDER=ovh

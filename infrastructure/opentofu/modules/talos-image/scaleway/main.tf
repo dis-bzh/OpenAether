@@ -31,6 +31,9 @@ resource "terraform_data" "build_and_upload" {
     interpreter = ["/usr/bin/env", "bash", "-c"]
     command     = <<-EOT
       set -euo pipefail
+      # S3-compatible stores reject the AWS CLI v2.23+ default trailing checksum —
+      # only add checksums when the operation actually requires them.
+      export AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
       for bin in curl zstd qemu-img aws; do
         command -v "$bin" >/dev/null 2>&1 || {
           echo "✗ required tool not found: $bin — run 'task setup' (installs zstd, qemu-utils, awscli)"
