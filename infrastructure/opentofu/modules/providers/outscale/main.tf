@@ -11,8 +11,14 @@ resource "outscale_nic" "control_plane" {
 
   security_group_ids = [outscale_security_group.this.security_group_id]
 
+  # Outscale's CreateNic requires an explicit PrivateIp once a private_ips block
+  # is given (a bare is_primary = true is rejected with MissingParameter). Assign
+  # deterministic IPs from the subnet (.10+), clear of the low addresses Outscale
+  # reserves at the start of every subnet (.1 gateway, .2/.3 reserved). These are
+  # the "fixed private IPs" the control planes rely on.
   private_ips {
     is_primary = true
+    private_ip = cidrhost(outscale_subnet.private.ip_range, 10 + count.index)
   }
 
   tags {
