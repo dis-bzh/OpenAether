@@ -48,9 +48,9 @@ tasks:
   # ===========================================================================
 
   talos-image:
-    desc: "Build + publish the Talos image for a provider. Usage: task talos-image PROVIDER=scw|ovh|outscale [VERSION=v1.13.3]"
+    desc: "Build + publish the Talos image for a provider. Usage: task talos-image PROVIDER=scaleway|ovh|outscale [VERSION=v1.13.3]"
     vars:
-      PROVIDER: '{{.PROVIDER | default "scw"}}'
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
       VERSION: '{{.VERSION | default "v1.13.3"}}'
     cmds:
       - ./scripts/talos-image.sh {{.PROVIDER}} {{.VERSION}}
@@ -60,10 +60,15 @@ tasks:
   # ===========================================================================
 
   infra-management:
-    desc: "Deploy the management cluster. Usage: task infra-management [PROVIDER=scw|ovh|outscale]"
+    desc: "Deploy the management cluster. Usage: task infra-management [PROVIDER=scaleway|ovh|outscale]"
     dir: infrastructure/opentofu/cluster
     vars:
-      PROVIDER: '{{.PROVIDER | default "scw"}}'
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    env:
+      AWS_ACCESS_KEY_ID:
+        sh: ./scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
+      AWS_SECRET_ACCESS_KEY:
+        sh: ./scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
     cmds:
       - ../../../scripts/ensure-buckets.sh envs/management-{{.PROVIDER}}.tfvars
       - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
@@ -74,7 +79,12 @@ tasks:
     desc: "Deploy a workload cluster. Usage: task infra-workload PROVIDER=ovh"
     dir: infrastructure/opentofu/cluster
     vars:
-      PROVIDER: '{{.PROVIDER | default "scw"}}'
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    env:
+      AWS_ACCESS_KEY_ID:
+        sh: ./scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
+      AWS_SECRET_ACCESS_KEY:
+        sh: ./scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
     cmds:
       - ../../../scripts/ensure-buckets.sh envs/workload-{{.PROVIDER}}.tfvars
       - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
@@ -82,11 +92,16 @@ tasks:
       - ../../../scripts/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
 
   management:
-    desc: "Phase 2: open SSH tunnels (from state) + bootstrap the management cluster. Usage: task management [PROVIDER=scw|ovh|outscale] KEY=~/.ssh/yourkey"
+    desc: "Phase 2: open SSH tunnels (from state) + bootstrap the management cluster. Usage: task management [PROVIDER=scaleway|ovh|outscale] KEY=~/.ssh/yourkey"
     dir: infrastructure/opentofu/cluster
     vars:
-      PROVIDER: '{{.PROVIDER | default "scw"}}'
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
+    env:
+      AWS_ACCESS_KEY_ID:
+        sh: ./scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
+      AWS_SECRET_ACCESS_KEY:
+        sh: ./scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
     cmds:
       - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
       - SSH_KEY="{{.KEY}}" ../../../scripts/talos-tunnels.sh open .
@@ -97,8 +112,13 @@ tasks:
     desc: "Phase 2: open tunnels + bootstrap a workload cluster. Usage: task workload PROVIDER=ovh KEY=~/.ssh/yourkey"
     dir: infrastructure/opentofu/cluster
     vars:
-      PROVIDER: '{{.PROVIDER | default "scw"}}'
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
+    env:
+      AWS_ACCESS_KEY_ID:
+        sh: ./scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
+      AWS_SECRET_ACCESS_KEY:
+        sh: ./scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
     cmds:
       - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
       - SSH_KEY="{{.KEY}}" ../../../scripts/talos-tunnels.sh open .
@@ -119,7 +139,12 @@ tasks:
     desc: "Destroy a workload cluster. Usage: task destroy-workload PROVIDER=ovh"
     dir: infrastructure/opentofu/cluster
     vars:
-      PROVIDER: '{{.PROVIDER | default "scw"}}'
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    env:
+      AWS_ACCESS_KEY_ID:
+        sh: ./scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
+      AWS_SECRET_ACCESS_KEY:
+        sh: ./scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
     cmds:
       - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
       - tofu destroy -var-file="envs/workload-{{.PROVIDER}}.tfvars"
