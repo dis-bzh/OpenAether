@@ -58,6 +58,12 @@ mapfile -t WKS < <(jq -r '.worker_private_ips.value[]? // empty' <<<"$OUTPUTS")
 close_tunnels # drop any stale tunnels (old IPs) before reopening
 : >"$PIDFILE"
 
+# The bastion is re-created by `tofu apply` (its EIP/public IP is stable), so a
+# changed host key on the same IP is expected after a redeploy — not an attack.
+# Drop any stale known_hosts entry so accept-new re-pins it, instead of SSH
+# refusing every tunnel with a host-key mismatch (which shows up as 0/N up).
+ssh-keygen -R "$BASTION" >/dev/null 2>&1 || true
+
 open_one() { # localport nodeip
   nohup ssh -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes \
     -o ServerAliveInterval=30 -i "$KEY" -N -L "$1:$2:50000" "${BUSER}@${BASTION}" \
