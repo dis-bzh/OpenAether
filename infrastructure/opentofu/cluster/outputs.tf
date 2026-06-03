@@ -80,6 +80,7 @@ output "machine_secrets" {
 output "backup_targets" {
   description = "Derived buckets + endpoints for the state and artifact backups (non-sensitive)."
   value = {
+    provider                = local.active_provider
     state_bucket_primary    = local.state_bucket_primary
     state_bucket_replica    = local.state_bucket_replica
     state_key               = local.state_key
