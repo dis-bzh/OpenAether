@@ -9,7 +9,7 @@
 # CROSS-provider failover — same role, different cloud.
 #
 # Usage:
-#   task failover PROVIDER=scw
+#   task failover PROVIDER=scaleway
 #
 # After rebuild:
 #   1. ArgoCD bootstrap -> syncs from Git automatically
@@ -46,8 +46,8 @@ git_repo_url     = "https://github.com/dis-bzh/OpenAether.git"
 argocd_namespace = "management-gitops"
 
 # --- Backup / DR object stores ------------------------------------------------
-# Derived buckets: state -> s3-openaether-scw-tfstate-prod (+ -backup),
-#                  kube/talos -> s3-openaether-scw-management-prod (+ -backup).
+# Derived buckets: state -> s3-openaether-scaleway-tfstate-prod (+ -backup),
+#                  kube/talos -> s3-openaether-scaleway-management-prod (+ -backup).
 # Replicate BACK to your primary provider once it recovers (export BACKUP_AWS_*).
 s3_primary_endpoint = "https://s3.fr-par.scw.cloud"
 s3_primary_region   = "fr-par"

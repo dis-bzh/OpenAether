@@ -12,7 +12,7 @@
 #   ./scripts/failover-management.sh <provider>
 #   task failover PROVIDER=ovh
 #
-# Supported providers: scw, ovh, outscale (pick one that is NOT your primary)
+# Supported providers: scaleway, ovh, outscale (pick one that is NOT your primary)
 #
 # Prerequisites:
 #   - tofu CLI available
@@ -26,7 +26,7 @@ PROVIDER="${1:-${PROVIDER:-}}"
 
 if [[ -z "$PROVIDER" ]]; then
   echo "Usage: $0 <provider>"
-  echo "       Supported: scw, ovh, outscale (pick one that is NOT your primary)"
+  echo "       Supported: scaleway, ovh, outscale (pick one that is NOT your primary)"
   exit 1
 fi
 
@@ -124,7 +124,7 @@ echo "Next steps:"
 echo "  1. ArgoCD is bootstrapping — wait ~10 min for Git sync to complete"
 echo "  2. Monitor: kubectl -n management-gitops get applications"
 echo "  3. Re-register spoke clusters:"
-echo "     for provider in scw ovh outscale; do"
+echo "     for provider in scaleway ovh outscale; do"
 echo "       task register-spoke CLUSTER=openaether-\${provider}-prod PROVIDER=\${provider}"
 echo "     done"
 echo ""
