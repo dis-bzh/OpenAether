@@ -156,6 +156,14 @@ data "talos_machine_configuration" "worker" {
     yamlencode({
       machine = merge(
         {
+          # Same as the control plane: the node's apid cert must be valid for
+          # 127.0.0.1 because Phase 2 reaches every node through an SSH tunnel on
+          # localhost. Without this the tunneled apply fails TLS verification
+          # ("certificate is valid for <node IP>, not 127.0.0.1").
+          certSANs = concat(
+            ["127.0.0.1", "localhost"],
+            var.worker_ips
+          )
           features = merge({
             diskQuotaSupport = true
             kubePrism = {
