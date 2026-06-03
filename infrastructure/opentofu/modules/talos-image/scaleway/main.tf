@@ -12,13 +12,10 @@ locals {
   scw_arch    = var.arch == "arm64" ? "arm" : "x86_64"
 }
 
-# Dedicated bucket to stage the QCOW2 for the snapshot import.
-resource "scaleway_object_bucket" "images" {
-  name   = var.bucket_name
-  region = var.region
-}
-
 # Fetch from Image Factory, decompress, convert to QCOW2, upload to the bucket.
+# The staging bucket (var.bucket_name) is created externally by ensure-buckets.sh
+# before tofu init — it is NOT a Terraform resource here to avoid a 409 on
+# BucketAlreadyOwnedByYou when the module is re-applied with an existing bucket.
 # Re-runs only when the schematic/version/key changes.
 resource "terraform_data" "build_and_upload" {
   triggers_replace = {
@@ -54,7 +51,6 @@ resource "terraform_data" "build_and_upload" {
     EOT
   }
 
-  depends_on = [scaleway_object_bucket.images]
 }
 
 # Import the staged QCOW2 as a Block Storage (SBS) snapshot in every target zone.
