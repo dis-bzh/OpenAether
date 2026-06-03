@@ -1,4 +1,12 @@
-# This is an auto-generated file. DO NOT EDIT
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: privileged
+  name: management-gitops
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -30551,6 +30559,7 @@ metadata:
     app.kubernetes.io/name: argocd-application-controller
     app.kubernetes.io/part-of: argocd
   name: argocd-application-controller
+  namespace: management-gitops
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -30560,6 +30569,7 @@ metadata:
     app.kubernetes.io/name: argocd-applicationset-controller
     app.kubernetes.io/part-of: argocd
   name: argocd-applicationset-controller
+  namespace: management-gitops
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -30569,6 +30579,7 @@ metadata:
     app.kubernetes.io/name: argocd-dex-server
     app.kubernetes.io/part-of: argocd
   name: argocd-dex-server
+  namespace: management-gitops
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -30578,6 +30589,7 @@ metadata:
     app.kubernetes.io/name: argocd-notifications-controller
     app.kubernetes.io/part-of: argocd
   name: argocd-notifications-controller
+  namespace: management-gitops
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -30587,6 +30599,7 @@ metadata:
     app.kubernetes.io/name: argocd-redis
     app.kubernetes.io/part-of: argocd
   name: argocd-redis
+  namespace: management-gitops
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -30596,6 +30609,7 @@ metadata:
     app.kubernetes.io/name: argocd-repo-server
     app.kubernetes.io/part-of: argocd
   name: argocd-repo-server
+  namespace: management-gitops
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -30605,6 +30619,7 @@ metadata:
     app.kubernetes.io/name: argocd-server
     app.kubernetes.io/part-of: argocd
   name: argocd-server
+  namespace: management-gitops
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -30614,6 +30629,7 @@ metadata:
     app.kubernetes.io/name: argocd-application-controller
     app.kubernetes.io/part-of: argocd
   name: argocd-application-controller
+  namespace: management-gitops
 rules:
 - apiGroups:
   - ""
@@ -30662,6 +30678,7 @@ metadata:
     app.kubernetes.io/name: argocd-applicationset-controller
     app.kubernetes.io/part-of: argocd
   name: argocd-applicationset-controller
+  namespace: management-gitops
 rules:
 - apiGroups:
   - argoproj.io
@@ -30737,6 +30754,7 @@ metadata:
     app.kubernetes.io/name: argocd-dex-server
     app.kubernetes.io/part-of: argocd
   name: argocd-dex-server
+  namespace: management-gitops
 rules:
 - apiGroups:
   - ""
@@ -30756,6 +30774,7 @@ metadata:
     app.kubernetes.io/name: argocd-notifications-controller
     app.kubernetes.io/part-of: argocd
   name: argocd-notifications-controller
+  namespace: management-gitops
 rules:
 - apiGroups:
   - argoproj.io
@@ -30801,6 +30820,7 @@ metadata:
     app.kubernetes.io/name: argocd-redis
     app.kubernetes.io/part-of: argocd
   name: argocd-redis
+  namespace: management-gitops
 rules:
 - apiGroups:
   - ""
@@ -30825,6 +30845,7 @@ metadata:
     app.kubernetes.io/name: argocd-server
     app.kubernetes.io/part-of: argocd
   name: argocd-server
+  namespace: management-gitops
 rules:
 - apiGroups:
   - ""
@@ -31016,6 +31037,7 @@ metadata:
     app.kubernetes.io/name: argocd-application-controller
     app.kubernetes.io/part-of: argocd
   name: argocd-application-controller
+  namespace: management-gitops
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -31023,6 +31045,7 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: argocd-application-controller
+  namespace: management-gitops
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -31032,6 +31055,7 @@ metadata:
     app.kubernetes.io/name: argocd-applicationset-controller
     app.kubernetes.io/part-of: argocd
   name: argocd-applicationset-controller
+  namespace: management-gitops
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -31039,6 +31063,7 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: argocd-applicationset-controller
+  namespace: management-gitops
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -31048,6 +31073,7 @@ metadata:
     app.kubernetes.io/name: argocd-dex-server
     app.kubernetes.io/part-of: argocd
   name: argocd-dex-server
+  namespace: management-gitops
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -31055,6 +31081,7 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: argocd-dex-server
+  namespace: management-gitops
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -31064,6 +31091,7 @@ metadata:
     app.kubernetes.io/name: argocd-notifications-controller
     app.kubernetes.io/part-of: argocd
   name: argocd-notifications-controller
+  namespace: management-gitops
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -31071,6 +31099,7 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: argocd-notifications-controller
+  namespace: management-gitops
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -31080,6 +31109,7 @@ metadata:
     app.kubernetes.io/name: argocd-redis
     app.kubernetes.io/part-of: argocd
   name: argocd-redis
+  namespace: management-gitops
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -31087,6 +31117,7 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: argocd-redis
+  namespace: management-gitops
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -31096,6 +31127,7 @@ metadata:
     app.kubernetes.io/name: argocd-server
     app.kubernetes.io/part-of: argocd
   name: argocd-server
+  namespace: management-gitops
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -31103,6 +31135,7 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: argocd-server
+  namespace: management-gitops
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -31119,7 +31152,7 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: argocd-application-controller
-  namespace: argocd
+  namespace: management-gitops
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -31136,7 +31169,7 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: argocd-applicationset-controller
-  namespace: argocd
+  namespace: management-gitops
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -31153,7 +31186,7 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: argocd-server
-  namespace: argocd
+  namespace: management-gitops
 ---
 apiVersion: v1
 data:
@@ -31256,6 +31289,7 @@ metadata:
     app.kubernetes.io/name: argocd-cm
     app.kubernetes.io/part-of: argocd
   name: argocd-cm
+  namespace: management-gitops
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -31264,6 +31298,7 @@ metadata:
     app.kubernetes.io/name: argocd-cmd-params-cm
     app.kubernetes.io/part-of: argocd
   name: argocd-cmd-params-cm
+  namespace: management-gitops
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -31272,6 +31307,7 @@ metadata:
     app.kubernetes.io/name: argocd-gpg-keys-cm
     app.kubernetes.io/part-of: argocd
   name: argocd-gpg-keys-cm
+  namespace: management-gitops
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -31281,6 +31317,7 @@ metadata:
     app.kubernetes.io/name: argocd-notifications-controller
     app.kubernetes.io/part-of: argocd
   name: argocd-notifications-cm
+  namespace: management-gitops
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -31289,6 +31326,7 @@ metadata:
     app.kubernetes.io/name: argocd-rbac-cm
     app.kubernetes.io/part-of: argocd
   name: argocd-rbac-cm
+  namespace: management-gitops
 ---
 apiVersion: v1
 data:
@@ -31314,6 +31352,7 @@ metadata:
     app.kubernetes.io/name: argocd-ssh-known-hosts-cm
     app.kubernetes.io/part-of: argocd
   name: argocd-ssh-known-hosts-cm
+  namespace: management-gitops
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -31322,6 +31361,7 @@ metadata:
     app.kubernetes.io/name: argocd-tls-certs-cm
     app.kubernetes.io/part-of: argocd
   name: argocd-tls-certs-cm
+  namespace: management-gitops
 ---
 apiVersion: v1
 kind: Secret
@@ -31331,6 +31371,7 @@ metadata:
     app.kubernetes.io/name: argocd-notifications-controller
     app.kubernetes.io/part-of: argocd
   name: argocd-notifications-secret
+  namespace: management-gitops
 type: Opaque
 ---
 apiVersion: v1
@@ -31340,6 +31381,7 @@ metadata:
     app.kubernetes.io/name: argocd-secret
     app.kubernetes.io/part-of: argocd
   name: argocd-secret
+  namespace: management-gitops
 type: Opaque
 ---
 apiVersion: v1
@@ -31350,6 +31392,7 @@ metadata:
     app.kubernetes.io/name: argocd-applicationset-controller
     app.kubernetes.io/part-of: argocd
   name: argocd-applicationset-controller
+  namespace: management-gitops
 spec:
   ports:
   - name: webhook
@@ -31371,6 +31414,7 @@ metadata:
     app.kubernetes.io/name: argocd-dex-server
     app.kubernetes.io/part-of: argocd
   name: argocd-dex-server
+  namespace: management-gitops
 spec:
   ports:
   - appProtocol: TCP
@@ -31397,6 +31441,7 @@ metadata:
     app.kubernetes.io/name: argocd-metrics
     app.kubernetes.io/part-of: argocd
   name: argocd-metrics
+  namespace: management-gitops
 spec:
   ports:
   - name: metrics
@@ -31414,6 +31459,7 @@ metadata:
     app.kubernetes.io/name: argocd-notifications-controller-metrics
     app.kubernetes.io/part-of: argocd
   name: argocd-notifications-controller-metrics
+  namespace: management-gitops
 spec:
   ports:
   - name: metrics
@@ -31431,6 +31477,7 @@ metadata:
     app.kubernetes.io/name: argocd-redis
     app.kubernetes.io/part-of: argocd
   name: argocd-redis
+  namespace: management-gitops
 spec:
   ports:
   - name: tcp-redis
@@ -31447,6 +31494,7 @@ metadata:
     app.kubernetes.io/name: argocd-repo-server
     app.kubernetes.io/part-of: argocd
   name: argocd-repo-server
+  namespace: management-gitops
 spec:
   ports:
   - name: server
@@ -31468,6 +31516,7 @@ metadata:
     app.kubernetes.io/name: argocd-server
     app.kubernetes.io/part-of: argocd
   name: argocd-server
+  namespace: management-gitops
 spec:
   ports:
   - name: http
@@ -31489,6 +31538,7 @@ metadata:
     app.kubernetes.io/name: argocd-server-metrics
     app.kubernetes.io/part-of: argocd
   name: argocd-server-metrics
+  namespace: management-gitops
 spec:
   ports:
   - name: metrics
@@ -31506,6 +31556,7 @@ metadata:
     app.kubernetes.io/name: argocd-applicationset-controller
     app.kubernetes.io/part-of: argocd
   name: argocd-applicationset-controller
+  namespace: management-gitops
 spec:
   selector:
     matchLabels:
@@ -31761,6 +31812,7 @@ metadata:
     app.kubernetes.io/name: argocd-dex-server
     app.kubernetes.io/part-of: argocd
   name: argocd-dex-server
+  namespace: management-gitops
 spec:
   selector:
     matchLabels:
@@ -31882,6 +31934,7 @@ metadata:
     app.kubernetes.io/name: argocd-notifications-controller
     app.kubernetes.io/part-of: argocd
   name: argocd-notifications-controller
+  namespace: management-gitops
 spec:
   selector:
     matchLabels:
@@ -31982,6 +32035,7 @@ metadata:
     app.kubernetes.io/name: argocd-redis
     app.kubernetes.io/part-of: argocd
   name: argocd-redis
+  namespace: management-gitops
 spec:
   selector:
     matchLabels:
@@ -32064,6 +32118,7 @@ metadata:
     app.kubernetes.io/name: argocd-repo-server
     app.kubernetes.io/part-of: argocd
   name: argocd-repo-server
+  namespace: management-gitops
 spec:
   selector:
     matchLabels:
@@ -32442,6 +32497,7 @@ metadata:
     app.kubernetes.io/name: argocd-server
     app.kubernetes.io/part-of: argocd
   name: argocd-server
+  namespace: management-gitops
 spec:
   selector:
     matchLabels:
@@ -32850,6 +32906,7 @@ metadata:
     app.kubernetes.io/name: argocd-application-controller
     app.kubernetes.io/part-of: argocd
   name: argocd-application-controller
+  namespace: management-gitops
 spec:
   replicas: 1
   selector:
@@ -33206,6 +33263,7 @@ metadata:
     app.kubernetes.io/name: argocd-application-controller
     app.kubernetes.io/part-of: argocd
   name: argocd-application-controller-network-policy
+  namespace: management-gitops
 spec:
   ingress:
   - from:
@@ -33226,6 +33284,7 @@ metadata:
     app.kubernetes.io/name: argocd-applicationset-controller
     app.kubernetes.io/part-of: argocd
   name: argocd-applicationset-controller-network-policy
+  namespace: management-gitops
 spec:
   ingress:
   - from:
@@ -33249,6 +33308,7 @@ metadata:
     app.kubernetes.io/name: argocd-dex-server
     app.kubernetes.io/part-of: argocd
   name: argocd-dex-server-network-policy
+  namespace: management-gitops
 spec:
   ingress:
   - from:
@@ -33279,6 +33339,7 @@ metadata:
     app.kubernetes.io/name: argocd-notifications-controller
     app.kubernetes.io/part-of: argocd
   name: argocd-notifications-controller-network-policy
+  namespace: management-gitops
 spec:
   ingress:
   - from:
@@ -33300,6 +33361,7 @@ metadata:
     app.kubernetes.io/name: argocd-redis
     app.kubernetes.io/part-of: argocd
   name: argocd-redis-network-policy
+  namespace: management-gitops
 spec:
   ingress:
   - from:
@@ -33329,6 +33391,7 @@ metadata:
     app.kubernetes.io/name: argocd-repo-server
     app.kubernetes.io/part-of: argocd
   name: argocd-repo-server-network-policy
+  namespace: management-gitops
 spec:
   ingress:
   - from:
@@ -33365,6 +33428,7 @@ metadata:
     app.kubernetes.io/name: argocd-server
     app.kubernetes.io/part-of: argocd
   name: argocd-server-network-policy
+  namespace: management-gitops
 spec:
   ingress:
   - {}
