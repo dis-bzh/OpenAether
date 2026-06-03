@@ -184,10 +184,15 @@ locals {
     "<bastion-ip>"
   )
 
-  # SSH user for the bastion tunnels. The Scaleway bastion provisions a dedicated
-  # unprivileged "bastion" user via cloud-init (no root login). OVH/Outscale
-  # bastion images default to "ubuntu".
-  bastion_user = local.active_provider == "scaleway" ? "bastion" : "ubuntu"
+  # SSH user for the bastion tunnels, by provider:
+  #   scaleway — a dedicated unprivileged "bastion" user via cloud-init (no root login)
+  #   ovh      — the OpenStack Ubuntu image's default "ubuntu"
+  #   outscale — Outscale's official OMIs default to "outscale" (NOT "ubuntu")
+  bastion_user = lookup({
+    scaleway = "bastion"
+    ovh      = "ubuntu"
+    outscale = "outscale"
+  }, local.active_provider, "ubuntu")
 
   control_plane_ips = coalesce(
     length(try(module.scw[0].control_plane_private_ips, [])) > 0 ? module.scw[0].control_plane_private_ips : null,
