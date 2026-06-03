@@ -32,7 +32,7 @@ locals {
   # The provider is explicit (not buried in cluster_name) so it's consistent across
   # management and workload clusters; project is cluster_name's first segment.
   backup_project        = split("-", var.cluster_name)[0]
-  backup_provider_short = lookup({ scaleway = "scw", ovh = "ovh", outscale = "outscale" }, local.active_provider, local.active_provider)
+  backup_provider_short = lookup({ scaleway = "scaleway", ovh = "ovh", outscale = "outscale" }, local.active_provider, local.active_provider)
   backup_bucket_prefix  = "s3-${local.backup_project}-${local.backup_provider_short}"
 
   # Artifacts (kube/talosconfig): the cluster's own provider holds the PRIMARY;
