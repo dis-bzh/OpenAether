@@ -151,6 +151,25 @@ tasks:
     cmds:
       - ./scripts/backup-state.sh infrastructure/opentofu/cluster
 
+  destroy-management:
+    desc: "Destroy a management cluster. Usage: task destroy-management PROVIDER=ovh"
+    dir: infrastructure/opentofu/cluster
+    vars:
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    env:
+      AWS_ACCESS_KEY_ID:
+        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
+      AWS_SECRET_ACCESS_KEY:
+        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
+      TF_VAR_outscale_access_key_id:
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale ak || true'
+      TF_VAR_outscale_secret_key_id:
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale sk || true'
+    cmds:
+      - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
+      - tofu state rm module.talos.talos_machine_secrets.this
+      - tofu destroy -var-file="envs/management-{{.PROVIDER}}.tfvars"
+
   destroy-workload:
     desc: "Destroy a workload cluster. Usage: task destroy-workload PROVIDER=ovh"
     dir: infrastructure/opentofu/cluster
