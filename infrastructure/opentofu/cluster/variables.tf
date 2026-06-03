@@ -61,7 +61,7 @@ variable "node_distribution" {
       instance_type   - VM type (e.g. "DEV1-M")
 
     OVH-specific:
-      flavor_name         - OpenStack flavor (e.g. "b2-7")
+      flavor_name         - OpenStack flavor (e.g. "b3-8")
       network_name        - External network name for floating IPs (default "Ext-Net")
       availability_zones  - OpenStack AZ list (default ["nova"])
 
@@ -171,4 +171,23 @@ variable "s3_replica_endpoint" {
 variable "s3_replica_region" {
   description = "S3 region of the replica/backup store (prod: e.g. gra)"
   type        = string
+}
+
+# ==============================================================================
+# Outscale API creds (fed by the Taskfile from the resolved S3/API keys; for
+# Outscale the API key == the OOS key). Empty when not deploying Outscale.
+# ==============================================================================
+
+variable "outscale_access_key_id" {
+  description = "Outscale API access key (Taskfile sets TF_VAR_outscale_access_key_id). Empty = use OSC_* env."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "outscale_secret_key_id" {
+  description = "Outscale API secret key."
+  type        = string
+  default     = ""
+  sensitive   = true
 }
