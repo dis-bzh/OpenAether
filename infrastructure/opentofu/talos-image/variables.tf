@@ -31,7 +31,7 @@ variable "arch" {
 variable "staging_bucket" {
   description = "Object Storage bucket used to stage the image for the snapshot import (Scaleway/Outscale upload path)."
   type        = string
-  default     = "s3-openaether-scw-talos-staging"
+  default     = "s3-openaether-scaleway-talos-staging"
 }
 
 variable "region" {
