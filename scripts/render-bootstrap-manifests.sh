@@ -13,7 +13,7 @@ set -euo pipefail
 # ─────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MANIFESTS_DIR="${SCRIPT_DIR}/../infrastructure/opentofu/bootstrap-manifests"
+MANIFESTS_DIR="${SCRIPT_DIR}/../infrastructure/opentofu/cluster/bootstrap-manifests"
 
 # Mode: production (default) or local Docker testing
 LOCAL_MODE=false
