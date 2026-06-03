@@ -55,5 +55,13 @@ resource "openstack_images_image_v2" "talos" {
 
   tags = ["talos", var.talos_version, "managed-by-opentofu"]
 
+  # local_file_path is an absolute path derived from path.root (var.cache_dir).
+  # It must not trigger a replace on its own: the only signal that the image needs
+  # to be rebuilt is a name change (= new version or schematic_id). The build step
+  # above handles the file; Glance doesn't care where it came from once uploaded.
+  lifecycle {
+    ignore_changes = [local_file_path]
+  }
+
   depends_on = [terraform_data.build]
 }
