@@ -66,11 +66,12 @@ resource "terraform_data" "backup" {
     command     = abspath("${path.module}/../../../scripts/backup-artifacts.sh")
 
     # Secrets (passphrase) and the artifacts go via env (binary-safe base64). The
-    # replica creds (BACKUP_AWS_*) are read from the ambient shell by the script.
+    # script resolves the S3 creds from PROVIDER (primary + <PU>_BACKUP_AWS_*).
     environment = {
       TALOSCONFIG_B64 = base64encode(module.talos.talosconfig)
       KUBECONFIG_B64  = base64encode(module.talos.kubeconfig_raw)
       PASSPHRASE      = var.encryption_passphrase
+      PROVIDER        = local.active_provider
       PRIMARY_BUCKET  = local.artifact_bucket_primary
       PRIMARY_EP      = var.s3_primary_endpoint
       PRIMARY_REGION  = var.s3_primary_region

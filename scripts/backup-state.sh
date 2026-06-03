@@ -4,33 +4,26 @@
 #
 # The S3 backend object is ALREADY ciphertext (OpenTofu encryption{} block,
 # AES-GCM + PBKDF2). This copies it from the PRIMARY bucket to the "-backup" one —
-# in prod a DIFFERENT provider (BACKUP_AWS_* creds) — layering S3 SSE on top.
+# in prod a DIFFERENT provider — layering S3 SSE on top.
 #
-# Run AFTER each apply: the S3 backend only flushes the new state when the apply
-# process exits, so an in-apply copy would capture the *previous* state. The
-# bucket/endpoint/key values come from the `backup_targets` tofu output.
+# Run AFTER each apply (the backend only flushes state on apply exit). The
+# bucket/endpoint/key/provider come from the `backup_targets` tofu output.
 #
-# Usage:
-#   ./scripts/backup-state.sh [tofu_dir]     # default: infrastructure/opentofu
+# Creds:
+#   primary : the ambient AWS_* (the Taskfile sets it to the cluster provider's keys)
+#   replica : <PU>_BACKUP_AWS_* -> BACKUP_AWS_* -> primary    (lib/common.sh::s3_cred)
 #
-# Env:
-#   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY                 primary store creds
-#   BACKUP_AWS_ACCESS_KEY_ID / BACKUP_AWS_SECRET_ACCESS_KEY   replica store creds
-#                                                            (default: primary creds)
+# Usage: ./scripts/backup-state.sh [tofu_dir]   (default: infrastructure/opentofu/cluster)
 # ==============================================================================
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 
 TOFU_DIR="${1:-infrastructure/opentofu/cluster}"
-
 command -v aws >/dev/null 2>&1 || { echo "✗ aws CLI required"; exit 1; }
 command -v jq  >/dev/null 2>&1 || { echo "✗ jq required"; exit 1; }
-
-# S3-compatible stores reject the AWS CLI v2.23+ default trailing checksum.
-export AWS_REQUEST_CHECKSUM_CALCULATION="${AWS_REQUEST_CHECKSUM_CALCULATION:-when_required}"
-export AWS_RESPONSE_CHECKSUM_VALIDATION="${AWS_RESPONSE_CHECKSUM_VALIDATION:-when_required}"
+oa_aws_compat
 
 cd "$TOFU_DIR"
-
 T="$(tofu output -json backup_targets 2>/dev/null || echo 'null')"
 [ "$T" != "null" ] && [ -n "$T" ] || {
   echo "⚠ no backup_targets output — apply the infra first (or backup_enabled=false). Skipping state backup."
@@ -44,19 +37,20 @@ PRIMARY_EP="$(jq -r '.primary_endpoint' <<<"$T")"
 PRIMARY_REGION="$(jq -r '.primary_region' <<<"$T")"
 REPLICA_EP="$(jq -r '.replica_endpoint' <<<"$T")"
 REPLICA_REGION="$(jq -r '.replica_region' <<<"$T")"
+PROVIDER="$(jq -r '.provider // empty' <<<"$T")"
+# Fallback: derive provider from the bucket name (s3-<project>-<provider>-tfstate-<env>).
+[ -n "$PROVIDER" ] || PROVIDER="$(sed -E 's/^s3-[^-]+-([a-z]+)-tfstate-.*/\1/' <<<"$PRIMARY_BUCKET")"
 
-# Replica creds default to the primary creds (dev: same provider).
-BACKUP_AWS_ACCESS_KEY_ID="${BACKUP_AWS_ACCESS_KEY_ID:-${AWS_ACCESS_KEY_ID:-}}"
-BACKUP_AWS_SECRET_ACCESS_KEY="${BACKUP_AWS_SECRET_ACCESS_KEY:-${AWS_SECRET_ACCESS_KEY:-}}"
+# Replica creds = the cluster provider's BACKUP creds (cross-provider in prod).
+BACKUP_AK="$(s3_cred "$PROVIDER" backup ak)"
+BACKUP_SK="$(s3_cred "$PROVIDER" backup sk)"
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
-# Download the ciphertext from primary, re-upload to the replica (cross-creds + SSE).
-AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-}" AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-}" \
-  aws s3 cp "s3://$PRIMARY_BUCKET/$KEY" "$WORK/state" \
-    --endpoint-url "$PRIMARY_EP" --region "$PRIMARY_REGION" >/dev/null
-
-AWS_ACCESS_KEY_ID="$BACKUP_AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$BACKUP_AWS_SECRET_ACCESS_KEY" \
+# Download the ciphertext from primary (ambient AWS_*), re-upload to replica (+SSE).
+aws s3 cp "s3://$PRIMARY_BUCKET/$KEY" "$WORK/state" \
+  --endpoint-url "$PRIMARY_EP" --region "$PRIMARY_REGION" >/dev/null
+AWS_ACCESS_KEY_ID="$BACKUP_AK" AWS_SECRET_ACCESS_KEY="$BACKUP_SK" \
   aws s3 cp "$WORK/state" "s3://$REPLICA_BUCKET/$KEY" \
     --endpoint-url "$REPLICA_EP" --region "$REPLICA_REGION" --sse AES256 >/dev/null
 
