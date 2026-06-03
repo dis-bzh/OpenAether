@@ -3,7 +3,7 @@
 # Client applications cluster. Managed by the management cluster via ArgoCD hub.
 # ==============================================================================
 
-cluster_name       = "openaether-scw"
+cluster_name       = "openaether-scaleway"
 environment        = "prod"
 cluster_role       = "workload"
 talos_version      = "v1.13.3"
@@ -32,8 +32,8 @@ git_repo_url     = "https://github.com/dis-bzh/OpenAether.git"
 argocd_namespace = "management-gitops"
 
 # --- Backup / DR object stores ------------------------------------------------
-# Derived buckets: state -> s3-openaether-scw-tfstate-prod (+ -backup),
-#                  kube/talos -> s3-openaether-scw-workload-prod (+ -backup).
+# Derived buckets: state -> s3-openaether-scaleway-tfstate-prod (+ -backup),
+#                  kube/talos -> s3-openaether-scaleway-workload-prod (+ -backup).
 # PRIMARY = this cluster's provider (AWS_*). REPLICA = the "-backup" store; in
 # prod point it at a DIFFERENT provider + export BACKUP_AWS_* for it.
 s3_primary_endpoint = "https://s3.fr-par.scw.cloud"

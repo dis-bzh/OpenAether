@@ -7,7 +7,7 @@
 #   export OS_USERNAME=<ovh_user>
 #   export OS_PASSWORD=<ovh_password>
 #   export OS_PROJECT_ID=<ovh_project_id>
-#   export OS_REGION_NAME=GRA11           # or eu-west-par (3-AZ)
+#   export OS_REGION_NAME=EU-WEST-PAR           # or eu-west-par (3-AZ)
 #   export OS_USER_DOMAIN_NAME=Default
 #   export OS_PROJECT_DOMAIN_NAME=Default
 #   (easiest: download the "OpenStack RC file v3" from the OVH console and source it)
@@ -24,7 +24,7 @@ node_distribution = {
   ovh = {
     control_planes     = 3
     workers            = 3
-    region             = "GRA11"
+    region             = "EU-WEST-PAR"
     flavor_name        = "b2-7"
     image_id           = "TALOS_IMAGE_ID" # Replace with actual OVH image UUID
     network_name       = "Ext-Net"
