@@ -1,0 +1,54 @@
+# ==============================================================================
+# Failover Management Cluster on Outscale / Numspot (cross-provider)
+# A SECOND management cluster, on Outscale, for when your PRIMARY management
+# provider is lost/unavailable. Rebuilds a full management cluster (~30 min).
+# Use this only when Outscale is NOT your primary provider.
+#
+# Note on terminology: re-running your own management-<provider>.tfvars rebuilds
+# the cluster on the SAME provider (the everyday recovery). This file is the
+# CROSS-provider failover — same role, different cloud.
+#
+# Prerequisites:
+#   export OSC_ACCESS_KEY=<outscale_access_key>
+#   export OSC_SECRET_KEY=<outscale_secret_key>
+#   export OSC_REGION=eu-west-2
+#
+# Usage:
+#   task failover PROVIDER=outscale
+# ==============================================================================
+
+cluster_name       = "openaether"
+environment        = "prod"
+cluster_role       = "management"
+talos_version      = "v1.13.3"
+kubernetes_version = "v1.35.3"
+talos_bootstrap    = false # Set to true after infra is up
+
+node_distribution = {
+  outscale = {
+    control_planes     = 3
+    workers            = 2
+    region             = "eu-west-2"
+    instance_type      = "tinav5.c2r4p1"
+    image_id           = "TALOS_OMI_ID" # Replace with actual Outscale OMI ID
+    availability_zones = ["eu-west-2a", "eu-west-2b", "eu-west-2c"]
+  }
+}
+
+admin_ip = ["YOUR_IP/32"]
+
+bastion_ssh_keys = {
+  outscale = "ssh-ed25519 AAAA... user@host"
+}
+
+git_repo_url     = "https://github.com/dis-bzh/OpenAether.git"
+argocd_namespace = "management-gitops"
+
+# --- Backup / DR object stores (Outscale OOS, S3-compatible) ------------------
+# Derived buckets: state -> s3-openaether-outscale-tfstate-prod (+ -backup),
+#                  kube/talos -> s3-openaether-outscale-management-prod (+ -backup).
+# Replicate BACK to your primary provider once it recovers (export BACKUP_AWS_*).
+s3_primary_endpoint = "https://oos.eu-west-2.outscale.com"
+s3_primary_region   = "eu-west-2"
+s3_replica_endpoint = "https://oos.eu-west-2.outscale.com" # prod: your primary provider, e.g. SCW https://s3.fr-par.scw.cloud
+s3_replica_region   = "eu-west-2"                           # prod: e.g. fr-par
