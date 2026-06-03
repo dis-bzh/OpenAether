@@ -12,7 +12,14 @@ provider "openstack" {
   auth_url = (local.ovh_dist.control_planes + local.ovh_dist.workers) > 0 ? null : "https://auth.placeholder.invalid/v3"
 }
 
-provider "outscale" {}
+# Outscale API creds fed explicitly (Taskfile sets TF_VAR_outscale_* from the
+# resolved S3/API keys) so auth doesn't depend on the exact OSC_* env var names.
+# Empty/null when not deploying Outscale → no effect on Scaleway/OVH applies.
+provider "outscale" {
+  access_key_id = var.outscale_access_key_id != "" ? var.outscale_access_key_id : null
+  secret_key_id = var.outscale_secret_key_id != "" ? var.outscale_secret_key_id : null
+  region        = local.active_provider == "outscale" ? local.osc_dist.region : null
+}
 
 # Backups go through the AWS CLI (scripts/backup-artifacts.sh + backup-state.sh),
 # not a Terraform provider — the artifacts/state are streamed to S3-compatible
@@ -40,8 +47,8 @@ locals {
   ovh_dist = merge({
     control_planes     = 0
     workers            = 0
-    region             = "GRA11"
-    flavor_name        = "b2-7"
+    region             = "EU-WEST-PAR"
+    flavor_name        = "b3-8"
     image_id           = null
     image_name         = "talos"
     network_name       = "Ext-Net"
