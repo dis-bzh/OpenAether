@@ -325,8 +325,8 @@ run "verify_ovh_module_activation" {
       ovh = {
         control_planes     = 3
         workers            = 1
-        region             = "GRA11"
-        flavor_name        = "b2-7"
+        region             = "EU-WEST-PAR"
+        flavor_name        = "b3-8"
         image_id           = "dummy-talos-ovh-image"
         network_name       = "Ext-Net"
         availability_zones = ["nova"]

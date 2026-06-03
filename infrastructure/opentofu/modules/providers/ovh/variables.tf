@@ -6,13 +6,13 @@ variable "cluster_name" {
 variable "region" {
   description = "OVH/OpenStack region"
   type        = string
-  default     = "GRA11"
+  default     = "EU-WEST-PAR"
 }
 
 variable "flavor_name" {
   description = "OpenStack flavor for cluster nodes"
   type        = string
-  default     = "b2-7"
+  default     = "b3-8"
 }
 
 variable "image_id" {
