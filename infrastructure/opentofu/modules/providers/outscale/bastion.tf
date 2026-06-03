@@ -24,7 +24,7 @@ resource "outscale_public_ip" "bastion" {}
 
 resource "outscale_vm" "bastion" {
   image_id           = coalesce(var.bastion_image_id, try(data.outscale_image.ubuntu.image_id, null))
-  vm_type            = "tinav5.c2r4p1"
+  vm_type            = "tinav5.c2r2p2"
   subnet_id          = outscale_subnet.public.subnet_id
   security_group_ids = [outscale_security_group.bastion.security_group_id]
 

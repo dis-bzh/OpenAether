@@ -44,7 +44,7 @@ resource "openstack_networking_port_v2" "bastion" {
 resource "openstack_compute_instance_v2" "bastion" {
   name        = "${var.cluster_name}-bastion"
   image_id    = data.openstack_images_image_v2.bastion.id
-  flavor_name = "b2-7"
+  flavor_name = "b3-8"
 
   network {
     port = openstack_networking_port_v2.bastion.id
