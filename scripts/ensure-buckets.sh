@@ -8,7 +8,7 @@
 #   state     -> s3-<project>-<provider>-tfstate-<env>   (+ -backup)
 #   artifacts -> s3-<project>-<provider>-<role>-<env>    (+ -backup)
 #
-# where <project> = cluster_name's first segment, <provider> = scw|ovh|outscale
+# where <project> = cluster_name's first segment, <provider> = scaleway|ovh|outscale
 # (detected from node_distribution).
 #
 # Only the STATE PRIMARY must exist before `tofu init` (the S3 backend won't
@@ -17,8 +17,10 @@
 # gpg backup) and may live on another provider, so they are BEST-EFFORT here and
 # never block the deploy.
 #
-# Primary buckets use AWS_*; the "-backup" replicas use BACKUP_AWS_* (default to
-# AWS_* when unset, e.g. dev).
+# Creds are resolved via variable indirection (same logic as talos-image.sh):
+#   Primary : ${PU}_AWS_ACCESS_KEY_ID (+ _ACCESS_KEY form) → AWS_ACCESS_KEY_ID
+#   Backup  : ${PU}_BACKUP_AWS_ACCESS_KEY_ID → BACKUP_AWS_ACCESS_KEY_ID → primary
+# where PU = SCW | OVH | OUTSCALE.  Both _ID and non-_ID forms accepted.
 #
 # Usage: ./scripts/ensure-buckets.sh <path/to/cluster.tfvars>
 # ==============================================================================
@@ -46,12 +48,13 @@ PRIMARY_REGION="$(val s3_primary_region)"
 REPLICA_EP="$(val s3_replica_endpoint)"
 REPLICA_REGION="$(val s3_replica_region)"
 
-# Active provider = the node_distribution key (scaleway|ovh|outscale) -> short form.
+# Active provider — also derive PU (uppercase prefix for cred lookups, mirrors
+# talos-image.sh: scaleway→SCW, ovh→OVH, outscale→OUTSCALE).
 PROVIDER_LONG="$(grep -E '^[[:space:]]*(scaleway|ovh|outscale)[[:space:]]*=' "$TFVARS" 2>/dev/null | head -1 | sed -E 's/^[[:space:]]*([a-z]+).*/\1/')"
 case "$PROVIDER_LONG" in
-  scaleway) PROVIDER=scw ;;
-  ovh)      PROVIDER=ovh ;;
-  outscale) PROVIDER=outscale ;;
+  scaleway) PROVIDER=scaleway PU=SCW ;;
+  ovh)      PROVIDER=ovh      PU=OVH ;;
+  outscale) PROVIDER=outscale PU=OUTSCALE ;;
   *) echo "✗ could not detect provider from node_distribution in $TFVARS"; exit 1 ;;
 esac
 
@@ -60,9 +63,26 @@ esac
 [ -n "$PRIMARY_EP" ] && [ -n "$REPLICA_EP" ] || {
   echo "✗ could not read s3_primary_endpoint/s3_replica_endpoint from $TFVARS"; exit 1; }
 
-# Replica creds default to the primary creds (dev: same provider).
-BACKUP_AWS_ACCESS_KEY_ID="${BACKUP_AWS_ACCESS_KEY_ID:-${AWS_ACCESS_KEY_ID:-}}"
-BACKUP_AWS_SECRET_ACCESS_KEY="${BACKUP_AWS_SECRET_ACCESS_KEY:-${AWS_SECRET_ACCESS_KEY:-}}"
+# Resolve primary S3 creds via variable indirection.
+# Try ${PU}_AWS_ACCESS_KEY_ID → ${PU}_AWS_ACCESS_KEY → generic AWS_* → native API keys.
+v_akid="${PU}_AWS_ACCESS_KEY_ID"; v_ak="${PU}_AWS_ACCESS_KEY"
+v_skid="${PU}_AWS_SECRET_ACCESS_KEY"; v_sk="${PU}_AWS_SECRET_KEY"
+PRIMARY_AK="${!v_akid:-${!v_ak:-${AWS_ACCESS_KEY_ID:-}}}"
+PRIMARY_SK="${!v_skid:-${!v_sk:-${AWS_SECRET_ACCESS_KEY:-}}}"
+case "$PROVIDER" in
+  scaleway) PRIMARY_AK="${PRIMARY_AK:-${SCW_ACCESS_KEY:-}}"; PRIMARY_SK="${PRIMARY_SK:-${SCW_SECRET_KEY:-}}" ;;
+  outscale) PRIMARY_AK="${PRIMARY_AK:-${OSC_ACCESS_KEY:-}}"; PRIMARY_SK="${PRIMARY_SK:-${OSC_SECRET_KEY:-}}" ;;
+esac
+[ -n "$PRIMARY_AK" ] || {
+  echo "✗ no S3 creds for '${PROVIDER}': export ${PU}_AWS_ACCESS_KEY_ID + ${PU}_AWS_SECRET_ACCESS_KEY"
+  exit 1
+}
+
+# Backup creds: ${PU}_BACKUP_AWS_* → generic BACKUP_AWS_* → primary creds (dev: same provider).
+bv_akid="${PU}_BACKUP_AWS_ACCESS_KEY_ID"; bv_ak="${PU}_BACKUP_AWS_ACCESS_KEY"
+bv_skid="${PU}_BACKUP_AWS_SECRET_ACCESS_KEY"; bv_sk="${PU}_BACKUP_AWS_SECRET_KEY"
+BACKUP_AK="${!bv_akid:-${!bv_ak:-${BACKUP_AWS_ACCESS_KEY_ID:-$PRIMARY_AK}}}"
+BACKUP_SK="${!bv_skid:-${!bv_sk:-${BACKUP_AWS_SECRET_ACCESS_KEY:-$PRIMARY_SK}}}"
 
 PROJECT="${CLUSTER%%-*}"
 PREFIX="s3-${PROJECT}-${PROVIDER}"
@@ -80,14 +100,14 @@ ensure_bucket() { # name  endpoint  region  access_key  secret_key
   fi
 }
 
-echo "▶ Ensuring backup buckets for ${PROJECT} (${PROVIDER}/${ROLE}/${ENVN})"
+echo "▶ Ensuring buckets for ${PROJECT} (${PU}/${ROLE}/${ENVN})"
 
 # State PRIMARY — REQUIRED before `tofu init`. Fatal under set -e.
-ensure_bucket "$STATE_PRIMARY" "$PRIMARY_EP" "$PRIMARY_REGION" "${AWS_ACCESS_KEY_ID:-}" "${AWS_SECRET_ACCESS_KEY:-}"
+ensure_bucket "$STATE_PRIMARY" "$PRIMARY_EP" "$PRIMARY_REGION" "$PRIMARY_AK" "$PRIMARY_SK"
 
 # The rest are needed only later and may live on another provider — best-effort.
-ensure_bucket "$ARTIFACT_PRIMARY"          "$PRIMARY_EP" "$PRIMARY_REGION" "${AWS_ACCESS_KEY_ID:-}" "${AWS_SECRET_ACCESS_KEY:-}" || echo "  ⚠ ${ARTIFACT_PRIMARY} not ready (will retry at backup time)"
-ensure_bucket "${STATE_PRIMARY}-backup"    "$REPLICA_EP" "$REPLICA_REGION" "$BACKUP_AWS_ACCESS_KEY_ID" "$BACKUP_AWS_SECRET_ACCESS_KEY" || echo "  ⚠ ${STATE_PRIMARY}-backup not ready (set BACKUP_AWS_* for a cross-provider replica)"
-ensure_bucket "${ARTIFACT_PRIMARY}-backup" "$REPLICA_EP" "$REPLICA_REGION" "$BACKUP_AWS_ACCESS_KEY_ID" "$BACKUP_AWS_SECRET_ACCESS_KEY" || echo "  ⚠ ${ARTIFACT_PRIMARY}-backup not ready (set BACKUP_AWS_* for a cross-provider replica)"
+ensure_bucket "$ARTIFACT_PRIMARY"          "$PRIMARY_EP" "$PRIMARY_REGION" "$PRIMARY_AK" "$PRIMARY_SK" || echo "  ⚠ ${ARTIFACT_PRIMARY} not ready (will retry at backup time)"
+ensure_bucket "${STATE_PRIMARY}-backup"    "$REPLICA_EP" "$REPLICA_REGION" "$BACKUP_AK"  "$BACKUP_SK"  || echo "  ⚠ ${STATE_PRIMARY}-backup not ready (set ${PU}_BACKUP_AWS_* for a cross-provider replica)"
+ensure_bucket "${ARTIFACT_PRIMARY}-backup" "$REPLICA_EP" "$REPLICA_REGION" "$BACKUP_AK"  "$BACKUP_SK"  || echo "  ⚠ ${ARTIFACT_PRIMARY}-backup not ready (set ${PU}_BACKUP_AWS_* for a cross-provider replica)"
 
 echo "✓ State primary bucket ready (backups best-effort)"
