@@ -2,7 +2,7 @@
 # ==============================================================================
 # OpenAether — encrypted backup of cluster access artifacts (talosconfig/kubeconfig)
 #
-# Called by infrastructure/opentofu/backup.tf (local-exec) during a Phase-2 apply.
+# Called by infrastructure/opentofu/cluster/backup.tf (local-exec) during a Phase-2 apply.
 # CLIENT-side encrypts each artifact with gpg (symmetric AES-256, authenticated)
 # using the SAME passphrase as the tfstate, then uploads the ciphertext to TWO
 # object stores — PRIMARY (the cluster's own provider) and REPLICA (in prod a
@@ -17,12 +17,16 @@
 #   BACKUP_AWS_ACCESS_KEY_ID / BACKUP_AWS_SECRET_ACCESS_KEY   replica store creds
 #                                                            (default: primary creds)
 #
-# Restore (DR): see infrastructure/opentofu/README.md → "Restore a backup".
+# Restore (DR): see infrastructure/opentofu/cluster/README.md → "Restore a backup".
 # ==============================================================================
 set -euo pipefail
 
 command -v aws >/dev/null 2>&1 || { echo "✗ aws CLI required for backups (or set backup_enabled=false)"; exit 1; }
 command -v gpg >/dev/null 2>&1 || { echo "✗ gpg required for client-side encryption (or set backup_enabled=false)"; exit 1; }
+
+# S3-compatible stores reject the AWS CLI v2.23+ default trailing checksum.
+export AWS_REQUEST_CHECKSUM_CALCULATION="${AWS_REQUEST_CHECKSUM_CALCULATION:-when_required}"
+export AWS_RESPONSE_CHECKSUM_VALIDATION="${AWS_RESPONSE_CHECKSUM_VALIDATION:-when_required}"
 
 # Replica creds default to the primary creds (dev: same provider as the cluster).
 BACKUP_AWS_ACCESS_KEY_ID="${BACKUP_AWS_ACCESS_KEY_ID:-${AWS_ACCESS_KEY_ID:-}}"

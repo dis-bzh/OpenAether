@@ -31,7 +31,7 @@ if [[ -z "$PROVIDER" ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TOFU_DIR="${SCRIPT_DIR}/../infrastructure/opentofu"
+TOFU_DIR="${SCRIPT_DIR}/../infrastructure/opentofu/cluster"
 ENVFILE="${TOFU_DIR}/envs/failover-${PROVIDER}.tfvars"
 
 if [[ ! -f "${ENVFILE}" ]]; then

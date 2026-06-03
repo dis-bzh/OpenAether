@@ -18,7 +18,7 @@
 set -euo pipefail
 
 ACTION="${1:-open}"
-TOFU_DIR="${2:-infrastructure/opentofu}"
+TOFU_DIR="${2:-infrastructure/opentofu/cluster}"
 KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
 KEY="${KEY/#\~/$HOME}"
 PIDFILE="${TOFU_DIR}/.talos-tunnels.pids"

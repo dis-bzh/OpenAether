@@ -20,10 +20,14 @@
 # ==============================================================================
 set -euo pipefail
 
-TOFU_DIR="${1:-infrastructure/opentofu}"
+TOFU_DIR="${1:-infrastructure/opentofu/cluster}"
 
 command -v aws >/dev/null 2>&1 || { echo "✗ aws CLI required"; exit 1; }
 command -v jq  >/dev/null 2>&1 || { echo "✗ jq required"; exit 1; }
+
+# S3-compatible stores reject the AWS CLI v2.23+ default trailing checksum.
+export AWS_REQUEST_CHECKSUM_CALCULATION="${AWS_REQUEST_CHECKSUM_CALCULATION:-when_required}"
+export AWS_RESPONSE_CHECKSUM_VALIDATION="${AWS_RESPONSE_CHECKSUM_VALIDATION:-when_required}"
 
 cd "$TOFU_DIR"
 

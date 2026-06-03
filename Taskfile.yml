@@ -16,7 +16,7 @@ tasks:
     cmds:
       - tofu fmt -check -recursive infrastructure/opentofu
       - yamllint -c infrastructure/.yamllint apps/ infrastructure/
-      - tflint --recursive infrastructure/opentofu
+      - tflint --recursive infrastructure/opentofu/cluster
 
   fmt:
     desc: Format OpenTofu code
@@ -24,8 +24,8 @@ tasks:
       - tofu fmt -recursive infrastructure/opentofu
 
   validate:
-    desc: Validate OpenTofu code
-    dir: infrastructure/opentofu
+    desc: Validate the cluster OpenTofu root
+    dir: infrastructure/opentofu/cluster
     cmds:
       - tofu init -backend=false
       - tofu validate
@@ -34,12 +34,12 @@ tasks:
     desc: Run security scans (Trivy, Checkov, Gitleaks)
     cmds:
       - trivy config infrastructure/
-      - checkov -d infrastructure/opentofu
+      - checkov -d infrastructure/opentofu/cluster
       - gitleaks detect --source . --no-git
 
   test:
-    desc: Run OpenTofu tests
-    dir: infrastructure/opentofu
+    desc: Run OpenTofu tests (cluster root)
+    dir: infrastructure/opentofu/cluster
     cmds:
       - tofu test
 
@@ -48,15 +48,12 @@ tasks:
   # ===========================================================================
 
   talos-image:
-    desc: "Build + publish the Talos image. Usage: task talos-image PROVIDER=scaleway [VERSION=v1.13.3]"
-    dir: infrastructure/talos-image
+    desc: "Build + publish the Talos image for a provider. Usage: task talos-image PROVIDER=scw|ovh|outscale [VERSION=v1.13.3]"
     vars:
-      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+      PROVIDER: '{{.PROVIDER | default "scw"}}'
       VERSION: '{{.VERSION | default "v1.13.3"}}'
     cmds:
-      - tofu init -upgrade
-      - tofu apply -var target_provider={{.PROVIDER}} -var talos_version={{.VERSION}}
-      - tofu output image_name
+      - ./scripts/talos-image.sh {{.PROVIDER}} {{.VERSION}}
 
   # ===========================================================================
   # Cluster Lifecycle
@@ -64,67 +61,67 @@ tasks:
 
   infra-management:
     desc: "Deploy the management cluster. Usage: task infra-management [PROVIDER=scw|ovh|outscale]"
-    dir: infrastructure/opentofu
+    dir: infrastructure/opentofu/cluster
     vars:
       PROVIDER: '{{.PROVIDER | default "scw"}}'
     cmds:
-      - ../../scripts/ensure-buckets.sh envs/management-{{.PROVIDER}}.tfvars
-      - tofu init -reconfigure $(../../scripts/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
+      - ../../../scripts/ensure-buckets.sh envs/management-{{.PROVIDER}}.tfvars
+      - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
       - tofu apply -var-file="envs/management-{{.PROVIDER}}.tfvars" -var talos_bootstrap=false
-      - ../../scripts/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
+      - ../../../scripts/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
 
   infra-workload:
     desc: "Deploy a workload cluster. Usage: task infra-workload PROVIDER=ovh"
-    dir: infrastructure/opentofu
+    dir: infrastructure/opentofu/cluster
     vars:
       PROVIDER: '{{.PROVIDER | default "scw"}}'
     cmds:
-      - ../../scripts/ensure-buckets.sh envs/workload-{{.PROVIDER}}.tfvars
-      - tofu init -reconfigure $(../../scripts/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
+      - ../../../scripts/ensure-buckets.sh envs/workload-{{.PROVIDER}}.tfvars
+      - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
       - tofu apply -var-file="envs/workload-{{.PROVIDER}}.tfvars" -var talos_bootstrap=false
-      - ../../scripts/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
+      - ../../../scripts/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
 
   management:
     desc: "Phase 2: open SSH tunnels (from state) + bootstrap the management cluster. Usage: task management [PROVIDER=scw|ovh|outscale] KEY=~/.ssh/yourkey"
-    dir: infrastructure/opentofu
+    dir: infrastructure/opentofu/cluster
     vars:
       PROVIDER: '{{.PROVIDER | default "scw"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
     cmds:
-      - tofu init -reconfigure $(../../scripts/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
-      - SSH_KEY="{{.KEY}}" ../../scripts/talos-tunnels.sh open .
+      - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
+      - SSH_KEY="{{.KEY}}" ../../../scripts/talos-tunnels.sh open .
       - tofu apply -var-file="envs/management-{{.PROVIDER}}.tfvars" -var talos_bootstrap=true
-      - ../../scripts/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
+      - ../../../scripts/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
 
   workload:
     desc: "Phase 2: open tunnels + bootstrap a workload cluster. Usage: task workload PROVIDER=ovh KEY=~/.ssh/yourkey"
-    dir: infrastructure/opentofu
+    dir: infrastructure/opentofu/cluster
     vars:
       PROVIDER: '{{.PROVIDER | default "scw"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
     cmds:
-      - tofu init -reconfigure $(../../scripts/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
-      - SSH_KEY="{{.KEY}}" ../../scripts/talos-tunnels.sh open .
+      - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
+      - SSH_KEY="{{.KEY}}" ../../../scripts/talos-tunnels.sh open .
       - tofu apply -var-file="envs/workload-{{.PROVIDER}}.tfvars" -var talos_bootstrap=true
-      - ../../scripts/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
+      - ../../../scripts/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
 
   close-tunnels:
     desc: "Close the Talos API SSH tunnels opened for Phase 2"
     cmds:
-      - ./scripts/talos-tunnels.sh close infrastructure/opentofu
+      - ./scripts/talos-tunnels.sh close infrastructure/opentofu/cluster
 
   backup-state:
     desc: "Replicate the (encrypted) tfstate to the -backup store (post-apply). Set BACKUP_AWS_* for a cross-provider replica."
     cmds:
-      - ./scripts/backup-state.sh infrastructure/opentofu
+      - ./scripts/backup-state.sh infrastructure/opentofu/cluster
 
   destroy-workload:
     desc: "Destroy a workload cluster. Usage: task destroy-workload PROVIDER=ovh"
-    dir: infrastructure/opentofu
+    dir: infrastructure/opentofu/cluster
     vars:
       PROVIDER: '{{.PROVIDER | default "scw"}}'
     cmds:
-      - tofu init -reconfigure $(../../scripts/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
+      - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
       - tofu destroy -var-file="envs/workload-{{.PROVIDER}}.tfvars"
 
   # ===========================================================================
@@ -161,7 +158,7 @@ tasks:
     cmds:
       - tofu init -upgrade > /dev/null 2>&1 || tofu init > /dev/null
       - |
-        export TF_VAR_cilium_manifest="$(cat ../opentofu/bootstrap-manifests/cilium-local.yaml 2>/dev/null || echo 'placeholder')"
+        export TF_VAR_cilium_manifest="$(cat ../opentofu/cluster/bootstrap-manifests/cilium-local.yaml 2>/dev/null || echo 'placeholder')"
         tofu apply -var talos_bootstrap=true -auto-approve
 
   local-test:
@@ -217,8 +214,8 @@ tasks:
 
   kubeconfig:
     desc: Retrieve kubeconfig from OpenTofu outputs
-    dir: infrastructure/opentofu
+    dir: infrastructure/opentofu/cluster
     cmds:
       - tofu output -raw kubeconfig > kubeconfig
       - tofu output -raw talosconfig > talosconfig
-      - echo "KUBECONFIG and TALOSCONFIG written to infrastructure/opentofu/"
+      - echo "KUBECONFIG and TALOSCONFIG written to infrastructure/opentofu/cluster/"

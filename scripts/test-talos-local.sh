@@ -21,7 +21,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${SCRIPT_DIR}/.."
 TOFU_DIR="${ROOT_DIR}/infrastructure/opentofu-local"
-MANIFESTS_DIR="${ROOT_DIR}/infrastructure/opentofu/bootstrap-manifests"
+MANIFESTS_DIR="${ROOT_DIR}/infrastructure/opentofu/cluster/bootstrap-manifests"
 
 CLUSTER_NAME="openaether-local-dev"
 CP_IPS=("10.5.0.10" "10.5.0.11" "10.5.0.12")

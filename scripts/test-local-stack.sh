@@ -154,7 +154,7 @@ section "4. YAML Lint"
 
 if command -v yamllint &>/dev/null; then
   check "yamllint apps/" yamllint -c "${ROOT_DIR}/infrastructure/.yamllint" "${ROOT_DIR}/apps/"
-  check "yamllint infrastructure/" yamllint -c "${ROOT_DIR}/infrastructure/.yamllint" "${ROOT_DIR}/infrastructure/opentofu/bootstrap-manifests/"
+  check "yamllint infrastructure/" yamllint -c "${ROOT_DIR}/infrastructure/.yamllint" "${ROOT_DIR}/infrastructure/opentofu/cluster/bootstrap-manifests/"
 else
   skip "yamllint" "yamllint not found (pip install yamllint)"
 fi
