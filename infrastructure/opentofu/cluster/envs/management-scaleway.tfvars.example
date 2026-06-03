@@ -33,8 +33,8 @@ argocd_namespace = "management-gitops"
 
 # --- Backup / DR object stores ------------------------------------------------
 # Derived buckets (you don't set them):
-#   state          -> s3-openaether-scw-tfstate-prod      (+ -backup)
-#   kube/talosconfig -> s3-openaether-scw-management-prod  (+ -backup)
+#   state          -> s3-openaether-scaleway-tfstate-prod      (+ -backup)
+#   kube/talosconfig -> s3-openaether-scaleway-management-prod  (+ -backup)
 # PRIMARY = this cluster's provider (uses AWS_*). REPLICA = the "-backup" store.
 # In PROD, point the replica at a DIFFERENT provider and export
 # BACKUP_AWS_ACCESS_KEY_ID / BACKUP_AWS_SECRET_ACCESS_KEY for it. In dev, leave

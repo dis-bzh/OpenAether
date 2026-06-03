@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.4] — 2026-06-03
+
+### Fixed — Outscale management cluster end-to-end (3/3 providers live)
+
+Brought the Outscale management cluster to a working Talos bootstrap, completing
+validated **management** deployments on all three providers (Scaleway ✅ ·
+OVH ✅ · Outscale ✅). Fixes, in the order they surfaced:
+
+- **Control-plane NIC** — control planes attach to the subnet directly; Outscale's
+  CreateVm rejects a dedicated NIC together with the VM's security groups.
+- **Bastion SSH user** — Outscale's official OMIs default to the `outscale` login,
+  not `ubuntu`; `bastion_user` is now mapped per provider (scaleway/ovh/outscale).
+- **Node internet egress** — the module had only an Internet Gateway, which 1:1-NATs
+  instances that own a public IP. The cluster nodes have none, so NTP and the
+  etcd/Kubernetes image pulls timed out and the bootstrap hung. Added a **NAT
+  service** in an AWS-style two-subnet layout (private nodes → NAT, public
+  bastion/NAT/LB → IGW), mirroring the Scaleway public-gateway / OVH router SNAT.
+- **Tunnel host key** — `talos-tunnels.sh` clears the stale `known_hosts` entry
+  before opening; a re-created bastion keeps its EIP but gets fresh host keys, which
+  otherwise failed every tunnel with a host-key mismatch.
+- **Worker certSANs** — the worker machine config now includes `127.0.0.1` (like the
+  control plane), required because Phase 2 reaches every node through an SSH tunnel
+  on localhost (was failing TLS verification with "valid for <node IP>, not 127.0.0.1").
+
+### Fixed — ArgoCD installed in the management-gitops namespace
+
+`render-bootstrap-manifests.sh` now kustomizes the upstream ArgoCD install into
+`${ARGOCD_NAMESPACE:-management-gitops}` (+ the Namespace, + the ClusterRoleBinding
+subjects, which kustomize doesn't rewrite on its own). The namespace-agnostic
+upstream manifest, injected as a Talos inlineManifest, was landing in `default` —
+so ArgoCD watched `default` while the root app lived in `management-gitops` and the
+root Application never reconciled. Affects every provider's bootstrap.
+
+### Added
+
+- **`task destroy-management PROVIDER=…`** — symmetric with `destroy-workload`.
+
+### Changed
+
+- Provider names spelled out everywhere (`scw` → `scaleway`) in docs/env templates,
+  consistent with the bucket/image naming convention.
+- OVH defaults: region `EU-WEST-PAR` (3-AZ), node/bastion flavor `b3-8`.
+- Outscale bastion downsized to `tinav5.c2r2p2`.
+
+---
+
 ## [0.3.3] — 2026-06-03
 
 ### Changed — repository structure (Option A)
@@ -82,9 +128,9 @@ reaches storage.
   `s3-<project>-<provider>-{tfstate|<role>}-<env>(-backup)` (provider explicit,
   derived from the active provider), consistent across management and workload.
 - **Provider-generic management & failover** — `task infra-management` /
-  `management` now take `PROVIDER` (scw/ovh/outscale), like the workload tasks.
-  Full env matrix added: `management-{scw,ovh,outscale}`,
-  `failover-{scw,ovh,outscale}` (each a `.tfvars.example`).
+  `management` now take `PROVIDER` (scaleway/ovh/outscale), like the workload tasks.
+  Full env matrix added: `management-{scaleway,ovh,outscale}`,
+  `failover-{scaleway,ovh,outscale}` (each a `.tfvars.example`).
   A `failover-*` cluster is the **cross-provider failover** (a second management
   on another cloud) — distinct from the everyday recovery of re-applying your own
   `management-<provider>` on the same provider.
@@ -176,7 +222,7 @@ Docker can't: `talos_machine_configuration_apply` (gRPC) and
 - **Outscale / Numspot module** — VPC, subnets, load balancers, public IPs, bastion
 - **Provider-agnostic junction point** — `coalesce()` selects the active provider; adding a new provider requires only implementing the contract
 - **`cluster_role` variable** — `management` or `workload` routes ArgoCD to the correct overlay
-- **Per-cluster environment templates** — `envs/management-scw.tfvars.example`, `envs/workload-{scw,ovh,outscale}.tfvars.example`, `envs/drp-ovh.tfvars.example` (copy to the real `*.tfvars`, which stays git-ignored)
+- **Per-cluster environment templates** — `envs/management-scaleway.tfvars.example`, `envs/workload-{scaleway,ovh,outscale}.tfvars.example`, `envs/drp-ovh.tfvars.example` (copy to the real `*.tfvars`, which stays git-ignored)
 - **Single-provider validation** — `check` block prevents accidentally activating multiple providers in one apply
 
 **GitOps multi-cluster:**

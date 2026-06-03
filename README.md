@@ -57,9 +57,9 @@ OpenAether/
 │       ├── cluster/                 # Cluster root (management + workload)
 │       │   ├── main.tf, backup.tf, backend.tf, variables.tf, outputs.tf
 │       │   ├── envs/                # Per-cluster config (<kind>-<provider>)
-│       │   │   ├── management-{scw,ovh,outscale}.tfvars(.example)
-│       │   │   ├── workload-{scw,ovh,outscale}.tfvars(.example)
-│       │   │   └── failover-{scw,ovh,outscale}.tfvars(.example)
+│       │   │   ├── management-{scaleway,ovh,outscale}.tfvars(.example)
+│       │   │   ├── workload-{scaleway,ovh,outscale}.tfvars(.example)
+│       │   │   └── failover-{scaleway,ovh,outscale}.tfvars(.example)
 │       │   └── tests/               # OpenTofu unit tests (26 tests total)
 │       ├── talos-image/             # Image builder root (one-off per version)
 │       │   ├── main.tf, backend.tf, variables.tf
@@ -115,12 +115,12 @@ OpenAether/
 #    Prod cross-provider backup: also export BACKUP_AWS_ACCESS_KEY_ID/SECRET.
 
 # 2. Configure your cluster (copy the template, then edit)
-cp infrastructure/opentofu/cluster/envs/management-scw.tfvars.example infrastructure/opentofu/cluster/envs/management-scw.tfvars
+cp infrastructure/opentofu/cluster/envs/management-scaleway.tfvars.example infrastructure/opentofu/cluster/envs/management-scaleway.tfvars
 # Edit: admin_ip, bastion_ssh_keys, s3_primary_*/s3_replica_*, etc.
 # Real envs/*.tfvars are git-ignored; only the *.tfvars.example are versioned.
 
 # 3. Phase 1 — ensures the backup buckets, derives + inits the backend, provisions
-#    the infra, replicates the state. PROVIDER defaults to scw (also ovh, outscale).
+#    the infra, replicates the state. PROVIDER defaults to scaleway (also ovh, outscale).
 task infra-management
 
 # 4. Phase 2 — opens the SSH tunnels (from state), bootstraps Talos + ArgoCD, and

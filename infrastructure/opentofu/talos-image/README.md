@@ -42,8 +42,8 @@ staging bucket) are **auto-created** by `scripts/talos-image.sh`.
 ## Usage
 
 ```bash
-task talos-image PROVIDER=scw                 # or ovh ; [VERSION=v1.13.3]
-# equivalent: ./scripts/talos-image.sh scw v1.13.3
+task talos-image PROVIDER=scaleway                 # or ovh ; [VERSION=v1.13.3]
+# equivalent: ./scripts/talos-image.sh scaleway v1.13.3
 ```
 
 - **Scaleway** — the cluster looks the image up by **name**
@@ -51,6 +51,8 @@ task talos-image PROVIDER=scw                 # or ovh ; [VERSION=v1.13.3]
   default in the `envs/*.tfvars.example`.
 - **OVH** — Glance gives a UUID: `tofu output image_id` → put it as `image_id` in
   the cluster `envs/<env>/<cluster>.tfvars`.
+- **Outscale** — the OMI registration gives an `ami-…` id: `tofu output image_id` →
+  put it as `image_id` in the cluster `envs/*.tfvars`.
 
 ## Customising the image
 
@@ -62,6 +64,6 @@ the build is reproducible and auditable.
 
 | `PROVIDER` | Status | Mechanism |
 |---|---|---|
-| `scw` | ✅ implemented | qcow2 → Object Storage → block snapshot import → Instance Image (per zone) |
+| `scaleway` | ✅ implemented | qcow2 → Object Storage → block snapshot import → Instance Image (per zone) |
 | `ovh` | ✅ implemented | qcow2 → Glance (`openstack_images_image_v2`, local upload — region-wide) |
-| `outscale` | ⏳ scaffolded (fails fast) | qcow2 → OOS → snapshot → OMI import (to implement) |
+| `outscale` | ✅ implemented | `nocloud` raw → OOS staging → `outscale_snapshot` import (pre-signed URL) → OMI (`outscale_image`) |
