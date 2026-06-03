@@ -58,11 +58,8 @@ worker.yaml
 *.tfplan
 plan
 
-# Talos image builder (state + downloaded/converted image artifacts)
-infrastructure/talos-image/.terraform/
-infrastructure/talos-image/.terraform.lock.hcl
-infrastructure/talos-image/terraform.tfstate*
-infrastructure/talos-image/.talos-image-cache/
+# Talos image builder (downloaded/converted image artifacts — state is in S3)
+infrastructure/opentofu/talos-image/.talos-image-cache/
 
 # Local test cluster (state + generated configs)
 infrastructure/opentofu-local/.terraform/
@@ -70,7 +67,7 @@ infrastructure/opentofu-local/.terraform.lock.hcl
 infrastructure/opentofu-local/terraform.tfstate*
 infrastructure/opentofu-local/kubeconfig
 infrastructure/opentofu-local/talosconfig
-infrastructure/opentofu/bootstrap-manifests/cilium-local.yaml
+infrastructure/opentofu/cluster/bootstrap-manifests/cilium-local.yaml
 
 # Editor/IDE
 .idea/
