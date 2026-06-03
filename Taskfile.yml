@@ -69,6 +69,10 @@ tasks:
         sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
       AWS_SECRET_ACCESS_KEY:
         sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
+      TF_VAR_outscale_access_key_id:
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale ak || true'
+      TF_VAR_outscale_secret_key_id:
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale sk || true'
     cmds:
       - ../../../scripts/ensure-buckets.sh envs/management-{{.PROVIDER}}.tfvars
       - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
@@ -85,6 +89,10 @@ tasks:
         sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
       AWS_SECRET_ACCESS_KEY:
         sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
+      TF_VAR_outscale_access_key_id:
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale ak || true'
+      TF_VAR_outscale_secret_key_id:
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale sk || true'
     cmds:
       - ../../../scripts/ensure-buckets.sh envs/workload-{{.PROVIDER}}.tfvars
       - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
@@ -102,6 +110,10 @@ tasks:
         sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
       AWS_SECRET_ACCESS_KEY:
         sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
+      TF_VAR_outscale_access_key_id:
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale ak || true'
+      TF_VAR_outscale_secret_key_id:
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale sk || true'
     cmds:
       - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
       - SSH_KEY="{{.KEY}}" ../../../scripts/talos-tunnels.sh open .
@@ -119,6 +131,10 @@ tasks:
         sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
       AWS_SECRET_ACCESS_KEY:
         sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
+      TF_VAR_outscale_access_key_id:
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale ak || true'
+      TF_VAR_outscale_secret_key_id:
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale sk || true'
     cmds:
       - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
       - SSH_KEY="{{.KEY}}" ../../../scripts/talos-tunnels.sh open .
@@ -145,6 +161,10 @@ tasks:
         sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
       AWS_SECRET_ACCESS_KEY:
         sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
+      TF_VAR_outscale_access_key_id:
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale ak || true'
+      TF_VAR_outscale_secret_key_id:
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale sk || true'
     cmds:
       - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
       - tofu destroy -var-file="envs/workload-{{.PROVIDER}}.tfvars"
