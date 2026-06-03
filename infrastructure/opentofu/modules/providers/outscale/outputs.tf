@@ -3,7 +3,7 @@
 # Node private IPs
 output "control_plane_private_ips" {
   description = "Private IPs of control plane nodes"
-  value       = [for nic in outscale_nic.control_plane : tolist(nic.private_ips)[0].private_ip]
+  value       = outscale_vm.control_plane[*].private_ip
 }
 
 output "worker_private_ips" {

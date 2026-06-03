@@ -1,41 +1,18 @@
 # ==============================================================================
 # Outscale — Compute Instances (VMs)
-# Control planes use NICs with fixed private IPs.
-# Workers use the private subnet directly.
+# Control planes and workers both attach to the private subnet directly and get
+# an auto-assigned private IP. (A dedicated outscale_nic can't be combined with
+# the VM's security_group_ids — Outscale's CreateVm rejects Nics + SG together —
+# and Talos reads the actual VM IPs from the outputs, so fixed IPs aren't needed.)
 # No user_data — Talos configuration is applied via the Talos API after provisioning.
 # ==============================================================================
-
-resource "outscale_nic" "control_plane" {
-  count     = var.control_plane_count
-  subnet_id = outscale_subnet.private.subnet_id
-
-  security_group_ids = [outscale_security_group.this.security_group_id]
-
-  # Outscale's CreateNic requires an explicit PrivateIp once a private_ips block
-  # is given (a bare is_primary = true is rejected with MissingParameter). Assign
-  # deterministic IPs from the subnet (.10+), clear of the low addresses Outscale
-  # reserves at the start of every subnet (.1 gateway, .2/.3 reserved). These are
-  # the "fixed private IPs" the control planes rely on.
-  private_ips {
-    is_primary = true
-    private_ip = cidrhost(outscale_subnet.private.ip_range, 10 + count.index)
-  }
-
-  tags {
-    key   = "Name"
-    value = "${var.cluster_name}-cp-nic-${count.index}"
-  }
-}
 
 resource "outscale_vm" "control_plane" {
   count    = var.control_plane_count
   image_id = var.image_id
   vm_type  = var.instance_type
 
-  nics {
-    nic_id        = outscale_nic.control_plane[count.index].nic_id
-    device_number = 0
-  }
+  subnet_id = outscale_subnet.private.subnet_id
 
   security_group_ids = [outscale_security_group.this.security_group_id]
 
