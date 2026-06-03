@@ -19,7 +19,7 @@ resource "outscale_load_balancer" "k8s" {
     load_balancer_protocol = "TCP"
   }
 
-  subnets         = [outscale_subnet.private.subnet_id]
+  subnets         = [outscale_subnet.public.subnet_id]
   security_groups = [outscale_security_group.this.security_group_id]
 
   tags {
@@ -53,7 +53,7 @@ resource "outscale_load_balancer" "app" {
     load_balancer_protocol = "TCP"
   }
 
-  subnets         = [outscale_subnet.private.subnet_id]
+  subnets         = [outscale_subnet.public.subnet_id]
   security_groups = [outscale_security_group.this.security_group_id]
 
   tags {
