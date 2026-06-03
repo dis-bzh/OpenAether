@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.3] — 2026-06-03
+
+### Changed — repository structure (Option A)
+
+All OpenTofu code is now under `infrastructure/opentofu/`:
+
+```
+infrastructure/opentofu/
+  cluster/        ← cluster root (was infrastructure/opentofu/ top-level)
+  talos-image/    ← image builder root (was infrastructure/talos-image/)
+  modules/        ← shared modules (unchanged)
+```
+
+No task names changed for the user. The `task talos-image`, `infra-management`,
+`management`, `infra-workload`, `workload`, `failover` tasks still work identically —
+only the `dir:` and script paths were updated internally.
+
+### Changed — Talos image bucket naming
+
+`task talos-image PROVIDER=scaleway` now uses bucket `s3-openaether-scaleway-talos-image`
+(was `s3-openaether-scw-…`), consistent with OVH/Outscale which already used
+the full provider name. Fixes a Scaleway async-delete bucket collision.
+
+### Added — Talos image build for Outscale
+
+`task talos-image PROVIDER=outscale` is now implemented:
+`nocloud-amd64.raw.zst` → OOS staging → `outscale_snapshot` import (pre-signed URL,
+`snapshot_size` in bytes, ~16 min) → `outscale_image` (OMI).
+
+Key fixes along the way: AWS CLI v2.23+ trailing checksum (`when_required`),
+`snapshot_size` in bytes (not GiB), pre-signed URL for Outscale auth, explicit
+provider creds via `TF_VAR_outscale_*` (API == OOS keys for Outscale).
+
+Validated images: Scaleway ✅ · OVH ✅ · Outscale ✅.
+
+---
+
 ## [0.3.2] — 2026-06-02
 
 ### Changed — backup & DR storage model (client-side encryption + dual store)

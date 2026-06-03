@@ -1,8 +1,0 @@
-# Talos Image Factory schematic.
-# POSTed to https://factory.talos.dev/schematics to resolve a deterministic
-# schematic ID (same content => same ID). Add official system extensions here
-# (e.g. siderolabs/qemu-guest-agent for OpenStack/Outscale) and re-apply to
-# produce a new, reproducible image. Empty customization = the base platform image.
-customization:
-  systemExtensions:
-    officialExtensions: []
