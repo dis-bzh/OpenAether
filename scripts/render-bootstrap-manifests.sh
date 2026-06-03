@@ -85,21 +85,67 @@ else
 fi
 
 # ─────────────────────────────────────────────────────
-# 2. Download ArgoCD install manifest
+# 2. Download + namespace the ArgoCD install manifest
+#
+# The upstream install.yaml is namespace-agnostic (meant for `kubectl apply -n
+# argocd`). Injected verbatim as a Talos inlineManifest — which carries no
+# namespace context — its namespaced resources land in `default`, and ArgoCD
+# then watches `default` instead of where the root app lives. Kustomize it into
+# ${ARGOCD_NAMESPACE} (this also rewrites the ClusterRoleBinding subject
+# namespaces) and prepend the Namespace so it exists before its resources apply.
 # ─────────────────────────────────────────────────────
-echo "🔧 Downloading ArgoCD ${ARGOCD_VERSION} install manifest..."
+ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-management-gitops}"
+echo "🔧 Downloading ArgoCD ${ARGOCD_VERSION} install manifest (namespaced to ${ARGOCD_NAMESPACE})..."
+
+ARGOCD_TMP="$(mktemp -d)"
+trap 'rm -rf "${ARGOCD_TMP}"' EXIT
 
 curl -sL \
   "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml" \
-  > "${MANIFESTS_DIR}/argocd-install.yaml"
+  > "${ARGOCD_TMP}/install.yaml"
 
 # Verify download succeeded (file should be >1KB)
-if [ ! -s "${MANIFESTS_DIR}/argocd-install.yaml" ] || [ "$(wc -c < "${MANIFESTS_DIR}/argocd-install.yaml")" -lt 1000 ]; then
+if [ ! -s "${ARGOCD_TMP}/install.yaml" ] || [ "$(wc -c < "${ARGOCD_TMP}/install.yaml")" -lt 1000 ]; then
   echo "  ❌ ArgoCD manifest download failed or is too small"
   exit 1
 fi
 
-echo "  ✅ Written to bootstrap-manifests/argocd-install.yaml"
+cat > "${ARGOCD_TMP}/namespace.yaml" <<EOF
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${ARGOCD_NAMESPACE}
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
+EOF
+
+cat > "${ARGOCD_TMP}/kustomization.yaml" <<EOF
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ${ARGOCD_NAMESPACE}
+resources:
+  - namespace.yaml
+  - install.yaml
+EOF
+
+kubectl kustomize "${ARGOCD_TMP}" > "${MANIFESTS_DIR}/argocd-install.yaml"
+
+# kustomize rewrites RoleBinding subject namespaces but NOT ClusterRoleBinding
+# ones (a long-standing quirk), leaving the 3 ArgoCD ClusterRoleBindings pointing
+# at SAs in the upstream-default "argocd" namespace — which don't exist here, so
+# those controllers would get no cluster permissions. After namespacing every
+# resource, "namespace: argocd" only survives on those subjects, so fix them.
+sed -i "s/^\( *namespace: \)argocd\$/\1${ARGOCD_NAMESPACE}/" "${MANIFESTS_DIR}/argocd-install.yaml"
+
+# Verify the kustomize output is sane (should still be >1KB)
+if [ ! -s "${MANIFESTS_DIR}/argocd-install.yaml" ] || [ "$(wc -c < "${MANIFESTS_DIR}/argocd-install.yaml")" -lt 1000 ]; then
+  echo "  ❌ ArgoCD manifest kustomize failed or is too small"
+  exit 1
+fi
+
+echo "  ✅ Written to bootstrap-manifests/argocd-install.yaml (namespace: ${ARGOCD_NAMESPACE})"
 
 # ─────────────────────────────────────────────────────
 # 3. Summary
