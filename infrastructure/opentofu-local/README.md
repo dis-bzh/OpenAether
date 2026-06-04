@@ -1,9 +1,11 @@
-# OpenAether — Local 3-CP Talos Test (Docker)
+# OpenAether — Local Talos Test (3 CP + 2 workers, Docker)
 
-Exercises the **production `modules/talos/`** end-to-end on a real **3 control plane**
-Talos cluster running in Docker — no cloud credentials. Use it to validate config
-generation, etcd quorum, bootstrap, kubeconfig retrieval, Cilium, and the ArgoCD
-GitOps chain before spending money in the cloud.
+Exercises the **production `modules/talos/`** end-to-end on a real **3 control
+plane + 2 worker** Talos cluster running in Docker — no cloud credentials. The
+dedicated workers stay schedulable (control planes keep their taint), so it also
+covers HA and real pod scheduling. Use it to validate config generation, etcd
+quorum, bootstrap, kubeconfig retrieval, Cilium, and the ArgoCD GitOps chain
+before spending money in the cloud.
 
 > No S3 backend (local state). Reuses the shared `../opentofu/modules/talos/` and
 > `../opentofu/modules/providers/local/`.
@@ -15,24 +17,25 @@ GitOps chain before spending money in the cloud.
 | `talos_machine_secrets` | ✅ | PKI |
 | `data.talos_client_configuration` | ✅ | talosconfig |
 | `data.talos_machine_configuration` | ✅ | **the real config** (certSANs, CNI=none, proxy off, kubePrism, inlineManifests, hostDNS) |
-| `talos_machine_bootstrap` | ✅ | 3-node etcd quorum |
+| `talos_machine_bootstrap` | ✅ | 3-node etcd quorum (control planes only) |
+| worker join (`modules/talos` worker config) | ✅ | 2 dedicated workers join via USERDATA |
 | `talos_cluster_kubeconfig` | ✅ | kubeconfig (rewritten to 127.0.0.1) |
 | `data.talos_cluster_health` | ☁️ cloud-only | stalls behind WSL2 port mappings; verified here via `talosctl health` (skip_health_check=true) |
 | `talos_machine_configuration_apply` | ☁️ cloud-only | Docker uses USERDATA delivery (Talos platform docs); maintenance-apply reboot-loops in containers |
 
-Plus, on top of the cluster: Cilium CNI on all 3 nodes, ArgoCD, and the
+Plus, on top of the cluster: Cilium CNI on all 5 nodes, ArgoCD, and the
 `ApplicationSet → Application` hub mechanism.
 
 ## Quick start
 
 ```bash
-# One command — full 3-CP deploy + verify (etcd quorum, Cilium, ArgoCD, GitOps)
+# One command — full deploy + verify (etcd quorum, Cilium, ArgoCD, GitOps)
 TF_VAR_encryption_passphrase="local-test-passphrase-32chars-minimum" \
   ./scripts/test-talos-local.sh
 
 # Or via task:
 task local-render-manifests   # render simplified Cilium (no WireGuard)
-task local-up                 # deploy the 3-CP cluster
+task local-up                 # deploy the cluster (3 CP + 2 workers)
 task local-status             # etcd members + nodes + ArgoCD
 task local-argocd             # ArgoCD UI → https://localhost:8080
 task local-down               # tear down
@@ -48,7 +51,7 @@ task local-down               # tear down
 | Why | VMs boot from a disk image in maintenance mode | maintenance-apply reboot-loops in containers (Talos Docker docs) |
 | Config content | identical (same `data.talos_machine_configuration`) | identical |
 
-The generated config is the **same** — local proves it boots a real 3-CP cluster.
+The generated config is the **same** — local proves it boots a real multi-node cluster.
 
 ## Networking (WSL2 + Docker Desktop)
 
@@ -56,10 +59,12 @@ The generated config is the **same** — local proves it boots a real 3-CP clust
 WSL2 host (OpenTofu + talosctl + kubectl)
   │  container IPs (10.5.0.x) are NOT routable from the host →
   │  reach the APIs via 127.0.0.1 port mappings:
-  ├─ 127.0.0.1:50000 → cp-0:50000   (Talos API)   node identity 10.5.0.10
-  ├─ 127.0.0.1:50001 → cp-1:50000   (Talos API)   node identity 10.5.0.11
-  ├─ 127.0.0.1:50002 → cp-2:50000   (Talos API)   node identity 10.5.0.12
-  └─ 127.0.0.1:6443  → cp-0:6443    (K8s API)
+  ├─ 127.0.0.1:50000 → cp-0:50000      (Talos API)   node identity 10.5.0.10
+  ├─ 127.0.0.1:50001 → cp-1:50000      (Talos API)   node identity 10.5.0.11
+  ├─ 127.0.0.1:50002 → cp-2:50000      (Talos API)   node identity 10.5.0.12
+  ├─ 127.0.0.1:50010 → worker-0:50000  (Talos API)   node identity 10.5.0.20
+  ├─ 127.0.0.1:50011 → worker-1:50000  (Talos API)   node identity 10.5.0.21
+  └─ 127.0.0.1:6443  → cp-0:6443       (K8s API)
 
 Containers (ghcr.io/siderolabs/talos): --read-only, PLATFORM=container,
   tmpfs /run /system /tmp + volumes /system/state /var /etc/cni /etc/kubernetes
@@ -76,6 +81,7 @@ cloud path unchanged (endpoints default to the node IPs there).
 | Variable | Default | Purpose |
 |---|---|---|
 | `control_plane_count` | `3` | 3 for a real quorum, 1 for a quick smoke test |
+| `worker_count` | `2` | dedicated schedulable workers (0 falls back to untainting the CPs) |
 | `talos_bootstrap` | `false` | `true` builds the full cluster |
 | `cilium_manifest` | `null` | set via `TF_VAR_cilium_manifest` from `cilium-local.yaml` |
 
@@ -88,8 +94,12 @@ talosctl --nodes 10.5.0.10 --endpoints 127.0.0.1:50000 etcd members
 # a container reboot-loops → check the boot phase
 docker logs openaether-local-dev-cp-0 2>&1 | grep -E "phase|boot sequence|failed"
 
-# Docker Desktop port-forward errors ("/forwards/expose 500") after many cycles
-#   → restart Docker Desktop; the daemon degrades after heavy create/destroy churn
+# Docker Desktop port-forward errors ("/forwards/expose 500") when many
+#   port-mapped containers start at once: workers are created in a second wave
+#   (depends_on the control planes) to cap concurrent --publish registrations,
+#   and the provisioners retry the `docker run` (clearing the half-created
+#   container first) as a backstop. If it still persists after heavy churn,
+#   restart Docker Desktop.
 
 # full reset
 task local-down

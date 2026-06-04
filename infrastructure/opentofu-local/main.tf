@@ -18,6 +18,13 @@ locals {
   cp_endpoints     = [for i in range(local.cp_count) : "127.0.0.1:${50000 + i}"]
   cluster_endpoint = "https://${local.cp_ips[0]}:6443" # cp0 is the API endpoint (no LB locally)
 
+  # Workers share the same deterministic scheme: IPs at .20+ (worker_ip_base) and
+  # host port mappings at 50010+i (talos_api_port_base + 10 + i), matching
+  # modules/providers/local. Dedicated workers stay untainted (schedulable).
+  worker_count     = var.worker_count
+  worker_ips       = [for i in range(local.worker_count) : "${local.net_prefix}.${20 + i}"]
+  worker_endpoints = [for i in range(local.worker_count) : "127.0.0.1:${50010 + i}"]
+
   manifests_dir = "${path.module}/../opentofu/bootstrap-manifests"
   cilium_manifest = var.cilium_manifest != null ? var.cilium_manifest : (
     fileexists("${local.manifests_dir}/cilium-local.yaml")
@@ -40,11 +47,12 @@ module "talos" {
   talos_version      = var.talos_version
 
   control_plane_count = var.talos_bootstrap ? local.cp_count : 0
-  worker_count        = 0
+  worker_count        = var.talos_bootstrap ? local.worker_count : 0
 
   control_plane_ips       = local.cp_ips
-  worker_ips              = []
+  worker_ips              = local.worker_ips
   control_plane_endpoints = local.cp_endpoints
+  worker_endpoints        = local.worker_endpoints
   k8s_lb_ip               = local.cp_ips[0]
 
   # Container/Docker specifics
@@ -74,15 +82,17 @@ module "local" {
   cluster_name        = "${var.cluster_name}-${var.environment}"
   talos_version       = var.talos_version
   control_plane_count = local.cp_count
-  worker_count        = 0
+  worker_count        = local.worker_count
 
   network_cidr        = "${local.net_prefix}.0/24"
   cp_ip_base          = 10
+  worker_ip_base      = 20
   talos_api_port_base = 50000
   k8s_api_port        = 6443
 
-  # Generated configs from modules/talos (one per CP — identical, node-agnostic)
+  # Generated configs from modules/talos (one per node — identical, node-agnostic)
   control_plane_configs = module.talos.control_plane_machine_configs
+  worker_configs        = module.talos.worker_machine_configs
 }
 
 # ==============================================================================

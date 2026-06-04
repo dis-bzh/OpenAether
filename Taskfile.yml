@@ -217,7 +217,7 @@ tasks:
       - ./scripts/render-bootstrap-manifests.sh --local
 
   local-up:
-    desc: "Deploy the local 3-CP Talos cluster (config + containers + bootstrap + kubeconfig)"
+    desc: "Deploy the local Talos cluster — 3 CP + 2 workers (config + containers + bootstrap + kubeconfig)"
     dir: infrastructure/opentofu-local
     cmds:
       - tofu init -upgrade > /dev/null 2>&1 || tofu init > /dev/null
@@ -226,12 +226,12 @@ tasks:
         tofu apply -var talos_bootstrap=true -auto-approve
 
   local-test:
-    desc: "Full end-to-end local test: 3-CP cluster + etcd quorum + Cilium + ArgoCD + GitOps"
+    desc: "Full end-to-end local test: 3 CP + 2 workers + etcd quorum + Cilium + ArgoCD + GitOps"
     cmds:
       - ./scripts/test-talos-local.sh
 
   local-status:
-    desc: "Check local cluster health (3 CPs)"
+    desc: "Check local cluster health (3 CP + 2 workers)"
     cmds:
       - |
         export KUBECONFIG=infrastructure/opentofu-local/kubeconfig

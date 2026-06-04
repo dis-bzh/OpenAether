@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# OpenAether — Local Talos Deployment Test (3 control planes, Docker)
+# OpenAether — Local Talos Deployment Test (3 control planes + 2 workers, Docker)
 #
 # Exercises the PRODUCTION modules/talos (config generation, bootstrap,
-# kubeconfig) on a real 3-CP etcd quorum, then deploys Cilium + ArgoCD + the
-# GitOps ApplicationSet — all without any cloud credentials.
+# kubeconfig) on a real 3-CP etcd quorum with 2 dedicated (schedulable) workers,
+# then deploys Cilium + ArgoCD + the GitOps ApplicationSet — no cloud creds.
 #
 # Config is delivered via USERDATA (the Talos Docker platform mechanism); the
 # only modules/talos resource not exercised locally is talos_machine_configuration_apply
@@ -26,6 +26,11 @@ MANIFESTS_DIR="${ROOT_DIR}/infrastructure/opentofu/cluster/bootstrap-manifests"
 CLUSTER_NAME="openaether-local-dev"
 CP_IPS=("10.5.0.10" "10.5.0.11" "10.5.0.12")
 CP_ENDPOINTS=("127.0.0.1:50000" "127.0.0.1:50001" "127.0.0.1:50002")
+# Dedicated workers (worker_count=2 in opentofu-local): IPs at .20+, host ports
+# at 50010+i. Schedulable/untainted, for HA and real workload scheduling tests.
+WORKER_IPS=("10.5.0.20" "10.5.0.21")
+WORKER_ENDPOINTS=("127.0.0.1:50010" "127.0.0.1:50011")
+TOTAL_NODES=$(( ${#CP_IPS[@]} + ${#WORKER_IPS[@]} ))
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 info()    { echo -e "${BLUE}▶ $*${NC}"; }
@@ -41,12 +46,13 @@ if [[ "${1:-}" == "--destroy" ]]; then
   cd "${TOFU_DIR}"
   export TF_VAR_cilium_manifest="placeholder"
   tofu destroy -auto-approve 2>/dev/null || true
-  # Belt-and-suspenders cleanup
-  for i in 0 1 2; do
-    docker rm -f "${CLUSTER_NAME}-cp-${i}" 2>/dev/null || true
-    for v in state var etccni etck8s libexec opt; do
-      docker volume rm "${CLUSTER_NAME}-cp-${i}-${v}" 2>/dev/null || true
-    done
+  # Belt-and-suspenders cleanup (covers both roles by name prefix, so it doesn't
+  # depend on the configured CP/worker counts).
+  for c in $(docker ps -aq --filter "name=${CLUSTER_NAME}-" 2>/dev/null); do
+    docker rm -f "$c" 2>/dev/null || true
+  done
+  for vol in $(docker volume ls -q --filter "name=${CLUSTER_NAME}-" 2>/dev/null); do
+    docker volume rm "$vol" 2>/dev/null || true
   done
   docker network rm "${CLUSTER_NAME}-net" 2>/dev/null || true
   rm -f "${TOFU_DIR}/kubeconfig" "${TOFU_DIR}/talosconfig"
@@ -85,7 +91,7 @@ success "Cilium manifest ready"
 # Step 2 — Deploy the 3-CP cluster via the production modules/talos
 # (config generation → USERDATA containers → bootstrap → kubeconfig)
 # ==============================================================================
-info "Step 2 — Deploying 3-CP Talos cluster (OpenTofu + modules/talos)..."
+info "Step 2 — Deploying Talos cluster: 3 CP + 2 workers (OpenTofu + modules/talos)..."
 cd "${TOFU_DIR}"
 tofu init -upgrade >/dev/null 2>&1 || tofu init >/dev/null
 # If no live cluster is running, any pre-existing local state is stale: its
@@ -98,6 +104,11 @@ tofu init -upgrade >/dev/null 2>&1 || tofu init >/dev/null
 if ! docker ps --format '{{.Names}}' | grep -q "^${CLUSTER_NAME}-cp-0$"; then
   rm -f terraform.tfstate terraform.tfstate.backup
 fi
+# Docker Desktop's WSL2 port-forwarder 500s when too many `docker run --publish`
+# register at once ("ports are not available … /forwards/expose … 500"); 5 nodes
+# in parallel tripped it. modules/providers/local serializes this in two waves
+# (workers depend_on the control planes) — capping concurrency without a global
+# -parallelism=1, which would deadlock the (container-independent) bootstrap.
 tofu apply -var talos_bootstrap=true -auto-approve
 success "Cluster provisioned (config generated, containers up, etcd bootstrapped, kubeconfig retrieved)"
 
@@ -123,9 +134,11 @@ else
   warn "etcd members found: $MEMBERS (expected 3) — the 3rd may still be joining"
 fi
 
+CP_LIST=$(IFS=,; echo "${CP_IPS[*]}")
+WORKER_LIST=$(IFS=,; echo "${WORKER_IPS[*]}")
 if talosctl --nodes "${CP_IPS[0]}" --endpoints "${CP_ENDPOINTS[0]}" health \
-     --control-plane-nodes "${CP_IPS[0]},${CP_IPS[1]},${CP_IPS[2]}" \
-     --worker-nodes "" --wait-timeout 5m >/dev/null 2>&1; then
+     --control-plane-nodes "${CP_LIST}" \
+     --worker-nodes "${WORKER_LIST}" --wait-timeout 5m >/dev/null 2>&1; then
   success "Talos cluster reports healthy"
 else
   warn "Talos health check did not fully pass (cluster may still be converging)"
@@ -139,20 +152,29 @@ for i in $(seq 1 60); do
   # `|| true`: grep -c exits 1 on 0 matches (no node Ready yet on early loops),
   # which under set -e + pipefail would abort the script here.
   READY=$(kubectl get nodes --no-headers 2>/dev/null | grep -c " Ready " || true)
-  [[ "$READY" -eq 3 ]] && break
+  [[ "$READY" -eq "$TOTAL_NODES" ]] && break
   sleep 5
 done
 echo "Nodes:"
 kubectl get nodes -o wide 2>/dev/null | sed 's/^/    /'
+[[ "$READY" -eq "$TOTAL_NODES" ]] && success "All ${TOTAL_NODES} nodes Ready (${#CP_IPS[@]} CP + ${#WORKER_IPS[@]} workers)" || warn "Nodes Ready: ${READY}/${TOTAL_NODES}"
 CILIUM=$(kubectl -n kube-system get pods -l k8s-app=cilium --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
-[[ "$CILIUM" -ge 3 ]] && success "Cilium running on all ${CILIUM} nodes" || warn "Cilium pods running: ${CILIUM}/3"
+[[ "$CILIUM" -ge "$TOTAL_NODES" ]] && success "Cilium running on all ${CILIUM} nodes" || warn "Cilium pods running: ${CILIUM}/${TOTAL_NODES}"
 
 # ==============================================================================
-# Step 5 — Remove control-plane taint (single-node-role local cluster)
+# Step 5 — Scheduling: with dedicated workers the control planes stay tainted
+# (workloads land on the untainted workers). Only when there are no workers do
+# we untaint the control planes so the single-role cluster can schedule pods.
 # ==============================================================================
-info "Step 5 — Removing control-plane taint (no dedicated workers locally)..."
-kubectl taint nodes --all node-role.kubernetes.io/control-plane- 2>/dev/null || true
-success "Taint removed"
+if [[ ${#WORKER_IPS[@]} -eq 0 ]]; then
+  info "Step 5 — Removing control-plane taint (no dedicated workers)..."
+  kubectl taint nodes --all node-role.kubernetes.io/control-plane- 2>/dev/null || true
+  success "Taint removed (control planes are schedulable)"
+else
+  info "Step 5 — Keeping control-plane taint (${#WORKER_IPS[@]} dedicated workers are schedulable)..."
+  SCHED=$(kubectl get nodes --no-headers -l '!node-role.kubernetes.io/control-plane' 2>/dev/null | grep -c " Ready " || true)
+  [[ "$SCHED" -eq ${#WORKER_IPS[@]} ]] && success "${SCHED} schedulable worker node(s) Ready" || warn "Schedulable workers Ready: ${SCHED}/${#WORKER_IPS[@]}"
+fi
 
 # ==============================================================================
 # Step 6 — Deploy ArgoCD via the bootstrap overlay
@@ -197,7 +219,7 @@ fi
 # ==============================================================================
 echo ""
 echo "════════════════════════════════════════════════════════════"
-success "Local 3-CP Talos cluster is up (modules/talos validated end-to-end)"
+success "Local Talos cluster is up: ${#CP_IPS[@]} CP + ${#WORKER_IPS[@]} workers (modules/talos validated end-to-end)"
 echo "════════════════════════════════════════════════════════════"
 echo ""
 echo "  export KUBECONFIG=${TOFU_DIR}/kubeconfig"
