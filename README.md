@@ -5,7 +5,7 @@
 
 ## Version
 
-**v0.3.2** — Multi-cloud infrastructure with hub/spoke GitOps, cross-provider failover, and client-side-encrypted dual-store backups.
+**v0.3.4** — Multi-cloud infrastructure with hub/spoke GitOps, cross-provider failover, and client-side-encrypted dual-store backups. Management cluster validated end-to-end on Scaleway, OVH, and Outscale.
 
 ## Architecture
 
@@ -104,50 +104,64 @@ OpenAether/
 ### Prerequisites
 
 ```bash
-# Install all tools
-./scripts/setup.sh
+./scripts/setup.sh                  # installs tofu, talosctl, kubectl, task, helm, yamllint…
 
-# Required tools: tofu, talosctl, kubectl, task, helm, yamllint
+# For CLOUD deploys only — load your credentials (see .env.example for the full,
+# documented list of variables). Local Docker testing needs none of this.
+cp .env.example .env.sh             # then edit it with your provider creds
+source .env.sh                      # .env.sh is git-ignored
 ```
 
-### Deploy the Management Cluster (Scaleway)
+### Local cluster (Docker — no cloud, no credentials)
+
+Brings up a real **3 control plane + 2 worker** Talos cluster in Docker — etcd
+quorum, Cilium, ArgoCD, and the GitOps `ApplicationSet → Application` chain — on
+the **same production `modules/talos/`** used in the cloud. Best first step.
 
 ```bash
-# 1. Export creds: SCW_* + AWS_* (= your SCW S3 keys) + TF_VAR_encryption_passphrase (>=32).
-#    Prod cross-provider backup: also export BACKUP_AWS_ACCESS_KEY_ID/SECRET.
-
-# 2. Configure your cluster (copy the template, then edit)
-cp infrastructure/opentofu/cluster/envs/management-scaleway.tfvars.example infrastructure/opentofu/cluster/envs/management-scaleway.tfvars
-# Edit: admin_ip, bastion_ssh_keys, s3_primary_*/s3_replica_*, etc.
-# Real envs/*.tfvars are git-ignored; only the *.tfvars.example are versioned.
-
-# 3. Phase 1 — ensures the backup buckets, derives + inits the backend, provisions
-#    the infra, replicates the state. PROVIDER defaults to scaleway (also ovh, outscale).
-task infra-management
-
-# 4. Phase 2 — opens the SSH tunnels (from state), bootstraps Talos + ArgoCD, and
-#    pushes the client-side-encrypted backups (kube/talosconfig + state replica).
-task management KEY=~/.ssh/yourkey
+task local-test                     # full deploy + verify (3 CP + 2 workers)
+task local-status                   # etcd members + nodes + ArgoCD
+task local-argocd                   # ArgoCD UI → https://localhost:8080
+task local-down                     # tear down (containers + volumes + state)
 ```
 
-### Deploy a Workload Cluster
+See [infrastructure/opentofu-local/README.md](infrastructure/opentofu-local/README.md) for details.
+
+### Deploy the Management Cluster (cloud)
 
 ```bash
-# OVH example — set OS_* env vars first
-export OS_AUTH_URL=https://auth.cloud.ovh.net/v3
-export OS_USERNAME=...
+source .env.sh                      # provider creds + TF_VAR_encryption_passphrase
 
-# cp infrastructure/opentofu/cluster/envs/workload-ovh.tfvars.example infrastructure/opentofu/cluster/envs/workload-ovh.tfvars
-# Edit it with your image_id and credentials
+# Configure your cluster (copy the template, then edit). Real envs/*.tfvars are
+# git-ignored; only the *.tfvars.example are versioned.
+cp infrastructure/opentofu/cluster/envs/management-scaleway.tfvars.example \
+   infrastructure/opentofu/cluster/envs/management-scaleway.tfvars
+# Edit: admin_ip, bastion_ssh_keys, image_name/image_id, s3_primary_*/s3_replica_*
+
+# Phase 0 — build the Talos image once per version (separate state, reused by all clusters)
+task talos-image PROVIDER=scaleway
+
+# Phase 1 — ensures the backup buckets, derives + inits the backend, provisions the
+# infra, replicates the state. PROVIDER defaults to scaleway (also ovh, outscale).
+task infra-management PROVIDER=scaleway
+
+# Phase 2 — opens the SSH tunnels (from state), bootstraps Talos + ArgoCD, and pushes
+# the client-side-encrypted backups (kube/talosconfig + state replica).
+task management PROVIDER=scaleway KEY=~/.ssh/yourkey
+```
+
+### 🚧 Deploy a Workload Cluster
+
+```bash
+cp infrastructure/opentofu/cluster/envs/workload-ovh.tfvars.example \
+   infrastructure/opentofu/cluster/envs/workload-ovh.tfvars   # then edit (image_id, admin_ip…)
 
 task infra-workload PROVIDER=ovh
 task workload PROVIDER=ovh KEY=~/.ssh/yourkey
-
-# Register the new cluster in ArgoCD hub
-task register-spoke CLUSTER=openaether-ovh-prod PROVIDER=ovh
+task register-spoke CLUSTER=openaether-ovh-prod PROVIDER=ovh   # register in the ArgoCD hub
 ```
 
-### Cross-provider failover — second management on another cloud
+### 🚧 Cross-provider failover — second management on another cloud
 
 ```bash
 # If your primary management provider is unavailable, stand one up elsewhere:
@@ -155,14 +169,11 @@ task failover PROVIDER=ovh
 # RTO: ~30 minutes. Client workloads are unaffected during recovery.
 ```
 
-### Local Validation (No Cloud Needed)
+### Static checks (no cloud, no Docker)
 
 ```bash
-# Runs all checks: tofu fmt/validate/test, kustomize build, talosctl validate, yamllint
-./scripts/test-local-stack.sh
-
-# Fast mode (skip talosctl gen)
-./scripts/test-local-stack.sh --fast
+./scripts/test-local-stack.sh        # tofu fmt/validate/test + kustomize + talosctl + yamllint
+./scripts/test-local-stack.sh --fast # skip talosctl gen
 ```
 
 ## Security
