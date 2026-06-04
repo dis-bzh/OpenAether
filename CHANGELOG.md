@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.3.4] — 2026-06-03
+## [0.4.0] — 2026-06-04
+
+**Milestone: multi-cloud management + GitOps foundations, ready for external testers.**
+The management cluster (Talos → Cilium → ArgoCD → GitOps `ApplicationSet`) is now
+validated end-to-end on **all three providers** (Scaleway, OVH, Outscale), and the
+full cloud lifecycle — `task talos-image` → `infra-management` → `management` →
+teardown — was re-run clean on each. The local Docker harness gained 2 workers
+(3 CP + 2 schedulable workers) and the test/lint tooling was hardened. Not 1.0
+yet (the platform stack on top — Gateway/Identity/Secrets/Observability — is still
+Phase 2 and pending a service-mesh/gateway revision), but stable enough to test.
 
 ### Fixed — Outscale management cluster end-to-end (3/3 providers live)
 
