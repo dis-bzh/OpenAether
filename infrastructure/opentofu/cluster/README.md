@@ -60,15 +60,18 @@ Between phases, establish SSH tunnels via the bastion for Talos API access (port
 | `gpg` (GnuPG >= 2.4) | Client-side encryption of the backed-up artifacts |
 | `aws` (CLI) | Streaming the encrypted backups to S3-compatible stores |
 
-**Credentials per provider:**
+**Credentials** — set them once in `.env.sh` (`cp .env.example .env.sh`, edit,
+`source .env.sh`). [`.env.example`](../../../.env.example) documents every
+variable; the summary:
 
-| Provider | Environment Variables |
-|----------|-----------------------|
-| Scaleway | `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`, `SCW_DEFAULT_PROJECT_ID` |
-| OVH | `OS_AUTH_URL`, `OS_USERNAME`, `OS_PASSWORD`, `OS_PROJECT_ID`, `OS_REGION_NAME` |
-| Outscale | `OSC_ACCESS_KEY`, `OSC_SECRET_KEY`, `OSC_REGION` |
-| All | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (primary S3 store), `TF_VAR_encryption_passphrase` (encrypts state **and** backups) |
-| Backup replica (prod) | `BACKUP_AWS_ACCESS_KEY_ID`, `BACKUP_AWS_SECRET_ACCESS_KEY` — creds for the `-backup` store on a *different* provider. Default to `AWS_*` when unset (dev). |
+| Scope | Variables |
+|-------|-----------|
+| Scaleway (compute) | `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`, `SCW_DEFAULT_PROJECT_ID` |
+| OVH (compute, OpenStack) | `OS_AUTH_URL`, `OS_USERNAME`, `OS_PASSWORD`, `OS_PROJECT_ID`, `OS_REGION_NAME` |
+| Outscale (compute) | `OSC_ACCESS_KEY`, `OSC_SECRET_KEY`, `OSC_REGION` |
+| S3 (state + backups) | `<PU>_AWS_ACCESS_KEY_ID` / `<PU>_AWS_SECRET_ACCESS_KEY`, where `PU` = `SCW`/`OVH`/`OUTSCALE`. Scaleway & Outscale **default to their API keys**; OVH needs dedicated S3 keys. **No ambient `AWS_*` fallback** (it could silently use another provider's keys); `task` resolves these and exports `AWS_*` internally. |
+| Backup replica (prod) | `<PU>_BACKUP_AWS_*` (or a global `BACKUP_AWS_*`) — the `-backup` store on a *different* provider; unset → reuses the primary creds (dev). |
+| All | `TF_VAR_encryption_passphrase` (≥ 32 chars; encrypts state **and** backups) |
 
 ## Environment Files
 
@@ -100,7 +103,7 @@ Only the `*.tfvars.example` templates are versioned. Copy an example to its real
 `admin_ip`, `bastion_ssh_keys`, etc. The real `*.tfvars` are git-ignored so
 credentials never get committed.
 
-> Local 3-CP Docker testing is **not** an env file here — it lives in
+> Local Docker testing (3 CP + 2 workers) is **not** an env file here — it lives in
 > [`../opentofu-local`](../opentofu-local) (its own root, `TF_VAR_`-driven).
 
 ## Workflow
@@ -179,9 +182,9 @@ swap the env file (`envs/workload-<provider>.tfvars`).
 ## Backup & Restore (DR)
 
 Every DR artifact lives in **two** object stores: a **primary** (the cluster's own
-provider, `AWS_*` creds) and a **replica** — the `-backup` store, in prod a
-*different* provider reached with `BACKUP_AWS_*` creds (these default to `AWS_*`
-when unset, e.g. for dev). Bucket names are derived from the cluster:
+provider, `<PU>_AWS_*` creds) and a **replica** — the `-backup` store, in prod a
+*different* provider reached with `<PU>_BACKUP_AWS_*` creds (these default to the
+primary when unset, e.g. for dev). Bucket names are derived from the cluster:
 
 | Artifact | Primary | Replica | Client encryption |
 |----------|---------|---------|-------------------|
@@ -199,7 +202,7 @@ the new state on apply exit.
 The four buckets are **auto-provisioned** (idempotent) by `task infra-management` /
 `task infra-workload` before `tofu init` — `scripts/ensure-buckets.sh` derives their
 names from the cluster's tfvars and `aws s3 mb`s any that are missing (primary with
-`AWS_*`, replicas with `BACKUP_AWS_*`). Manual equivalent:
+`<PU>_AWS_*`, replicas with `<PU>_BACKUP_AWS_*`). Manual equivalent:
 `./scripts/ensure-buckets.sh envs/<cluster>.tfvars`.
 
 ```bash

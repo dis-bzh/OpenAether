@@ -28,9 +28,10 @@ vendor/
 go.work
 go.work.sum
 
-# env files (contain secrets)
-.env
-.env.*
+# env files (contain secrets) — but version the documented template.
+# `.env*` (no dot) also catches variants like `.env-anonimised.sh`.
+.env*
+!.env.example
 
 # Editor/IDE
 # .idea/
