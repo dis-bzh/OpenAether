@@ -5,7 +5,7 @@
 
 ## Version
 
-**v0.3.4** — Multi-cloud infrastructure with hub/spoke GitOps, cross-provider failover, and client-side-encrypted dual-store backups. Management cluster validated end-to-end on Scaleway, OVH, and Outscale.
+**v0.4.0** — Multi-cloud infrastructure with hub/spoke GitOps, cross-provider failover, and client-side-encrypted dual-store backups. Management cluster validated end-to-end on Scaleway, OVH, and Outscale; full cloud lifecycle re-run clean. Ready for external testers (not yet 1.0).
 
 ## Architecture
 
