@@ -250,12 +250,13 @@ tasks:
         kubectl -n management-gitops port-forward svc/argocd-server 8080:443
 
   local-down:
-    desc: "Destroy local Talos cluster and Docker containers"
-    dir: infrastructure/opentofu-local
+    desc: "Destroy local Talos cluster (containers + volumes + network + state)"
     cmds:
-      - |
-        export TF_VAR_cilium_manifest="placeholder"
-        tofu destroy -auto-approve 2>/dev/null || true
+      # Delegate to the script's --destroy: `tofu destroy` alone can't tear the
+      # cluster down (machine_secrets is prevent_destroy'd, so it errors and
+      # leaves containers + state behind). --destroy also removes the containers,
+      # volumes, network, and the ephemeral local state for a clean slate.
+      - ./scripts/test-talos-local.sh --destroy
 
   # ===========================================================================
   # Bootstrap & Secrets

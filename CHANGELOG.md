@@ -48,6 +48,28 @@ the cluster scope"), pinning root apps at `SYNC Unknown`. Added a kustomize
 patch to namespace those subjects too — otherwise a self-sync would revert the
 inline-manifest fix above.
 
+### Fixed — local Docker test harness (`test-talos-local.sh`)
+
+- **`grep -c` footguns** — four `R=$(… | grep -c …)` counts aborted the script
+  under `set -e`+`pipefail` the moment they matched zero lines (grep exits 1),
+  silently killing the run at "etcd quorum"/"nodes Ready"/"ArgoCD pods". Guarded
+  with `|| true`; the etcd one also dropped a stray `|| echo 0` that produced a
+  two-line `"0\n0"` and broke the arithmetic `[[ ]]`.
+- **State hygiene** — `machine_secrets` is `prevent_destroy`'d, so `tofu destroy`
+  (and `task local-down`) couldn't tear the local cluster down and left a stale
+  state behind. Reusing it broke the next run: a skipped bootstrap (etcd hangs at
+  "waiting to join") or an old CA against fresh containers (bootstrap TLS
+  handshake failure). The script now wipes the ephemeral local state when no live
+  cluster is present and in `--destroy`; `task local-down` delegates to
+  `--destroy` for a real teardown (containers + volumes + network + state).
+
+### Fixed — developer tooling
+
+- **`task lint`** — `tflint --recursive <dir>` broke at tflint v0.47 (positional
+  path args dropped) → `tflint --chdir=<dir> --recursive`. Documented the
+  `encryption_passphrase` variable (its sole finding). `.yamllint` now ignores
+  the generated `cilium-local.yaml` (twin of the already-ignored `cilium.yaml`).
+
 ### Added
 
 - **`task destroy-management PROVIDER=…`** — symmetric with `destroy-workload`.

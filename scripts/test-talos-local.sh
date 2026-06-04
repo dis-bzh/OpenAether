@@ -50,6 +50,10 @@ if [[ "${1:-}" == "--destroy" ]]; then
   done
   docker network rm "${CLUSTER_NAME}-net" 2>/dev/null || true
   rm -f "${TOFU_DIR}/kubeconfig" "${TOFU_DIR}/talosconfig"
+  # Wipe the ephemeral local state too: `tofu destroy` leaves it populated
+  # (machine_secrets is prevent_destroy'd), and a stale state breaks the next
+  # fresh apply (CA mismatch / skipped bootstrap). No backend, so this is safe.
+  rm -f "${TOFU_DIR}/terraform.tfstate" "${TOFU_DIR}/terraform.tfstate.backup"
   success "Local cluster destroyed"
   exit 0
 fi
@@ -84,6 +88,16 @@ success "Cilium manifest ready"
 info "Step 2 — Deploying 3-CP Talos cluster (OpenTofu + modules/talos)..."
 cd "${TOFU_DIR}"
 tofu init -upgrade >/dev/null 2>&1 || tofu init >/dev/null
+# If no live cluster is running, any pre-existing local state is stale: its
+# containers are gone, and `--destroy` can't fully clear state because
+# machine_secrets is prevent_destroy'd. Reusing that half-state either mixes an
+# old CA with freshly-created containers (bootstrap fails the TLS handshake:
+# "certificate signed by unknown authority") or skips the already-recorded
+# bootstrap so the new etcd hangs at "waiting to join". Local state is ephemeral
+# (no backend), so wipe it for a clean, CA-consistent apply rather than reuse it.
+if ! docker ps --format '{{.Names}}' | grep -q "^${CLUSTER_NAME}-cp-0$"; then
+  rm -f terraform.tfstate terraform.tfstate.backup
+fi
 tofu apply -var talos_bootstrap=true -auto-approve
 success "Cluster provisioned (config generated, containers up, etcd bootstrapped, kubeconfig retrieved)"
 
@@ -96,7 +110,10 @@ export TALOSCONFIG="${TOFU_DIR}/talosconfig"
 info "Step 3 — Verifying etcd quorum and Talos health..."
 MEMBERS=0
 for i in $(seq 1 18); do
-  MEMBERS=$(talosctl --nodes "${CP_IPS[0]}" --endpoints "${CP_ENDPOINTS[0]}" etcd members 2>/dev/null | grep -c "${CLUSTER_NAME}-cp-" || echo 0)
+  # grep -c prints "0" AND exits 1 on no match; `|| echo 0` would then append a
+  # second line ("0\n0") and break the arithmetic `[[ ]]` below. `|| true` keeps
+  # grep's own single-line count (incl. its "0") under `set -o pipefail`.
+  MEMBERS=$(talosctl --nodes "${CP_IPS[0]}" --endpoints "${CP_ENDPOINTS[0]}" etcd members 2>/dev/null | grep -c "${CLUSTER_NAME}-cp-" || true)
   [[ "$MEMBERS" -eq 3 ]] && break
   sleep 5
 done
@@ -119,7 +136,9 @@ fi
 # ==============================================================================
 info "Step 4 — Verifying Kubernetes nodes and Cilium..."
 for i in $(seq 1 60); do
-  READY=$(kubectl get nodes --no-headers 2>/dev/null | grep -c " Ready ")
+  # `|| true`: grep -c exits 1 on 0 matches (no node Ready yet on early loops),
+  # which under set -e + pipefail would abort the script here.
+  READY=$(kubectl get nodes --no-headers 2>/dev/null | grep -c " Ready " || true)
   [[ "$READY" -eq 3 ]] && break
   sleep 5
 done
@@ -145,11 +164,13 @@ kubectl apply -k "${ROOT_DIR}/apps/bootstrap/overlays/prod" --server-side=true -
 sleep 5
 kubectl apply -k "${ROOT_DIR}/apps/bootstrap/overlays/prod" --server-side=true --force-conflicts >/dev/null 2>&1 || true
 for i in $(seq 1 48); do
-  R=$(kubectl -n management-gitops get pods --no-headers 2>/dev/null | grep -c "Running")
+  # `|| true`: grep -c exits 1 when 0 pods match, which under set -e + pipefail
+  # would abort the whole script right here (the failure that hid Step 6/7).
+  R=$(kubectl -n management-gitops get pods --no-headers 2>/dev/null | grep -c "Running" || true)
   [[ "$R" -ge 7 ]] && break
   sleep 5
 done
-R=$(kubectl -n management-gitops get pods --no-headers 2>/dev/null | grep -c "Running")
+R=$(kubectl -n management-gitops get pods --no-headers 2>/dev/null | grep -c "Running" || true)
 [[ "$R" -ge 7 ]] && success "ArgoCD running (${R} pods)" || warn "ArgoCD pods running: ${R}/7"
 
 # ==============================================================================
