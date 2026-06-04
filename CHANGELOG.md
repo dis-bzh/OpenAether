@@ -72,6 +72,17 @@ inline-manifest fix above.
 
 ### Added
 
+- **Local cluster gains 2 dedicated workers** — the Docker test setup is now
+  **3 CP + 2 workers** (`worker_count`, default 2) instead of 3 single-role CPs.
+  Workers stay schedulable while the control planes keep their taint, so the
+  local harness now covers HA and real pod scheduling. Worker Talos APIs map to
+  `127.0.0.1:50010/50011`, node IPs `10.5.0.20/21`. `modules/providers/local`
+  already supported workers; this wires them through `opentofu-local` and the
+  test script (health `--worker-nodes`, 5-node checks, schedulable-worker check).
+  To dodge Docker Desktop's WSL2 port-forwarder 500ing on concurrent `--publish`
+  registrations, workers are created in a second wave (`depends_on` the control
+  planes) and each `docker run` retries — no global `-parallelism=1` (which would
+  deadlock the container-independent bootstrap).
 - **`task destroy-management PROVIDER=…`** — symmetric with `destroy-workload`.
 
 ### Changed

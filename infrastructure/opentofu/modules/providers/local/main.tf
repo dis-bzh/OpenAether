@@ -26,7 +26,7 @@ locals {
 
   worker_names = [for i in range(var.worker_count) : "${var.cluster_name}-worker-${i}"]
   worker_ips   = [for i in range(var.worker_count) : "${local.net_prefix}.${var.worker_ip_base + i}"]
-  worker_ports = [for i in range(var.worker_count) : var.talos_api_port_base + 100 + i]
+  worker_ports = [for i in range(var.worker_count) : var.talos_api_port_base + 10 + i]
 
   talos_image = "ghcr.io/siderolabs/talos:${var.talos_version}"
 
@@ -96,23 +96,35 @@ resource "terraform_data" "control_plane" {
       USERDATA_FLAG=""
       if [ -n "$USERDATA" ]; then USERDATA_FLAG="--env USERDATA"; fi
 
-      docker run --detach \
-        --name "$NAME" \
-        --hostname "$NAME" \
-        ${local.common_run_flags} \
-        --mount type=volume,source=$NAME-state,destination=/system/state \
-        --mount type=volume,source=$NAME-var,destination=/var \
-        --mount type=volume,source=$NAME-etccni,destination=/etc/cni \
-        --mount type=volume,source=$NAME-etck8s,destination=/etc/kubernetes \
-        --mount type=volume,source=$NAME-libexec,destination=/usr/libexec/kubernetes \
-        --mount type=volume,source=$NAME-opt,destination=/opt \
-        --network "${var.cluster_name}-net" \
-        --ip "${local.cp_ips[count.index]}" \
-        --publish "127.0.0.1:${local.cp_ports[count.index]}:50000" \
-        $K8S_PORT_FLAG \
-        --restart unless-stopped \
-        $USERDATA_FLAG \
-        "${local.talos_image}"
+      # Docker Desktop's WSL2 port-forwarder intermittently 500s when several
+      # port-mapped containers are created at once ("ports are not available …
+      # /forwards/expose returned … status: 500"). Retry, clearing the
+      # half-created container (which would otherwise keep holding the port)
+      # before each attempt so the forwarder can release and rebind it.
+      for attempt in 1 2 3 4 5; do
+        if docker run --detach \
+          --name "$NAME" \
+          --hostname "$NAME" \
+          ${local.common_run_flags} \
+          --mount type=volume,source=$NAME-state,destination=/system/state \
+          --mount type=volume,source=$NAME-var,destination=/var \
+          --mount type=volume,source=$NAME-etccni,destination=/etc/cni \
+          --mount type=volume,source=$NAME-etck8s,destination=/etc/kubernetes \
+          --mount type=volume,source=$NAME-libexec,destination=/usr/libexec/kubernetes \
+          --mount type=volume,source=$NAME-opt,destination=/opt \
+          --network "${var.cluster_name}-net" \
+          --ip "${local.cp_ips[count.index]}" \
+          --publish "127.0.0.1:${local.cp_ports[count.index]}:50000" \
+          $K8S_PORT_FLAG \
+          --restart unless-stopped \
+          $USERDATA_FLAG \
+          "${local.talos_image}"; then
+          break
+        fi
+        echo "docker run for $NAME failed (attempt $attempt/5) — clearing + retrying after port settle..."
+        docker rm -f "$NAME" 2>/dev/null || true
+        sleep 5
+      done
 
       echo "Waiting for Talos API on 127.0.0.1:${local.cp_ports[count.index]}..."
       for i in $(seq 1 45); do
@@ -169,22 +181,34 @@ resource "terraform_data" "worker" {
       USERDATA_FLAG=""
       if [ -n "$USERDATA" ]; then USERDATA_FLAG="--env USERDATA"; fi
 
-      docker run --detach \
-        --name "$NAME" \
-        --hostname "$NAME" \
-        ${local.common_run_flags} \
-        --mount type=volume,source=$NAME-state,destination=/system/state \
-        --mount type=volume,source=$NAME-var,destination=/var \
-        --mount type=volume,source=$NAME-etccni,destination=/etc/cni \
-        --mount type=volume,source=$NAME-etck8s,destination=/etc/kubernetes \
-        --mount type=volume,source=$NAME-libexec,destination=/usr/libexec/kubernetes \
-        --mount type=volume,source=$NAME-opt,destination=/opt \
-        --network "${var.cluster_name}-net" \
-        --ip "${local.worker_ips[count.index]}" \
-        --publish "127.0.0.1:${local.worker_ports[count.index]}:50000" \
-        --restart unless-stopped \
-        $USERDATA_FLAG \
-        "${local.talos_image}"
+      # Docker Desktop's WSL2 port-forwarder intermittently 500s when several
+      # port-mapped containers are created at once ("ports are not available …
+      # /forwards/expose returned … status: 500"). Retry, clearing the
+      # half-created container (which would otherwise keep holding the port)
+      # before each attempt so the forwarder can release and rebind it.
+      for attempt in 1 2 3 4 5; do
+        if docker run --detach \
+          --name "$NAME" \
+          --hostname "$NAME" \
+          ${local.common_run_flags} \
+          --mount type=volume,source=$NAME-state,destination=/system/state \
+          --mount type=volume,source=$NAME-var,destination=/var \
+          --mount type=volume,source=$NAME-etccni,destination=/etc/cni \
+          --mount type=volume,source=$NAME-etck8s,destination=/etc/kubernetes \
+          --mount type=volume,source=$NAME-libexec,destination=/usr/libexec/kubernetes \
+          --mount type=volume,source=$NAME-opt,destination=/opt \
+          --network "${var.cluster_name}-net" \
+          --ip "${local.worker_ips[count.index]}" \
+          --publish "127.0.0.1:${local.worker_ports[count.index]}:50000" \
+          --restart unless-stopped \
+          $USERDATA_FLAG \
+          "${local.talos_image}"; then
+          break
+        fi
+        echo "docker run for $NAME failed (attempt $attempt/5) — clearing + retrying after port settle..."
+        docker rm -f "$NAME" 2>/dev/null || true
+        sleep 5
+      done
 
       for i in $(seq 1 45); do
         nc -z 127.0.0.1 ${local.worker_ports[count.index]} 2>/dev/null && { echo "$NAME ready"; exit 0; }
@@ -204,5 +228,9 @@ resource "terraform_data" "worker" {
     EOF
   }
 
-  depends_on = [terraform_data.network]
+  # Create workers only after the control planes: that caps concurrent
+  # `docker run --publish` registrations (Docker Desktop's WSL2 forwarder 500s
+  # when too many hit it at once) without a global -parallelism=1, which would
+  # deadlock the bootstrap (it has no dependency on the containers).
+  depends_on = [terraform_data.network, terraform_data.control_plane]
 }
