@@ -16,7 +16,7 @@ tasks:
     cmds:
       - tofu fmt -check -recursive infrastructure/opentofu
       - yamllint -c infrastructure/.yamllint apps/ infrastructure/
-      - tflint --recursive infrastructure/opentofu/cluster
+      - tflint --chdir=infrastructure/opentofu/cluster --recursive
 
   fmt:
     desc: Format OpenTofu code
