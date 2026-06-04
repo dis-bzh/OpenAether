@@ -28,6 +28,10 @@ staging bucket) are **auto-created** by `scripts/talos-image.sh`.
 
 ## Prerequisites
 
+Set credentials once in `.env.sh` (`cp .env.example .env.sh`, edit, `source`) —
+[`.env.example`](../../../.env.example) is the documented, authoritative list.
+What this builder needs:
+
 - **Compute creds** for the target provider: `SCW_*` (scaleway), `OS_*` (ovh,
   OpenStack), `OSC_*` (outscale).
 - **S3 creds** for the target provider's Object Storage (state + staging),
@@ -35,7 +39,7 @@ staging bucket) are **auto-created** by `scripts/talos-image.sh`.
   - `SCW_AWS_ACCESS_KEY_ID` / `SCW_AWS_SECRET_ACCESS_KEY` — default to `SCW_*` (Scaleway S3 == API keys).
   - `OVH_AWS_ACCESS_KEY_ID` / `OVH_AWS_SECRET_ACCESS_KEY` — **separate** keys (`openstack ec2 credentials create`), *not* `OS_PASSWORD`.
   - `OUTSCALE_AWS_ACCESS_KEY_ID` / `OUTSCALE_AWS_SECRET_ACCESS_KEY` — default to `OSC_*` (OOS == API keys).
-  - (plain `AWS_*` still works as a fallback.)
+  - (no ambient `AWS_*` fallback — it could silently use another provider's keys.)
 - `TF_VAR_encryption_passphrase` (≥32 chars).
 - Local CLI tools: `curl`, `zstd`, `qemu-img`, `aws` (installed by `task setup`).
 
