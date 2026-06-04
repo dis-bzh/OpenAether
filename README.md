@@ -42,11 +42,13 @@ SCW Workload Cluster     OVH Workload Cluster     Outscale Workload Cluster
 
 ## Cloud Provider Support
 
+Management cluster validated end-to-end (Talos bootstrap → Cilium → ArgoCD) on **all three** providers.
+
 | Provider | Status | Region | Notes |
 |----------|--------|--------|-------|
-| **Scaleway** | ✅ Operational | fr-par (3 AZs) | HA control plane, full networking stack |
-| **OVH** | ✅ Code complete | GRA (OpenStack) | Octavia LB, floating IPs, private network |
-| **Outscale / Numspot** | ✅ Code complete | eu-west-2 | Load balancer, NAT, VPC |
+| **Scaleway** | ✅ Management validated | fr-par (3 AZs) | HA control plane, public gateway egress, full networking stack |
+| **OVH** | ✅ Management validated | EU-WEST-PAR (OpenStack) | Octavia LB, floating IPs, router SNAT egress, private network |
+| **Outscale / Numspot** | ✅ Management validated | eu-west-2 | LB, NAT-service egress, public/private subnets, VPC |
 
 ## Repository Structure
 
