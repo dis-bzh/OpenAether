@@ -1,6 +1,7 @@
 variable "encryption_passphrase" {
-  type      = string
-  sensitive = true
+  description = "Passphrase (>=32 chars) for OpenTofu state encryption (PBKDF2 → AES-GCM) and SSE-C of the remote state object. Supply via TF_VAR_encryption_passphrase; never commit."
+  type        = string
+  sensitive   = true
 
   validation {
     condition     = length(var.encryption_passphrase) >= 32
