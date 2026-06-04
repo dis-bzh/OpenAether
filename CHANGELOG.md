@@ -40,6 +40,14 @@ upstream manifest, injected as a Talos inlineManifest, was landing in `default` 
 so ArgoCD watched `default` while the root app lived in `management-gitops` and the
 root Application never reconciled. Affects every provider's bootstrap.
 
+The GitOps path (`apps/bootstrap/base`, which ArgoCD self-manages from git) had
+the same ClusterRoleBinding-subject gap: kustomize's `namespace:` transformer
+left the 3 subjects in `argocd`, so the application-controller SA got no
+cluster-scoped permissions and its live-state cache failed ("cannot list … at
+the cluster scope"), pinning root apps at `SYNC Unknown`. Added a kustomize
+patch to namespace those subjects too — otherwise a self-sync would revert the
+inline-manifest fix above.
+
 ### Added
 
 - **`task destroy-management PROVIDER=…`** — symmetric with `destroy-workload`.
