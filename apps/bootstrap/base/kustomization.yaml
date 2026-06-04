@@ -6,3 +6,18 @@ namespace: management-gitops
 resources:
   - namespace.yaml
   - https://raw.githubusercontent.com/argoproj/argo-cd/v3.3.2/manifests/install.yaml
+
+# Kustomize's `namespace:` transformer rewrites RoleBinding subjects but NOT
+# ClusterRoleBinding subjects (a long-standing quirk), leaving ArgoCD's 3
+# ClusterRoleBindings pointing at SAs in the upstream-default "argocd" namespace
+# — which don't exist here, so those controllers would get no cluster
+# permissions (live-state cache fails: "cannot list ... at the cluster scope").
+# Patch each ClusterRoleBinding's subject into our namespace.
+patches:
+  - target:
+      group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+    patch: |-
+      - op: replace
+        path: /subjects/0/namespace
+        value: management-gitops
