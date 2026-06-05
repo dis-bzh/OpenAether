@@ -81,7 +81,7 @@ cloud path unchanged (endpoints default to the node IPs there).
 | Variable | Default | Purpose |
 |---|---|---|
 | `control_plane_count` | `3` | 3 for a real quorum, 1 for a quick smoke test |
-| `worker_count` | `2` | dedicated schedulable workers (0 falls back to untainting the CPs) |
+| `worker_count` | `3` | dedicated schedulable workers (0 falls back to untainting the CPs) |
 | `talos_bootstrap` | `false` | `true` builds the full cluster |
 | `cilium_manifest` | `null` | set via `TF_VAR_cilium_manifest` from `cilium-local.yaml` |
 
