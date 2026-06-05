@@ -26,10 +26,10 @@ MANIFESTS_DIR="${ROOT_DIR}/infrastructure/opentofu/cluster/bootstrap-manifests"
 CLUSTER_NAME="openaether-local-dev"
 CP_IPS=("10.5.0.10" "10.5.0.11" "10.5.0.12")
 CP_ENDPOINTS=("127.0.0.1:50000" "127.0.0.1:50001" "127.0.0.1:50002")
-# Dedicated workers (worker_count=2 in opentofu-local): IPs at .20+, host ports
+# Dedicated workers (worker_count=3 in opentofu-local): IPs at .20+, host ports
 # at 50010+i. Schedulable/untainted, for HA and real workload scheduling tests.
-WORKER_IPS=("10.5.0.20" "10.5.0.21")
-WORKER_ENDPOINTS=("127.0.0.1:50010" "127.0.0.1:50011")
+WORKER_IPS=("10.5.0.20" "10.5.0.21" "10.5.0.22")
+WORKER_ENDPOINTS=("127.0.0.1:50010" "127.0.0.1:50011" "127.0.0.1:50012")
 TOTAL_NODES=$(( ${#CP_IPS[@]} + ${#WORKER_IPS[@]} ))
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
