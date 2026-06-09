@@ -50,9 +50,10 @@ variable "admin_ip" {
   type        = list(string)
 }
 
-variable "bastion_ssh_key" {
-  description = "SSH public key for bastion access"
-  type        = string
+variable "bastion_ssh_keys" {
+  description = "SSH public keys for bastion access (list for multi-admin)"
+  type        = list(string)
+  default     = []
 }
 
 variable "bastion_image_id" {

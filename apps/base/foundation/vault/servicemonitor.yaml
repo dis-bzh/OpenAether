@@ -1,0 +1,20 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: openbao-workload
+  namespace: foundation-vault
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: openbao-workload
+spec:
+  selector:
+    matchLabels:
+      app: openbao
+  endpoints:
+    - port: ui
+      path: /v1/sys/metrics
+      scheme: http
+      interval: 30s
+      scrapeTimeout: 10s
+      bearerTokenFile: /var/run/secrets/openaether/prometheus-token

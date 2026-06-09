@@ -28,9 +28,49 @@ resource "openstack_networking_secgroup_rule_v2" "bastion_ssh" {
   security_group_id = openstack_networking_secgroup_v2.bastion.id
 }
 
-resource "openstack_networking_secgroup_rule_v2" "bastion_egress" {
+# Egress restricted to: established/related, DNS, NTP, apt, private subnet.
+# nftables (in-VM) is the hard enforcement; this SG rule provides defence-in-depth
+# by allowing egress to the private subnet and well-known services only.
+resource "openstack_networking_secgroup_rule_v2" "bastion_egress_private" {
   direction         = "egress"
   ethertype         = "IPv4"
+  remote_ip_prefix  = "10.0.0.0/24"
+  security_group_id = openstack_networking_secgroup_v2.bastion.id
+}
+
+resource "openstack_networking_secgroup_rule_v2" "bastion_egress_dns" {
+  direction         = "egress"
+  ethertype         = "IPv4"
+  protocol          = "udp"
+  port_range_min    = 53
+  port_range_max    = 53
+  security_group_id = openstack_networking_secgroup_v2.bastion.id
+}
+
+resource "openstack_networking_secgroup_rule_v2" "bastion_egress_dns_tcp" {
+  direction         = "egress"
+  ethertype         = "IPv4"
+  protocol          = "tcp"
+  port_range_min    = 53
+  port_range_max    = 53
+  security_group_id = openstack_networking_secgroup_v2.bastion.id
+}
+
+resource "openstack_networking_secgroup_rule_v2" "bastion_egress_http" {
+  direction         = "egress"
+  ethertype         = "IPv4"
+  protocol          = "tcp"
+  port_range_min    = 80
+  port_range_max    = 80
+  security_group_id = openstack_networking_secgroup_v2.bastion.id
+}
+
+resource "openstack_networking_secgroup_rule_v2" "bastion_egress_https" {
+  direction         = "egress"
+  ethertype         = "IPv4"
+  protocol          = "tcp"
+  port_range_min    = 443
+  port_range_max    = 443
   security_group_id = openstack_networking_secgroup_v2.bastion.id
 }
 
@@ -50,14 +90,14 @@ resource "openstack_compute_instance_v2" "bastion" {
     port = openstack_networking_port_v2.bastion.id
   }
 
-  user_data = <<-EOT
-    #cloud-config
-    ssh_authorized_keys:
-      - ${var.bastion_ssh_key}
-    packages:
-      - netcat-openbsd
-      - tcpdump
-  EOT
+  user_data = templatefile("${path.module}/../_shared/bastion-cloud-init.yaml.tftpl", {
+    bastion_user      = "ubuntu"
+    ssh_keys          = var.bastion_ssh_keys
+    private_cidr      = "10.0.0.0/24"
+    extra_packages    = []
+    extra_write_files = []
+    extra_runcmd      = []
+  })
 
   tags = ["bastion", var.cluster_name]
 }

@@ -1,0 +1,102 @@
+# OpenAether 0.5.0 Sprint C — Dashboard OpenBao (Vault-compatible)
+# Métriques: auth, secrets, raft, transit, seal status.
+# OpenBao expose les métriques Prometheus sur /v1/sys/metrics.
+# VMServiceScrape OpenBao à ajouter dans foundation/vault/ (sprint D).
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbao
+  namespace: services-observability
+  labels:
+    grafana_dashboard: "1"
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: grafana-dashboards
+  annotations:
+    grafana_folder: "Security"
+data:
+  openbao.json: |
+    {
+      "title": "OpenBao (Vault) Overview",
+      "uid": "openaether-openbao",
+      "schemaVersion": 36,
+      "version": 1,
+      "refresh": "1m",
+      "tags": ["openbao", "vault", "security", "pki", "openaether"],
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {"selected": false, "text": "VictoriaMetrics", "value": "VictoriaMetrics"},
+            "hide": 0
+          }
+        ]
+      },
+      "panels": [
+        {
+          "title": "Vault Initialized",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [{"expr": "vault_core_initialized", "legendFormat": "Initialized"}],
+          "fieldConfig": {"defaults": {"mappings": [{"type": "value", "options": {"0": {"text": "No", "color": "red"}, "1": {"text": "Yes", "color": "green"}}}]}}
+        },
+        {
+          "title": "Vault Sealed",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [{"expr": "vault_core_sealed", "legendFormat": "Sealed"}],
+          "fieldConfig": {"defaults": {"mappings": [{"type": "value", "options": {"0": {"text": "Unsealed", "color": "green"}, "1": {"text": "SEALED", "color": "red"}}}]}}
+        },
+        {
+          "title": "Active Leaders",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [{"expr": "sum(vault_core_active)", "legendFormat": "Leaders"}],
+          "fieldConfig": {"defaults": {"thresholds": {"steps": [{"color": "red", "value": 0}, {"color": "green", "value": 1}]}}}
+        },
+        {
+          "title": "Auth Requests/s",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {"expr": "rate(vault_auth_method_login_count[5m])", "legendFormat": "Login/s {{auth_method}}"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "reqps"}}
+        },
+        {
+          "title": "Token Count",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {"expr": "vault_token_count", "legendFormat": "Tokens"},
+            {"expr": "vault_token_count_by_policy", "legendFormat": "Tokens by policy {{policy}}"}
+          ]
+        },
+        {
+          "title": "Raft Commit Time",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {"expr": "rate(vault_raft_replication_appendEntries_logs[5m])", "legendFormat": "Raft append entries/s"}
+          ]
+        },
+        {
+          "title": "Secret KV Operations",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {"expr": "rate(vault_secret_kv_count[5m])", "legendFormat": "KV secrets/s"}
+          ]
+        }
+      ]
+    }

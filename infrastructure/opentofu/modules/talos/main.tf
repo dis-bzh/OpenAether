@@ -46,7 +46,7 @@ data "talos_client_configuration" "this" {
 # ==============================================================================
 # Inline Manifests — conditional injection
 # Cilium is always injected (CNI is required for networking).
-# ArgoCD manifests are only injected during initial bootstrap.
+# Flux manifests are only injected during initial bootstrap.
 # ==============================================================================
 
 locals {
@@ -58,20 +58,20 @@ locals {
     },
   ]
 
-  # ArgoCD is only needed during initial bootstrap. On upgrades/DRP,
-  # ArgoCD is already running and manages itself via GitOps.
-  argocd_manifests = var.bootstrap_manifests_enabled && var.argocd_manifest != "" ? [
+  # Flux is only needed during initial bootstrap. On upgrades/DRP,
+  # Flux is already running and manages itself via GitOps.
+  flux_manifests = var.bootstrap_manifests_enabled && var.flux_manifest != "" ? [
     {
-      name     = "argocd-install"
-      contents = var.argocd_manifest
+      name     = "flux-install"
+      contents = var.flux_manifest
     },
     {
-      name     = "argocd-root-app"
-      contents = var.root_app_manifest
+      name     = "flux-bootstrap"
+      contents = var.flux_bootstrap_manifest
     },
   ] : []
 
-  inline_manifests = concat(local.base_manifests, local.argocd_manifests)
+  inline_manifests = concat(local.base_manifests, local.flux_manifests)
 }
 
 # ==============================================================================

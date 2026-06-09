@@ -1,0 +1,31 @@
+# OpenAether 0.5.0 — OpenBao root (1 répl raft 1, seal Shamir 3-of-5)
+# Le root sert UNIQUEMENT de seal transit pour le workload OpenBao (3 répl HA).
+# Fallback recovery keys Shamir offline (coffre/papier), cérémonie manuelle.
+# Sprint 0: déploiement complet (statefulset + service + bootstrap Job).
+# NOTE sprint 0: servicemonitor.yaml + prometheusrule.yaml retirés (CRDs
+# monitoring.coreos.com absents tant que kube-prometheus-stack pas
+# installé, prévu sprint 4 obs). Les fichiers sont conservés sur disque
+# pour activation sprint 4.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: foundation-pki-root
+
+# NB: le namespace `foundation-pki-root` est défini dans
+# apps/base/namespaces/namespaces.yaml (cohérent avec les autres foundation-*).
+# On ne le (re)déclare pas ici.
+resources:
+  - serviceaccount.yaml
+  - configmap.yaml
+  - statefulset.yaml
+  - service.yaml
+  - pdb.yaml
+  - networkpolicy.yaml
+  - bootstrap
+
+labels:
+  - includeSelectors: true
+    pairs:
+      openaether.io/managed: "true"
+      openaether.io/sprint: "0.5.0-sprint0"
+      openaether.io/component: openbao-pki-root

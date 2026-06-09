@@ -80,3 +80,7 @@ infrastructure/opentofu/cluster/bootstrap-manifests/cilium-local.yaml
 # Phase 2 SSH tunnel PIDs (Talos API via bastion)
 infrastructure/opentofu/.talos-tunnels.pids
 infrastructure/opentofu/cluster/.talos-tunnels.pids
+
+# Claude Code session artifacts (local state, pas du contenu projet)
+.claude/
+CLAUDE.md

@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: external-secrets-cert-controller
+spec:
+  template:
+    spec:
+      containers:
+        - name: cert-controller
+          args:
+            - certcontroller
+            - --crd-requeue-interval=5m
+            - --service-name=external-secrets-webhook
+            - --service-namespace=foundation-pki-management
+            - --secret-name=external-secrets-webhook
+            - --secret-namespace=foundation-pki-management
+            - --metrics-addr=:8080
+            - --healthz-addr=:8081
+            - --loglevel=info
+            - --zap-time-encoding=epoch
+            - --enable-partial-cache=true

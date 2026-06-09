@@ -1,0 +1,70 @@
+# OpenAether 0.5.0 Sprint C — kube-state-metrics
+# ──────────────────────────────────────────────────────────────────
+# Expose les métriques des objets Kubernetes (Deployments, Pods, Nodes,
+# PersistentVolumes, etc.) au format Prometheus.
+# Scraping assuré par VMServiceScrape kube-state-metrics (vmscapes.yaml).
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: prometheus-community
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: kube-state-metrics
+spec:
+  url: https://prometheus-community.github.io/helm-charts
+  interval: 1h
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kube-state-metrics
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: kube-state-metrics
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: kube-state-metrics
+      version: "5.25.1"
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+        namespace: services-observability
+      interval: 1h
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    replicaCount: 2
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: kube-state-metrics
+              topologyKey: kubernetes.io/hostname
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+    # Pas de ServiceMonitor (on utilise VMServiceScrape dans vmscapes.yaml).
+    prometheus:
+      monitor:
+        enabled: false
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1

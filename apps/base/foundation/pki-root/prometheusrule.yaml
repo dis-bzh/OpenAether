@@ -1,0 +1,35 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbao-pki-root
+  namespace: foundation-pki-root
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: openbao-pki-root
+spec:
+  groups:
+    - name: openbao-pki-root
+      interval: 30s
+      rules:
+        # Root scellé > 5min = critical (cérémonie Shamir à faire)
+        - alert: OpenBaoRootSealed
+          expr: openbao_core_unsealed == 0
+          for: 5m
+          labels:
+            severity: critical
+            component: openbao-pki-root
+          annotations:
+            summary: "OpenBao root sealed > 5min"
+            description: "Le root OpenBao (ns foundation-pki-root) est scellé. Cérémonie Shamir 3-of-5 requise pour unseal. Le workload OpenBao (HA) reste fonctionnel en sealed=true mais ne peut plus auto-unseal au prochain restart."
+            runbook_url: "https://github.com/dis-bzh/OpenAether/blob/main/docs/runbooks/openbao-root-unseal.md"
+        # Root restart fréquent = suspect (crashloop ou attaque)
+        - alert: OpenBaoRootRestarting
+          expr: increase(kube_pod_container_status_restarts_total{pod=~"openbao-pki-root-.*"}[15m]) > 3
+          for: 5m
+          labels:
+            severity: warning
+            component: openbao-pki-root
+          annotations:
+            summary: "OpenBao root restarting frequently"
+            description: "Pod root a redémarré > 3 fois en 15min. Vérifier les logs (kubectl logs -n foundation-pki-root openbao-pki-root-0)."

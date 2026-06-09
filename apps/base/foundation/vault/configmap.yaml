@@ -1,0 +1,82 @@
+# OpenAether 0.5.0 — OpenBao workload config (seal transit + raft 3)
+# Seal: transit vers root OpenBao (openbao-internal.foundation-pki-root.svc.cluster.local:8200)
+# - Le wrapping token est lu depuis /bao/seal/token (Secret openbao-seal-token)
+#   par le wrapper entrypoint.sh qui exporte VAULT_TOKEN (le seal "transit"
+#   NE supporte PAS `token_path`, seulement `token`/VAULT_TOKEN — validé localement).
+# - La clé symétrique est 'aether-workload' (créée par Job bootstrap)
+# - Mount path: transit/
+# Raft 3 répl: retry_join sur les 3 pods via svc headless openbao.
+# TODO sprint 1: TLS sur listener + cluster_addr.
+#
+# NB OpenBao 2.x:
+#  - `disable_mlock` retiré (obsolète, cf. pki-root/configmap.yaml).
+#  - `api_addr`/`cluster_addr` via env BAO_API_ADDR/BAO_CLUSTER_ADDR (POD_IP).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openbao-config
+  namespace: foundation-vault
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: openbao-workload
+data:
+  config.hcl: |
+    ui = true
+
+    listener "tcp" {
+      tls_disable = 1  # TODO sprint 1: cert-manager + openbao-server-tls
+      address = "[::]:8200"
+      cluster_address = "[::]:8201"
+    }
+
+    storage "raft" {
+      path = "/bao/data"
+
+      retry_join {
+        leader_api_addr = "http://openbao-0.openbao.foundation-vault.svc.cluster.local:8200"
+      }
+      retry_join {
+        leader_api_addr = "http://openbao-1.openbao.foundation-vault.svc.cluster.local:8200"
+      }
+      retry_join {
+        leader_api_addr = "http://openbao-2.openbao.foundation-vault.svc.cluster.local:8200"
+      }
+    }
+
+    # Seal transit: auto-unseal via root OpenBao.
+    # Le token est fourni via VAULT_TOKEN (env, par le wrapper) — PAS token_path.
+    seal "transit" {
+      address    = "http://openbao-internal.foundation-pki-root.svc.cluster.local:8200"
+      key_name   = "aether-workload"
+      mount_path = "transit/"
+      disable_renewal = "false"
+    }
+  entrypoint.sh: |
+    #!/bin/sh
+    # Wrapper: exporte VAULT_TOKEN (seal transit token, le seal ne supporte que
+    # `token`/VAULT_TOKEN, pas token_path) + api_addr/cluster_addr par pod.
+    # Attend que le Secret openbao-seal-token soit monté (bootstrap PostSync).
+    set -e
+    # CRITIQUE raft HA: api_addr/cluster_addr DOIVENT être des DNS stables, PAS
+    # POD_IP (éphémère). Sinon, après un restart, les peers raft gardent en mémoire
+    # les anciennes IP → "requestVote i/o timeout" → aucune élection de leader.
+    # DNS stable du StatefulSet: <pod>.<svc-headless>.<ns>.svc.cluster.local
+    POD_FQDN="${HOSTNAME}.openbao.${POD_NAMESPACE}.svc.cluster.local"
+    export BAO_API_ADDR="http://${POD_FQDN}:8200"
+    export BAO_CLUSTER_ADDR="http://${POD_FQDN}:8201"
+    echo "raft addr: ${POD_FQDN}"
+    for i in $(seq 1 60); do
+      if [ -s /bao/seal/token ]; then
+        export VAULT_TOKEN="$(cat /bao/seal/token)"
+        echo "seal token loaded (len=$(printf %s "$VAULT_TOKEN" | wc -c))"
+        break
+      fi
+      echo "waiting for /bao/seal/token (seal transit token)... ${i}/60"
+      sleep 5
+    done
+    if [ -z "${VAULT_TOKEN:-}" ]; then
+      echo "ERROR: seal token absent after 5min — le Job bootstrap a-t-il tourné ?" >&2
+      exit 1
+    fi
+    exec bao server -config=/bao/config/config.hcl

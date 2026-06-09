@@ -1,0 +1,23 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: openbao-pki-root
+  namespace: foundation-pki-root
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: openbao-pki-root
+spec:
+  selector:
+    matchLabels:
+      app: openbao-pki-root
+  endpoints:
+    - port: ui
+      path: /v1/sys/metrics
+      scheme: http
+      interval: 30s
+      scrapeTimeout: 10s
+      # Bearer token file: OpenBao expose ses métriques sur /v1/sys/metrics
+      # sans auth via le listener tcp, mais en prod on ajoutera un token
+      # Prometheus dédié via ExternalSecret.
+      bearerTokenFile: /var/run/secrets/openaether/prometheus-token

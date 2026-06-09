@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# DAG management complet — source de vérité pour tous les overlays.
+# Tout actif sauf kyverno (suspend:true dans 40-kyverno.yaml).
+resources:
+  - gitrepository.yaml
+  - 00-namespaces.yaml
+  - 01-platform.yaml
+  - 10-foundation-pki-root.yaml
+  - 11-foundation-vault.yaml
+  - 12-external-secrets.yaml
+  - 13-cert-manager.yaml
+  - 14-istio.yaml
+  - 20-cnpg.yaml
+  - 21-storage.yaml
+  - 30-observability.yaml
+  - 40-kyverno.yaml

@@ -1,0 +1,55 @@
+# Groupe 01 — Platform (priority classes + network policies de base)
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform-gateway-api
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  timeout: 3m
+  sourceRef:
+    kind: GitRepository
+    name: openaether
+  path: ./apps/base/platform/gateway-api
+  prune: true
+  wait: true
+  dependsOn:
+    - name: namespaces
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform-priority-classes
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  timeout: 3m
+  sourceRef:
+    kind: GitRepository
+    name: openaether
+  path: ./apps/base/platform/priority-classes
+  prune: true
+  wait: true
+  dependsOn:
+    - name: namespaces
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform-network-policies
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  timeout: 3m
+  sourceRef:
+    kind: GitRepository
+    name: openaether
+  path: ./apps/base/platform/network-policies
+  prune: true
+  wait: true
+  dependsOn:
+    - name: namespaces

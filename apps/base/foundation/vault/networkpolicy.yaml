@@ -1,0 +1,205 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: openbao-workload
+  namespace: foundation-vault
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: openbao-workload
+spec:
+  description: "OpenBao workload (HA 3 répl): ingress depuis Cilium Gateway
+    (sprint 3), external-secrets, csi-driver, cert-manager, istiod, root OpenBao
+    (transit wrap reverse). Egress: kube-dns, k8s API, root OpenBao (transit wrap)."
+  endpointSelector:
+    matchLabels:
+      app: openbao
+  ingress:
+    # 1. Cilium Gateway (sprint 3) — vault.openaether.eu
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: services-gateway
+            k8s-app: cilium-gateway
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+    # 2. ESO (pull ExternalSecret)
+    #    NB: le chart external-secrets ne pose PAS de label `app:` nu — il
+    #    utilise `app.kubernetes.io/name`. Un selector `app: external-secrets`
+    #    bloque donc ESO→OpenBao en PERMANENCE (cloud inclus), pas seulement
+    #    en local. Toujours sélectionner sur le label canonique.
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: foundation-pki-management
+            app.kubernetes.io/name: external-secrets
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+    # 3. CSI driver (mount OpenBao secrets dans pods stateful sprint 1+)
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: csi-secrets-store
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+    # 4. cert-manager (sign certs via OpenBao PKI)
+    #    Sprint B: vérifier au déploiement que le chart cert-manager pose bien
+    #    `app: cert-manager` sur le pod controller (cf. bug ESO ci-dessus).
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: cert-manager
+            app: cert-manager
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+    # 5. Istiod (cert SPIFFE mesh)
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: istio-system
+            app: istiod
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+    # 6. Root OpenBao (transit wrap callback — en pratique le workload est
+    # CLIENT du root, pas l'inverse; mais on autorise la racine à appeler
+    # le workload en cas de revoke/check)
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: foundation-pki-root
+            app: openbao-pki-root
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+    # 7. Prometheus scraper
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-prometheus
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+    # 8. Peers raft (3 répliques): le join challenge passe par l'API 8200,
+    #    le trafic cluster par 8201. Sans ces 2 ports en ingress ET egress,
+    #    les pods 1/2 ne rejoignent jamais le leader → restent uninitialized.
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: foundation-vault
+            app: openbao
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+            - port: "8201"
+              protocol: TCP
+    # 9. Job bootstrap (init raft one-time, step 7) depuis foundation-pki-root.
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: foundation-pki-root
+            app: openbao-bootstrap
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+    # 10. Job bootstrap-roles (configures auth/policies/roles ESO+cert-manager
+    #     PostSync vault). Même namespace: le Job est en foundation-vault.
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: foundation-vault
+            app: openbao-vault-bootstrap
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+  egress:
+    # DNS
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # Kubernetes API (auth kubernetes + health)
+    - toServices:
+        - k8sService:
+            serviceName: kubernetes
+            namespace: default
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # Root OpenBao (transit wrap)
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: foundation-pki-root
+            app: openbao-pki-root
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+    # Raft entre les 3 répliques: join challenge sur l'API 8200 + cluster 8201.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: foundation-vault
+            app: openbao
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+            - port: "8201"
+              protocol: TCP
+---
+# Politique egress pour le Job bootstrap-roles (foundation-vault).
+# Permet: DNS + kube-apiserver (kubectl) + API OpenBao workload.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: openbao-vault-bootstrap-job
+  namespace: foundation-vault
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: openbao-vault-bootstrap
+spec:
+  description: "Job bootstrap-roles egress: DNS + k8s API + OpenBao workload API."
+  endpointSelector:
+    matchLabels:
+      app: openbao-vault-bootstrap
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toServices:
+        - k8sService:
+            serviceName: kubernetes
+            namespace: default
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: foundation-vault
+            app: openbao
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP

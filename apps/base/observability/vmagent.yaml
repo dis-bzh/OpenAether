@@ -1,0 +1,99 @@
+# OpenAether 0.5.0 Sprint C — VMAgent HA (scraping Kubernetes)
+# ──────────────────────────────────────────────────────────────────
+# VMAgent scrape les métriques via kubernetes_sd (découverte automatique)
+# et les envoie à vminsert via remote_write.
+#
+# 2 répliques + shardCount=2: chaque agent scrape 1/2 des targets.
+# Évite la duplication de scraping tout en assurant la HA.
+#
+# ClusterRole vmagent: lecture cluster-wide pods/nodes/services/endpoints.
+# Nécessaire pour la découverte automatique Kubernetes SD.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vmagent
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: vmagent
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vmagent
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: vmagent
+rules:
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - nodes/proxy
+      - nodes/metrics
+      - services
+      - endpoints
+      - pods
+      - namespaces
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["extensions", "networking.k8s.io"]
+    resources:
+      - ingresses
+    verbs: ["get", "list", "watch"]
+  - nonResourceURLs: ["/metrics", "/metrics/cadvisor"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vmagent
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: vmagent
+subjects:
+  - kind: ServiceAccount
+    name: vmagent
+    namespace: services-observability
+roleRef:
+  kind: ClusterRole
+  name: vmagent
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMAgent
+metadata:
+  name: vmagent
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: vmagent
+spec:
+  replicaCount: 2
+  shardCount: 2
+  serviceAccountName: vmagent
+  remoteWrite:
+    - url: "http://vminsert-victoria-metrics.services-observability:8480/insert/0/prometheus"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: vmagent
+            topologyKey: kubernetes.io/hostname
+  # Sélectionner tous les VMServiceScrape/VMNodeScrape du cluster.
+  selectAllByDefault: true
+  podDisruptionBudget:
+    minAvailable: 1

@@ -3,23 +3,7 @@ kind: Namespace
 metadata:
   name: foundation-networking
   labels:
-    linkerd.io/inject: disabled  # CNI itself
-    pod-security.kubernetes.io/enforce: privileged
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: foundation-vault
-  labels:
-    linkerd.io/inject: enabled
-    pod-security.kubernetes.io/enforce: privileged
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: foundation-service-mesh
-  labels:
-    linkerd.io/inject: disabled # Linkerd control plane itself
+    # Sprint 1: Istio ambient labels seront ajoutés (istio.io/dataplane-mode: ambient)
     pod-security.kubernetes.io/enforce: privileged
 ---
 apiVersion: v1
@@ -29,64 +13,25 @@ metadata:
   labels:
     pod-security.kubernetes.io/enforce: privileged
 ---
+# foundation-pki-root et foundation-vault sont ici (et non dans leurs services respectifs)
+# car le RBAC cross-namespace (foundation-pki-root-rbac Kustomization) a besoin que ces
+# deux namespaces existent AVANT que pki-root et vault soient déployés.
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: foundation-pki-management
+  name: foundation-pki-root
   labels:
     pod-security.kubernetes.io/enforce: privileged
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: "openbao-pki-root"
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: foundation-storage
+  name: foundation-vault
   labels:
     pod-security.kubernetes.io/enforce: privileged
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: foundation-databases
-  labels:
-    linkerd.io/inject: enabled
-    pod-security.kubernetes.io/enforce: privileged
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: management-gitops
-  labels:
-    linkerd.io/inject: disabled  # ArgoCD control plane
-    pod-security.kubernetes.io/enforce: privileged
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: services-identity
-  labels:
-    linkerd.io/inject: enabled
-    pod-security.kubernetes.io/enforce: restricted
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: services-observability
-  labels:
-    linkerd.io/inject: enabled
-    pod-security.kubernetes.io/enforce: privileged
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: services-gateway
-  labels:
-    linkerd.io/inject: enabled
-    pod-security.kubernetes.io/enforce: privileged
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: services-autoscaling
-  labels:
-    linkerd.io/inject: enabled
-    pod-security.kubernetes.io/enforce: baseline
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: openbao-workload

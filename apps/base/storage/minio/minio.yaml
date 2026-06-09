@@ -1,0 +1,97 @@
+# OpenAether 0.5.0 Sprint C — MinIO S3-compatible (test local uniquement)
+# ──────────────────────────────────────────────────────────────────
+# MinIO est déployé EN LOCAL UNIQUEMENT pour tester les configurations
+# S3 (Loki backend, VMCluster backup futur) avec la même interface
+# qu'un S3 cloud (Scaleway Object Storage, OVH OBS, Outscale OSU).
+#
+# Ce fichier est inclus UNIQUEMENT dans apps/overlays/local/kustomization.yaml.
+# apps/overlays/management/ (cloud) pointe directement vers le S3 natif
+# du provider via overlay patch sur les valeurs des HelmReleases.
+#
+# Architecture: 1 pod Deployment, 10Gi local-path. Pas de HA (test local).
+# Accès: http://minio.foundation-storage:9000 (API S3)
+#        http://minio.foundation-storage:9001 (console UI, port-forward local)
+# Credentials: ExternalSecret depuis OpenBao secret/minio/root
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: minio
+  namespace: foundation-storage
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: minio
+spec:
+  url: https://charts.min.io/
+  interval: 1h
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: minio
+  namespace: foundation-storage
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: minio
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: minio
+      version: "5.2.0"
+      sourceRef:
+        kind: HelmRepository
+        name: minio
+        namespace: foundation-storage
+      interval: 1h
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  valuesFrom:
+    - kind: Secret
+      name: minio-root-credentials
+      valuesKey: accessKey
+      targetPath: rootUser
+    - kind: Secret
+      name: minio-root-credentials
+      valuesKey: secretKey
+      targetPath: rootPassword
+  values:
+    # Single node — test local uniquement.
+    mode: standalone
+    replicas: 1
+    persistence:
+      enabled: true
+      storageClass: local-path
+      size: 10Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    # Buckets créés automatiquement au démarrage.
+    buckets:
+      - name: loki
+        policy: none
+        purge: false
+      - name: vmbackup
+        policy: none
+        purge: false
+    # Désactiver les features non nécessaires en local.
+    metrics:
+      serviceMonitor:
+        enabled: false
+    # Console UI accessible via port-forward.
+    consoleService:
+      type: ClusterIP
+      port: 9001
+    service:
+      type: ClusterIP
+      port: 9000

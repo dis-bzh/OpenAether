@@ -1,0 +1,22 @@
+# Groupe 21 — Storage (Longhorn HelmRelease + StorageClasses + ExternalSecret LUKS)
+# Dépend d'eso (longhorn-encryption ExternalSecret).
+# Isolation : un problème Longhorn n'impacte pas la stack foundation.
+# MinIO : overlay local uniquement (voir apps/flux/local/21-storage.yaml).
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: storage
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  timeout: 15m
+  sourceRef:
+    kind: GitRepository
+    name: openaether
+  path: ./apps/base/storage
+  prune: true
+  wait: true
+  dependsOn:
+    - name: external-secrets

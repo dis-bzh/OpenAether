@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: external-secrets-webhook
+spec:
+  template:
+    spec:
+      containers:
+        - name: webhook
+          args:
+            - webhook
+            - --port=10250
+            - --dns-name=external-secrets-webhook.foundation-pki-management.svc
+            - --cert-dir=/tmp/certs
+            - --check-interval=5m
+            - --metrics-addr=:8080
+            - --healthz-addr=:8081
+            - --loglevel=info
+            - --zap-time-encoding=epoch

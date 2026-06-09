@@ -1,6 +1,6 @@
 # ==============================================================================
 # Outscale — Bastion Host
-# Private subnet + public IP for SSH admin access.
+# Public subnet + EIP for SSH admin access.
 # Provides SSH jump to cluster nodes on port 50000 (Talos) and 6443 (K8s).
 # ==============================================================================
 
@@ -20,6 +20,53 @@ resource "outscale_security_group_rule" "bastion_ssh" {
   ip_range          = each.value
 }
 
+# Egress restricted to private subnet + DNS + NTP + apt.
+# nftables (in-VM) is the hard enforcement; these SG rules provide defence-in-depth.
+resource "outscale_security_group_rule" "bastion_egress_private" {
+  flow              = "Outbound"
+  security_group_id = outscale_security_group.bastion.security_group_id
+  ip_protocol       = "tcp"
+  from_port_range   = 0
+  to_port_range     = 65535
+  ip_range          = "10.0.0.0/24"
+}
+
+resource "outscale_security_group_rule" "bastion_egress_dns_udp" {
+  flow              = "Outbound"
+  security_group_id = outscale_security_group.bastion.security_group_id
+  ip_protocol       = "udp"
+  from_port_range   = 53
+  to_port_range     = 53
+  ip_range          = "0.0.0.0/0"
+}
+
+resource "outscale_security_group_rule" "bastion_egress_dns_tcp" {
+  flow              = "Outbound"
+  security_group_id = outscale_security_group.bastion.security_group_id
+  ip_protocol       = "tcp"
+  from_port_range   = 53
+  to_port_range     = 53
+  ip_range          = "0.0.0.0/0"
+}
+
+resource "outscale_security_group_rule" "bastion_egress_http" {
+  flow              = "Outbound"
+  security_group_id = outscale_security_group.bastion.security_group_id
+  ip_protocol       = "tcp"
+  from_port_range   = 80
+  to_port_range     = 80
+  ip_range          = "0.0.0.0/0"
+}
+
+resource "outscale_security_group_rule" "bastion_egress_https" {
+  flow              = "Outbound"
+  security_group_id = outscale_security_group.bastion.security_group_id
+  ip_protocol       = "tcp"
+  from_port_range   = 443
+  to_port_range     = 443
+  ip_range          = "0.0.0.0/0"
+}
+
 resource "outscale_public_ip" "bastion" {}
 
 resource "outscale_vm" "bastion" {
@@ -28,15 +75,14 @@ resource "outscale_vm" "bastion" {
   subnet_id          = outscale_subnet.public.subnet_id
   security_group_ids = [outscale_security_group.bastion.security_group_id]
 
-  user_data = base64encode(<<-EOT
-    #cloud-config
-    ssh_authorized_keys:
-      - ${var.bastion_ssh_key}
-    packages:
-      - netcat-openbsd
-      - tcpdump
-  EOT
-  )
+  user_data = base64encode(templatefile("${path.module}/../_shared/bastion-cloud-init.yaml.tftpl", {
+    bastion_user      = "outscale"
+    ssh_keys          = var.bastion_ssh_keys
+    private_cidr      = "10.0.0.0/24"
+    extra_packages    = []
+    extra_write_files = []
+    extra_runcmd      = []
+  }))
 
   tags {
     key   = "Name"

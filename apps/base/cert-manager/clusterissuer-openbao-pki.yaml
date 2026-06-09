@@ -1,0 +1,25 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: openbao-pki-root
+spec:
+  vault:
+    path: pki/root/sign/openaether-intermediate
+    server: http://openbao-internal.foundation-pki-root.svc.cluster.local:8200
+    auth:
+      kubernetes:
+        mountPath: kubernetes
+        role: cert-manager-issuer
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: openbao-pki-intermediate
+spec:
+  vault:
+    path: pki/intermediate/sign/openaether-leaf
+    server: http://openbao-internal.foundation-pki-root.svc.cluster.local:8200
+    auth:
+      kubernetes:
+        mountPath: kubernetes
+        role: cert-manager-issuer

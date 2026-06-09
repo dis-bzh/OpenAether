@@ -1,0 +1,447 @@
+# OpenAether 0.5.0 Sprint C — NetworkPolicies Observability
+# ──────────────────────────────────────────────────────────────────
+# CiliumNetworkPolicy par composant dans services-observability.
+# Principe: deny-all implicite Cilium + allow explicite par flux.
+#
+# Flux principaux:
+#   VMAgent      → vminsert :8480 (remote_write)
+#   Grafana      ← Istio gateway :3000 (UI)
+#   Grafana      → vmselect :8481 + Loki :3100 + CNPG :5432
+#   Loki         ← Alloy :3100 (push logs)
+#   Alloy        → Loki :3100 + k8s API :443 (discovery)
+#   node-exporter← VMAgent :9100
+#   KSM          ← VMAgent :8080
+# ──────────────────────────────────────────────────────────────────
+
+# ── VMAgent ────────────────────────────────────────────────────────
+# egress: DNS + k8s API (SD) + tous pods scrape ports + vminsert
+# ingress: aucun (VMAgent ne sert pas de requêtes externes)
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: vmagent
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: vmagent
+spec:
+  description: "VMAgent: egress scraping cluster-wide + remote_write vminsert."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: vmagent
+  egress:
+    # DNS
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # Kubernetes API (SD discovery + auth)
+    - toServices:
+        - k8sService:
+            serviceName: kubernetes
+            namespace: default
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # remote_write vers vminsert
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: services-observability
+            app.kubernetes.io/name: vminsert
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+    # Scraping cluster-wide: tous pods sur ports métriques courants.
+    # VMAgent utilise un port dynamique par cible; autoriser les ports
+    # standards de scraping pour les composants connus.
+    - toPorts:
+        - ports:
+            - port: "8080"   # kube-state-metrics, nombreux operateurs
+              protocol: TCP
+            - port: "8200"   # OpenBao métriques
+              protocol: TCP
+            - port: "8428"   # VMSingle (si présent)
+              protocol: TCP
+            - port: "8480"   # vminsert
+              protocol: TCP
+            - port: "8481"   # vmselect
+              protocol: TCP
+            - port: "9090"   # Prometheus compat
+              protocol: TCP
+            - port: "9100"   # node-exporter
+              protocol: TCP
+            - port: "9187"   # postgres-exporter
+              protocol: TCP
+
+# ── VMCluster (vminsert + vmstorage + vmselect) ────────────────────
+# Labels posés par VMOperator: app.kubernetes.io/name = vminsert|vmstorage|vmselect
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: vminsert
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: vmcluster
+spec:
+  description: "vminsert: ingress VMAgent :8480, egress vmstorage :8400."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: vminsert
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: services-observability
+            app.kubernetes.io/name: vmagent
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: services-observability
+            app.kubernetes.io/name: vmstorage
+      toPorts:
+        - ports:
+            - port: "8400"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: vmstorage
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: vmcluster
+spec:
+  description: "vmstorage: ingress vminsert :8400 + vmselect :8401 + peers :8401."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: vmstorage
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: services-observability
+            app.kubernetes.io/name: vminsert
+      toPorts:
+        - ports:
+            - port: "8400"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: services-observability
+            app.kubernetes.io/name: vmselect
+      toPorts:
+        - ports:
+            - port: "8401"
+              protocol: TCP
+    # Peers vmstorage (réplication interne VMCluster)
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: services-observability
+            app.kubernetes.io/name: vmstorage
+      toPorts:
+        - ports:
+            - port: "8400"
+              protocol: TCP
+            - port: "8401"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: services-observability
+            app.kubernetes.io/name: vmstorage
+      toPorts:
+        - ports:
+            - port: "8400"
+              protocol: TCP
+            - port: "8401"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: vmselect
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: vmcluster
+spec:
+  description: "vmselect: ingress Grafana :8481, egress vmstorage :8401."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: vmselect
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: services-observability
+            app.kubernetes.io/name: grafana
+      toPorts:
+        - ports:
+            - port: "8481"
+              protocol: TCP
+    # Aussi depuis VMAgent pour les queries d'alertes (futur Alertmanager).
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: services-observability
+            app.kubernetes.io/name: vmagent
+      toPorts:
+        - ports:
+            - port: "8481"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: services-observability
+            app.kubernetes.io/name: vmstorage
+      toPorts:
+        - ports:
+            - port: "8401"
+              protocol: TCP
+
+# ── Loki ──────────────────────────────────────────────────────────
+# ingress: Alloy (push logs) + Grafana (query)
+# egress: DNS + MinIO :9000 (chunks S3)
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: loki
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: loki
+spec:
+  description: "Loki: ingress Alloy+Grafana :3100, egress MinIO :9000."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: loki
+  ingress:
+    # Alloy: logs push (DaemonSet, hostNetwork=false → pod IP normale)
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: services-observability
+            app.kubernetes.io/name: alloy
+      toPorts:
+        - ports:
+            - port: "3100"
+              protocol: TCP
+    # Grafana: query logs
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: services-observability
+            app.kubernetes.io/name: grafana
+      toPorts:
+        - ports:
+            - port: "3100"
+              protocol: TCP
+    # Loki peers (réplication memberlist)
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: services-observability
+            app.kubernetes.io/name: loki
+      toPorts:
+        - ports:
+            - port: "3100"
+              protocol: TCP
+            - port: "7946"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # MinIO S3 (local) ou S3 cloud :443 (overlay)
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: foundation-storage
+            app.kubernetes.io/name: minio
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+    # S3 cloud (HTTPS) — pour overlay cloud
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+
+# ── Alloy (DaemonSet) ──────────────────────────────────────────────
+# egress: DNS + Loki :3100 + k8s API :443 (discovery pods)
+# Alloy utilise l'API k8s pour lire les logs → pas de hostPath requis.
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: alloy
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: alloy
+spec:
+  description: "Alloy DaemonSet: egress DNS + Loki :3100 + k8s API :443."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: alloy
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toServices:
+        - k8sService:
+            serviceName: kubernetes
+            namespace: default
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: services-observability
+            app.kubernetes.io/name: loki
+      toPorts:
+        - ports:
+            - port: "3100"
+              protocol: TCP
+
+# ── Grafana ────────────────────────────────────────────────────────
+# ingress: Istio gateway :80 (HTTPRoute redirige vers :80/3000)
+# egress: DNS + vmselect :8481 + Loki :3100 + CNPG :5432 + k8s API (sidecar)
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: grafana
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: grafana
+spec:
+  description: "Grafana: ingress Istio gateway, egress datasources + CNPG."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: grafana
+  ingress:
+    # Istio gateway (ztunnel ambient → waypoint → Grafana)
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: foundation-service-mesh
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
+    # Loki (memberlist/health internal)
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: services-observability
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # k8s API (sidecar dashboard discovery + ServiceAccountToken)
+    - toServices:
+        - k8sService:
+            serviceName: kubernetes
+            namespace: default
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # vmselect (datasource VictoriaMetrics)
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: services-observability
+            app.kubernetes.io/name: vmselect
+      toPorts:
+        - ports:
+            - port: "8481"
+              protocol: TCP
+    # Loki (datasource logs)
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: services-observability
+            app.kubernetes.io/name: loki
+      toPorts:
+        - ports:
+            - port: "3100"
+              protocol: TCP
+    # CNPG PostgreSQL (grafana-db)
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: foundation-databases
+            cnpg.io/cluster: grafana-db
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP

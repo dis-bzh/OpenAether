@@ -1,0 +1,21 @@
+# Groupe 11 — OpenBao Workload (raft HA 3 nodes, auto-unseal via pki-root)
+# Isolation : un crash workload n'impacte pas pki-root ni eso.
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: foundation-vault
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  timeout: 10m
+  sourceRef:
+    kind: GitRepository
+    name: openaether
+  path: ./apps/base/foundation/vault
+  prune: true
+  wait: false
+  dependsOn:
+    - name: platform-gateway-api
+    - name: foundation-pki-root

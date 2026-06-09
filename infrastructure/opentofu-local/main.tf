@@ -63,13 +63,13 @@ module "talos" {
   # the local test verifies health out-of-band via `talosctl health` instead.
   skip_health_check = true
 
-  # Inject Cilium only (ArgoCD is too large for USERDATA — deployed post-bootstrap
-  # via kubectl, matching the documented fallback path). bootstrap_manifests_enabled
-  # stays true so the cluster gets its CNI on first boot.
+  # Inject Cilium only (Flux is too large for USERDATA — deployed post-bootstrap
+  # via `flux install` + `kubectl apply -k apps/flux/local`).
+  # bootstrap_manifests_enabled stays true so the cluster gets its CNI on first boot.
   bootstrap_manifests_enabled = true
   cilium_manifest             = local.cilium_manifest
-  argocd_manifest             = ""
-  root_app_manifest           = ""
+  flux_manifest               = ""
+  flux_bootstrap_manifest     = ""
 }
 
 # ==============================================================================

@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: services-observability
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    istio.io/dataplane-mode: ambient
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: "observability"

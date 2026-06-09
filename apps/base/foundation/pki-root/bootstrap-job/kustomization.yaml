@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Bootstrap Job isolé : dépend à la fois de foundation-pki-root (StatefulSet + SA)
+# et de foundation-vault (SA openbao-workload, Secret openbao-seal-token).
+# Séparé pour éviter le deadlock Flux : le Job a besoin du SA vault qui n'existe
+# que quand vault est Ready, mais vault attend pki-root Ready → cycle si le Job
+# est dans la même Kustomization que pki-root.
+namespace: foundation-pki-root
+
+resources:
+  - 00-bootstrap-job.yaml
+
+labels:
+  - includeSelectors: false
+    pairs:
+      openaether.io/managed: "true"
+      openaether.io/sprint: "0.5.0-sprint0"
+      openaether.io/component: openbao-bootstrap

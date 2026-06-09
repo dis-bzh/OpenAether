@@ -1,0 +1,164 @@
+# OpenAether 0.5.0 — OpenBao workload StatefulSet (3 répl, seal transit)
+# - Raft cluster 3/3
+# - Seal transit: auto-unseal via root OpenBao
+# - PSS privileged (PKI system-level)
+# - PriorityClass platform-critical
+# - Volume /bao/seal/token: Secret openbao-seal-token (créé par Job bootstrap)
+# - Probes: readiness tolère sealed=200 (workload devrait être unsealed), liveness strict
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: openbao
+  namespace: foundation-vault
+  labels:
+    app: openbao
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: openbao-workload
+    openaether.io/role: workload
+spec:
+  serviceName: openbao
+  replicas: 3
+  # Parallel: raft a besoin que les 3 pods démarrent ensemble pour le bootstrap
+  # du cluster. OrderedReady bloque pod-1/2 tant que pod-0 n'est pas Ready, or
+  # pod-0 ne peut pas devenir Ready sans ses peers raft → deadlock.
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: openbao
+  template:
+    metadata:
+      labels:
+        app: openbao
+        openaether.io/component: openbao-workload
+    spec:
+      serviceAccountName: openbao-workload
+      priorityClassName: platform-critical
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: openbao
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: openbao
+      containers:
+        - name: openbao
+          image: openbao/openbao:2.5.4
+          # Wrapper: exporte VAULT_TOKEN (seal transit) + api/cluster addr (POD_IP),
+          # attend le Secret openbao-seal-token monté (Job bootstrap PostSync).
+          command: ["/bin/sh", "/bao/config/entrypoint.sh"]
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+            - containerPort: 8200
+              name: api
+              protocol: TCP
+            - containerPort: 8201
+              name: cluster
+              protocol: TCP
+          securityContext:
+            # IPC_LOCK retiré: mlock supprimé dans OpenBao 2.x.
+            capabilities:
+              drop:
+                - ALL
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 100
+          # Probes (validées localement): startup tolère uninit/sealed (le temps
+          # que le Job bootstrap crée le seal token et que le transit auto-unseal
+          # opère). readiness retire le pod sealed du Service. liveness stricte.
+          startupProbe:
+            httpGet:
+              path: /v1/sys/health?standbyok=true&uninitcode=200&sealedcode=200
+              port: 8200
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 60  # 10min: boot + attente seal token + raft join
+          livenessProbe:
+            httpGet:
+              path: /v1/sys/health?standbyok=true&uninitcode=200&sealedcode=200
+              port: 8200
+              scheme: HTTP
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health?standbyok=true
+              port: 8200
+              scheme: HTTP
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 2Gi
+          volumeMounts:
+            - name: data
+              mountPath: /bao/data
+            - name: config
+              mountPath: /bao/config
+            - name: seal-token
+              mountPath: /bao/seal
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: openbao-config
+        - name: seal-token
+          secret:
+            secretName: openbao-seal-token
+            # optional: le Secret est créé par le Job bootstrap APRÈS le déploiement
+            # du StatefulSet. Sans optional, les pods restent ContainerCreating.
+            # Le wrapper entrypoint.sh attend l'apparition du fichier (60×5s).
+            optional: true
+            items:
+              - key: token
+                path: token
+                # 0440: owner=root, group=fsGroup(1000); le process (uid 100,
+                # gid 1000) lit via le groupe. 0400 bloquerait (owner=root).
+                mode: 0440
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          openaether.io/managed: "true"
+          openaether.io/sprint: "0.5.0-sprint0"
+          openaether.io/component: openbao-workload
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 10Gi

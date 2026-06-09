@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# OpenAether 0.5.0 Sprint B — Istio Ambient Mesh (Istio 1.24+)
+# Profile: ambient (ztunnel DaemonSet + istiod + istio-ingressgateway)
+# IMPORTANT: Requiert Cilium reconfiguré (cni-exclusive=false, bpf-lb-sock-hostns-only=true)
+# Bootstrap Cilium mis à jour AVANT ce kustomize.
+resources:
+  - namespace.yaml
+  - istio-base.yaml
+  - istiod.yaml
+  - istio-cni.yaml
+  - ztunnel.yaml
+  - istio-ingressgateway.yaml
+  - gatewayclass-istio.yaml
+  - gateway-openaether.yaml
+  - waypoints.yaml
+
+# Pas de `namespace:` global: les HelmRelease ont namespace explicite (foundation-service-mesh),
+# istio-base.yaml déclare istio-system (requis Istio), Gateway est dans services-gateway.
+# Un namespace: global renommerait istio-system → foundation-service-mesh (conflit namespaces.yaml).
+
+labels:
+  - includeSelectors: true
+    pairs:
+      openaether.io/managed: "true"
+      openaether.io/sprint: "0.5.0-sprintB"
+      openaether.io/component: "istio"
