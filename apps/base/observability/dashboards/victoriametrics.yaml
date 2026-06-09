@@ -1,0 +1,95 @@
+# OpenAether 0.5.0 Sprint C — Dashboard VMCluster Overview
+# Métriques VMCluster: ingestion rate, query rate, storage, réplication.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-victoriametrics
+  namespace: services-observability
+  labels:
+    grafana_dashboard: "1"
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: grafana-dashboards
+  annotations:
+    grafana_folder: "Monitoring"
+data:
+  victoriametrics.json: |
+    {
+      "title": "VictoriaMetrics Cluster Overview",
+      "uid": "openaether-vmcluster",
+      "schemaVersion": 36,
+      "version": 1,
+      "refresh": "30s",
+      "tags": ["victoriametrics", "monitoring", "openaether"],
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {"selected": false, "text": "VictoriaMetrics", "value": "VictoriaMetrics"},
+            "hide": 0
+          }
+        ]
+      },
+      "panels": [
+        {
+          "title": "Ingestion Rate",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {"expr": "sum(rate(vm_rows_inserted_total[5m]))", "legendFormat": "Rows/s ingested"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "short"}}
+        },
+        {
+          "title": "Query Rate",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {"expr": "rate(vm_http_requests_total{path=~\"/select.*\"}[5m])", "legendFormat": "Queries/s"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "reqps"}}
+        },
+        {
+          "title": "Storage Used (vmstorage)",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 8, "x": 0, "y": 8},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {"expr": "sum(vm_data_size_bytes)", "legendFormat": "Data size"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "bytes"}}
+        },
+        {
+          "title": "Active Time Series",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 8, "x": 8, "y": 8},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {"expr": "sum(vm_new_timeseries_created_total)", "legendFormat": "Active series"}
+          ]
+        },
+        {
+          "title": "Queue Lag (vminsert → vmstorage)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {"expr": "vm_rows_ignored_total", "legendFormat": "Rows ignored (errors)"}
+          ]
+        },
+        {
+          "title": "VMAgent Active Targets",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 8, "x": 0, "y": 20},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {"expr": "sum(vmagent_targets_total)", "legendFormat": "Targets"}
+          ]
+        }
+      ]
+    }

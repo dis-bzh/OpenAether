@@ -1,0 +1,203 @@
+#cloud-config
+# ==============================================================================
+# OpenAether bastion — hardened cloud-init (shared template)
+#
+# P0 hardening items:
+#   1. sshd: ANSSI/Mozilla-2025 crypto, no password, no root, AllowGroups
+#            bastion-admins, AllowTcpForwarding restricted to cluster ports
+#   2. nftables egress DROP in-VM (the real hard control; SG egress = accept
+#            on all providers)
+#   3. No secrets at rest: tmpfs /tmp, HISTFILE=/dev/null, SSH keys in
+#            /etc/ssh/authorized_keys.d/<user> (not in home dir)
+#   4. Dedicated group bastion-admins, nominative user, no shared/anon account
+#   5. unattended-upgrades (security updates only, auto-reboot 03:00)
+#   6. SSH-CA-ready: empty TrustedUserCAKeys + AuthorizedPrincipalsFile (no-op)
+#            DO NOT set AuthorizedKeysFile none — breaks future SSH-CA compat
+#
+# Required template vars:
+#   ssh_keys      = list(string)   SSH authorized public keys
+#   bastion_user  = string          User name (scw="bastion", ovh="ubuntu", osc="outscale")
+#   private_cidr  = string          Private subnet CIDR for nftables (e.g. "10.0.0.0/24")
+#
+# Optional template vars:
+#   extra_packages    = list(string)   Extra packages to install
+#   extra_write_files = list(object({path=string, permissions=string, content=string}))
+#   extra_runcmd      = list(string)   Runs BEFORE nftables enable (use for route fixes)
+# ==============================================================================
+
+groups:
+  - bastion-admins
+
+users:
+  - default
+  - name: ${bastion_user}
+    groups: [bastion-admins, sudo]
+    shell: /bin/bash
+    lock_passwd: true
+    sudo: false
+
+ssh_pwauth: false
+disable_root: true
+
+packages:
+  - nftables
+  - unattended-upgrades
+  - apt-listchanges
+  - netcat-openbsd
+  - tcpdump
+  - curl
+%{ for p in extra_packages ~}
+  - ${p}
+%{ endfor ~}
+
+write_files:
+  # --------------------------------------------------------------------------
+  # SSH authorized keys — stored in /etc/ssh/authorized_keys.d/ so they
+  # survive tmpfs mounts on home dirs (if added by future providers).
+  # sshd is pointed here via AuthorizedKeysFile below.
+  # --------------------------------------------------------------------------
+  - path: /etc/ssh/authorized_keys.d/${bastion_user}
+    permissions: '0600'
+    content: |
+%{ for k in ssh_keys ~}
+      ${k}
+%{ endfor ~}
+
+  # --------------------------------------------------------------------------
+  # sshd hardening — ANSSI/Mozilla 2025 crypto, tunnel-scoped forwarding
+  # --------------------------------------------------------------------------
+  - path: /etc/ssh/sshd_config.d/99-bastion-hardening.conf
+    permissions: '0600'
+    content: |
+      PermitRootLogin no
+      PasswordAuthentication no
+      ChallengeResponseAuthentication no
+      PubkeyAuthentication yes
+      AuthorizedKeysFile /etc/ssh/authorized_keys.d/%u
+
+      AllowGroups bastion-admins
+
+      # Restrict TCP forwarding to cluster ports only; nftables further
+      # restricts the destination CIDR. PermitOpen uses host:port patterns
+      # (* = any host); CIDR notation is not supported across all OpenSSH versions.
+      AllowTcpForwarding yes
+      PermitOpen *:6443 *:50000 *:8200
+      X11Forwarding no
+      AllowAgentForwarding no
+      PermitTunnel no
+
+      # ANSSI/Mozilla 2025 crypto
+      KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512
+      Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
+      MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com
+
+      LoginGraceTime 30
+      MaxAuthTries 3
+      ClientAliveInterval 300
+      ClientAliveCountMax 2
+
+      # SSH-CA forward-compat (empty files = no-op until CA is activated)
+      TrustedUserCAKeys /etc/ssh/trusted_user_ca.pub
+      AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u
+
+  # --------------------------------------------------------------------------
+  # nftables egress DROP — in-VM hard control
+  # Allows: DNS, NTP, apt (80/443 outbound), established/related (return
+  # traffic for SSH tunnels), private CIDR on cluster ports.
+  # Everything else outbound is dropped.
+  # --------------------------------------------------------------------------
+  - path: /etc/nftables.conf
+    permissions: '0640'
+    content: |
+      #!/usr/sbin/nft -f
+      flush ruleset
+
+      table inet filter {
+        chain input {
+          type filter hook input priority 0; policy drop;
+          iif lo accept
+          ct state established,related accept
+          tcp dport 22 accept
+          ip protocol icmp accept
+          ip6 nexthdr ipv6-icmp accept
+        }
+
+        chain forward {
+          type filter hook forward priority 0; policy drop;
+        }
+
+        chain output {
+          type filter hook output priority 0; policy drop;
+          oif lo accept
+          # Return traffic (SSH tunnel data)
+          ct state established,related accept
+          # DNS + NTP
+          udp dport 53 accept
+          tcp dport 53 accept
+          udp dport 123 accept
+          # Package updates (apt)
+          tcp dport { 80, 443 } accept
+          # Cluster nodes — Talos API + K8s API + OpenBao
+          ip daddr ${private_cidr} tcp dport { 6443, 50000, 8200 } accept
+          # ICMP outbound (ping, path MTU)
+          ip protocol icmp accept
+        }
+      }
+
+  # --------------------------------------------------------------------------
+  # SSH-CA forward-compat — empty placeholder files (no-op today)
+  # When SSH CA is activated via OpenBao, populate these files and reload sshd.
+  # --------------------------------------------------------------------------
+  - path: /etc/ssh/trusted_user_ca.pub
+    permissions: '0644'
+    content: ""
+
+  # --------------------------------------------------------------------------
+  # No bash history to disk
+  # --------------------------------------------------------------------------
+  - path: /etc/profile.d/no-history.sh
+    permissions: '0644'
+    content: |
+      export HISTFILE=/dev/null
+      unset HISTFILE
+
+  # --------------------------------------------------------------------------
+  # unattended-upgrades — security updates only, auto-reboot off-hours
+  # --------------------------------------------------------------------------
+  - path: /etc/apt/apt.conf.d/50unattended-upgrades
+    permissions: '0644'
+    content: |
+      Unattended-Upgrade::Allowed-Origins {
+        "$${distro_id}:$${distro_codename}-security";
+      };
+      Unattended-Upgrade::Automatic-Reboot "true";
+      Unattended-Upgrade::Automatic-Reboot-Time "03:00";
+      Unattended-Upgrade::Remove-Unused-Dependencies "true";
+
+%{ for f in extra_write_files ~}
+  - path: ${f.path}
+    permissions: '${f.permissions}'
+    content: |
+      ${indent(6, trimspace(f.content))}
+
+%{ endfor ~}
+
+mounts:
+  - [tmpfs, /tmp, tmpfs, "size=64m,mode=1777,nosuid,nodev,noexec", "0", "0"]
+
+runcmd:
+  # SSH-CA principals directory (no-op placeholder)
+  - mkdir -p /etc/ssh/auth_principals && chmod 755 /etc/ssh/auth_principals
+  # Ensure authorized_keys.d has correct ownership
+  - chown root:root /etc/ssh/authorized_keys.d && chmod 755 /etc/ssh/authorized_keys.d
+  - chown ${bastion_user}:${bastion_user} /etc/ssh/authorized_keys.d/${bastion_user} 2>/dev/null || true
+%{ for cmd in extra_runcmd ~}
+  - ${cmd}
+%{ endfor ~}
+  # nftables — load rules after any provider route fixes
+  - systemctl enable nftables
+  - systemctl restart nftables
+  # sshd — reload hardened config
+  - systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
+  # unattended-upgrades
+  - systemctl enable --now unattended-upgrades

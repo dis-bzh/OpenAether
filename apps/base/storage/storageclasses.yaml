@@ -1,0 +1,176 @@
+# OpenAether 0.5.0 Sprint C — StorageClasses Longhorn
+# ──────────────────────────────────────────────────────────────────
+# Convention: longhorn-{replication}-{access}[-encrypted]
+#   replication : x1 (1 replica Longhorn) · x2 (2 replicas) · x3 (3 replicas)
+#   access      : rwo (ReadWriteOnce) · rwx (ReadWriteMany)
+#   encrypted   : LUKS via clé OpenBao (Secret longhorn-encryption)
+#
+# RÈGLE D'OR : ne jamais doubler la réplication.
+#   App auto-réplique (CNPG, VMCluster, Loki, Kafka, OpenSearch)
+#     → longhorn-x1-rwo ou local-path
+#   App single-replica sans failover propre
+#     → longhorn-x2-rwo (ou encrypted si données sensibles)
+#
+# AVERTISSEMENT RÉSEAU : Longhorn x2 = 2× le trafic write sur le réseau cluster.
+#   Sur 1Gbps entre nœuds, dépasser 30% en IO Longhorn dégrade le cluster.
+#   Préférer local-path ou x1 pour les workloads IO-intensifs (métriques, logs).
+#
+# Tous les volumes Longhorn : reclaimPolicy=Retain (pas de perte accidentelle).
+# allowVolumeExpansion=true (agrandir sans recréer le pod).
+# ──────────────────────────────────────────────────────────────────
+
+# ── longhorn-x1-rwo ────────────────────────────────────────────────
+# 1 réplique Longhorn + ReadWriteOnce.
+# Pour: apps qui auto-répliquent (CNPG primaire, vmstorage, Loki singleBinary).
+# Avantage: le volume n'est PAS répliqué par Longhorn → 0 overhead réseau Longhorn.
+# HA fournie par l'applicatif. Backup Longhorn (S3) reste disponible.
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-x1-rwo
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: storage
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "1"
+  staleReplicaTimeout: "30"
+  fromBackup: ""
+
+# ── longhorn-x1-rwo-encrypted ──────────────────────────────────────
+# 1 réplique Longhorn + ReadWriteOnce + chiffrement LUKS.
+# Pour: apps auto-répliquent + données sensibles (CNPG chiffré, secrets stockés).
+# La clé LUKS est dans Secret longhorn-encryption (ns longhorn-system),
+# géré par ExternalSecret → OpenBao (secret/longhorn/encryption.passphrase).
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-x1-rwo-encrypted
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: storage
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "1"
+  staleReplicaTimeout: "30"
+  fromBackup: ""
+  encrypted: "true"
+  csi.storage.k8s.io/provisioner-secret-name: longhorn-encryption
+  csi.storage.k8s.io/provisioner-secret-namespace: longhorn-system
+  csi.storage.k8s.io/node-publish-secret-name: longhorn-encryption
+  csi.storage.k8s.io/node-publish-secret-namespace: longhorn-system
+  csi.storage.k8s.io/node-stage-secret-name: longhorn-encryption
+  csi.storage.k8s.io/node-stage-secret-namespace: longhorn-system
+
+# ── longhorn-x2-rwo ────────────────────────────────────────────────
+# 2 répliques Longhorn + ReadWriteOnce.
+# Pour: apps single-replica sans HA propre (Grafana, Keycloak, apps stateful).
+# Longhorn assure la HA du volume : si un nœud tombe, le volume reste accessible.
+# ATTENTION: 2× le trafic write réseau. Éviter pour workloads IO-intensifs.
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-x2-rwo
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: storage
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "2"
+  staleReplicaTimeout: "30"
+  fromBackup: ""
+
+# ── longhorn-x2-rwo-encrypted ──────────────────────────────────────
+# 2 répliques Longhorn + ReadWriteOnce + chiffrement LUKS.
+# Pour: apps single-replica + données sensibles (Keycloak, apps avec credentials).
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-x2-rwo-encrypted
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: storage
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "2"
+  staleReplicaTimeout: "30"
+  fromBackup: ""
+  encrypted: "true"
+  csi.storage.k8s.io/provisioner-secret-name: longhorn-encryption
+  csi.storage.k8s.io/provisioner-secret-namespace: longhorn-system
+  csi.storage.k8s.io/node-publish-secret-name: longhorn-encryption
+  csi.storage.k8s.io/node-publish-secret-namespace: longhorn-system
+  csi.storage.k8s.io/node-stage-secret-name: longhorn-encryption
+  csi.storage.k8s.io/node-stage-secret-namespace: longhorn-system
+
+# ── longhorn-x2-rwx ────────────────────────────────────────────────
+# 2 répliques Longhorn + ReadWriteMany (NFS-like via Longhorn Share Manager).
+# Pour: cas rares de stockage partagé multi-pods (assets statiques, uploads).
+# ATTENTION: overhead NFS sur le réseau. Ne pas utiliser pour IO haute fréquence.
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-x2-rwx
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: storage
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "2"
+  staleReplicaTimeout: "30"
+  fromBackup: ""
+  nfsOptions: "vers=4.1,noresvport,softerr,timeo=600,retrans=5"
+
+# ── longhorn-x2-rwx-encrypted ──────────────────────────────────────
+# 2 répliques Longhorn + ReadWriteMany + chiffrement LUKS.
+# Pour: stockage partagé multi-pods + données sensibles.
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-x2-rwx-encrypted
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: storage
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "2"
+  staleReplicaTimeout: "30"
+  fromBackup: ""
+  nfsOptions: "vers=4.1,noresvport,softerr,timeo=600,retrans=5"
+  encrypted: "true"
+  csi.storage.k8s.io/provisioner-secret-name: longhorn-encryption
+  csi.storage.k8s.io/provisioner-secret-namespace: longhorn-system
+  csi.storage.k8s.io/node-publish-secret-name: longhorn-encryption
+  csi.storage.k8s.io/node-publish-secret-namespace: longhorn-system
+  csi.storage.k8s.io/node-stage-secret-name: longhorn-encryption
+  csi.storage.k8s.io/node-stage-secret-namespace: longhorn-system

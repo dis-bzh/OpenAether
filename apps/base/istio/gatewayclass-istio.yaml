@@ -1,0 +1,21 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: istio
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintB"
+    openaether.io/component: "gateway"
+spec:
+  controllerName: istio.io/gateway-controller
+  parametersRef:
+    group: networking.istio.io
+    kind: GatewayClassParameters
+    name: default
+---
+apiVersion: networking.istio.io/v1
+kind: GatewayClassParameters
+metadata:
+  name: default
+spec:
+  defaultRevision: default

@@ -1,0 +1,166 @@
+# OpenAether 0.5.0 Sprint C — VMServiceScrape / VMNodeScrape
+# ──────────────────────────────────────────────────────────────────
+# Ces CRDs définissent CE QUE scrape VMAgent (découverte GitOps-native).
+# Pas besoin d'éditer des ConfigMaps manuellement.
+#
+# Ajouter un nouveau scrape = créer un VMServiceScrape dans n'importe quel ns
+# (VMAgent selectAllByDefault=true → découverte cluster-wide).
+
+# ── kubelet + cAdvisor (métriques nodes + containers) ──────────────
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMNodeScrape
+metadata:
+  name: kubelet
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: vmagent-scrapes
+spec:
+  scheme: https
+  tlsConfig:
+    insecureSkipVerify: true
+  bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+  # kubelet expose métriques node standard + cadvisor (containers).
+  relabelConfigs:
+    - action: labelmap
+      regex: __meta_kubernetes_node_label_(.+)
+  path: /metrics
+---
+# cAdvisor: métriques détaillées par container (CPU, mémoire, réseau, IO).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMNodeScrape
+metadata:
+  name: cadvisor
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: vmagent-scrapes
+spec:
+  scheme: https
+  path: /metrics/cadvisor
+  tlsConfig:
+    insecureSkipVerify: true
+  bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+  relabelConfigs:
+    - action: labelmap
+      regex: __meta_kubernetes_node_label_(.+)
+
+# ── kube-state-metrics ─────────────────────────────────────────────
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: kube-state-metrics
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: vmagent-scrapes
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kube-state-metrics
+  namespaceSelector:
+    matchNames:
+      - services-observability
+  endpoints:
+    - port: http
+      path: /metrics
+
+# ── node-exporter ──────────────────────────────────────────────────
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: node-exporter
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: vmagent-scrapes
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus-node-exporter
+  namespaceSelector:
+    matchNames:
+      - services-observability
+  endpoints:
+    - port: http-metrics
+      path: /metrics
+
+# ── VMCluster self-scrape ──────────────────────────────────────────
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: vmcluster
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: vmagent-scrapes
+spec:
+  selector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - vminsert
+          - vmstorage
+          - vmselect
+  namespaceSelector:
+    matchNames:
+      - services-observability
+  endpoints:
+    - port: http
+
+# ── VMAgent self-scrape ────────────────────────────────────────────
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: vmagent
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: vmagent-scrapes
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vmagent
+  namespaceSelector:
+    matchNames:
+      - services-observability
+  endpoints:
+    - port: http
+
+# ── kube-apiserver ─────────────────────────────────────────────────
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: kube-apiserver
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: vmagent-scrapes
+spec:
+  selector:
+    matchLabels:
+      component: apiserver
+      provider: kubernetes
+  namespaceSelector:
+    matchNames:
+      - default
+  endpoints:
+    - port: https
+      scheme: https
+      tlsConfig:
+        insecureSkipVerify: true
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token

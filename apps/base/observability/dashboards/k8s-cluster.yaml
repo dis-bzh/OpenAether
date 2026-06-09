@@ -1,0 +1,105 @@
+# OpenAether 0.5.0 Sprint C — Dashboard Kubernetes Cluster Overview
+# Métriques cluster: pods, nodes, namespaces, PVCs, deployments.
+# Source: kube-state-metrics + kubelet (cAdvisor).
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-k8s-cluster
+  namespace: services-observability
+  labels:
+    grafana_dashboard: "1"
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: grafana-dashboards
+  annotations:
+    grafana_folder: "Kubernetes"
+data:
+  k8s-cluster.json: |
+    {
+      "title": "Kubernetes Cluster Overview",
+      "uid": "openaether-k8s-cluster",
+      "schemaVersion": 36,
+      "version": 1,
+      "refresh": "30s",
+      "tags": ["kubernetes", "cluster", "openaether"],
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {"selected": false, "text": "VictoriaMetrics", "value": "VictoriaMetrics"},
+            "hide": 0
+          },
+          {
+            "name": "namespace",
+            "type": "query",
+            "datasource": {"type": "prometheus", "uid": "${datasource}"},
+            "definition": "label_values(kube_namespace_labels, namespace)",
+            "query": "label_values(kube_namespace_labels, namespace)",
+            "refresh": 2,
+            "multi": true,
+            "includeAll": true,
+            "allValue": ".*"
+          }
+        ]
+      },
+      "panels": [
+        {
+          "title": "Cluster Nodes",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [{"expr": "count(kube_node_info)", "legendFormat": "Nodes"}],
+          "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "green", "value": null}]}}}
+        },
+        {
+          "title": "Running Pods",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [{"expr": "count(kube_pod_status_phase{phase=\"Running\", namespace=~\"$namespace\"})", "legendFormat": "Running Pods"}],
+          "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "green", "value": null}]}}}
+        },
+        {
+          "title": "Failed Pods",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [{"expr": "count(kube_pod_status_phase{phase=\"Failed\", namespace=~\"$namespace\"}) or vector(0)", "legendFormat": "Failed Pods"}],
+          "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "green", "value": 0}, {"color": "red", "value": 1}]}}}
+        },
+        {
+          "title": "CPU Usage (cluster)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {"expr": "sum(rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\", container!=\"\"}[5m]))", "legendFormat": "CPU Used"},
+            {"expr": "sum(kube_node_status_allocatable{resource=\"cpu\"})", "legendFormat": "CPU Allocatable"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "cores"}}
+        },
+        {
+          "title": "Memory Usage (cluster)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {"expr": "sum(container_memory_working_set_bytes{namespace=~\"$namespace\", container!=\"\"})", "legendFormat": "Memory Used"},
+            {"expr": "sum(kube_node_status_allocatable{resource=\"memory\"})", "legendFormat": "Memory Allocatable"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "bytes"}}
+        },
+        {
+          "title": "Pods par namespace",
+          "type": "table",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 12},
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "targets": [
+            {"expr": "count by (namespace) (kube_pod_status_phase{phase=\"Running\", namespace=~\"$namespace\"})", "legendFormat": "{{namespace}}", "instant": true}
+          ]
+        }
+      ]
+    }

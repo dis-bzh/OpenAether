@@ -7,6 +7,19 @@ resources:
 
 patches:
   - target:
+      kind: Namespace
+      name: kyverno
+    patch: |-
+      - op: add
+        path: /metadata/labels/openaether.io~1managed
+        value: "true"
+      - op: add
+        path: /metadata/labels/openaether.io~1sprint
+        value: "0.5.0-sprint0"
+      - op: add
+        path: /metadata/labels/openaether.io~1component
+        value: "kyverno"
+  - target:
       kind: CronJob
       name: kyverno-cleanup-admission-reports
       namespace: kyverno

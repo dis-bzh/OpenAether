@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# OpenAether — Overlay CLOUD management (cluster_role=management).
+# Lue par la Kustomization racine (flux-bootstrap.yaml.tftpl → path: apps/flux/management).
+#
+# DAG complet hérité de ../base — tout actif sauf kyverno (suspend dans base).
+# Ordre de déploiement (via dependsOn) :
+#   00 namespaces
+#   └─ 01 platform
+#   └─ 10 pki-root
+#      └─ 11 vault
+#         └─ 13 cert-manager ← aussi: 12 eso
+#            └─ 14 istio
+#   └─ 12 eso
+#      └─ 20 cnpg
+#      └─ 21 storage
+#         └─ 30 observability ← aussi: cert-manager, istio, cnpg
+#   └─ 40 kyverno → kyverno-policies
+resources:
+  - ../base

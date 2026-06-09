@@ -1,0 +1,15 @@
+# OpenAether 0.5.0 — Priority classes (hiérarchie platform)
+# P0: platform-critical (OpenBao, cert-manager, ESO, CSI, ArgoCD)
+# P1: platform-medium (Keycloak/CNPG/Jetstack controllers)
+# P2: platform-low (observability, demo, dashboards)
+# P3: workload-batch (KEDA scaledobjects)
+# NB: system-cluster-critical + system-node-critical sont pré-installés
+# par k8s, on ne les (re)déclare pas (preemptionPolicy immutable + nom réservé).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - platform-critical.yaml
+  - platform-medium.yaml
+  - platform-low.yaml
+  - workload-batch.yaml

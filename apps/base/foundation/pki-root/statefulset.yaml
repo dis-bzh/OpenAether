@@ -1,0 +1,205 @@
+# OpenAether 0.5.0 — OpenBao root StatefulSet (1 répl)
+# - Seal: Shamir 3-of-5 (défaut OpenBao quand pas de seal "transit"/"pkcs11"/etc.)
+# - Storage: raft 1 répl (local), PVC 2Gi local-path
+# - PSS privileged (composant PKI system-level)
+# - priorityClassName platform-critical
+# - probes: readiness tolère sealed (sealed=204), liveness strict
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: openbao-pki-root
+  namespace: foundation-pki-root
+  labels:
+    app: openbao-pki-root
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: openbao-pki-root
+spec:
+  serviceName: openbao-pki-root-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openbao-pki-root
+  template:
+    metadata:
+      labels:
+        app: openbao-pki-root
+    spec:
+      serviceAccountName: openbao-pki-root
+      priorityClassName: platform-critical
+      # PSS privileged: root OpenBao manipule des données PKI très sensibles,
+      # допуéré privileged (sinon le cluster bootstrap ne peut pas provisionner
+      # le transit seal pour le workload).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      # Anti-affinity: ne jamais avoir 2 répl sur le même noeud (raffinement
+      # même si 1 répl, prépare l'évolution vers 3 répl en sprint 1+).
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: openbao-pki-root
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: openbao
+          image: openbao/openbao:2.5.4
+          # Wrapper entrypoint.sh: exporte BAO_API_ADDR/BAO_CLUSTER_ADDR (POD_IP).
+          command: ["/bin/sh", "/bao/config/entrypoint.sh"]
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+            - containerPort: 8200
+              name: api
+              protocol: TCP
+            - containerPort: 8201
+              name: cluster
+              protocol: TCP
+          securityContext:
+            # IPC_LOCK retiré: mlock supprimé dans OpenBao 2.x.
+            capabilities:
+              drop:
+                - ALL
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 100
+          # OpenAether 0.5.0 probes (HTTP /sys/health, validées localement):
+          #  - startup: attend que l'API réponde (init Shamir/unseal géré par le
+          #    Job bootstrap). On tolère uninitialized(501) ET sealed(503) via
+          #    uninitcode/sealedcode=200 → "up dès que le process écoute".
+          #  - readiness: retire le pod du Service tant que sealed (sealedcode=503),
+          #    mais OK si standby.
+          #  - liveness: strict — restart seulement si l'API ne répond plus.
+          startupProbe:
+            httpGet:
+              path: /v1/sys/health?standbyok=true&uninitcode=200&sealedcode=200
+              port: 8200
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 60  # 5min max
+          livenessProbe:
+            httpGet:
+              path: /v1/sys/health?standbyok=true&uninitcode=200&sealedcode=200
+              port: 8200
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health?standbyok=true
+              port: 8200
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /bao/data
+            - name: config
+              mountPath: /bao/config
+            - name: tmp
+              mountPath: /tmp
+        - name: unsealer
+          image: alpine/k8s:1.31.1
+          # Re-unseal automatique après restart: polling seal-status toutes les 10s.
+          # N'agit QUE si initialized=true ET sealed=true ET le Secret existe.
+          # Premier boot: Secret absent (optional:true) → boucle inerte jusqu'à
+          # ce que le Job bootstrap crée openbao-root-recovery.
+          command:
+            - /bin/sh
+            - -c
+            - |
+              KEYS_FILE=/unseal/unseal_keys
+              while true; do
+                STATUS="$(curl -sf http://localhost:8200/v1/sys/seal-status 2>/dev/null || echo '{}')"
+                INITIALIZED="$(echo "$STATUS" | jq -r '.initialized // "false"')"
+                SEALED="$(echo "$STATUS" | jq -r '.sealed // "true"')"
+                if [ "$INITIALIZED" = "true" ] && [ "$SEALED" = "true" ] && [ -s "$KEYS_FILE" ]; then
+                  set +x
+                  i=0
+                  IFS=','
+                  for k in $(cat "$KEYS_FILE"); do
+                    [ "$i" -ge 3 ] && break
+                    curl -sf -X PUT http://localhost:8200/v1/sys/unseal \
+                      -d "$(jq -nc --arg k "$k" '{key:$k}')" >/dev/null 2>&1 || true
+                    i=$((i+1))
+                  done
+                  unset IFS
+                  set +x
+                fi
+                sleep 10
+              done
+          securityContext:
+            capabilities:
+              drop:
+                - ALL
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 100
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
+          volumeMounts:
+            - name: unseal-keys
+              mountPath: /unseal
+              readOnly: true
+            - name: tmp-unsealer
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: openbao-pki-root-config
+        - name: tmp
+          emptyDir: {}
+        - name: unseal-keys
+          secret:
+            secretName: openbao-root-recovery
+            optional: true
+            items:
+              - key: unseal_keys
+                path: unseal_keys
+        - name: tmp-unsealer
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          openaether.io/managed: "true"
+          openaether.io/sprint: "0.5.0-sprint0"
+          openaether.io/component: openbao-pki-root
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 2Gi

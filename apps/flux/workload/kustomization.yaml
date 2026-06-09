@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# PLACEHOLDER cluster_role=workload — débloque le contrat tofu (path existe, pas de 404 Flux).
+# Spoke réel = phase 3+ (cert-manager, istio, observability-agent ; PAS de pki-root/vault
+# → unseal géré par le management cluster / KMS cloud).
+# Pour l'instant: reprend le DAG management complet depuis ../base — tout ce qui ne doit
+# pas tourner sur un spoke sera suspendu au moment de la mise en œuvre phase 3+.
+resources:
+  - ../base

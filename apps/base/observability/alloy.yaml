@@ -1,0 +1,129 @@
+# OpenAether 0.5.0 Sprint C — Alloy (collecte logs Kubernetes → Loki)
+# ──────────────────────────────────────────────────────────────────
+# Alloy remplace Promtail comme collecteur de logs. DaemonSet (1/nœud).
+# Utilise l'API Kubernetes (loki.source.kubernetes) pour récupérer les logs
+# des pods sans accès direct aux fichiers /var/log → compatible Docker-in-Docker
+# ET nœuds Talos (containerd rootfs non exposé en hostPath).
+#
+# Config HCL inline: discovery → relabeling → loki.write.
+# Extensible: ajouter des composants Alloy (métriques, traces, OTEL) sans
+# redéploiement — éditer le configMap et Alloy recharge à chaud.
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: alloy
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: alloy
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: alloy
+      version: "0.11.0"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: services-observability
+      interval: 1h
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    controller:
+      type: daemonset
+    alloy:
+      configMap:
+        content: |
+          // ── Découverte des pods Kubernetes ─────────────────────────────
+          discovery.kubernetes "pods" {
+            role = "pod"
+          }
+
+          // ── Relabeling: enrichir les logs avec les métadonnées k8s ─────
+          discovery.relabel "pods" {
+            targets = discovery.kubernetes.pods.targets
+
+            // Namespace
+            rule {
+              source_labels = ["__meta_kubernetes_namespace"]
+              target_label  = "namespace"
+            }
+
+            // Nom du pod
+            rule {
+              source_labels = ["__meta_kubernetes_pod_name"]
+              target_label  = "pod"
+            }
+
+            // Nom du container
+            rule {
+              source_labels = ["__meta_kubernetes_pod_container_name"]
+              target_label  = "container"
+            }
+
+            // Label app (fallback: app.kubernetes.io/name)
+            rule {
+              source_labels = ["__meta_kubernetes_pod_label_app"]
+              target_label  = "app"
+            }
+            rule {
+              source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+              regex         = "(.+)"
+              target_label  = "app"
+            }
+
+            // Sprint / composant OpenAether
+            rule {
+              source_labels = ["__meta_kubernetes_pod_label_openaether_io_component"]
+              target_label  = "component"
+            }
+
+            // Exclure les pods Alloy eux-mêmes (évite la boucle de logs).
+            rule {
+              source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+              regex         = "alloy"
+              action        = "drop"
+            }
+          }
+
+          // ── Collecte logs via API k8s ───────────────────────────────────
+          // loki.source.kubernetes: stream logs via kube API (pas de hostPath).
+          // Compatible Talos (containerd rootfs non exposé) et Docker-in-Docker.
+          loki.source.kubernetes "pods" {
+            targets    = discovery.relabel.pods.output
+            forward_to = [loki.write.default.receiver]
+          }
+
+          // ── Envoi vers Loki ─────────────────────────────────────────────
+          loki.write "default" {
+            endpoint {
+              url = "http://loki.services-observability.svc.cluster.local:3100/loki/api/v1/push"
+            }
+            // Labels externes communs à tous les logs de ce cluster.
+            external_labels = {
+              cluster = "management",
+            }
+          }
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+    rbac:
+      create: true
+    serviceAccount:
+      create: true
+    # Tolerations pour être déployé sur les nœuds control-plane.
+    tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule

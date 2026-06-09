@@ -1,0 +1,74 @@
+# OpenAether 0.5.0 — NetworkPolicy root OpenBao
+# Modèle: default-deny (géré par CiliumClusterwideNetworkPolicy wave 1)
+# + allow-list explicite par identité (SA) et protocole.
+# Sprint 0: on NE déploie PAS encore le CCNP default-deny (qui casserait tout
+# le cluster). Cette CiliumNetworkPolicy est déjà restrictive au cas où
+# quelqu'un déploie le CCNP plus tôt.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: openbao-pki-root
+  namespace: foundation-pki-root
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: openbao-pki-root
+spec:
+  description: "Root OpenBao: ingress depuis bootstrap SA (init/configure transit)
+    et workload OpenBao (transit wrap). Egress: kube-dns + NTP."
+  endpointSelector:
+    matchLabels:
+      app: openbao-pki-root
+  ingress:
+    # 1. Job bootstrap (init/unseal/transit/seal token) du même ns.
+    #    NB: on matche `app: openbao-bootstrap` (stable) et PAS
+    #    openaether.io/component: le label transformer du kustomization parent
+    #    (includeSelectors:true) écrase component → openbao-pki-root sur tous
+    #    les objets, y compris le Job bootstrap.
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: foundation-pki-root
+            app: openbao-bootstrap
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+    # 2. Workload OpenBao (transit wrap vers seal "transit")
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: foundation-vault
+            app: openbao
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+    # 3. Prometheus scraper (ServiceMonitor)
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-prometheus
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+  egress:
+    # DNS
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # Kubernetes API (auth kubernetes config + health)
+    - toServices:
+        - k8sService:
+            serviceName: kubernetes
+            namespace: default
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

@@ -1,0 +1,16 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: openbao-pki-root
+  namespace: foundation-pki-root
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: openbao-pki-root
+spec:
+  # 1 répl: maxUnavailable 0 (jamais d'eviction volontaire), tolère le restart
+  # crashloop bref.
+  maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: openbao-pki-root

@@ -1,0 +1,13 @@
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: platform-medium
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: platform
+description: "OpenAether 0.5.0 platform-medium: Keycloak, CNPG operator,
+  Istio control plane, Cilium operator."
+globalDefault: false
+preemptionPolicy: Never
+value: 50000000

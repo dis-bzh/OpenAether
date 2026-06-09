@@ -76,7 +76,7 @@ resource "scaleway_instance_security_group" "this" {
     protocol = "TCP"
   }
 
-  # Outbound — Allow all
+  # Outbound — allow all for cluster nodes (nftables on bastion handles egress restriction)
   outbound_default_policy = "accept"
 
   project_id = var.project_id

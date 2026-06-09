@@ -118,6 +118,26 @@ install_image_tools() {
     fi
 }
 
+install_flux() {
+    local FLUX_VERSION="2.4.0"
+    local ARCH="linux_amd64"
+    echo "Installing Flux CLI v${FLUX_VERSION}..."
+    local tmp
+    tmp="$(mktemp -d)"
+    curl -fsSL "https://github.com/fluxcd/flux2/releases/download/v${FLUX_VERSION}/flux_${FLUX_VERSION}_${ARCH}.tar.gz" -o "$tmp/flux.tar.gz"
+    tar -xzf "$tmp/flux.tar.gz" -C "$tmp"
+    if [ -w /usr/local/bin ]; then
+        install -m 755 "$tmp/flux" /usr/local/bin/flux
+    elif command -v sudo &> /dev/null; then
+        sudo install -m 755 "$tmp/flux" /usr/local/bin/flux
+    else
+        mkdir -p ~/.local/bin
+        install -m 755 "$tmp/flux" ~/.local/bin/flux
+        echo "NOTE: flux installed to ~/.local/bin. Ensure it's in your PATH."
+    fi
+    rm -rf "$tmp"
+}
+
 install_precommit() {
     echo "Installing pre-commit..."
     if command -v apt-get &> /dev/null; then
@@ -167,7 +187,12 @@ if [ "$MISSING_IMG_TOOLS" -eq 1 ]; then
     install_image_tools
 fi
 
-# 7. Check pre-commit (optional but recommended)
+# 7. Check Flux CLI
+if ! check_cmd flux; then
+    install_flux
+fi
+
+# 8. Check pre-commit (optional but recommended)
 if ! check_cmd pre-commit; then
     echo -e "${RED}⚠ pre-commit is not installed (recommended for DevSecOps)${NC}"
     read -p "Install pre-commit? (y/N) " -n 1 -r

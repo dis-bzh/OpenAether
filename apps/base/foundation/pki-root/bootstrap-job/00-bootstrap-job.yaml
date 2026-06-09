@@ -1,0 +1,301 @@
+# OpenAether 0.5.0 — Bootstrap OpenBao root (consolidé, 1 Job idempotent)
+# ───────────────────────────────────────────────────────────────────────────
+# Remplace les 3 anciens Jobs (init / configure-transit / seal-token) qui
+# utilisaient port-forward + exec + le CLI `bao` (absent de l'image alpine et
+# fragile). Ici: tout via l'API HTTP OpenBao sur le DNS du Service
+# openbao-internal (publishNotReadyAddresses=true → joignable même sealed).
+#
+# Image: alpine/k8s (kubectl + jq + curl présents — validé localement).
+#
+# Flux (chaque étape idempotente, re-run safe):
+#   1. Attendre l'API root
+#   2. Init Shamir 5/3 si nécessaire → Secret openbao-root-recovery
+#      (unseal keys + root token — JAMAIS commités, JAMAIS loggés)
+#   3. Unseal root (3 clés depuis le Secret)
+#   4. Configurer transit (engine + clé aether-workload + policy + auth k8s + role)
+#   5. Login k8s (SA openbao-workload) → token périodique → Secret openbao-seal-token
+#   6. Rollout du StatefulSet workload pour qu'il lise le seal token
+#   7. Init workload raft (transit auto-unseal) → Secret openbao-workload-recovery
+#
+# Step 8 (roles ESO + cert-manager) est dans vault/bootstrap-roles-job.yaml
+# (PostSync vault, BeforeHookCreation) — dépend du workload healthy, pas du root.
+#
+# Sécurité: set +x partout où des secrets transitent; aucune clé/token loggé.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: openbao-bootstrap
+  namespace: foundation-pki-root
+  labels:
+    app: openbao-bootstrap
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: openbao-bootstrap
+  annotations: {}
+spec:
+  backoffLimit: 5
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        app: openbao-bootstrap
+        openaether.io/component: openbao-bootstrap
+    spec:
+      serviceAccountName: openbao-bootstrap
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bootstrap
+          image: alpine/k8s:1.31.1
+          env:
+            - name: ROOT_ADDR
+              value: "http://openbao-internal.foundation-pki-root.svc.cluster.local:8200"
+            - name: ROOT_NS
+              value: "foundation-pki-root"
+            - name: VAULT_NS
+              value: "foundation-vault"
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+
+              # ── helpers ───────────────────────────────────────────────────
+              # api METHOD PATH [DATA] [TOKEN]  → echo body. Le code HTTP est écrit
+              # dans /tmp/http (FICHIER, pas une var: api() tourne dans $(...) donc
+              # une var globale serait perdue dans le subshell). Lecture: $(H).
+              api() {
+                local m="$1" p="$2" d="${3:-}" t="${4:-}"
+                local args=(-s -o /tmp/body -w '%{http_code}' -X "$m")
+                [ -n "$t" ] && args+=(-H "X-Vault-Token: $t")
+                [ -n "$d" ] && args+=(-d "$d")
+                curl "${args[@]}" "${ROOT_ADDR}${p}" > /tmp/http
+                cat /tmp/body
+              }
+              H() { cat /tmp/http 2>/dev/null || echo "000"; }
+
+              echo "════ 1) Attente API root (${ROOT_ADDR}) ════"
+              for i in $(seq 1 60); do
+                code="$(curl -s -o /dev/null -w '%{http_code}' \
+                  "${ROOT_ADDR}/v1/sys/health?uninitcode=200&sealedcode=200&standbyok=true" || true)"
+                if [ "$code" != "000" ] && [ -n "$code" ]; then
+                  echo "  API up (health=$code)"; break
+                fi
+                echo "  waiting... ${i}/60 (code=$code)"; sleep 5
+              done
+
+              echo "════ 2) Init Shamir 5/3 si nécessaire ════"
+              INIT="$(api GET /v1/sys/seal-status)"
+              INITIALIZED="$(echo "$INIT" | jq -r '.initialized')"
+              if [ "$INITIALIZED" = "true" ]; then
+                echo "  root déjà initialisé"
+              else
+                echo "  init operator (secret_shares=5 secret_threshold=3)"
+                set +x
+                BODY="$(api PUT /v1/sys/init '{"secret_shares":5,"secret_threshold":3}')"
+                [ "$(H)" = "200" ] || { echo "ERREUR init HTTP=$(H)"; echo "$BODY" | jq -r '.errors' ; exit 1; }
+                # Stocke keys + root token dans le Secret (jamais loggés).
+                echo "$BODY" | jq -r '.keys_base64 | join(",")' > /tmp/keys
+                echo "$BODY" | jq -r '.root_token'               > /tmp/roottok
+                kubectl create secret generic openbao-root-recovery -n "$ROOT_NS" \
+                  --from-literal=unseal_keys="$(cat /tmp/keys)" \
+                  --from-literal=unseal_keys_json="$(echo "$BODY" | jq -c '.keys_base64')" \
+                  --from-literal=root_token="$(cat /tmp/roottok)" \
+                  --from-literal=initialized_at="$(date -u +%FT%TZ)" \
+                  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+                echo "  ✅ Secret openbao-root-recovery créé (5 unseal keys + root token)"
+                echo "  👉 Récupère + distribue les clés offline (cf. README)."
+                set -x; set +x
+              fi
+
+              echo "════ 3) Unseal root ════"
+              SEALED="$(api GET /v1/sys/seal-status | jq -r '.sealed')"
+              if [ "$SEALED" = "false" ]; then
+                echo "  root déjà unsealed"
+              else
+                set +x
+                if ! kubectl get secret openbao-root-recovery -n "$ROOT_NS" >/dev/null 2>&1; then
+                  echo "ERREUR: root sealed mais Secret openbao-root-recovery absent."
+                  echo "→ unseal manuel requis (clés offline). cf. README."
+                  exit 1
+                fi
+                KEYS="$(kubectl get secret openbao-root-recovery -n "$ROOT_NS" \
+                  -o jsonpath='{.data.unseal_keys}' | base64 -d)"
+                i=0
+                IFS=','; for k in $KEYS; do
+                  [ "$i" -ge 3 ] && break
+                  api PUT /v1/sys/unseal "$(jq -nc --arg k "$k" '{key:$k}')" >/dev/null
+                  i=$((i+1))
+                done; unset IFS
+                SEALED="$(api GET /v1/sys/seal-status | jq -r '.sealed')"
+                [ "$SEALED" = "false" ] || { echo "ERREUR: root toujours sealed"; exit 1; }
+                echo "  ✅ root unsealed"
+                set -x; set +x
+              fi
+
+              echo "════ 4) Configurer transit (engine/clé/policy/auth k8s/role) ════"
+              set +x
+              ROOT_TOKEN="$(kubectl get secret openbao-root-recovery -n "$ROOT_NS" \
+                -o jsonpath='{.data.root_token}' | base64 -d)"
+
+              # 4a. enable transit (idempotent)
+              api POST /v1/sys/mounts/transit '{"type":"transit"}' "$ROOT_TOKEN" >/dev/null || true
+              echo "  transit engine: HTTP=$(H) (204=créé, 400=déjà présent)"
+
+              # 4b. clé symétrique aether-workload (idempotent)
+              api POST /v1/transit/keys/aether-workload \
+                '{"type":"aes256-gcm96","exportable":false,"deletion_allowed":false}' "$ROOT_TOKEN" >/dev/null
+              echo "  clé aether-workload: HTTP=$(H)"
+
+              # 4c. policy workload-unseal (encrypt+decrypt)
+              POLICY="$(printf 'path "transit/encrypt/aether-workload" {\n  capabilities = ["update"]\n}\npath "transit/decrypt/aether-workload" {\n  capabilities = ["update"]\n}\n')"
+              api PUT /v1/sys/policies/acl/workload-unseal \
+                "$(jq -nc --arg p "$POLICY" '{policy:$p}')" "$ROOT_TOKEN" >/dev/null
+              echo "  policy workload-unseal: HTTP=$(H)"
+
+              # 4d. enable kubernetes auth (idempotent)
+              api POST /v1/sys/auth/kubernetes '{"type":"kubernetes"}' "$ROOT_TOKEN" >/dev/null || true
+              echo "  auth kubernetes: HTTP=$(H) (204=activé, 400=déjà)"
+
+              # 4e. config auth k8s. token_reviewer_jwt omis → le root utilise son
+              #     propre SA (auth-delegator) pour la TokenReview (validé doc).
+              #     On passe explicitement le CA monté dans CE pod bootstrap
+              #     (même cluster) → pas de dépendance au défaut local du root.
+              CA_CRT="$(cat /var/run/secrets/kubernetes.io/serviceaccount/ca.crt)"
+              api POST /v1/auth/kubernetes/config \
+                "$(jq -nc --arg ca "$CA_CRT" '{
+                    kubernetes_host:"https://kubernetes.default.svc.cluster.local",
+                    kubernetes_ca_cert:$ca,
+                    disable_iss_validation:true}')" \
+                "$ROOT_TOKEN" >/dev/null
+              CODE="$(H)"
+              echo "  config auth k8s: HTTP=$CODE"
+              case "$CODE" in 200|204) : ;; *)
+                echo "ERREUR: config auth k8s a échoué (HTTP=$CODE)"; cat /tmp/body; exit 1 ;; esac
+
+              # 4f. role workload-unseal (SA openbao-workload@foundation-vault),
+              #     token périodique 168h → le seal renouvelle (disable_renewal=false).
+              api POST /v1/auth/kubernetes/role/workload-unseal \
+                "$(jq -nc --arg ns "$VAULT_NS" '{
+                    bound_service_account_names:"openbao-workload",
+                    bound_service_account_namespaces:$ns,
+                    token_policies:"workload-unseal",
+                    token_period:"168h",
+                    token_ttl:"168h"}')" \
+                "$ROOT_TOKEN" >/dev/null
+              echo "  role workload-unseal: HTTP=$(H)"
+              set -x; set +x
+
+              echo "════ 5) Seal token workload (login k8s) ════"
+              set +x
+              REGEN=1
+              if kubectl get secret openbao-seal-token -n "$VAULT_NS" >/dev/null 2>&1; then
+                EX="$(kubectl get secret openbao-seal-token -n "$VAULT_NS" \
+                  -o jsonpath='{.data.token}' | base64 -d || true)"
+                if [ -n "$EX" ]; then
+                  api POST /v1/auth/token/lookup-self '' "$EX" >/dev/null || true
+                  if [ "$(H)" = "200" ]; then echo "  seal token existant valide → no-op"; REGEN=0; fi
+                fi
+              fi
+              if [ "$REGEN" = "1" ]; then
+                echo "  mint JWT pour SA openbao-workload + login k8s"
+                JWT="$(kubectl create token openbao-workload -n "$VAULT_NS" --duration=10m)"
+                RESP="$(api POST /v1/auth/kubernetes/login \
+                  "$(jq -nc --arg j "$JWT" '{jwt:$j,role:"workload-unseal"}')")"
+                TOKEN="$(echo "$RESP" | jq -r '.auth.client_token // empty')"
+                if [ -z "$TOKEN" ]; then
+                  echo "ERREUR login k8s HTTP=$(H)"; echo "$RESP" | jq -r '.errors // .'; exit 1
+                fi
+                kubectl create secret generic openbao-seal-token -n "$VAULT_NS" \
+                  --from-literal=token="$TOKEN" \
+                  --from-literal=created_at="$(date -u +%FT%TZ)" \
+                  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+                echo "  ✅ Secret openbao-seal-token créé (token périodique)"
+              fi
+              set -x; set +x
+
+              echo "════ 6) Rollout workload (lecture du seal token) ════"
+              if kubectl get statefulset openbao -n "$VAULT_NS" >/dev/null 2>&1; then
+                if [ "${REGEN:-1}" = "1" ]; then
+                  kubectl patch statefulset openbao -n "$VAULT_NS" --type=merge \
+                    -p "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"openaether.io/seal-bootstrapped-at\":\"$(date +%s)\"}}}}}" >/dev/null
+                  echo "  rollout déclenché"
+                else
+                  echo "  seal token inchangé → pas de rollout"
+                fi
+              else
+                echo "  ⚠ StatefulSet openbao absent (foundation/vault pas encore appliqué) — skip init"
+                echo ""
+                echo "✅ Bootstrap root terminé (workload à initialiser quand foundation/vault sera là)"
+                exit 0
+              fi
+
+              echo "════ 7) Init workload raft (one-time, transit auto-unseal) ════"
+              # Le workload doit être initialisé UNE fois (operator init) pour créer
+              # la barrière raft. Avec seal transit, l'init renvoie des recovery keys
+              # et les pods s'auto-unsealent. Idempotent: si déjà init → no-op.
+              set +x
+              WL_ADDR="http://openbao.${VAULT_NS}.svc.cluster.local:8200"
+              wlapi() {
+                local m="$1" p="$2" d="${3:-}" t="${4:-}"
+                local a=(-s -o /tmp/wlbody -w '%{http_code}' -X "$m")
+                [ -n "$t" ] && a+=(-H "X-Vault-Token: $t")
+                [ -n "$d" ] && a+=(-d "$d")
+                curl "${a[@]}" "${WL_ADDR}${p}" > /tmp/wlhttp
+                cat /tmp/wlbody
+              }
+              echo "  attente API workload ($WL_ADDR)"
+              for i in $(seq 1 60); do
+                c="$(curl -s -o /dev/null -w '%{http_code}' \
+                  "${WL_ADDR}/v1/sys/health?uninitcode=200&sealedcode=200&standbyok=true&uninitcode=200" || true)"
+                [ "$c" != "000" ] && [ -n "$c" ] && { echo "    workload API up (health=$c)"; break; }
+                echo "    waiting... ${i}/60 (code=$c)"; sleep 5
+              done
+              WL_INIT="$(wlapi GET /v1/sys/seal-status | jq -r '.initialized')"
+              if [ "$WL_INIT" = "true" ]; then
+                echo "  workload déjà initialisé → no-op"
+              else
+                echo "  operator init workload (recovery_shares=3 recovery_threshold=2)"
+                BODY="$(wlapi PUT /v1/sys/init '{"recovery_shares":3,"recovery_threshold":2}')"
+                CODE="$(cat /tmp/wlhttp)"
+                [ "$CODE" = "200" ] || { echo "ERREUR init workload HTTP=$CODE"; echo "$BODY" | jq -r '.errors // .'; exit 1; }
+                # Stocke recovery keys + root token workload (jamais loggés/committés).
+                kubectl create secret generic openbao-workload-recovery -n "$VAULT_NS" \
+                  --from-literal=recovery_keys="$(echo "$BODY" | jq -r '.recovery_keys_base64 | join(",")')" \
+                  --from-literal=recovery_keys_json="$(echo "$BODY" | jq -c '.recovery_keys_base64')" \
+                  --from-literal=root_token="$(echo "$BODY" | jq -r '.root_token')" \
+                  --from-literal=initialized_at="$(date -u +%FT%TZ)" \
+                  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+                echo "  ✅ workload initialisé + Secret openbao-workload-recovery créé"
+                echo "  ⏳ attente auto-unseal transit + formation raft (3 voters)"
+                for i in $(seq 1 24); do
+                  S="$(wlapi GET /v1/sys/seal-status | jq -r '.sealed')"
+                  [ "$S" = "false" ] && { echo "    workload unsealed (transit OK)"; break; }
+                  echo "    waiting unseal... ${i}/24"; sleep 5
+                done
+              fi
+              set -x; set +x
+
+              echo ""
+              echo "✅ Bootstrap root COMPLET (root unsealed + transit + workload HA auto-unsealed)"
+              echo "   Roles ESO + cert-manager → vault/bootstrap-roles-job.yaml (PostSync vault)"
+          securityContext:
+            capabilities:
+              drop: ["ALL"]
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false   # kubectl/curl écrivent dans /tmp
+            runAsNonRoot: true
+            runAsUser: 1000
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

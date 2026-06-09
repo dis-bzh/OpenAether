@@ -1,0 +1,118 @@
+# OpenAether 0.5.0 Sprint C — Grafana HA
+# ──────────────────────────────────────────────────────────────────
+# 2 répliques avec podAntiAffinity.
+# Backend DB: PostgreSQL CNPG grafana-db (grafana-cnpg-db.yaml) pour
+# la session, les dashboards, les utilisateurs — requis pour HA.
+# Admin: ExternalSecret grafana-admin (username=admin).
+# Datasources: VictoriaMetrics vmselect + Loki (inline values).
+# Dashboards: sidecar dashboard (label grafana_dashboard=1) → découverte
+# ConfigMaps de tous les namespaces (searchNamespace: ALL).
+#
+# Pas de PVC Grafana (state dans PostgreSQL).
+# Dashboard sidecar recharge les ConfigMaps à chaud (hot-reload).
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: grafana
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: grafana
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: grafana
+      version: "8.6.4"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: services-observability
+      interval: 1h
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    replicas: 2
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: grafana
+              topologyKey: kubernetes.io/hostname
+    # Admin credentials depuis ExternalSecret grafana-admin.
+    admin:
+      existingSecret: grafana-admin
+      userKey: admin-user
+      passwordKey: admin-password
+    # PostgreSQL CNPG pour la session HA (requis si replicas > 1).
+    grafana.ini:
+      database:
+        type: postgres
+        host: grafana-db-rw.foundation-databases:5432
+        name: grafana
+        user: grafana
+        password: "$__env{GF_DATABASE_PASSWORD}"
+        ssl_mode: disable
+      server:
+        root_url: "https://grafana.openaether.eu"
+      security:
+        cookie_secure: true
+        strict_transport_security: true
+      analytics:
+        reporting_enabled: false
+        check_for_updates: false
+    # Injecter le password DB depuis le Secret grafana-db-credentials.
+    envFromSecret: grafana-db-credentials
+    env:
+      GF_DATABASE_PASSWORD:
+        valueFrom:
+          secretKeyRef:
+            name: grafana-db-credentials
+            key: password
+    # Datasources inline (Flux gère la mise à jour).
+    datasources:
+      datasources.yaml:
+        apiVersion: 1
+        datasources:
+          - name: VictoriaMetrics
+            type: prometheus
+            url: "http://vmselect-victoria-metrics.services-observability:8481/select/0/prometheus"
+            isDefault: true
+            editable: false
+            jsonData:
+              prometheusType: Prometheus
+              timeInterval: "30s"
+          - name: Loki
+            type: loki
+            url: "http://loki.services-observability:3100"
+            editable: false
+    # Sidecar: découverte automatique des ConfigMaps label grafana_dashboard=1.
+    sidecar:
+      dashboards:
+        enabled: true
+        label: grafana_dashboard
+        labelValue: "1"
+        searchNamespace: ALL
+        provider:
+          foldersFromFilesStructure: true
+          allowUiUpdates: false
+    persistence:
+      enabled: false
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 300m
+        memory: 512Mi
+    podDisruptionBudget:
+      minAvailable: 1

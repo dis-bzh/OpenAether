@@ -125,14 +125,14 @@ variable "cilium_manifest" {
   type        = string
 }
 
-variable "argocd_manifest" {
-  description = "ArgoCD install manifest YAML content (from bootstrap-manifests/argocd-install.yaml)"
+variable "flux_manifest" {
+  description = "Flux install manifest YAML content (from bootstrap-manifests/flux-install.yaml)"
   type        = string
   default     = ""
 }
 
-variable "root_app_manifest" {
-  description = "ArgoCD root Application manifest YAML content (rendered from template)"
+variable "flux_bootstrap_manifest" {
+  description = "Flux bootstrap manifest YAML content (GitRepository + Kustomization, rendered from template)"
   type        = string
   default     = ""
 }

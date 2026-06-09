@@ -1,0 +1,25 @@
+# Groupe 30 — Observability (VMCluster, Loki, Grafana, Alloy, exporters)
+# Isolation clé : Grafana KO n'impacte pas OpenBao, Istio, ou le stockage.
+# Dépend de storage (volumes), cert-manager (certs Grafana), istio (mTLS), cnpg (grafana-db).
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: observability
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  timeout: 20m
+  sourceRef:
+    kind: GitRepository
+    name: openaether
+  path: ./apps/base/observability
+  prune: true
+  wait: false
+  dependsOn:
+    - name: storage
+    - name: cert-manager
+    - name: istio
+    - name: cnpg
+    - name: external-secrets

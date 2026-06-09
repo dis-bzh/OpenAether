@@ -1,0 +1,61 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# OpenAether — Overlay LOCAL management (Docker/WSL2, cluster_role implicite = management).
+# Base: ../base (DAG management complet).
+# Différences vs management (cloud):
+#   - local-path-provisioner actif (00b) : Docker n'a pas de provisioner dynamique.
+#   - storage-minio actif (21b) : S3 local pour test Loki/Grafana.
+#   - cert-manager, istio, storage, observability : suspendus (HelmReleases, réseau chart
+#     inaccessible en Docker / nécessitent Longhorn + Istio non disponibles).
+#   - foundation-pki-root : dépendance ajoutée sur platform-local-storage (PVC openbao).
+#
+# Règle DAG (invariant) : l'ensemble {suspended} doit être fermé vers le haut —
+# aucune Kustomization active ne dépend d'une suspended (sinon deadlock wait).
+resources:
+  - ../base
+  - 00b-local-storage.yaml
+  - 21b-storage-minio.yaml
+
+patches:
+  # cert-manager suspendu : HelmRelease chart non accessible en Docker.
+  - target:
+      group: kustomize.toolkit.fluxcd.io
+      kind: Kustomization
+      name: cert-manager
+    patch: |-
+      - { op: add,     path: /spec/suspend, value: true }
+      - { op: replace, path: /spec/wait,    value: false }
+
+  # istio suspendu : HelmReleases (5), nécessite cert-manager + réseau chart.
+  - target:
+      group: kustomize.toolkit.fluxcd.io
+      kind: Kustomization
+      name: istio
+    patch: |-
+      - { op: add,     path: /spec/suspend, value: true }
+      - { op: replace, path: /spec/wait,    value: false }
+
+  # storage (Longhorn) suspendu : HelmRelease, nœuds Docker sans disque dédié.
+  - target:
+      group: kustomize.toolkit.fluxcd.io
+      kind: Kustomization
+      name: storage
+    patch: |-
+      - { op: add,     path: /spec/suspend, value: true }
+      - { op: replace, path: /spec/wait,    value: false }
+
+  # observability suspendu : dépend de storage+cert-manager+istio (tous suspendus).
+  - target:
+      group: kustomize.toolkit.fluxcd.io
+      kind: Kustomization
+      name: observability
+    patch: |-
+      - { op: add, path: /spec/suspend, value: true }
+
+  # foundation-pki-root : ajouter dep platform-local-storage (local-only, PVC openbao).
+  - target:
+      group: kustomize.toolkit.fluxcd.io
+      kind: Kustomization
+      name: foundation-pki-root
+    patch: |-
+      - { op: add, path: /spec/dependsOn/-, value: { name: platform-local-storage } }

@@ -1,0 +1,9 @@
+# Cross-namespace RBAC for the bootstrap Job: the SA openbao-bootstrap
+# (foundation-pki-root) needs to act in foundation-vault (create SA token,
+# write seal secret, patch StatefulSet). Must NOT be in the pki-root
+# kustomization (namespace: foundation-pki-root would rewrite these) nor
+# in foundation-vault (depends on pki-root → circular).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - bootstrap-rbac.yaml

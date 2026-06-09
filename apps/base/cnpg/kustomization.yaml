@@ -1,6 +1,15 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+# OpenAether 0.5.0 fix P0 sync: ns réel foundation-databases pour cluster.yaml.
+# ATTENTION: ne PAS appliquer namespace: sur l'install vendored CNPG
+# (celui-ci définit son propre namespace `cnpg-system` pour l'opérateur).
+# Solution: on laisse l'install créer l'opérateur dans cnpg-system, et on
+# override uniquement cluster.yaml.
 resources:
+  - namespace.yaml
   - https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.23/releases/cnpg-1.23.1.yaml
   - cluster.yaml
+  - secret.yaml
+  - grafana-db-cluster.yaml
+  - grafana-db-externalsecret.yaml

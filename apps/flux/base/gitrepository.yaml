@@ -1,0 +1,15 @@
+# OpenAether — GitRepository source commun à toutes les Kustomizations Flux.
+# Pointe sur la branche main du repo OpenAether.
+# Flux reconcilie depuis ce point d'entrée.
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: openaether
+  namespace: flux-system
+spec:
+  interval: 1m
+  url: https://github.com/dis-bzh/OpenAether.git
+  ref:
+    branch: feature/implement-gitops-management
+  timeout: 60s

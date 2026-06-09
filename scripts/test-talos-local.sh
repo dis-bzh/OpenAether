@@ -4,7 +4,7 @@
 #
 # Exercises the PRODUCTION modules/talos (config generation, bootstrap,
 # kubeconfig) on a real 3-CP etcd quorum with 2 dedicated (schedulable) workers,
-# then deploys Cilium + ArgoCD + the GitOps ApplicationSet — no cloud creds.
+# then deploys Cilium + Flux + the GitOps Kustomizations — no cloud creds.
 #
 # Config is delivered via USERDATA (the Talos Docker platform mechanism); the
 # only modules/talos resource not exercised locally is talos_machine_configuration_apply
@@ -26,10 +26,10 @@ MANIFESTS_DIR="${ROOT_DIR}/infrastructure/opentofu/cluster/bootstrap-manifests"
 CLUSTER_NAME="openaether-local-dev"
 CP_IPS=("10.5.0.10" "10.5.0.11" "10.5.0.12")
 CP_ENDPOINTS=("127.0.0.1:50000" "127.0.0.1:50001" "127.0.0.1:50002")
-# Dedicated workers (worker_count=3 in opentofu-local): IPs at .20+, host ports
-# at 50010+i. Schedulable/untainted, for HA and real workload scheduling tests.
-WORKER_IPS=("10.5.0.20" "10.5.0.21" "10.5.0.22")
-WORKER_ENDPOINTS=("127.0.0.1:50010" "127.0.0.1:50011" "127.0.0.1:50012")
+# Dedicated workers (worker_count=2 in opentofu-local/variables.tf): IPs at .20+,
+# host ports at 50010+i. Schedulable/untainted, for HA and real workload scheduling tests.
+WORKER_IPS=("10.5.0.20" "10.5.0.21")
+WORKER_ENDPOINTS=("127.0.0.1:50010" "127.0.0.1:50011")
 TOTAL_NODES=$(( ${#CP_IPS[@]} + ${#WORKER_IPS[@]} ))
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
@@ -69,12 +69,22 @@ fi
 # ==============================================================================
 info "Preflight checks..."
 MISSING=()
-for cmd in docker tofu talosctl kubectl helm nc; do
+for cmd in docker tofu talosctl kubectl helm nc flux; do
   command -v "$cmd" >/dev/null 2>&1 || MISSING+=("$cmd")
 done
 [[ ${#MISSING[@]} -gt 0 ]] && { error "Missing tools: ${MISSING[*]}"; exit 1; }
 docker ps >/dev/null 2>&1 || { error "Docker is not running (start Docker Desktop, enable WSL2 integration)."; exit 1; }
 export TF_VAR_encryption_passphrase="${TF_VAR_encryption_passphrase:-local-test-passphrase-32chars-minimum}"
+
+# Flux reconciles from GitHub — the current branch must be pushed so the GitRepository can clone it.
+CURRENT_BRANCH="$(git -C "${ROOT_DIR}" symbolic-ref --short HEAD 2>/dev/null || echo "main")"
+UNPUSHED=$(git -C "${ROOT_DIR}" log "origin/${CURRENT_BRANCH}..HEAD" --oneline 2>/dev/null | wc -l || echo 0)
+if [[ "${UNPUSHED}" -gt 0 ]]; then
+  warn "Branch '${CURRENT_BRANCH}' has ${UNPUSHED} unpushed commit(s). Flux will reconcile from GitHub"
+  warn "and will not see local changes until pushed. Run: git push origin ${CURRENT_BRANCH}"
+  warn "Proceeding — GitRepository will wait for the branch to become available."
+fi
+
 success "Preflight passed"
 
 # ==============================================================================
@@ -177,42 +187,51 @@ else
 fi
 
 # ==============================================================================
-# Step 6 — Deploy ArgoCD via the bootstrap overlay
-#   --server-side: ApplicationSet CRD exceeds the client-side annotation limit
-#   double apply:  the ApplicationSet CR needs its CRD established first
+# Step 6 — Install Flux controllers
+#   Flux is too large for Talos USERDATA → deployed post-bootstrap.
+#   Uses flux CLI pinned to the same version as flux-install.yaml in the repo.
 # ==============================================================================
-info "Step 6 — Deploying ArgoCD (bootstrap overlay, server-side apply)..."
-kubectl apply -k "${ROOT_DIR}/apps/bootstrap/overlays/prod" --server-side=true --force-conflicts >/dev/null 2>&1 || true
-sleep 5
-kubectl apply -k "${ROOT_DIR}/apps/bootstrap/overlays/prod" --server-side=true --force-conflicts >/dev/null 2>&1 || true
-for i in $(seq 1 48); do
-  # `|| true`: grep -c exits 1 when 0 pods match, which under set -e + pipefail
-  # would abort the whole script right here (the failure that hid Step 6/7).
-  R=$(kubectl -n management-gitops get pods --no-headers 2>/dev/null | grep -c "Running" || true)
-  [[ "$R" -ge 7 ]] && break
+info "Step 6 — Installing Flux controllers (flux install)..."
+# flux install reports failure if any deployment is not ready within its own timeout,
+# but pods may still be starting (Kyverno audit policy can add ~15s delay in Docker).
+# The pod-wait loop below is the real readiness gate — don't abort on flux install timeout.
+flux install --kubeconfig "${TOFU_DIR}/kubeconfig" >/dev/null 2>&1 || true
+for i in $(seq 1 36); do
+  R=$(kubectl -n flux-system get pods --no-headers 2>/dev/null | grep -c "Running" || true)
+  [[ "$R" -ge 4 ]] && break
   sleep 5
 done
-R=$(kubectl -n management-gitops get pods --no-headers 2>/dev/null | grep -c "Running" || true)
-[[ "$R" -ge 7 ]] && success "ArgoCD running (${R} pods)" || warn "ArgoCD pods running: ${R}/7"
+R=$(kubectl -n flux-system get pods --no-headers 2>/dev/null | grep -c "Running" || true)
+[[ "$R" -ge 4 ]] && success "Flux controllers running (${R} pods)" || warn "Flux pods running: ${R}/4"
 
 # ==============================================================================
-# Step 7 — Verify ApplicationSet → Application (GitOps hub mechanism)
+# Step 7 — Apply Flux Kustomizations (local overlay)
+#   Suspended groups: cert-manager, istio, storage, observability (HelmRelease)
+#   Active groups: namespaces, platform, vault, eso, cnpg, kyverno
 # ==============================================================================
-info "Step 7 — Verifying ApplicationSet multi-cluster generation..."
-for i in $(seq 1 12); do kubectl -n management-gitops get appproject default >/dev/null 2>&1 && break; sleep 5; done
-APPS=0
-for i in $(seq 1 10); do
-  kubectl -n management-gitops annotate applicationset openaether-platform "reconcile=$(date +%s)" --overwrite >/dev/null 2>&1 || true
-  sleep 8
-  APPS=$(kubectl -n management-gitops get applications --no-headers 2>/dev/null | wc -l)
-  [[ "$APPS" -gt 0 ]] && break
-done
-if [[ "$APPS" -gt 0 ]]; then
-  success "ApplicationSet generated ${APPS} Application(s):"
-  kubectl -n management-gitops get applications 2>/dev/null | sed 's/^/    /'
-else
-  warn "No Applications generated yet (check argocd-applicationset-controller logs)"
+info "Step 7 — Applying Flux Kustomizations (apps/flux/local)..."
+kubectl apply -k "${ROOT_DIR}/apps/flux/local" --server-side=true --force-conflicts >/dev/null 2>&1
+
+# The GitRepository in apps/flux/local/gitrepository.yaml points to branch: main (default for
+# cloud/production). In local dev, commits may be on a feature branch not yet merged to main.
+# Patch the branch to match the current HEAD so Flux can pull the right code.
+CURRENT_BRANCH="$(git -C "${ROOT_DIR}" symbolic-ref --short HEAD 2>/dev/null || echo "main")"
+if [[ "${CURRENT_BRANCH}" != "main" ]]; then
+  info "  Patching GitRepository branch: main → ${CURRENT_BRANCH} (local dev branch)"
+  kubectl patch gitrepository openaether -n flux-system \
+    --type='merge' -p "{\"spec\":{\"ref\":{\"branch\":\"${CURRENT_BRANCH}\"}}}" >/dev/null 2>&1 || true
 fi
+sleep 5
+for i in $(seq 1 24); do
+  READY=$(flux get kustomizations --kubeconfig "${TOFU_DIR}/kubeconfig" --no-header 2>/dev/null \
+    | grep -v "True\s*False\|suspended" | grep -c "True" || true)
+  TOTAL=$(flux get kustomizations --kubeconfig "${TOFU_DIR}/kubeconfig" --no-header 2>/dev/null \
+    | grep -v "suspended\|True     False" | wc -l || true)
+  [[ "$READY" -ge 3 ]] && break
+  sleep 5
+done
+info "Flux Kustomizations status:"
+flux get kustomizations --kubeconfig "${TOFU_DIR}/kubeconfig" 2>/dev/null | sed 's/^/    /' || true
 
 # ==============================================================================
 # Summary
@@ -227,5 +246,5 @@ echo "  export TALOSCONFIG=${TOFU_DIR}/talosconfig"
 echo "  kubectl get nodes"
 echo "  talosctl --nodes ${CP_IPS[0]} --endpoints ${CP_ENDPOINTS[0]} etcd members"
 echo ""
-echo "  ArgoCD UI:  kubectl -n management-gitops port-forward svc/argocd-server 8080:443"
+echo "  Flux status:  flux get kustomizations --kubeconfig \${KUBECONFIG}"
 echo "  Tear down:  $0 --destroy   (or: task local-down)"

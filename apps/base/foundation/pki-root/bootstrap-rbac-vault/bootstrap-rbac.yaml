@@ -1,0 +1,54 @@
+# OpenAether 0.5.0 — RBAC cross-namespace pour le Job bootstrap (côté vault)
+# ───────────────────────────────────────────────────────────────────────────
+# Le SA openbao-bootstrap vit dans foundation-pki-root mais doit agir dans
+# foundation-vault: mint un JWT pour openbao-workload, écrire le Secret
+# openbao-seal-token, patcher le StatefulSet openbao.
+#
+# IMPORTANT: ces objets sont définis ICI (kustomization vault, ns
+# foundation-vault) et NON dans bootstrap/ — car la directive
+# `namespace: foundation-pki-root` du kustomization bootstrap réécrirait leur
+# namespace et casserait le RBAC (le Role atterrirait dans pki-root).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: openbao-bootstrap-vault
+  namespace: foundation-vault
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: openbao-bootstrap
+rules:
+  # Stocker le seal token transit du workload.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update", "patch"]
+  # Générer un JWT court pour le SA openbao-workload (login k8s sur le root).
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    verbs: ["create"]
+  # Rollout du StatefulSet workload après création du seal token.
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["get", "patch"]
+  # Lire l'état des pods workload (vérif auto-unseal).
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openbao-bootstrap-vault
+  namespace: foundation-vault
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: openbao-bootstrap
+subjects:
+  - kind: ServiceAccount
+    name: openbao-bootstrap
+    namespace: foundation-pki-root
+roleRef:
+  kind: Role
+  name: openbao-bootstrap-vault
+  apiGroup: rbac.authorization.k8s.io

@@ -1,0 +1,50 @@
+# OpenAether 0.5.0 Sprint C — CNPG Cluster PostgreSQL pour Grafana
+# ──────────────────────────────────────────────────────────────────
+# Grafana HA (2 répliques) requiert un backend DB partagé pour la session,
+# les dashboards, les utilisateurs, les alertes.
+# PostgreSQL CNPG: 2 instances (streaming replication), StorageClass
+# longhorn-x1-rwo-encrypted (CNPG gère sa propre HA + données sensibles).
+#
+# Namespace: foundation-databases (même cluster CNPG existant).
+# ExternalSecret: grafana-db-credentials (externalsecrets-grafana.yaml)
+# → OpenBao secret/grafana/db.password
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: grafana-db
+  namespace: foundation-databases
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: grafana-db
+spec:
+  instances: 2
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.3
+  primaryUpdateStrategy: unsupervised
+  storage:
+    # CNPG gère sa propre réplication (streaming) → x1 Longhorn.
+    # Chiffrement LUKS: données Grafana (sessions, alertes, credentials).
+    storageClass: longhorn-x1-rwo-encrypted
+    size: 5Gi
+  # Connexion Grafana: user grafana, base grafana.
+  # Le superuser postgres est géré par CNPG (secret auto-généré).
+  bootstrap:
+    initdb:
+      database: grafana
+      owner: grafana
+      secret:
+        name: grafana-db-credentials
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  affinity:
+    # CNPG AffinityConfiguration (pas le type standard K8s)
+    podAntiAffinityType: preferred
+    topologyKey: kubernetes.io/hostname
+  monitoring:
+    enablePodMonitor: false

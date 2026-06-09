@@ -1,0 +1,60 @@
+# Groupe 10 — OpenBao PKI Root (Shamir 5/3, auto-unseal du workload)
+# Isolation critique : un problème ici n'affecte que le unseal, pas les apps.
+#
+# bootstrap-rbac-vault: RBAC cross-namespace pour le bootstrap Job.
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: foundation-pki-root-rbac
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  timeout: 3m
+  sourceRef:
+    kind: GitRepository
+    name: openaether
+  path: ./apps/base/foundation/pki-root/bootstrap-rbac-vault
+  prune: true
+  wait: true
+  dependsOn:
+    - name: namespaces
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: foundation-pki-root
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  timeout: 10m
+  sourceRef:
+    kind: GitRepository
+    name: openaether
+  path: ./apps/base/foundation/pki-root
+  prune: true
+  wait: false
+  dependsOn:
+    - name: namespaces
+    - name: foundation-pki-root-rbac
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: foundation-pki-root-bootstrap
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  timeout: 15m
+  sourceRef:
+    kind: GitRepository
+    name: openaether
+  path: ./apps/base/foundation/pki-root/bootstrap-job
+  prune: true
+  wait: false
+  dependsOn:
+    - name: foundation-pki-root
+    - name: foundation-vault

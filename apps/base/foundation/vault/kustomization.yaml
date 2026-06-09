@@ -1,0 +1,33 @@
+# OpenAether 0.5.0 — OpenBao workload (3 répl raft 3, seal transit vers root)
+# Refacto de l'ancien apps/base/openbao/ qui sera supprimé en sprint 1.
+# Seal: transit (vers openbao-internal.foundation-pki-root.svc.cluster.local:8200)
+# Auto-unseal: le wrapping token est créé par le Job bootstrap
+# apps/base/foundation/pki-root/bootstrap/20-workload-seal-token-job.yaml
+# et stocké dans Secret openbao-seal-token (ns foundation-vault).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# NB: le namespace `foundation-vault` est défini dans
+# apps/base/namespaces/namespaces.yaml. On ne le (re)déclare pas ici.
+# La directive `namespace:` réécrit les metadata.namespace des ressources
+# ci-dessous vers foundation-vault.
+namespace: foundation-vault
+
+resources:
+  - configmap.yaml
+  - serviceaccount.yaml
+  - bootstrap-rbac.yaml
+  - statefulset.yaml
+  - service.yaml
+  - pdb.yaml
+  - networkpolicy.yaml
+  - httproute.yaml
+  - bootstrap-roles-job.yaml
+
+labels:
+  - includeSelectors: true
+    pairs:
+      openaether.io/managed: "true"
+      openaether.io/sprint: "0.5.0-sprint0"
+      openaether.io/component: openbao-workload
+      openaether.io/role: workload

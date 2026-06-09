@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: argocd-cmd-params-cm
-  namespace: management-gitops
-data:
-  server.insecure: "false"  # TLS enabled for production

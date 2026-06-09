@@ -1,0 +1,12 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: openbao-workload
+spec:
+  vault:
+    path: pki/workload/sign/openaether-leaf
+    server: http://openbao.foundation-vault.svc.cluster.local:8200
+    auth:
+      kubernetes:
+        mountPath: kubernetes
+        role: cert-manager-issuer

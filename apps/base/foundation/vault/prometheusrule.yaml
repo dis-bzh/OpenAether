@@ -1,0 +1,55 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbao-workload
+  namespace: foundation-vault
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: openbao-workload
+spec:
+  groups:
+    - name: openbao-workload
+      interval: 30s
+      rules:
+        # Workload sealed > 2min = critical (transit wrap fail)
+        - alert: OpenBaoWorkloadSealed
+          expr: openbao_core_unsealed == 0
+          for: 2m
+          labels:
+            severity: critical
+            component: openbao-workload
+          annotations:
+            summary: "OpenBao workload sealed > 2min"
+            description: "Le workload OpenBao (ns foundation-vault) est scellé. Transit wrap fail probable (root OpenBao down, network policy, ou secret openbao-seal-token manquant). Vérifier le statut du root + logs du workload."
+            runbook_url: "https://github.com/dis-bzh/OpenAether/blob/main/docs/runbooks/openbao-workload-unseal.md"
+        # Raft no leader = critical
+        - alert: OpenBaoRaftNoLeader
+          expr: openbao_raft_state != 1
+          for: 1m
+          labels:
+            severity: critical
+            component: openbao-workload
+          annotations:
+            summary: "OpenBao raft cluster has no leader"
+            description: "Aucune instance raft n'est leader. Le cluster ne peut pas traiter de requêtes d'écriture."
+        # Transit unwrap failures (échecs d'auto-unseal)
+        - alert: OpenBaoTransitUnsealFailures
+          expr: increase(openbao_transit_seal_unwrap_failures_total[5m]) > 0
+          for: 1m
+          labels:
+            severity: warning
+            component: openbao-workload
+          annotations:
+            summary: "OpenBao transit seal unwrap failures"
+            description: "Échecs de transit unwrap détectés. Vérifier la connectivité au root OpenBao (svc openbao-internal.foundation-pki-root)."
+        # Raft lag élevé = warning
+        - alert: OpenBaoRaftLagHigh
+          expr: openbao_raft_commit_index - openbao_raft_last_log_index > 100
+          for: 5m
+          labels:
+            severity: warning
+            component: openbao-workload
+          annotations:
+            summary: "OpenBao raft commit lag > 100 entries"
+            description: "Une réplique est en retard sur le commit. Possible I/O lente ou network."
