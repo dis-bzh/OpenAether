@@ -20,7 +20,7 @@ variable "environment" {
 }
 
 variable "cluster_role" {
-  description = "Role of this cluster in the CMP: 'management' (hub, runs ArgoCD/OpenBao/Keycloak) or 'workload' (spoke, runs client apps)"
+  description = "Role of this cluster in the CMP: 'management' (hub, runs OpenBao/ESO/Keycloak) or 'workload' (spoke, runs client apps)"
   type        = string
   default     = "workload"
   validation {
@@ -107,9 +107,9 @@ variable "bastion_ssh_keys" {
 # ==============================================================================
 
 variable "git_repo_url" {
-  description = "Git repository URL for ArgoCD root application"
+  description = "Git repository URL for the Flux GitRepository source (OpenAether-apps)"
   type        = string
-  default     = "https://github.com/dis-bzh/OpenAether.git"
+  default     = "https://github.com/dis-bzh/OpenAether-apps.git"
 }
 
 variable "flux_namespace" {
