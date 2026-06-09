@@ -20,6 +20,13 @@ FAST="${1:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${SCRIPT_DIR}/.."
 TOFU_DIR="${ROOT_DIR}/infrastructure/opentofu"
+
+# APPS_DIR points to the OpenAether-apps repository.
+# Fallback to this repo for pre-split / monorepo layout.
+APPS_DIR="${APPS_DIR:-${ROOT_DIR}/../OpenAether-apps}"
+if [[ ! -d "${APPS_DIR}/apps" ]]; then
+  APPS_DIR="${ROOT_DIR}"
+fi
 PASS=0
 FAIL=0
 SKIP=0
@@ -76,19 +83,17 @@ check "unit tests (provider-contract)" bash -c "cd '${TOFU_DIR}' && AWS_DEFAULT_
 section "2. Kustomize Overlays"
 
 OVERLAYS=(
-  "apps/bootstrap/overlays/prod"
-  "apps/bootstrap/overlays/local"
-  "apps/overlays/management"
-  "apps/overlays/workload-base"
-  "apps/overlays/local"
-  "apps/overlays/prod"
+  "apps/flux/management"
+  "apps/flux/local"
+  "apps/flux/workload"
+  "apps/flux/base"
 )
 
 for overlay in "${OVERLAYS[@]}"; do
-  if [[ -d "${ROOT_DIR}/${overlay}" ]]; then
-    check "build: ${overlay}" kubectl kustomize "${ROOT_DIR}/${overlay}"
+  if [[ -d "${APPS_DIR}/${overlay}" ]]; then
+    check "build: ${overlay}" kubectl kustomize "${APPS_DIR}/${overlay}"
   else
-    skip "build: ${overlay}" "directory not found"
+    skip "build: ${overlay}" "directory not found (APPS_DIR=${APPS_DIR})"
   fi
 done
 
@@ -153,7 +158,9 @@ fi
 section "4. YAML Lint"
 
 if command -v yamllint &>/dev/null; then
-  check "yamllint apps/" yamllint -c "${ROOT_DIR}/infrastructure/.yamllint" "${ROOT_DIR}/apps/"
+  [[ -d "${APPS_DIR}/apps" ]] && \
+    check "yamllint apps/" yamllint -c "${ROOT_DIR}/infrastructure/.yamllint" "${APPS_DIR}/apps/" || \
+    skip "yamllint apps/" "APPS_DIR not found"
   check "yamllint infrastructure/" yamllint -c "${ROOT_DIR}/infrastructure/.yamllint" "${ROOT_DIR}/infrastructure/opentofu/cluster/bootstrap-manifests/"
 else
   skip "yamllint" "yamllint not found (pip install yamllint)"

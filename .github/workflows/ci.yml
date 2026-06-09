@@ -114,23 +114,17 @@ jobs:
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
 
-      - name: Validate bootstrap prod overlay
-        run: kubectl kustomize apps/bootstrap/overlays/prod/ > /dev/null
+      - name: Validate Flux base overlay
+        run: kubectl kustomize apps/flux/base/ > /dev/null
 
-      - name: Validate bootstrap local overlay
-        run: kubectl kustomize apps/bootstrap/overlays/local/ > /dev/null
+      - name: Validate Flux management overlay
+        run: kubectl kustomize apps/flux/management/ > /dev/null
 
-      - name: Validate management overlay
-        run: kubectl kustomize apps/overlays/management/ > /dev/null
+      - name: Validate Flux workload overlay
+        run: kubectl kustomize apps/flux/workload/ > /dev/null
 
-      - name: Validate workload-base overlay
-        run: kubectl kustomize apps/overlays/workload-base/ > /dev/null
-
-      - name: Validate local overlay
-        run: kubectl kustomize apps/overlays/local/ > /dev/null
-
-      - name: Validate prod overlay
-        run: kubectl kustomize apps/overlays/prod/ > /dev/null
+      - name: Validate Flux local overlay
+        run: kubectl kustomize apps/flux/local/ > /dev/null
 
   talos:
     name: Talos Config Validation

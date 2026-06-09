@@ -51,7 +51,7 @@ variable "worker_count" {
 
 variable "git_repo_url" {
   type    = string
-  default = "https://github.com/dis-bzh/OpenAether.git"
+  default = "https://github.com/dis-bzh/OpenAether-apps.git"
 }
 
 variable "argocd_namespace" {

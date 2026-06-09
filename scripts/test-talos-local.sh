@@ -23,6 +23,21 @@ ROOT_DIR="${SCRIPT_DIR}/.."
 TOFU_DIR="${ROOT_DIR}/infrastructure/opentofu-local"
 MANIFESTS_DIR="${ROOT_DIR}/infrastructure/opentofu/cluster/bootstrap-manifests"
 
+# APPS_DIR points to the OpenAether-apps repository (apps/ tree with Flux Kustomizations).
+# After the infra/apps split, clone dis-bzh/OpenAether-apps next to OpenAether-infra.
+# Override with: APPS_DIR=/path/to/OpenAether-apps task local-test
+APPS_DIR="${APPS_DIR:-${ROOT_DIR}/../OpenAether-apps}"
+if [[ ! -d "${APPS_DIR}/apps/flux/local" ]]; then
+  # Fallback: apps/ still lives in this repo (pre-split or monorepo layout)
+  if [[ -d "${ROOT_DIR}/apps/flux/local" ]]; then
+    APPS_DIR="${ROOT_DIR}"
+  else
+    echo "ERROR: Cannot find apps/flux/local in APPS_DIR=${APPS_DIR}" >&2
+    echo "       Clone dis-bzh/OpenAether-apps next to this repo, or set APPS_DIR." >&2
+    exit 1
+  fi
+fi
+
 CLUSTER_NAME="openaether-local-dev"
 CP_IPS=("10.5.0.10" "10.5.0.11" "10.5.0.12")
 CP_ENDPOINTS=("127.0.0.1:50000" "127.0.0.1:50001" "127.0.0.1:50002")
@@ -210,7 +225,7 @@ R=$(kubectl -n flux-system get pods --no-headers 2>/dev/null | grep -c "Running"
 #   Active groups: namespaces, platform, vault, eso, cnpg, kyverno
 # ==============================================================================
 info "Step 7 — Applying Flux Kustomizations (apps/flux/local)..."
-kubectl apply -k "${ROOT_DIR}/apps/flux/local" --server-side=true --force-conflicts >/dev/null 2>&1
+kubectl apply -k "${APPS_DIR}/apps/flux/local" --server-side=true --force-conflicts >/dev/null 2>&1
 
 # The GitRepository in apps/flux/local/gitrepository.yaml points to branch: main (default for
 # cloud/production). In local dev, commits may be on a feature branch not yet merged to main.

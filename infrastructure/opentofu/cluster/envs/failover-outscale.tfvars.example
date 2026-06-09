@@ -41,7 +41,7 @@ bastion_ssh_keys = {
   outscale = "ssh-ed25519 AAAA... user@host"
 }
 
-git_repo_url     = "https://github.com/dis-bzh/OpenAether.git"
+git_repo_url     = "https://github.com/dis-bzh/OpenAether-apps.git"
 argocd_namespace = "management-gitops"
 
 # --- Backup / DR object stores (Outscale OOS, S3-compatible) ------------------
