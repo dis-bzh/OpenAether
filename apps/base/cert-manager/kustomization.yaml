@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# OpenAether 0.5.0 Sprint B — cert-manager v1.15+
+# ClusterIssuer: OpenBao PKI (root en foundation-pki-root, transit seal)
+# Remplace ESO pour les certificats TLS internes, ESO reste pour secrets applicatifs.
+resources:
+  - namespace.yaml
+  - helmrelease.yaml
+  - clusterissuer-openbao-pki.yaml
+  - clusterissuer-openbao-workload.yaml
+
+labels:
+  - includeSelectors: true
+    pairs:
+      openaether.io/managed: "true"
+      openaether.io/sprint: "0.5.0-sprintB"
+      openaether.io/component: "cert-manager"

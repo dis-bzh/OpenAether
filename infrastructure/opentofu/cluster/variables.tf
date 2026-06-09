@@ -97,8 +97,8 @@ variable "admin_ip" {
 }
 
 variable "bastion_ssh_keys" {
-  description = "Map of SSH public keys for bastion hosts, keyed by provider name"
-  type        = map(string)
+  description = "SSH public keys per provider. Key = provider name (scaleway/ovh/outscale), value = list of SSH public keys. Add a key to grant multi-admin access without changing the list structure."
+  type        = map(list(string))
   default     = {}
 }
 
@@ -112,10 +112,10 @@ variable "git_repo_url" {
   default     = "https://github.com/dis-bzh/OpenAether.git"
 }
 
-variable "argocd_namespace" {
-  description = "Namespace for ArgoCD installation"
+variable "flux_namespace" {
+  description = "Namespace for Flux installation"
   type        = string
-  default     = "management-gitops"
+  default     = "flux-system"
 }
 
 variable "cilium_manifest" {
@@ -124,14 +124,14 @@ variable "cilium_manifest" {
   default     = null
 }
 
-variable "argocd_manifest" {
-  description = "Optional override for ArgoCD manifest (rendered from file by default)"
+variable "flux_manifest" {
+  description = "Optional override for Flux install manifest (rendered from file by default)"
   type        = string
   default     = null
 }
 
-variable "root_app_manifest" {
-  description = "Optional override for Root App manifest (rendered from template by default)"
+variable "flux_bootstrap_manifest" {
+  description = "Optional override for Flux bootstrap manifest (rendered from template by default)"
   type        = string
   default     = null
 }

@@ -1,5 +1,50 @@
+# OpenAether 0.5.0 Sprint C — Stack Monitoring HA
+# ──────────────────────────────────────────────────────────────────
+# Remplace base.yaml (prototype sprint0: raw Deployments emptyDir).
+# Architecture HA full GitOps:
+#   VMOperator + VMCluster (vminsert x2 + vmstorage x2 + vmselect x2)
+#   VMAgent x2 (sharding, scraping kubernetes SD)
+#   kube-state-metrics x2 + node-exporter (DaemonSet)
+#   Loki x2 (SingleBinary, backend MinIO/S3)
+#   Alloy (DaemonSet, collecte logs → Loki)
+#   Grafana x2 (backend PostgreSQL CNPG grafana-db)
+#   NetworkPolicy Cilium par composant
+#   Dashboards GitOps (ConfigMaps label grafana_dashboard=1)
+#
+# NB: PAS de directive `namespace:` globale — chaque ressource déclare
+# son propre namespace pour éviter les réécritures non voulues.
+# grafana-cnpg-db + externalsecret foundation-databases → apps/base/cnpg/.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - base.yaml
+  - namespace.yaml
+  # VictoriaMetrics Operator + Cluster HA
+  - vm-operator.yaml
+  - vmcluster.yaml
+  - vmagent.yaml
+  - vmscapes.yaml
+  # Exporters métriques
+  - kube-state-metrics.yaml
+  - node-exporter.yaml
+  # Logs: Loki + Alloy
+  - loki.yaml
+  - externalsecret-loki.yaml
+  - alloy.yaml
+  # Grafana HA (CNPG DB dans apps/base/cnpg/)
+  - grafana.yaml
+  - externalsecrets-grafana.yaml
+  - httproute-grafana.yaml
+  # Network
+  - networkpolicy.yaml
+  # Dashboards GitOps (sidecar Grafana)
+  - dashboards/node-exporter.yaml
+  - dashboards/k8s-cluster.yaml
+  - dashboards/openbao.yaml
+  - dashboards/victoriametrics.yaml
+
+labels:
+  - includeSelectors: false
+    pairs:
+      openaether.io/managed: "true"
+      openaether.io/sprint: "0.5.0-sprintC"

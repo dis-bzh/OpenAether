@@ -1,0 +1,115 @@
+# OpenAether 0.5.0 Sprint C — VMCluster HA (VictoriaMetrics)
+# ──────────────────────────────────────────────────────────────────
+# VMCluster déploie 3 composants séparés:
+#   vminsert  (2 répliques) — ingestion HTTP HA
+#   vmstorage (2 répliques) — stockage données, replicationFactor=2
+#   vmselect  (2 répliques) — query HA (PromQL/MetricsQL)
+#
+# replicationFactor=2: chaque série est stockée sur 2 vmstorage.
+# → tolérance: 1 vmstorage peut tomber sans perte de données.
+# → StorageClass local-path: vmstorage gère sa propre réplication,
+#   doubler avec Longhorn serait du gaspillage réseau/IO.
+#
+# Ports:
+#   vminsert  :8480 — remote_write endpoint (VMAgent → vminsert)
+#   vmstorage :8400 — data port (vminsert → vmstorage)
+#   vmstorage :8401 — cluster port (vmstorage peers)
+#   vmselect  :8481 — query endpoint (Grafana → vmselect)
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMCluster
+metadata:
+  name: victoria-metrics
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: victoriametrics
+spec:
+  retentionPeriod: "30d"
+  replicationFactor: 2
+  vminsert:
+    replicaCount: 2
+    extraArgs:
+      # Taille du buffer interne pour absorber les pics de trafic.
+      maxInsertRequestSize: "64MB"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: vminsert
+              topologyKey: kubernetes.io/hostname
+    podDisruptionBudget:
+      minAvailable: 1
+  vmstorage:
+    replicaCount: 2
+    storageDataPath: /vm-data
+    storage:
+      volumeClaimTemplate:
+        spec:
+          # local-path: VMCluster gère sa propre réplication (replicationFactor=2).
+          # Longhorn x2 + VMCluster x2 = 4× overhead inutile.
+          storageClassName: local-path
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 20Gi
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 2Gi
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: vmstorage
+              topologyKey: kubernetes.io/hostname
+    podDisruptionBudget:
+      minAvailable: 1
+  vmselect:
+    replicaCount: 2
+    cacheMountPath: /select-cache
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 2Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: vmselect
+              topologyKey: kubernetes.io/hostname
+    podDisruptionBudget:
+      minAvailable: 1

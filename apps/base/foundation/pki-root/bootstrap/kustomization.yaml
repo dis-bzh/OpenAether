@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# OpenAether 0.5.0 — Bootstrap root OpenBao
+# 1 Job ArgoCD PostSync, idempotent, qui orchestre tout l'auto-unseal transit
+# via l'API HTTP (init Shamir → unseal → transit → seal token workload → rollout).
+namespace: foundation-pki-root
+
+resources:
+  - serviceaccount.yaml
+  - networkpolicy.yaml
+
+labels:
+  - includeSelectors: false
+    pairs:
+      openaether.io/managed: "true"
+      openaether.io/sprint: "0.5.0-sprint0"
+      openaether.io/component: openbao-bootstrap

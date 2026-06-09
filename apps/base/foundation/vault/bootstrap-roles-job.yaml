@@ -1,0 +1,302 @@
+# OpenAether 0.5.0 — Roles ESO + cert-manager sur OpenBao workload (Job idempotent)
+# ───────────────────────────────────────────────────────────────────────────────────
+# PostSync vault — s'exécute après que le StatefulSet openbao soit Healthy (3/3).
+# BeforeHookCreation: supprimé + recréé à chaque sync → idempotent sur bootstrap,
+# DRP (perte PVCs), config change, montée de version.
+#
+# Ce Job était l'ancien "step 8" de pki-root/bootstrap/00-bootstrap-job.yaml.
+# Extrait ici car il dépend du workload OpenBao (pas du root) et doit s'exécuter
+# APRÈS la Healthy du workload, pas juste après le root.
+#
+# Sécurité: set +x partout où des secrets transitent; aucune clé/token loggé.
+#
+# SA: openbao-vault-bootstrap (ns foundation-vault) — droits lecture-seule Secret
+# openbao-workload-recovery (root_token workload) + accès API OpenBao workload.
+# RBAC défini dans ce fichier (même kustomization → même namespace).
+# ───────────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-vault-bootstrap
+  namespace: foundation-vault
+  labels:
+    app: openbao-vault-bootstrap
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: openbao-vault-bootstrap
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: openbao-vault-bootstrap
+  namespace: foundation-vault
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: openbao-vault-bootstrap
+rules:
+  # Lire le root_token workload pour configurer auth/policies/roles.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+    resourceNames: ["openbao-workload-recovery"]
+  # Attendre que les pods workload soient Ready avant d'appeler l'API.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openbao-vault-bootstrap
+  namespace: foundation-vault
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: openbao-vault-bootstrap
+subjects:
+  - kind: ServiceAccount
+    name: openbao-vault-bootstrap
+    namespace: foundation-vault
+roleRef:
+  kind: Role
+  name: openbao-vault-bootstrap
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: openbao-vault-bootstrap
+  namespace: foundation-vault
+  labels:
+    app: openbao-vault-bootstrap
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: openbao-vault-bootstrap
+  annotations: {}
+spec:
+  backoffLimit: 5
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: openbao-vault-bootstrap
+        openaether.io/component: openbao-vault-bootstrap
+    spec:
+      serviceAccountName: openbao-vault-bootstrap
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bootstrap-roles
+          image: alpine/k8s:1.31.1
+          env:
+            - name: VAULT_NS
+              value: "foundation-vault"
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+
+              WL_ADDR="http://openbao.${VAULT_NS}.svc.cluster.local:8200"
+
+              # ── helper API workload ─────────────────────────────────────────
+              # Résultat dans /tmp/wlbody; code HTTP dans /tmp/wlhttp.
+              wlapi() {
+                local m="$1" p="$2" d="${3:-}" t="${4:-}"
+                local a=(-s -o /tmp/wlbody -w '%{http_code}' -X "$m")
+                [ -n "$t" ] && a+=(-H "X-Vault-Token: $t")
+                [ -n "$d" ] && a+=(-d "$d")
+                curl "${a[@]}" "${WL_ADDR}${p}" > /tmp/wlhttp
+                cat /tmp/wlbody
+              }
+              WH() { cat /tmp/wlhttp 2>/dev/null || echo "000"; }
+
+              # ── 1) Récupérer root_token workload ───────────────────────────
+              set +x
+              echo "════ Lecture root_token workload ════"
+              if ! kubectl get secret openbao-workload-recovery -n "$VAULT_NS" >/dev/null 2>&1; then
+                echo "⚠ Secret openbao-workload-recovery absent — workload non initialisé."
+                echo "  Ce Job sera re-exécuté au prochain sync ArgoCD."
+                echo "  Pour forcer: kubectl delete job openbao-vault-bootstrap -n $VAULT_NS"
+                exit 1
+              fi
+              WL_TOKEN="$(kubectl get secret openbao-workload-recovery -n "$VAULT_NS" \
+                -o jsonpath='{.data.root_token}' | base64 -d 2>/dev/null)"
+              if [ -z "$WL_TOKEN" ]; then
+                echo "ERREUR: root_token workload vide dans le Secret"; exit 1
+              fi
+              echo "  root_token workload récupéré"
+              set -x; set +x
+
+              # ── 2) Attente API workload ─────────────────────────────────────
+              echo "════ Attente API workload ($WL_ADDR) ════"
+              for i in $(seq 1 60); do
+                c="$(curl -s -o /dev/null -w '%{http_code}' \
+                  "${WL_ADDR}/v1/sys/health?uninitcode=200&sealedcode=200&standbyok=true" || true)"
+                [ "$c" != "000" ] && [ -n "$c" ] && { echo "  workload API up (health=$c)"; break; }
+                echo "  waiting API... ${i}/60 (code=$c)"; sleep 5
+              done
+
+              # ── 3) Résolution leader raft via /v1/sys/leader ──────────────
+              # Le service headless round-robin vers tous les pods (standby inclus).
+              # /v1/sys/leader donne l'URL du nœud actif → on y pointe toutes les
+              # écritures. Si le nœud actuel répond avec redirect_addr, on suit.
+              echo "════ Résolution leader raft workload ════"
+              set +x
+              LEADER_URL=""
+              for i in $(seq 1 24); do
+                LEADER_JSON="$(curl -s "${WL_ADDR}/v1/sys/leader" || true)"
+                LEADER_URL="$(echo "$LEADER_JSON" | jq -r '.leader_address // empty' 2>/dev/null || true)"
+                IS_SELF="$(echo "$LEADER_JSON" | jq -r '.is_self // "false"' 2>/dev/null || echo "false")"
+                if [ -n "$LEADER_URL" ] && [ "$LEADER_URL" != "null" ]; then
+                  echo "  leader trouvé: $LEADER_URL (is_self=${IS_SELF})"
+                  # Pointer wlapi vers le leader directement
+                  WL_ADDR="$LEADER_URL"
+                  # Retirer le trailing slash si présent
+                  WL_ADDR="${WL_ADDR%/}"
+                  break
+                fi
+                echo "  waiting leader... ${i}/24 (leader_address=${LEADER_URL:-vide})"
+                sleep 5
+              done
+              if [ -z "$LEADER_URL" ] || [ "$LEADER_URL" = "null" ]; then
+                echo "ERREUR: impossible de déterminer le leader raft après 2min"; exit 1
+              fi
+              set -x; set +x
+
+              # ── 4) PKI engine (idempotent) ──────────────────────────────────
+              echo "════ PKI + auth kubernetes workload ════"
+              set +x
+
+              # 4a. enable pki engine (ignore 400 = déjà présent)
+              wlapi POST /v1/sys/mounts/pki '{"type":"pki"}' "$WL_TOKEN" >/dev/null || true
+              echo "  pki mount: HTTP=$(WH) (204=créé, 400=déjà)"
+
+              # 4b. mount pki/workload (chemin attendu par ClusterIssuer openbao-workload)
+              wlapi POST /v1/sys/mounts/pki/workload '{"type":"pki"}' "$WL_TOKEN" >/dev/null || true
+              echo "  pki/workload mount: HTTP=$(WH) (204=créé, 400=déjà)"
+
+              # ── 5) Policy ESO (read-only KV) ───────────────────────────────
+              # Lecture secrets applicatifs dans le KV engine (secret/).
+              ESO_POLICY="$(printf 'path "secret/data/*" {\n  capabilities = ["read"]\n}\npath "secret/metadata/*" {\n  capabilities = ["read", "list"]\n}\n')"
+              wlapi PUT /v1/sys/policies/acl/external-secrets-read \
+                "$(jq -nc --arg p "$ESO_POLICY" '{policy:$p}')" "$WL_TOKEN" >/dev/null
+              echo "  policy external-secrets-read: HTTP=$(WH)"
+
+              # 5b. Policy secret-seeder (write KV — utilisée par ce Job step 10)
+              # Scoped au prefixe exact, pas wildcard général.
+              SEEDER_POLICY="$(printf 'path "secret/data/grafana/*" {\n  capabilities = ["create","update","read"]\n}\npath "secret/data/minio/*" {\n  capabilities = ["create","update","read"]\n}\npath "secret/data/longhorn/*" {\n  capabilities = ["create","update","read"]\n}\npath "secret/metadata/*" {\n  capabilities = ["read","list"]\n}\n')"
+              wlapi PUT /v1/sys/policies/acl/secret-seeder \
+                "$(jq -nc --arg p "$SEEDER_POLICY" '{policy:$p}')" "$WL_TOKEN" >/dev/null
+              echo "  policy secret-seeder: HTTP=$(WH)"
+
+              # ── 6) Role ESO ─────────────────────────────────────────────────
+              # SA: external-secrets, ns: foundation-pki-management
+              wlapi POST /v1/auth/kubernetes/role/external-secrets-operator \
+                "$(jq -nc '{
+                    bound_service_account_names:"external-secrets",
+                    bound_service_account_namespaces:"foundation-pki-management",
+                    token_policies:"external-secrets-read",
+                    token_ttl:"1h",
+                    token_max_ttl:"4h"}')" "$WL_TOKEN" >/dev/null
+              echo "  role external-secrets-operator: HTTP=$(WH)"
+
+              # ── 7) Policy cert-manager ──────────────────────────────────────
+              # Signer sur pki/workload/sign/* (chemin ClusterIssuer openbao-workload)
+              CM_POLICY="$(printf 'path "pki/workload/sign/*" {\n  capabilities = ["create", "update"]\n}\npath "pki/workload/cert/*" {\n  capabilities = ["read"]\n}\n')"
+              wlapi PUT /v1/sys/policies/acl/cert-manager-pki \
+                "$(jq -nc --arg p "$CM_POLICY" '{policy:$p}')" "$WL_TOKEN" >/dev/null
+              echo "  policy cert-manager-pki: HTTP=$(WH)"
+
+              # ── 8) Auth Kubernetes sur workload ────────────────────────────
+              wlapi POST /v1/sys/auth/kubernetes '{"type":"kubernetes"}' "$WL_TOKEN" >/dev/null || true
+              echo "  auth kubernetes workload: HTTP=$(WH) (204=activé, 400=déjà)"
+
+              CA_CRT="$(cat /var/run/secrets/kubernetes.io/serviceaccount/ca.crt)"
+              wlapi POST /v1/auth/kubernetes/config \
+                "$(jq -nc --arg ca "$CA_CRT" '{
+                    kubernetes_host:"https://kubernetes.default.svc.cluster.local",
+                    kubernetes_ca_cert:$ca,
+                    disable_iss_validation:true}')" "$WL_TOKEN" >/dev/null
+              CODE="$(WH)"
+              echo "  config auth k8s workload: HTTP=$CODE"
+              case "$CODE" in 200|204) : ;; *)
+                echo "ERREUR: config auth k8s workload a échoué (HTTP=$CODE)"; cat /tmp/wlbody; exit 1 ;; esac
+
+              # ── 9) Role cert-manager ────────────────────────────────────────
+              # SA: cert-manager, ns: cert-manager
+              wlapi POST /v1/auth/kubernetes/role/cert-manager-issuer \
+                "$(jq -nc '{
+                    bound_service_account_names:"cert-manager",
+                    bound_service_account_namespaces:"cert-manager",
+                    token_policies:"cert-manager-pki",
+                    token_ttl:"1h",
+                    token_max_ttl:"4h"}')" "$WL_TOKEN" >/dev/null
+              echo "  role cert-manager-issuer: HTTP=$(WH)"
+              set -x; set +x
+
+              # ── 10) Seed secrets Sprint C (grafana, minio, longhorn) ────────
+              # Idempotent: GET kv → HTTP 404 → générer + PUT ; HTTP 200 → no-op.
+              # Utilise le root_token workload déjà chargé (WL_TOKEN).
+              # set +x déjà actif depuis le début de ce bloc secret.
+              echo ""
+              echo "════ 10) Seed secrets Sprint C (grafana/admin, minio/root, longhorn/encryption) ════"
+
+              kv_seed() {
+                local path="$1"
+                local payload="$2"
+                wlapi GET "/v1/secret/data/${path}" '' "$WL_TOKEN" >/dev/null 2>&1
+                local code
+                code="$(WH)"
+                if [ "$code" = "200" ]; then
+                  echo "  secret/${path}: déjà présent → no-op"
+                  return 0
+                fi
+                echo "  secret/${path}: absent (HTTP=$code) → génération + seed"
+                wlapi POST "/v1/secret/data/${path}" \
+                  "$(jq -nc --argjson d "$payload" '{"data":$d}')" \
+                  "$WL_TOKEN" >/dev/null
+                echo "    → HTTP=$(WH)"
+              }
+
+              # Générer les valeurs aléatoires AVANT le kv_seed (set +x actif).
+              GRAFANA_PASS="$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)"
+              GRAFANA_DB_PASS="$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)"
+              MINIO_SECRET="$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)"
+              LONGHORN_PASS="$(openssl rand -base64 48 | tr -d '/+=')"
+
+              kv_seed "grafana/admin" \
+                "$(jq -nc --arg p "$GRAFANA_PASS" '{username:"admin",password:$p}')"
+              kv_seed "grafana/db" \
+                "$(jq -nc --arg p "$GRAFANA_DB_PASS" '{password:$p}')"
+              kv_seed "minio/root" \
+                "$(jq -nc --arg s "$MINIO_SECRET" '{accessKey:"minio",secretKey:$s}')"
+              kv_seed "longhorn/encryption" \
+                "$(jq -nc --arg p "$LONGHORN_PASS" '{passphrase:$p}')"
+
+              echo "  ✅ Secrets Sprint C seedés (idempotents)"
+              set -x; set +x
+
+              echo ""
+              echo "✅ Roles ESO + cert-manager configurés + secrets Sprint C seedés"
+          securityContext:
+            capabilities:
+              drop: ["ALL"]
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false   # kubectl/curl écrivent dans /tmp
+            runAsNonRoot: true
+            runAsUser: 1000
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

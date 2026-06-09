@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: foundation-pki-management
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: "external-secrets"

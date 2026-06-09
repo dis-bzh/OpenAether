@@ -108,8 +108,8 @@ module "scw" {
   instance_type    = local.scw_dist.instance_type
   additional_zones = local.scw_dist.zones != null ? local.scw_dist.zones : ["fr-par-1", "fr-par-2", "fr-par-3"]
 
-  admin_ip        = var.admin_ip
-  bastion_ssh_key = lookup(var.bastion_ssh_keys, "scaleway", "")
+  admin_ip         = var.admin_ip
+  bastion_ssh_keys = lookup(var.bastion_ssh_keys, "scaleway", [])
 }
 
 # ==============================================================================
@@ -132,8 +132,8 @@ module "ovh" {
   availability_zones = local.ovh_dist.availability_zones
   bastion_image_id   = local.ovh_dist.bastion_image_id
 
-  admin_ip        = var.admin_ip
-  bastion_ssh_key = lookup(var.bastion_ssh_keys, "ovh", "")
+  admin_ip         = var.admin_ip
+  bastion_ssh_keys = lookup(var.bastion_ssh_keys, "ovh", [])
 }
 
 # ==============================================================================
@@ -155,8 +155,8 @@ module "outscale" {
   availability_zones = local.osc_dist.availability_zones
   bastion_image_id   = local.osc_dist.bastion_image_id
 
-  admin_ip        = var.admin_ip
-  bastion_ssh_key = lookup(var.bastion_ssh_keys, "outscale", "")
+  admin_ip         = var.admin_ip
+  bastion_ssh_keys = lookup(var.bastion_ssh_keys, "outscale", [])
 }
 
 # ==============================================================================
@@ -224,11 +224,11 @@ locals {
 
 locals {
   cilium_manifest = var.cilium_manifest != null ? var.cilium_manifest : file("${path.module}/bootstrap-manifests/cilium.yaml")
-  argocd_manifest = var.argocd_manifest != null ? var.argocd_manifest : file("${path.module}/bootstrap-manifests/argocd-install.yaml")
-  root_app_manifest = var.root_app_manifest != null ? var.root_app_manifest : templatefile("${path.module}/bootstrap-manifests/argocd-root-app.yaml.tftpl", {
-    namespace    = var.argocd_namespace
+  flux_manifest   = var.flux_manifest != null ? var.flux_manifest : file("${path.module}/bootstrap-manifests/flux-install.yaml")
+  flux_bootstrap_manifest = var.flux_bootstrap_manifest != null ? var.flux_bootstrap_manifest : templatefile("${path.module}/bootstrap-manifests/flux-bootstrap.yaml.tftpl", {
+    namespace    = var.flux_namespace
     git_repo_url = var.git_repo_url
-    environment  = var.environment
+    git_branch   = "feature/implement-gitops-management"
     cluster_role = var.cluster_role
   })
 }
@@ -262,11 +262,11 @@ module "talos" {
   worker_endpoints        = var.talos_bootstrap ? [for i in range(local.total_workers) : "127.0.0.1:${50100 + i}"] : []
 
   # Bootstrap manifests — Cilium is always injected (CNI required),
-  # ArgoCD only on initial bootstrap (not on upgrades/DRP)
+  # Flux only on initial bootstrap (not on upgrades/DRP)
   bootstrap_manifests_enabled = var.talos_bootstrap
   cilium_manifest             = local.cilium_manifest
-  argocd_manifest             = local.argocd_manifest
-  root_app_manifest           = local.root_app_manifest
+  flux_manifest               = local.flux_manifest
+  flux_bootstrap_manifest     = local.flux_bootstrap_manifest
 
   depends_on = [module.scw, module.ovh, module.outscale]
 }

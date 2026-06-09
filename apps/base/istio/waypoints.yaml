@@ -1,0 +1,22 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: istio-waypoint
+  namespace: foundation-service-mesh
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintB"
+    openaether.io/component: "istio"
+spec:
+  gatewayClassName: istio
+  listeners:
+    - name: mesh
+      port: 15008
+      protocol: HBONE
+      allowedRoutes:
+        namespaces:
+          from: All
+---
+# Waypoint par service via annotation (ex: openbao, keycloak, demo-app)
+# Les services meshés déclarent: annotations: networking.istio.io/use-waypoint=istio-waypoint
+# Les HTTPRoutes pointent vers le Gateway openaether-gateway (services-gateway)

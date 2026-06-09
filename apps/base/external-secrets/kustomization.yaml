@@ -1,8 +1,30 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: external-secrets
+# OpenAether 0.5.0 — fix P0 sync:
+# ESO install.yaml vendoré ne crée aucun Namespace, le kustomize
+# réécrit namespace sur tous les objets vers `foundation-pki-management`
+# (sémantique: PKI/secret material; on garde un ns dédié pour ESO)
+namespace: foundation-pki-management
 
 resources:
+  - namespace.yaml
   - install.yaml
-  - clustersecretstore.yaml
+  - rbac-cert-controller-create.yaml
+
+patches:
+  - path: patch-cert-controller-ns.yaml
+    target:
+      kind: Deployment
+      name: external-secrets-cert-controller
+  - path: patch-webhook-dns.yaml
+    target:
+      kind: Deployment
+      name: external-secrets-webhook
+
+labels:
+  - includeSelectors: true
+    pairs:
+      openaether.io/managed: "true"
+      openaether.io/sprint: "0.5.0-sprint0"
+      openaether.io/component: external-secrets

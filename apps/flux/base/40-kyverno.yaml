@@ -1,0 +1,40 @@
+# Groupe 40 — Kyverno (admission controller + policies)
+# Isolation : politiques admission, pas de dépendance sur la stack applicative.
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: kyverno
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  timeout: 10m
+  sourceRef:
+    kind: GitRepository
+    name: openaether
+  path: ./apps/base/kyverno
+  prune: true
+  wait: true
+  suspend: true
+  dependsOn:
+    - name: namespaces
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: kyverno-policies
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  timeout: 5m
+  sourceRef:
+    kind: GitRepository
+    name: openaether
+  path: ./apps/base/kyverno-policies
+  prune: true
+  wait: true
+  suspend: true
+  dependsOn:
+    - name: kyverno

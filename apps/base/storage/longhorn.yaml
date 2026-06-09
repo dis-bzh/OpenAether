@@ -1,0 +1,77 @@
+# OpenAether 0.5.0 Sprint C — Longhorn distributed block storage
+# ──────────────────────────────────────────────────────────────────
+# Longhorn fournit le stockage distribué pour les apps qui n'ont pas
+# leur propre réplication (single-replica apps, RWX, volumes chiffrés).
+#
+# Apps qui auto-répliquent (CNPG, VMCluster, Loki singleBinary)
+# → utiliser StorageClass local-path ou longhorn-x1-rwo pour éviter
+#   la double réplication (app 2× + Longhorn 2× = 4× le volume de données).
+#
+# Talos: kubeletRootDir=/var/lib/kubelet (standard).
+# Cilium CNI: pas d'iSCSI mais Longhorn utilise NFS/TCP → OK.
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: longhorn
+  namespace: longhorn-system
+spec:
+  url: https://charts.longhorn.io
+  interval: 1h
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: longhorn
+  namespace: longhorn-system
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: longhorn
+      version: "1.7.2"
+      sourceRef:
+        kind: HelmRepository
+        name: longhorn
+        namespace: longhorn-system
+      interval: 1h
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  values:
+    defaultSettings:
+      # Nombre de répliques par défaut pour les nouveaux volumes.
+      # Surchargé par StorageClass (numberOfReplicas).
+      defaultReplicaCount: 2
+      # Espace minimal disponible avant de refuser de nouveaux volumes.
+      storageMinimalAvailablePercentage: 15
+      # Supprimer automatiquement les volumes orphelins (sans PVC).
+      orphanAutoDeletion: true
+      # backupTarget: configuré par overlay cloud (S3 cross-cloud).
+      backupTarget: ""
+      # kubelet path Talos
+      kubernetesClusterAutoscalerEnabled: false
+    longhornManager:
+      tolerations: []
+      nodeSelector: {}
+    longhornDriver:
+      tolerations: []
+      nodeSelector: {}
+    csi:
+      # Talos: /var/lib/kubelet est le kubelet root dir standard.
+      kubeletRootDir: /var/lib/kubelet
+      attacherReplicaCount: 2
+      provisionerReplicaCount: 2
+      resizerReplicaCount: 2
+      snapshotterReplicaCount: 2
+    persistence:
+      # Ne pas définir de StorageClass par défaut ici — local-path reste default.
+      defaultClass: false
+      defaultClassReplicaCount: 2
+    ingress:
+      enabled: false  # UI accessible via port-forward ou HTTPRoute sprint D

@@ -1,0 +1,25 @@
+# OpenAether 0.5.0 — Allow DNS (kube-system/CoreDNS) pour tous les pods
+# CCNP qui autorise egress UDP/TCP 53 vers kube-dns.
+# Cette policy est ESSENTIELLE: sans DNS, aucun service ne peut démarrer.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: allow-dns
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: platform
+spec:
+  description: "Allow egress DNS UDP/TCP 53 vers kube-system/CoreDNS depuis tous les pods."
+  endpointSelector: {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP

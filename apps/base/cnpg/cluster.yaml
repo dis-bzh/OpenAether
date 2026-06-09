@@ -1,8 +1,16 @@
+# OpenAether 0.5.0 fix P0 sync: ns databases -> foundation-databases
+# + storageClass openebs-hostpath (inexistant) -> local-path (provisioner actif).
+# NB: Keycloak 26.0 sera remplacé par Zitadel POC sprint 2; ce Cluster CNPG
+# reste pour valider la chaîne BDD HA + sera réutilisé pour Zitadel (PG).
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
   name: keycloak-db
-  namespace: databases
+  namespace: foundation-databases
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: cnpg-keycloak-db
 spec:
   instances: 3
   imageName: ghcr.io/cloudnative-pg/postgresql:16.1
@@ -14,16 +22,22 @@ spec:
       shared_buffers: "128MB"
 
   # Storage Configuration
+  # OpenAether 0.5.0 fix P0 sync: storageClassName aligné sur la SC provisionnée
+  # par base/storage (local-path). openebs-hostpath n'existe pas dans le cluster.
   storage:
-    size: 1Gi
-    storageClass: openebs-hostpath
+    size: 5Gi
+    storageClass: local-path
 
-  # Bootstrap from SQL (create DB/User if needed, though init_secrets.sh does user/pass via Secret)
+  # Bootstrap from SQL (create DB/User if needed)
   bootstrap:
     initdb:
       database: keycloak
       owner: keycloak
-      # References the secret created by init_secrets.sh
+      # References the secret created by ExternalSecret (apps/base/keycloak/secrets.yaml)
+      # Note: ce Secret est dans services-identity (où Keycloak tourne), le Cluster
+      # CNPG doit le référencer en cross-ns via la clé `secret` (Keycloak Operator
+      # supporte cela via le paramètre `enabled` + bootstrap.secret.name; en cas de
+      # non-fonctionnement, créer un mirror ExternalSecret dans foundation-databases).
       secret:
         name: keycloak-db-app
 
@@ -31,9 +45,15 @@ spec:
   monitoring:
     enablePodMonitor: true
 
-  # Backup (example - to be configured with S3)
+  # Backup (sprint 4 obs: barman + S3)
   # backup:
   #   barmanObjectStore:
-  #     destinationPath: s3://backups/
+  #     destinationPath: s3://openaether-backups/
   #     endpointURL: https://s3.fr-par.scw.cloud
-  #     s3Credentials: ...
+  #     s3Credentials:
+  #       accessKeyId:
+  #         name: backup-s3-creds
+  #         key: access-key
+  #       secretAccessKey:
+  #         name: backup-s3-creds
+  #         key: secret-key

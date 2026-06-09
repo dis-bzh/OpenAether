@@ -1,0 +1,19 @@
+# Groupe 00 — Namespaces
+# Prérequis absolu : tout le reste dépend de lui.
+# Pas de dependsOn — premier à reconcilier.
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: namespaces
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  timeout: 3m
+  sourceRef:
+    kind: GitRepository
+    name: openaether
+  path: ./apps/base/namespaces
+  prune: true
+  wait: true

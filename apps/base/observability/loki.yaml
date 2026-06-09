@@ -1,0 +1,137 @@
+# OpenAether 0.5.0 Sprint C — Loki HA (stockage logs)
+# ──────────────────────────────────────────────────────────────────
+# Mode: SingleBinary x2 (simple à opérer, HA par réplication Loki).
+# Backend: S3 (MinIO en local, S3 natif en cloud via overlay).
+# replication_factor=2: chaque chunk est répliqué sur les 2 instances.
+#
+# Credentials S3: ExternalSecret loki-s3-credentials (externalsecret-loki.yaml)
+# → en local: MinIO (secret/minio/root)
+# → en cloud: patch ExternalSecret via overlay (secret/s3/loki)
+#
+# schemaConfig v13 (tsdb): schéma recommandé depuis Loki 2.8+.
+# auth_enabled=false: pas d'auth multi-tenant (cluster privé).
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: grafana
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: loki
+spec:
+  url: https://grafana.github.io/helm-charts
+  interval: 1h
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: loki
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: loki
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: loki
+      version: "6.25.0"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: services-observability
+      interval: 1h
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  valuesFrom:
+    - kind: Secret
+      name: loki-s3-credentials
+      valuesKey: accessKey
+      targetPath: loki.storage.s3.accessKeyId
+    - kind: Secret
+      name: loki-s3-credentials
+      valuesKey: secretKey
+      targetPath: loki.storage.s3.secretAccessKey
+  values:
+    deploymentMode: SingleBinary
+    singleBinary:
+      replicas: 2
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: loki
+                    app.kubernetes.io/component: single-binary
+                topologyKey: kubernetes.io/hostname
+      persistence:
+        enabled: true
+        storageClass: local-path
+        size: 10Gi
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 1Gi
+    loki:
+      auth_enabled: false
+      commonConfig:
+        replication_factor: 2
+      storage:
+        type: s3
+        bucketNames:
+          chunks: loki
+          ruler: loki
+          admin: loki
+        s3:
+          # endpoint surchargé par overlay cloud (S3 natif provider).
+          endpoint: http://minio.foundation-storage:9000
+          region: us-east-1
+          s3ForcePathStyle: true
+          insecure: true
+      schemaConfig:
+        configs:
+          - from: "2024-01-01"
+            store: tsdb
+            object_store: s3
+            schema: v13
+            index:
+              prefix: loki_index_
+              period: 24h
+      limits_config:
+        retention_period: 30d
+        reject_old_samples: true
+        reject_old_samples_max_age: 168h
+        ingestion_rate_mb: 10
+        ingestion_burst_size_mb: 20
+    # Pas de MinIO intégré (on utilise notre propre instance).
+    minio:
+      enabled: false
+    # Pas de gateway/ingress (accès interne seulement via service ClusterIP).
+    gateway:
+      enabled: false
+    # Désactiver les composants distribués non nécessaires en SingleBinary.
+    backend:
+      replicas: 0
+    read:
+      replicas: 0
+    write:
+      replicas: 0
+    monitoring:
+      serviceMonitor:
+        enabled: false
+      selfMonitoring:
+        enabled: false
+      lokiCanary:
+        enabled: false

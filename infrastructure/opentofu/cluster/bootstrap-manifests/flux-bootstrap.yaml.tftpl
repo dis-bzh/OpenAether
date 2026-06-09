@@ -1,0 +1,37 @@
+# OpenAether — Flux bootstrap manifest (template)
+# Injecté en inline_manifest Talos lors du bootstrap initial.
+# Remplace argocd-root-app.yaml.tftpl.
+#
+# Variables OpenTofu :
+#   ${git_repo_url}   — ex: https://github.com/dis-bzh/OpenAether.git
+#   ${git_branch}     — ex: main
+#   ${cluster_role}   — ex: management (→ apps/flux/management)
+#   ${namespace}      — ex: flux-system
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: openaether
+  namespace: ${namespace}
+spec:
+  interval: 1m
+  url: ${git_repo_url}
+  ref:
+    branch: ${git_branch}
+  timeout: 60s
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: openaether-platform
+  namespace: ${namespace}
+spec:
+  interval: 10m
+  retryInterval: 2m
+  timeout: 5m
+  sourceRef:
+    kind: GitRepository
+    name: openaether
+  path: ./apps/flux/${cluster_role}
+  prune: true
+  wait: false

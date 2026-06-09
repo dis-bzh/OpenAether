@@ -1,0 +1,30 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: ztunnel
+  namespace: foundation-service-mesh
+spec:
+  chart:
+    spec:
+      chart: ztunnel
+      version: "1.24.2"
+      sourceRef:
+        kind: HelmRepository
+        name: istio
+        namespace: foundation-service-mesh
+      interval: 1h
+  dependsOn:
+    - name: istio-cni
+  values:
+    # ztunnel: mTLS L4 ambiant, HBONE (HTTP/2 over TLS) vers waypoints
+    # Pas de sidecar = 3× moins de RAM qu'Istio sidecar classique
+    replicaCount: 1  # DaemonSet sur chaque nœud
+    hub: docker.io/istio
+    tag: 1.24.2
+    resources:
+      limits:
+        cpu: 200m
+        memory: 128Mi
+      requests:
+        cpu: 50m
+        memory: 32Mi

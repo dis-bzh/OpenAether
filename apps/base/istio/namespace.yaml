@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: foundation-service-mesh
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintB"
+    openaether.io/component: "istio"
+    istio.io/dataplane-mode: ambient
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: services-gateway
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintB"
+    openaether.io/component: "gateway"

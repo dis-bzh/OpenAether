@@ -1,0 +1,29 @@
+# OpenAether 0.5.0 Sprint C — HTTPRoute Grafana → openaether-gateway
+# Migré de base.yaml (sprint 0.5.0-sprint0) vers ce fichier dédié.
+# parentRef: openaether-gateway (Istio, ns services-gateway, from: All).
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: grafana
+  namespace: services-observability
+  labels:
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprintC"
+    openaether.io/component: grafana
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: openaether-gateway
+      namespace: services-gateway
+  hostnames:
+    - "grafana.openaether.eu"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: grafana
+          port: 80

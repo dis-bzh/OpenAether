@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: openbao
+  namespace: foundation-vault
+  labels:
+    app: openbao
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: openbao-workload
+spec:
+  clusterIP: None
+  # CRITIQUE: les pods sealed sont NotReady. Sans ceci, retry_join raft ne peut
+  # pas résoudre les peers au boot → deadlock (aucun pod ne devient Ready).
+  publishNotReadyAddresses: true
+  ports:
+    - name: api
+      port: 8200
+      targetPort: 8200
+      protocol: TCP
+    - name: cluster
+      port: 8201
+      targetPort: 8201
+      protocol: TCP
+  selector:
+    app: openbao
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openbao-ui
+  namespace: foundation-vault
+  labels:
+    app: openbao
+    openaether.io/managed: "true"
+    openaether.io/sprint: "0.5.0-sprint0"
+    openaether.io/component: openbao-workload
+spec:
+  type: ClusterIP
+  ports:
+    - name: ui
+      port: 8200
+      targetPort: 8200
+      protocol: TCP
+  selector:
+    app: openbao

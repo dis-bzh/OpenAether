@@ -192,14 +192,6 @@ tasks:
   # Multi-Cluster Management
   # ===========================================================================
 
-  register-spoke:
-    desc: "Register a spoke cluster in ArgoCD hub. Usage: task register-spoke CLUSTER=openaether-ovh-prod PROVIDER=ovh"
-    vars:
-      CLUSTER: '{{.CLUSTER | default ""}}'
-      PROVIDER: '{{.PROVIDER | default ""}}'
-    cmds:
-      - ./scripts/register-spoke.sh "{{.CLUSTER}}" "{{.PROVIDER}}"
-
   failover:
     desc: "Cross-provider failover: stand up a 2nd management cluster on another cloud. Usage: task failover PROVIDER=ovh"
     vars:
@@ -226,7 +218,7 @@ tasks:
         tofu apply -var talos_bootstrap=true -auto-approve
 
   local-test:
-    desc: "Full end-to-end local test: 3 CP + 2 workers + etcd quorum + Cilium + ArgoCD + GitOps"
+    desc: "Full end-to-end local test: 3 CP + 2 workers + etcd quorum + Cilium + Flux + GitOps"
     cmds:
       - ./scripts/test-talos-local.sh
 
@@ -239,15 +231,16 @@ tasks:
         echo "=== etcd quorum ===" && talosctl --nodes 10.5.0.10 --endpoints 127.0.0.1:50000 etcd members || true
         echo "=== Kubernetes nodes ===" && kubectl get nodes -o wide || true
         echo "=== kube-system pods ===" && kubectl get pods -n kube-system || true
-        echo "=== ArgoCD ===" && kubectl get applications -n management-gitops 2>/dev/null || echo "not deployed yet"
+        echo "=== Flux Kustomizations ===" && flux get kustomizations 2>/dev/null || echo "Flux not deployed yet"
+        echo "=== Flux HelmReleases ===" && flux get helmreleases -A 2>/dev/null || echo "no HelmReleases"
 
-  local-argocd:
-    desc: "Port-forward ArgoCD UI to localhost:8080"
+  local-flux:
+    desc: "Port-forward Flux source-controller UI (debug) to localhost:9090"
     cmds:
       - |
         export KUBECONFIG=infrastructure/opentofu-local/kubeconfig
-        echo "ArgoCD UI → https://localhost:8080"
-        kubectl -n management-gitops port-forward svc/argocd-server 8080:443
+        echo "Flux source-controller → http://localhost:9090"
+        kubectl -n flux-system port-forward svc/source-controller 9090:80
 
   local-down:
     desc: "Destroy local Talos cluster (containers + volumes + network + state)"
@@ -263,12 +256,25 @@ tasks:
   # ===========================================================================
 
   bootstrap:
-    desc: Apply ArgoCD bootstrap manifests (if inlineManifests failed)
+    desc: "Bootstrap Flux on a running cluster (if inline manifests failed). Usage: task bootstrap [ROLE=management|local]"
+    vars:
+      ROLE: '{{.ROLE | default "local"}}'
     cmds:
-      - kubectl apply -k apps/bootstrap/overlays/prod
+      - |
+        export KUBECONFIG=infrastructure/opentofu-local/kubeconfig
+        flux install
+        kubectl apply -k apps/flux/{{.ROLE}}
+
+  register-spoke:
+    desc: "Register a spoke cluster in Flux hub. Usage: task register-spoke CLUSTER=openaether-ovh-prod PROVIDER=ovh"
+    vars:
+      CLUSTER: '{{.CLUSTER | default ""}}'
+      PROVIDER: '{{.PROVIDER | default ""}}'
+    cmds:
+      - ./scripts/register-spoke.sh "{{.CLUSTER}}" "{{.PROVIDER}}"
 
   render-manifests:
-    desc: Render/update bootstrap manifests (Cilium, ArgoCD)
+    desc: Render/update bootstrap manifests (Cilium + Flux)
     cmds:
       - ./scripts/render-bootstrap-manifests.sh
 
