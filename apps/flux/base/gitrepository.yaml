@@ -11,5 +11,5 @@ spec:
   interval: 1m
   url: https://github.com/dis-bzh/OpenAether.git
   ref:
-    branch: feature/implement-gitops-management
+    branch: main
   timeout: 60s

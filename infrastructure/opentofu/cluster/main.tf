@@ -228,7 +228,7 @@ locals {
   flux_bootstrap_manifest = var.flux_bootstrap_manifest != null ? var.flux_bootstrap_manifest : templatefile("${path.module}/bootstrap-manifests/flux-bootstrap.yaml.tftpl", {
     namespace    = var.flux_namespace
     git_repo_url = var.git_repo_url
-    git_branch   = "feature/implement-gitops-management"
+    git_branch   = "main"
     cluster_role = var.cluster_role
   })
 }
