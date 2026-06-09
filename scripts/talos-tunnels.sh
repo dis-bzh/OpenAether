@@ -66,7 +66,8 @@ ssh-keygen -R "$BASTION" >/dev/null 2>&1 || true
 
 open_one() { # localport nodeip
   nohup ssh -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes \
-    -o ServerAliveInterval=30 -i "$KEY" -N -L "$1:$2:50000" "${BUSER}@${BASTION}" \
+    -o ServerAliveInterval=15 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
+    -i "$KEY" -N -L "$1:$2:50000" "${BUSER}@${BASTION}" \
     >/dev/null 2>&1 &
   echo $! >>"$PIDFILE"
 }
