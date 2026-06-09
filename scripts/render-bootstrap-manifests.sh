@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ─────────────────────────────────────────────────────────────
 # OpenAether — Render Bootstrap Manifests
-# Generates static Cilium and ArgoCD manifests for Talos
+# Generates static Cilium + Flux manifests for Talos
 # inlineManifests injection.
 #
 # Prerequisites: helm, curl
@@ -24,7 +24,7 @@ fi
 
 # Versions — update these when upgrading
 CILIUM_VERSION="${CILIUM_VERSION:-1.19.2}"
-ARGOCD_VERSION="${ARGOCD_VERSION:-v3.3.2}"
+FLUX_VERSION="${FLUX_VERSION:-}"
 
 mkdir -p "${MANIFESTS_DIR}"
 
@@ -46,7 +46,6 @@ if [[ "$LOCAL_MODE" == "true" ]]; then
   # Local mode: simplified Cilium for Docker/WSL2
   # - kubeProxyReplacement=false: use iptables (no eBPF kube-proxy replacement)
   # - encryption=false: no WireGuard (simpler for single-node Docker)
-  # - nodemonitor=false: reduces resource usage in local
   helm template cilium cilium/cilium \
     --version "${CILIUM_VERSION}" \
     --namespace kube-system \
@@ -85,76 +84,29 @@ else
 fi
 
 # ─────────────────────────────────────────────────────
-# 2. Download + namespace the ArgoCD install manifest
-#
-# The upstream install.yaml is namespace-agnostic (meant for `kubectl apply -n
-# argocd`). Injected verbatim as a Talos inlineManifest — which carries no
-# namespace context — its namespaced resources land in `default`, and ArgoCD
-# then watches `default` instead of where the root app lives. Kustomize it into
-# ${ARGOCD_NAMESPACE} (this also rewrites the ClusterRoleBinding subject
-# namespaces) and prepend the Namespace so it exists before its resources apply.
+# 2. Download Flux install manifest
 # ─────────────────────────────────────────────────────
-ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-management-gitops}"
-echo "🔧 Downloading ArgoCD ${ARGOCD_VERSION} install manifest (namespaced to ${ARGOCD_NAMESPACE})..."
-
-ARGOCD_TMP="$(mktemp -d)"
-trap 'rm -rf "${ARGOCD_TMP}"' EXIT
-
-curl -sL \
-  "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml" \
-  > "${ARGOCD_TMP}/install.yaml"
-
-# Verify download succeeded (file should be >1KB)
-if [ ! -s "${ARGOCD_TMP}/install.yaml" ] || [ "$(wc -c < "${ARGOCD_TMP}/install.yaml")" -lt 1000 ]; then
-  echo "  ❌ ArgoCD manifest download failed or is too small"
-  exit 1
+if [[ "$LOCAL_MODE" == "false" ]]; then
+  echo "🔧 Downloading Flux install manifest${FLUX_VERSION:+ (${FLUX_VERSION})}..."
+  FLUX_URL="https://github.com/fluxcd/flux2/releases/latest/download/install.yaml"
+  if [[ -n "${FLUX_VERSION}" ]]; then
+    FLUX_URL="https://github.com/fluxcd/flux2/releases/download/${FLUX_VERSION}/install.yaml"
+  fi
+  curl -sL "${FLUX_URL}" > "${MANIFESTS_DIR}/flux-install.yaml"
+  if [ ! -s "${MANIFESTS_DIR}/flux-install.yaml" ] || [ "$(wc -c < "${MANIFESTS_DIR}/flux-install.yaml")" -lt 1000 ]; then
+    echo "  ❌ Flux manifest download failed or is too small"
+    exit 1
+  fi
+  echo "  ✅ Written to bootstrap-manifests/flux-install.yaml"
 fi
-
-cat > "${ARGOCD_TMP}/namespace.yaml" <<EOF
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: ${ARGOCD_NAMESPACE}
-  labels:
-    pod-security.kubernetes.io/enforce: privileged
-    pod-security.kubernetes.io/audit: privileged
-    pod-security.kubernetes.io/warn: privileged
-EOF
-
-cat > "${ARGOCD_TMP}/kustomization.yaml" <<EOF
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-namespace: ${ARGOCD_NAMESPACE}
-resources:
-  - namespace.yaml
-  - install.yaml
-EOF
-
-kubectl kustomize "${ARGOCD_TMP}" > "${MANIFESTS_DIR}/argocd-install.yaml"
-
-# kustomize rewrites RoleBinding subject namespaces but NOT ClusterRoleBinding
-# ones (a long-standing quirk), leaving the 3 ArgoCD ClusterRoleBindings pointing
-# at SAs in the upstream-default "argocd" namespace — which don't exist here, so
-# those controllers would get no cluster permissions. After namespacing every
-# resource, "namespace: argocd" only survives on those subjects, so fix them.
-sed -i "s/^\( *namespace: \)argocd\$/\1${ARGOCD_NAMESPACE}/" "${MANIFESTS_DIR}/argocd-install.yaml"
-
-# Verify the kustomize output is sane (should still be >1KB)
-if [ ! -s "${MANIFESTS_DIR}/argocd-install.yaml" ] || [ "$(wc -c < "${MANIFESTS_DIR}/argocd-install.yaml")" -lt 1000 ]; then
-  echo "  ❌ ArgoCD manifest kustomize failed or is too small"
-  exit 1
-fi
-
-echo "  ✅ Written to bootstrap-manifests/argocd-install.yaml (namespace: ${ARGOCD_NAMESPACE})"
 
 # ─────────────────────────────────────────────────────
 # 3. Summary
 # ─────────────────────────────────────────────────────
 echo ""
-echo ""
 echo "📋 Bootstrap manifests rendered:"
-echo "   Cilium:  ${CILIUM_VERSION} ($([ "$LOCAL_MODE" == "true" ] && echo "local — simplified" || echo "production — WireGuard"))"
-echo "   ArgoCD:  ${ARGOCD_VERSION}"
+echo "   Cilium: ${CILIUM_VERSION} ($([ "$LOCAL_MODE" == "true" ] && echo "local — simplified" || echo "production — WireGuard"))"
+[[ "$LOCAL_MODE" == "false" ]] && echo "   Flux:   ${FLUX_VERSION:-latest}"
 echo ""
 echo "   Files:"
 ls -lh "${MANIFESTS_DIR}"/*.yaml 2>/dev/null || true
@@ -162,9 +114,9 @@ ls -lh "${MANIFESTS_DIR}"/*.tftpl 2>/dev/null || true
 echo ""
 if [[ "$LOCAL_MODE" == "true" ]]; then
   echo "💡 Local manifests generated. Drive the 3-CP Docker cluster with:"
-  echo "   ./scripts/test-talos-local.sh        # or: task local-up"
+  echo "   ./scripts/test-talos-local.sh        # or: task local-test"
   echo "   (it reads bootstrap-manifests/cilium-local.yaml into TF_VAR_cilium_manifest)"
 else
   echo "💡 Commit these files to the repository."
-  echo "   Re-run this script when upgrading Cilium or ArgoCD versions."
+  echo "   Re-run this script when upgrading Cilium or Flux versions."
 fi

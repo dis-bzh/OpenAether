@@ -9,7 +9,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1m
-  url: https://github.com/dis-bzh/OpenAether.git
+  url: https://github.com/dis-bzh/OpenAether-apps.git
   ref:
     branch: main
   timeout: 60s
