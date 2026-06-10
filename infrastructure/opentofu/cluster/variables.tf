@@ -150,7 +150,7 @@ variable "flux_bootstrap_manifest" {
 # Bucket names are DERIVED from this convention (see locals in backup.tf), so you
 # only provide the endpoints/regions of the two stores here. tfstate client-side
 # encryption is the backend's encryption{} block (AES-GCM); the artifacts are
-# client-side encrypted with gpg (AES-256) by scripts/backup-artifacts.sh.
+# client-side encrypted with gpg (AES-256) by scripts/ops/backup-artifacts.sh.
 # ==============================================================================
 
 variable "s3_primary_endpoint" {
