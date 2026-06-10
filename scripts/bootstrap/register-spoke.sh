@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# OpenAether — Register a spoke cluster in ArgoCD (management cluster hub)
+# OpenAether — Register a spoke cluster in Flux (management cluster hub)
 #
 # Usage:
 #   ./scripts/register-spoke.sh <cluster-name> <provider>
@@ -27,7 +27,7 @@ TOFU_DIR="${SCRIPT_DIR}/../infrastructure/opentofu"
 MGMT_KUBECONFIG="${KUBECONFIG_MANAGEMENT:-${HOME}/.kube/config}"
 ARGOCD_NS="management-gitops"
 
-echo "🔗 Registering spoke cluster '${CLUSTER}' (provider: ${PROVIDER}) in ArgoCD..."
+echo "🔗 Registering spoke cluster '${CLUSTER}' (provider: ${PROVIDER}) in Flux..."
 
 # 1. Retrieve spoke kubeconfig from OpenTofu output
 echo "  → Retrieving kubeconfig from OpenTofu state..."
@@ -46,41 +46,41 @@ SPOKE_TOKEN=$(KUBECONFIG="${SPOKE_KUBECONFIG}" kubectl -n kube-system get servic
 # Use bearer token from kubeconfig if available (Talos generates one)
 SPOKE_BEARER=$(KUBECONFIG="${SPOKE_KUBECONFIG}" kubectl config view --minify --raw -o jsonpath='{.users[0].user.token}' 2>/dev/null || echo "")
 if [[ -z "${SPOKE_BEARER}" ]]; then
-  # Fallback: create a service account on the spoke cluster for ArgoCD
+  # Fallback: create a service account on the spoke cluster for Flux
   KUBECONFIG="${SPOKE_KUBECONFIG}" kubectl apply -f - <<EOF
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: argocd-manager
+  name: flux-manager
   namespace: kube-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: argocd-manager
+  name: flux-manager
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: cluster-admin
 subjects:
   - kind: ServiceAccount
-    name: argocd-manager
+    name: flux-manager
     namespace: kube-system
 ---
 apiVersion: v1
 kind: Secret
 metadata:
-  name: argocd-manager-token
+  name: flux-manager-token
   namespace: kube-system
   annotations:
-    kubernetes.io/service-account.name: argocd-manager
+    kubernetes.io/service-account.name: flux-manager
 type: kubernetes.io/service-account-token
 EOF
   sleep 3
-  SPOKE_BEARER=$(KUBECONFIG="${SPOKE_KUBECONFIG}" kubectl -n kube-system get secret argocd-manager-token -o jsonpath='{.data.token}' | base64 -d)
+  SPOKE_BEARER=$(KUBECONFIG="${SPOKE_KUBECONFIG}" kubectl -n kube-system get secret flux-manager-token -o jsonpath='{.data.token}' | base64 -d)
 fi
 
-# 3. Create ArgoCD cluster secret on the management cluster
+# 3. Create Flux cluster secret on the management cluster
 echo "  → Creating cluster secret on management cluster..."
 KUBECONFIG="${MGMT_KUBECONFIG}" kubectl apply -f - <<EOF
 apiVersion: v1
@@ -89,7 +89,7 @@ metadata:
   name: cluster-${CLUSTER}
   namespace: ${ARGOCD_NS}
   labels:
-    argocd.argoproj.io/secret-type: cluster
+    flux.argoproj.io/secret-type: cluster
     openaether.io/managed: "true"
     openaether.io/role: workload
     openaether.io/provider: ${PROVIDER}
@@ -108,7 +108,7 @@ stringData:
     }
 EOF
 
-echo "  ✅ Cluster '${CLUSTER}' registered in ArgoCD."
+echo "  ✅ Cluster '${CLUSTER}' registered in Flux."
 echo ""
-echo "  ArgoCD will now deploy apps/overlays/workload-base/ to this cluster."
+echo "  Flux will now deploy apps/overlays/workload-base/ to this cluster."
 echo "  Monitor: kubectl --kubeconfig=${MGMT_KUBECONFIG} -n ${ARGOCD_NS} get applications"
