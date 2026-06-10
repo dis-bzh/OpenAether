@@ -15,10 +15,6 @@ resource "talos_machine_secrets" "this" {
 # Applied via cluster.secretboxEncryptionSecret in the control plane config patch.
 resource "random_bytes" "etcd_encryption_secret" {
   length = 32
-
-  lifecycle {
-    prevent_destroy = true
-  }
 }
 
 # ==============================================================================
