@@ -13,7 +13,7 @@
 #   (or manually: tofu apply -var-file=envs/failover-ovh.tfvars -var talos_bootstrap=true)
 #
 # After rebuild:
-#   1. ArgoCD bootstrap → syncs from Git automatically
+#   1. Flux bootstrap → syncs from Git automatically
 #   2. Re-register spoke clusters: task register-spoke CLUSTER=<name> PROVIDER=<provider>
 #   3. Update DNS for management endpoints (if using ExternalDNS — automated in Phase 4)
 # ==============================================================================
@@ -45,7 +45,6 @@ bastion_ssh_keys = {
 }
 
 git_repo_url     = "https://github.com/dis-bzh/OpenAether-apps.git"
-argocd_namespace = "management-gitops"
 
 # --- Backup / DR object stores ------------------------------------------------
 # This failover cluster runs when your primary provider is DOWN, so its PRIMARY

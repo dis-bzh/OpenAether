@@ -54,11 +54,6 @@ variable "git_repo_url" {
   default = "https://github.com/dis-bzh/OpenAether-apps.git"
 }
 
-variable "argocd_namespace" {
-  type    = string
-  default = "management-gitops"
-}
-
 # Accept cilium manifest override (for local simplified variant)
 variable "cilium_manifest" {
   description = "Cilium manifest content. Set via TF_VAR_cilium_manifest from cilium-local.yaml."

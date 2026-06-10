@@ -1,6 +1,6 @@
 # ==============================================================================
 # Management Cluster — OVH Public Cloud (hub)
-# Hosts ArgoCD (hub), OpenBao, Keycloak, VictoriaMetrics. NOT in the client
+# Hosts Flux (hub), OpenBao, Keycloak, VictoriaMetrics. NOT in the client
 # data path. Use this when OVH is your PRIMARY management provider.
 #
 # Prerequisites:
@@ -37,11 +37,10 @@ node_distribution = {
 admin_ip = ["YOUR_IP/32"]
 
 bastion_ssh_keys = {
-  ovh = "ssh-ed25519 AAAA... user@host"
+  ovh = ["ssh-ed25519 AAAA... user@host"]
 }
 
 git_repo_url     = "https://github.com/dis-bzh/OpenAether-apps.git"
-argocd_namespace = "management-gitops"
 
 # --- Backup / DR object stores (OVH S3-compatible Object Storage) -------------
 # Derived buckets: state -> s3-openaether-ovh-tfstate-prod (+ -backup),

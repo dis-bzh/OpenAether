@@ -41,7 +41,7 @@ output "cluster_endpoint" {
 }
 
 output "bootstrap_manifests_enabled" {
-  description = "Whether bootstrap manifests (ArgoCD) are injected via inlineManifests"
+  description = "Whether bootstrap manifests (Flux) are injected via inlineManifests"
   value       = var.bootstrap_manifests_enabled
 }
 

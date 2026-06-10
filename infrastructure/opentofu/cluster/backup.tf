@@ -5,7 +5,7 @@
 # to TWO object stores — PRIMARY (the cluster's own provider) and REPLICA (the
 # "-backup" store; in prod a *different* provider, different creds). The full
 # machine configs are intentionally NOT backed up here: they embed the large
-# inline manifests (ArgoCD ~1.8MB) and are fully derivable from the machine
+# inline manifests (Flux ~1.8MB) and are fully derivable from the machine
 # secrets, which already live in the encrypted tfstate (the real DR artifact).
 #
 # Encryption (defence in depth):

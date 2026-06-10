@@ -1,6 +1,6 @@
 # ==============================================================================
 # Workload Cluster — OVH Public Cloud (spoke)
-# Client applications cluster. Managed by the management cluster via ArgoCD hub.
+# Client applications cluster. Managed by the management cluster via Flux hub.
 #
 # Prerequisites:
 #   export OS_AUTH_URL=https://auth.cloud.ovh.net/v3
@@ -40,7 +40,6 @@ bastion_ssh_keys = {
 }
 
 git_repo_url     = "https://github.com/dis-bzh/OpenAether-apps.git"
-argocd_namespace = "management-gitops"
 
 # --- Backup / DR object stores (OVH S3-compatible Object Storage) -------------
 # Derived buckets: state -> s3-openaether-ovh-tfstate-prod (+ -backup),

@@ -6,7 +6,7 @@ ignore: |
   **/traefik/standard-install.yaml
   **/linkerd/linkerd-crds.yaml
   **/linkerd/linkerd-control-plane.yaml
-  **/bootstrap-manifests/argocd-install.yaml
+  **/bootstrap-manifests/flux-install.yaml
   **/bootstrap-manifests/cilium.yaml
   **/bootstrap-manifests/cilium-local.yaml
 
