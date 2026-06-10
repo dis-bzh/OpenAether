@@ -4,7 +4,7 @@ Exercises the **production `modules/talos/`** end-to-end on a real **3 control
 plane + 2 worker** Talos cluster running in Docker — no cloud credentials. The
 dedicated workers stay schedulable (control planes keep their taint), so it also
 covers HA and real pod scheduling. Use it to validate config generation, etcd
-quorum, bootstrap, kubeconfig retrieval, Cilium, and the ArgoCD GitOps chain
+quorum, bootstrap, kubeconfig retrieval, Cilium, and the Flux GitOps chain
 before spending money in the cloud.
 
 > No S3 backend (local state). Reuses the shared `../opentofu/modules/talos/` and
@@ -23,21 +23,21 @@ before spending money in the cloud.
 | `data.talos_cluster_health` | ☁️ cloud-only | stalls behind WSL2 port mappings; verified here via `talosctl health` (skip_health_check=true) |
 | `talos_machine_configuration_apply` | ☁️ cloud-only | Docker uses USERDATA delivery (Talos platform docs); maintenance-apply reboot-loops in containers |
 
-Plus, on top of the cluster: Cilium CNI on all 5 nodes, ArgoCD, and the
+Plus, on top of the cluster: Cilium CNI on all 5 nodes, Flux, and the
 `ApplicationSet → Application` hub mechanism.
 
 ## Quick start
 
 ```bash
-# One command — full deploy + verify (etcd quorum, Cilium, ArgoCD, GitOps)
+# One command — full deploy + verify (etcd quorum, Cilium, Flux, GitOps)
 TF_VAR_encryption_passphrase="local-test-passphrase-32chars-minimum" \
   ./scripts/test-talos-local.sh
 
 # Or via task:
 task local-render-manifests   # render simplified Cilium (no WireGuard)
 task local-up                 # deploy the cluster (3 CP + 2 workers)
-task local-status             # etcd members + nodes + ArgoCD
-task local-argocd             # ArgoCD UI → https://localhost:8080
+task local-status             # etcd members + nodes + Flux
+task local-flux             # Flux UI → https://localhost:8080
 task local-down               # tear down
 ```
 

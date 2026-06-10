@@ -19,8 +19,8 @@ tofu apply -var-file=envs/<cluster>.tfvars
   │     ├── Machine secrets (prevent_destroy=true)
   │     ├── Control plane config + inlineManifests:
   │     │     ├── Cilium CNI (always injected)
-  │     │     ├── ArgoCD install (bootstrap only)
-  │     │     └── ArgoCD root Application (bootstrap only)
+  │     │     ├── Flux install (bootstrap only)
+  │     │     └── Flux root Application (bootstrap only)
   │     ├── Worker config
   │     └── Config apply → bootstrap → health check → kubeconfig
   │
@@ -44,7 +44,7 @@ and junction point work without modification.
 | Phase | Command | What happens |
 |-------|---------|--------------|
 | Phase 1 | `tofu apply -var-file=envs/<cluster>.tfvars` | VMs, networking, LBs |
-| Phase 2 | `... -var talos_bootstrap=true` | Talos config, bootstrap, ArgoCD |
+| Phase 2 | `... -var talos_bootstrap=true` | Talos config, bootstrap, Flux |
 
 Between phases, establish SSH tunnels via the bastion for Talos API access (port 50000).
 
@@ -114,17 +114,17 @@ credentials never get committed.
 # Phase 0 — build the Talos image once per version (separate state, reused by all clusters)
 task talos-image PROVIDER=scaleway               # -> image "talos-scaleway-amd64-v1.13.3" (or PROVIDER=ovh)
 
-# Generate bootstrap manifests (Cilium, ArgoCD)
-./scripts/render-bootstrap-manifests.sh
+# Generate bootstrap manifests (Cilium, Flux)
+./scripts/bootstrap/render-bootstrap-manifests.sh
 
 # Phase 1 — infra (IPs land in the state). The task ensures the buckets + inits the
 # per-cluster backend for you. PROVIDER defaults to scaleway (also ovh, outscale).
 task infra-management                      # or: task infra-management PROVIDER=ovh
 #   manual equivalent:
-#     ./scripts/ensure-buckets.sh envs/management-scaleway.tfvars
-#     tofu init -reconfigure $(./scripts/tf-backend.sh envs/management-scaleway.tfvars)
+#     ./scripts/internal/ensure-buckets.sh envs/management-scaleway.tfvars
+#     tofu init -reconfigure $(./scripts/internal/tf-backend.sh envs/management-scaleway.tfvars)
 #     tofu apply -var-file=envs/management-scaleway.tfvars -var talos_bootstrap=false
-#     ./scripts/backup-state.sh infrastructure/opentofu   # replicate state to the -backup store
+#     ./scripts/ops/backup-state.sh infrastructure/opentofu   # replicate state to the -backup store
 
 # Phase 2 — `task management` opens the SSH tunnels (read from the state) then bootstraps
 task management KEY=~/.ssh/yourkey         # or: task management PROVIDER=ovh KEY=~/.ssh/yourkey
@@ -146,16 +146,16 @@ task workload PROVIDER=ovh KEY=~/.ssh/yourkey
 
 ```bash
 # If your primary management provider is unavailable, stand one up elsewhere:
-./scripts/failover-management.sh ovh        # or: task failover PROVIDER=ovh
+./scripts/bootstrap/failover-management.sh ovh   # or: task failover PROVIDER=ovh
 # RTO: ~30 minutes. Workload clusters are unaffected.
 ```
 
-### Upgrade Cilium or ArgoCD
+### Upgrade Cilium or Flux
 
 ```bash
 export CILIUM_VERSION=1.20.0
-export ARGOCD_VERSION=v3.4.0
-./scripts/render-bootstrap-manifests.sh
+export FLUX_VERSION=v3.4.0
+./scripts/bootstrap/render-bootstrap-manifests.sh
 tofu apply -var-file=envs/management-scaleway.tfvars -var talos_bootstrap=true
 ```
 
@@ -269,7 +269,7 @@ tofu test -filter=tests/talos-config.tftest.hcl   # Talos config logic (10 tests
 tofu test -filter=tests/provider-contract.tftest.hcl  # Junction point (7 tests)
 
 # Full local validation (tests + kustomize + talosctl + yamllint)
-./scripts/test-local-stack.sh
+./scripts/dev/test-local-stack.sh
 ```
 
 ## Security

@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.0] — 2026-06-04
 
 **Milestone: multi-cloud management + GitOps foundations, ready for external testers.**
-The management cluster (Talos → Cilium → ArgoCD → GitOps `ApplicationSet`) is now
+The management cluster (Talos → Cilium → Flux → GitOps `ApplicationSet`) is now
 validated end-to-end on **all three providers** (Scaleway, OVH, Outscale), and the
 full cloud lifecycle — `task talos-image` → `infra-management` → `management` →
 teardown — was re-run clean on each. The local Docker harness gained 2 workers
@@ -40,18 +40,18 @@ OVH ✅ · Outscale ✅). Fixes, in the order they surfaced:
   control plane), required because Phase 2 reaches every node through an SSH tunnel
   on localhost (was failing TLS verification with "valid for <node IP>, not 127.0.0.1").
 
-### Fixed — ArgoCD installed in the management-gitops namespace
+### Fixed — Flux installed in the management-gitops namespace
 
-`render-bootstrap-manifests.sh` now kustomizes the upstream ArgoCD install into
-`${ARGOCD_NAMESPACE:-management-gitops}` (+ the Namespace, + the ClusterRoleBinding
+`render-bootstrap-manifests.sh` now kustomizes the upstream Flux install into
+`${FLUX_NAMESPACE:-flux-system}` (+ the Namespace, + the ClusterRoleBinding
 subjects, which kustomize doesn't rewrite on its own). The namespace-agnostic
 upstream manifest, injected as a Talos inlineManifest, was landing in `default` —
-so ArgoCD watched `default` while the root app lived in `management-gitops` and the
+so Flux watched `default` while the root app lived in `management-gitops` and the
 root Application never reconciled. Affects every provider's bootstrap.
 
-The GitOps path (`apps/bootstrap/base`, which ArgoCD self-manages from git) had
+The GitOps path (`apps/bootstrap/base`, which Flux self-manages from git) had
 the same ClusterRoleBinding-subject gap: kustomize's `namespace:` transformer
-left the 3 subjects in `argocd`, so the application-controller SA got no
+left the 3 subjects in `Flux`, so the application-controller SA got no
 cluster-scoped permissions and its live-state cache failed ("cannot list … at
 the cluster scope"), pinning root apps at `SYNC Unknown`. Added a kustomize
 patch to namespace those subjects too — otherwise a self-sync would revert the
@@ -61,7 +61,7 @@ inline-manifest fix above.
 
 - **`grep -c` footguns** — four `R=$(… | grep -c …)` counts aborted the script
   under `set -e`+`pipefail` the moment they matched zero lines (grep exits 1),
-  silently killing the run at "etcd quorum"/"nodes Ready"/"ArgoCD pods". Guarded
+  silently killing the run at "etcd quorum"/"nodes Ready"/"Flux pods". Guarded
   with `|| true`; the etcd one also dropped a stray `|| echo 0` that produced a
   two-line `"0\n0"` and broke the arithmetic `[[ ]]`.
 - **State hygiene** — `machine_secrets` is `prevent_destroy`'d, so `tofu destroy`
@@ -211,7 +211,7 @@ reaches storage.
 ### Validated — first end-to-end cloud deployment (Scaleway)
 
 The management cluster stack came up on Scaleway (3 control planes + 2 workers,
-Cilium, ArgoCD, GitOps), exercising the two cloud-only Talos resources that local
+Cilium, Flux, GitOps), exercising the two cloud-only Talos resources that local
 Docker can't: `talos_machine_configuration_apply` (gRPC) and
 `data.talos_cluster_health`. Changes that got it there:
 
@@ -259,10 +259,10 @@ Docker can't: `talos_machine_configuration_apply` (gRPC) and
   - `container_mode` — omits `machine.install` and enables `hostDNS.forwardKubeDNSToHost`.
   - `health_check_timeout`, `skip_kubernetes_health_checks`, `skip_health_check` — robustness knobs.
   - New outputs `control_plane_machine_configs` / `worker_machine_configs` (consumed for USERDATA).
-- **`scripts/test-talos-local.sh`** — single-command E2E: config gen → 3 USERDATA containers → etcd quorum bootstrap → kubeconfig → Cilium (3 nodes) → ArgoCD → ApplicationSet.
+- **`scripts/test-talos-local.sh`** — single-command E2E: config gen → 3 USERDATA containers → etcd quorum bootstrap → kubeconfig → Cilium (3 nodes) → Flux → ApplicationSet.
 - **`render-bootstrap-manifests.sh --local`** — simplified Cilium (no WireGuard, no kube-proxy replacement) for Docker.
 - **Taskfile** `local-*` tasks.
-- **Validated end-to-end**: 3 nodes `Ready` on Kubernetes v1.35.3, **3-member etcd quorum**, Cilium CNI on all nodes, tofu-retrieved kubeconfig, ArgoCD running, and the ApplicationSet generating the management cluster's Application.
+- **Validated end-to-end**: 3 nodes `Ready` on Kubernetes v1.35.3, **3-member etcd quorum**, Cilium CNI on all nodes, tofu-retrieved kubeconfig, Flux running, and the ApplicationSet generating the management cluster's Application.
 - **Coverage**: 7 of 8 `modules/talos/` resources are exercised locally; only `talos_machine_configuration_apply` and the `talos_cluster_health` data source are cloud-only (both for legitimate platform/networking reasons).
 
 ### Added
@@ -271,18 +271,18 @@ Docker can't: `talos_machine_configuration_apply` (gRPC) and
 - **OVH / OpenStack module** — complete networking stack (private network, router, Octavia LBs, floating IPs, bastion)
 - **Outscale / Numspot module** — VPC, subnets, load balancers, public IPs, bastion
 - **Provider-agnostic junction point** — `coalesce()` selects the active provider; adding a new provider requires only implementing the contract
-- **`cluster_role` variable** — `management` or `workload` routes ArgoCD to the correct overlay
+- **`cluster_role` variable** — `management` or `workload` routes Flux to the correct overlay
 - **Per-cluster environment templates** — `envs/management-scaleway.tfvars.example`, `envs/workload-{scaleway,ovh,outscale}.tfvars.example`, `envs/drp-ovh.tfvars.example` (copy to the real `*.tfvars`, which stays git-ignored)
 - **Single-provider validation** — `check` block prevents accidentally activating multiple providers in one apply
 
 **GitOps multi-cluster:**
-- **ArgoCD ApplicationSet** — replaces single root Application; automatically deploys the correct overlay to each registered cluster
+- **Flux ApplicationSet** — replaces single root Application; automatically deploys the correct overlay to each registered cluster
 - **Management cluster overlay** — `apps/overlays/management/` (OpenBao, Keycloak, VictoriaMetrics, etc.)
 - **Workload cluster overlay** — `apps/overlays/workload-base/` (Traefik, ESO, Kyverno, KEDA, storage)
-- **Local cluster secret** — management cluster registers itself in ArgoCD hub on bootstrap
+- **Local cluster secret** — management cluster registers itself in Flux hub on bootstrap
 
 **Operational tooling:**
-- **`scripts/register-spoke.sh`** — registers a workload cluster in ArgoCD hub after provisioning
+- **`scripts/register-spoke.sh`** — registers a workload cluster in Flux hub after provisioning
 - **`scripts/drp-management.sh`** — automated DRP procedure; rebuilds management cluster on fallback provider (~30 min RTO)
 - **`scripts/test-local-stack.sh`** — full local validation (OpenTofu tests + kustomize builds + talosctl + yamllint) with no cloud credentials required
 - **Taskfile** — new tasks: `deploy-management`, `deploy-workload`, `bootstrap-workload`, `register-spoke`, `drp`
@@ -301,7 +301,7 @@ Docker can't: `talos_machine_configuration_apply` (gRPC) and
 
 - `node_distribution` variable extended with OVH/Outscale-specific optional fields (`flavor_name`, `availability_zones`, `network_name`, `bastion_image_id`)
 - `outputs.tf` — all outputs are now provider-agnostic; added `active_provider` and `cluster_role`
-- `argocd-root-app.yaml.tftpl` — now points to `apps/bootstrap/overlays/prod/` instead of a single overlay path
+- `Flux-root-app.yaml.tftpl` — now points to `apps/bootstrap/overlays/prod/` instead of a single overlay path
 - `apps/overlays/local/` — removed deprecated Linkerd (replaced by Cilium Service Mesh, Phase 4)
 - YAML lint config — added ignore patterns for vendor/generated files; relaxed sequence indentation rule
 

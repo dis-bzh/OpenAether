@@ -35,9 +35,12 @@ this contract to be consumed by the Talos module and the root `main.tf`.
    `talos_machine_secrets`, or any Talos-specific resources. Talos configuration is handled
    exclusively by the centralized `modules/talos/` module.
 
-2. **No `user_data` injection** — Talos machine configuration MUST NOT be injected via
-   VM `user_data`. The Talos provider applies configuration via the Talos API
-   (`talos_machine_configuration_apply`) after the infrastructure is provisioned.
+2. **`user_data` delivery is opt-in** — the default cloud delivery mode is
+   `talos_machine_configuration_apply` (gRPC maintenance-mode apply). Provider
+   modules MAY expose a `user_data` variable to inject Talos config at VM creation
+   when the platform supports it (`config_delivery = "userdata"` in the Talos module).
+   Docker/container platforms require this mode; cloud providers may use it to skip
+   the maintenance-mode phase and shorten bootstrap time.
 
 3. **Private-first networking** — All cluster nodes (control planes + workers) SHOULD
    reside in a private network with no public IP. A bastion host provides admin access,
@@ -57,7 +60,7 @@ Provider Module (cloud-specific)          Talos Module (cloud-agnostic)
 │ Security Groups             │          │ Bootstrap (etcd)             │
 │ Bastion Host                │          │ Kubeconfig retrieval         │
 │ NAT Gateway                 │          │ Inline manifests (Cilium,    │
-│                             │          │   ArgoCD, Root App)          │
+│                             │          │   Flux, Root App)          │
 └─────────────────────────────┘          └──────────────────────────────┘
 ```
 
