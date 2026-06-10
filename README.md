@@ -1,4 +1,4 @@
-# OpenAether
+# OpenAether-infra
 
 > **Store Anywhere, Run Anywhere.**
 > An open-source, resilient, multi-cloud Cloud Management Platform (CMP).
@@ -11,7 +11,7 @@
 
 ```
 Management Cluster (Hub) — Scaleway HA (3 zones)
-  ├── ArgoCD (hub mode — manages all spoke clusters via ApplicationSet)
+  ├── Flux (hub mode — manages all spoke clusters via ApplicationSet)
   ├── OpenBao (secrets management — HA Raft)
   ├── Keycloak + CloudNativePG (identity)
   ├── VictoriaMetrics (observability aggregator)
@@ -32,7 +32,7 @@ SCW Workload Cluster     OVH Workload Cluster     Outscale Workload Cluster
 | **IaC** | OpenTofu 1.12.x | ✅ |
 | **OS** | Talos Linux v1.13.3 (Immutable) | ✅ |
 | **CNI** | Cilium 1.19.2 (WireGuard) | ✅ |
-| **GitOps** | ArgoCD v3.3.2 (hub/spoke) | ✅ |
+| **GitOps** | Flux v3.3.2 (hub/spoke) | ✅ |
 | **Gateway** | Traefik v3.0 (Gateway API) | 🚧 Phase 2 |
 | **Identity** | Keycloak 26.0 + CloudNativePG | 🚧 Phase 2 |
 | **Secrets** | OpenBao 2.2.0 (Vault fork) | 🚧 Phase 2 |
@@ -42,7 +42,7 @@ SCW Workload Cluster     OVH Workload Cluster     Outscale Workload Cluster
 
 ## Cloud Provider Support
 
-Management cluster validated end-to-end (Talos bootstrap → Cilium → ArgoCD) on **all three** providers.
+Management cluster validated end-to-end (Talos bootstrap → Cilium → Flux) on **all three** providers.
 
 | Provider | Status | Region | Notes |
 |----------|--------|--------|-------|
@@ -53,7 +53,7 @@ Management cluster validated end-to-end (Talos bootstrap → Cilium → ArgoCD) 
 ## Repository Structure
 
 ```
-OpenAether/
+OpenAether-infra/
 ├── infrastructure/
 │   └── opentofu/                    # All Infrastructure as Code
 │       ├── cluster/                 # Cluster root (management + workload)
@@ -76,28 +76,30 @@ OpenAether/
 │               ├── scaleway/        # qcow2 → snapshot → instance image
 │               ├── ovh/             # local qcow2 → Glance
 │               └── outscale/        # raw → OOS → snapshot → OMI
-├── apps/                            # Kubernetes manifests (GitOps)
-│   ├── base/                        # Provider-agnostic service definitions
-│   ├── overlays/
-│   │   ├── management/              # Management cluster apps
-│   │   ├── workload-base/           # Workload cluster base apps
-│   │   ├── local/                   # Local development
-│   │   └── prod/                    # Production (legacy)
-│   └── bootstrap/                   # ArgoCD bootstrap + ApplicationSet
-│       └── overlays/prod/
-│           ├── root-appset.yaml     # ApplicationSet (multi-cluster)
-│           └── local-cluster-secret.yaml
 └── scripts/
     ├── setup.sh
-    ├── render-bootstrap-manifests.sh
-    ├── register-spoke.sh            # Register spoke cluster in ArgoCD hub
-    ├── failover-management.sh       # Stand up management on another cloud (~30 min)
-    ├── ensure-buckets.sh            # Create the per-cluster backup buckets (idempotent)
-    ├── tf-backend.sh                # Derive the S3 backend config from a cluster's tfvars
-    ├── backup-state.sh              # Replicate the encrypted tfstate to the -backup store
-    ├── backup-artifacts.sh          # gpg-encrypt + upload kube/talosconfig (OpenTofu local-exec)
-    └── test-local-stack.sh          # Full local validation (no cloud needed)
+    ├── lib/common.sh                # Shared helpers (tfvars parsing, S3 creds)
+    ├── bootstrap/                   # Cluster lifecycle (run once or rarely)
+    │   ├── render-bootstrap-manifests.sh
+    │   ├── talos-image.sh
+    │   ├── talos-tunnels.sh
+    │   ├── register-spoke.sh        # Register spoke cluster in Flux hub
+    │   └── failover-management.sh   # Stand up management on another cloud (~30 min)
+    ├── ops/                         # Ongoing operations
+    │   ├── backup-state.sh          # Replicate the encrypted tfstate to the -backup store
+    │   ├── backup-artifacts.sh      # gpg-encrypt + upload kube/talosconfig (local-exec)
+    │   ├── bastion-harden-check.sh
+    │   └── local-admin-portforward.sh
+    ├── dev/                         # Local testing (no cloud)
+    │   ├── test-talos-local.sh      # Full 3-CP + 2-worker local cluster test
+    │   └── test-local-stack.sh      # Static checks (tofu fmt/validate + kustomize)
+    └── internal/                    # Called by Taskfile / other scripts, not directly
+        ├── resolve-s3-cred.sh
+        ├── tf-backend.sh            # Derive the S3 backend config from cluster tfvars
+        └── ensure-buckets.sh        # Create the per-cluster backup buckets (idempotent)
 ```
+
+Kubernetes manifests live in the companion repo [dis-bzh/OpenAether-apps](https://github.com/dis-bzh/OpenAether-apps), reconciled by Flux from the management cluster.
 
 ## Quick Start
 
@@ -115,13 +117,13 @@ source .env.sh                      # .env.sh is git-ignored
 ### Local cluster (Docker — no cloud, no credentials)
 
 Brings up a real **3 control plane + 2 worker** Talos cluster in Docker — etcd
-quorum, Cilium, ArgoCD, and the GitOps `ApplicationSet → Application` chain — on
+quorum, Cilium, Flux, and the GitOps `ApplicationSet → Application` chain — on
 the **same production `modules/talos/`** used in the cloud. Best first step.
 
 ```bash
 task local-test                     # full deploy + verify (3 CP + 2 workers)
-task local-status                   # etcd members + nodes + ArgoCD
-task local-argocd                   # ArgoCD UI → https://localhost:8080
+task local-status                   # etcd members + nodes + Flux
+task local-flux                   # Flux UI → https://localhost:8080
 task local-down                     # tear down (containers + volumes + state)
 ```
 
@@ -145,7 +147,7 @@ task talos-image PROVIDER=scaleway
 # infra, replicates the state. PROVIDER defaults to scaleway (also ovh, outscale).
 task infra-management PROVIDER=scaleway
 
-# Phase 2 — opens the SSH tunnels (from state), bootstraps Talos + ArgoCD, and pushes
+# Phase 2 — opens the SSH tunnels (from state), bootstraps Talos + Flux, and pushes
 # the client-side-encrypted backups (kube/talosconfig + state replica).
 task management PROVIDER=scaleway KEY=~/.ssh/yourkey
 ```
@@ -158,7 +160,7 @@ cp infrastructure/opentofu/cluster/envs/workload-ovh.tfvars.example \
 
 task infra-workload PROVIDER=ovh
 task workload PROVIDER=ovh KEY=~/.ssh/yourkey
-task register-spoke CLUSTER=openaether-ovh-prod PROVIDER=ovh   # register in the ArgoCD hub
+task register-spoke CLUSTER=openaether-ovh-prod PROVIDER=ovh   # register in the Flux hub
 ```
 
 ### 🚧 Cross-provider failover — second management on another cloud
@@ -172,8 +174,8 @@ task failover PROVIDER=ovh
 ### Static checks (no cloud, no Docker)
 
 ```bash
-./scripts/test-local-stack.sh        # tofu fmt/validate/test + kustomize + talosctl + yamllint
-./scripts/test-local-stack.sh --fast # skip talosctl gen
+./scripts/dev/test-local-stack.sh        # tofu fmt/validate/test + kustomize + talosctl + yamllint
+./scripts/dev/test-local-stack.sh --fast # skip talosctl gen
 ```
 
 ## Security
@@ -194,7 +196,7 @@ task failover PROVIDER=ovh
 
 | Phase | Deliverable | Status |
 |-------|-------------|--------|
-| **3** | OVH + Outscale active, ArgoCD hub/spoke, cross-provider failover | ✅ Done |
+| **3** | OVH + Outscale active, Flux hub/spoke, cross-provider failover | ✅ Done |
 | **4** | DNS failover (ExternalDNS + k8GB), OpenBao auto-unseal | ⏳ Planned |
 | **4b** | Warm standby management on OVH (<5 min RTO) | ⏳ Planned |
 | **5** | Service catalogue (Kratix / Backstage) | ⏳ Planned |
@@ -204,4 +206,4 @@ task failover PROVIDER=ovh
 
 **OpenAether** is licensed under the [GNU Affero General Public License v3.0 (AGPLv3)](LICENSE).
 
-Source: **https://github.com/dis-bzh/OpenAether**
+Source: **https://github.com/dis-bzh/OpenAether-infra**
