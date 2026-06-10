@@ -10,6 +10,17 @@ resource "talos_machine_secrets" "this" {
   }
 }
 
+# 32-byte random key for Kubernetes Secrets encryption at rest (AES-256-GCM via
+# secretbox). Generated once, stable across applies (stored in tfstate).
+# Applied via cluster.secretboxEncryptionSecret in the control plane config patch.
+resource "random_bytes" "etcd_encryption_secret" {
+  length = 32
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 # ==============================================================================
 # Client Configuration (talosctl)
 # ==============================================================================
@@ -126,7 +137,10 @@ data "talos_machine_configuration" "control_plane" {
         proxy = {
           disabled = true # kube-proxy replaced by Cilium
         }
-        inlineManifests = local.inline_manifests
+        # Encrypt all Kubernetes Secrets in etcd at rest (AES-256-GCM / secretbox).
+        # Key is generated once and stored in tfstate — stable across applies.
+        secretboxEncryptionSecret = random_bytes.etcd_encryption_secret.base64
+        inlineManifests           = local.inline_manifests
       }
     })
   ]
