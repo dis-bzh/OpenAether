@@ -24,7 +24,7 @@ PIDFILE="/tmp/openaether-admin-pf.pids"
 TARGETS=(
   "openbao-root    foundation-pki-root     svc/openbao-pki-root-ui  8210:8200"
   "openbao-work    foundation-vault        svc/openbao-ui           8220:8200"
-  "argocd          management-gitops       svc/argocd-server        8080:443"
+  "flux          management-gitops       svc/flux-server        8080:443"
   "grafana         services-observability  svc/grafana              3000:3000"
 )
 
@@ -34,7 +34,7 @@ stop() {
     rm -f "$PIDFILE"
     echo "stopped port-forwards"
   else
-    pkill -f "kubectl.*port-forward.*(openbao|argocd|grafana)" 2>/dev/null || true
+    pkill -f "kubectl.*port-forward.*(openbao|flux|grafana)" 2>/dev/null || true
     echo "no pidfile; best-effort pkill done"
   fi
 }
@@ -59,12 +59,12 @@ cat <<EOF
   ─────────────────────────────────────────────
   OpenBao root      → http://127.0.0.1:8210/ui
   OpenBao workload  → http://127.0.0.1:8220/ui
-  ArgoCD            → https://127.0.0.1:8080
+  Flux            → https://127.0.0.1:8080
   Grafana           → http://127.0.0.1:3000   (if deployed)
   ─────────────────────────────────────────────
   OpenBao login: token (root token in Secret openbao-{root,workload}-recovery).
-  ArgoCD admin pw:
-    kubectl -n management-gitops get secret argocd-initial-admin-secret \\
+  Flux admin pw:
+    kubectl -n management-gitops get secret flux-initial-admin-secret \\
       -o jsonpath='{.data.password}' | base64 -d; echo
   ─────────────────────────────────────────────
   Stop: ./scripts/local-admin-portforward.sh --stop
