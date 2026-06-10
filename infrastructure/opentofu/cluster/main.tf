@@ -21,7 +21,7 @@ provider "outscale" {
   region        = local.active_provider == "outscale" ? local.osc_dist.region : null
 }
 
-# Backups go through the AWS CLI (scripts/backup-artifacts.sh + backup-state.sh),
+# Backups go through the AWS CLI (scripts/ops/backup-artifacts.sh + backup-state.sh),
 # not a Terraform provider — the artifacts/state are streamed to S3-compatible
 # stores with per-call creds/endpoints (primary + cross-provider replica), which
 # the aws provider can't express cleanly. So there is intentionally no aws provider.
