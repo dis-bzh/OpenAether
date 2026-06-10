@@ -1,6 +1,6 @@
 # ==============================================================================
 # Management Cluster — Scaleway HA (3 zones)
-# This cluster hosts ArgoCD (hub), OpenBao, Keycloak, VictoriaMetrics.
+# This cluster hosts Flux (hub), OpenBao, Keycloak, VictoriaMetrics.
 # It is NOT in the data path of client workloads.
 # ==============================================================================
 
@@ -25,11 +25,10 @@ node_distribution = {
 admin_ip = ["YOUR_IP/32"]
 
 bastion_ssh_keys = {
-  scaleway = "ssh-ed25519 AAAA... user@host"
+  scaleway = ["ssh-ed25519 AAAA... user@host"]
 }
 
 git_repo_url     = "https://github.com/dis-bzh/OpenAether-apps.git"
-argocd_namespace = "management-gitops"
 
 # --- Backup / DR object stores ------------------------------------------------
 # Derived buckets (you don't set them):

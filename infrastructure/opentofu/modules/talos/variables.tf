@@ -115,7 +115,7 @@ variable "k8s_lb_ip" {
 # ==============================================================================
 
 variable "bootstrap_manifests_enabled" {
-  description = "Whether to inject bootstrap manifests (Cilium, ArgoCD) via inlineManifests. Set to true for initial bootstrap, false for upgrades/DRP where ArgoCD is already running."
+  description = "Whether to inject bootstrap manifests (Cilium, Flux) via inlineManifests. Set to true for initial bootstrap, false for upgrades/DRP where Flux is already running."
   type        = bool
   default     = true
 }

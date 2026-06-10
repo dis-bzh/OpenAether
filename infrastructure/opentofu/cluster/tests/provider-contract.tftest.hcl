@@ -104,7 +104,6 @@ variables {
   admin_ip            = ["10.0.0.1/32"]
   bastion_ssh_keys    = { scaleway = "ssh-ed25519 test" }
   git_repo_url        = "https://github.com/test/repo.git"
-  argocd_namespace    = "management-gitops"
   cilium_manifest     = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium-test"
   s3_primary_endpoint = "https://s3.fr-par.scw.cloud"
   s3_primary_region   = "fr-par"

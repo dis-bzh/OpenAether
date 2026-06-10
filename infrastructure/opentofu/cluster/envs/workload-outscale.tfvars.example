@@ -1,6 +1,6 @@
 # ==============================================================================
 # Workload Cluster — Outscale / Numspot (spoke)
-# Client applications cluster. Managed by the management cluster via ArgoCD hub.
+# Client applications cluster. Managed by the management cluster via Flux hub.
 #
 # Prerequisites:
 #   export OSC_ACCESS_KEY=<outscale_access_key>
@@ -32,7 +32,6 @@ bastion_ssh_keys = {
 }
 
 git_repo_url     = "https://github.com/dis-bzh/OpenAether-apps.git"
-argocd_namespace = "management-gitops"
 
 # --- Backup / DR object stores (Outscale OOS, S3-compatible) ------------------
 # Derived buckets: state -> s3-openaether-outscale-tfstate-prod (+ -backup),

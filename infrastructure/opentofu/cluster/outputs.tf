@@ -120,7 +120,7 @@ output "instructions" {
     #   2. Bootstrap:
     #      tofu apply -var-file=envs/<cluster>.tfvars -var talos_bootstrap=true
     #
-    # ─── Register as ArgoCD spoke (workload clusters only) ──────────
+    # ─── Register as Flux spoke (workload clusters only) ──────────
     #   task register-spoke CLUSTER=${var.cluster_name}-${var.environment} PROVIDER=${local.active_provider}
     #
     # ─── Cross-provider failover (2nd management on another cloud) ──

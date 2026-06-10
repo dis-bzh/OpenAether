@@ -121,9 +121,7 @@ variables {
     }
   }
   git_repo_url        = "https://github.com/test/repo.git"
-  argocd_namespace    = "management-gitops"
   cilium_manifest     = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium-config\n  namespace: kube-system"
-  argocd_manifest     = "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: management-gitops"
   root_app_manifest   = "apiVersion: argoproj.io/v1alpha1\nkind: Application\nmetadata:\n  name: test-root"
   s3_primary_endpoint = "https://s3.fr-par.scw.cloud"
   s3_primary_region   = "fr-par"
@@ -255,17 +253,17 @@ run "installer_image_uses_talos_version" {
 }
 
 # ==============================================================================
-# Test 8: bootstrap_manifests_enabled=false → argocd NOT in inline manifests
-# This is critical for upgrades and DRP where ArgoCD is already running.
-# Adding ArgoCD manifests again would cause reconciliation conflicts.
+# Test 8: bootstrap_manifests_enabled=false → flux NOT in inline manifests
+# This is critical for upgrades and DRP where Flux is already running.
+# Adding Flux manifests again would cause reconciliation conflicts.
 # ==============================================================================
 
-run "bootstrap_disabled_skips_argocd" {
+run "bootstrap_disabled_skips_flux" {
   command = plan
 
   variables {
     talos_bootstrap = false
-    argocd_manifest = "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: management-gitops"
+    flux_manifest   = "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: management-gitops"
   }
 
   assert {

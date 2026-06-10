@@ -1,6 +1,6 @@
 # ==============================================================================
 # Workload Cluster — Scaleway (spoke)
-# Client applications cluster. Managed by the management cluster via ArgoCD hub.
+# Client applications cluster. Managed by the management cluster via Flux hub.
 # ==============================================================================
 
 cluster_name       = "openaether-scaleway"
@@ -29,7 +29,6 @@ bastion_ssh_keys = {
 }
 
 git_repo_url     = "https://github.com/dis-bzh/OpenAether-apps.git"
-argocd_namespace = "management-gitops"
 
 # --- Backup / DR object stores ------------------------------------------------
 # Derived buckets: state -> s3-openaether-scaleway-tfstate-prod (+ -backup),
