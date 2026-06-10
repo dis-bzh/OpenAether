@@ -53,7 +53,7 @@ tasks:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
       VERSION: '{{.VERSION | default "v1.13.3"}}'
     cmds:
-      - ./scripts/talos-image.sh {{.PROVIDER}} {{.VERSION}}
+      - ./scripts/bootstrap/talos-image.sh {{.PROVIDER}} {{.VERSION}}
 
   # ===========================================================================
   # Cluster Lifecycle
@@ -66,18 +66,18 @@ tasks:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
     env:
       AWS_ACCESS_KEY_ID:
-        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
+        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak
       AWS_SECRET_ACCESS_KEY:
-        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
+        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} sk
       TF_VAR_outscale_access_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale ak || true'
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale ak || true'
       TF_VAR_outscale_secret_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale sk || true'
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale sk || true'
     cmds:
-      - ../../../scripts/ensure-buckets.sh envs/management-{{.PROVIDER}}.tfvars
-      - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
+      - ../../../scripts/internal/ensure-buckets.sh envs/management-{{.PROVIDER}}.tfvars
+      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
       - tofu apply -var-file="envs/management-{{.PROVIDER}}.tfvars" -var talos_bootstrap=false
-      - ../../../scripts/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
+      - ../../../scripts/ops/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
 
   infra-workload:
     desc: "Deploy a workload cluster. Usage: task infra-workload PROVIDER=ovh"
@@ -86,18 +86,18 @@ tasks:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
     env:
       AWS_ACCESS_KEY_ID:
-        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
+        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak
       AWS_SECRET_ACCESS_KEY:
-        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
+        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} sk
       TF_VAR_outscale_access_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale ak || true'
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale ak || true'
       TF_VAR_outscale_secret_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale sk || true'
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale sk || true'
     cmds:
-      - ../../../scripts/ensure-buckets.sh envs/workload-{{.PROVIDER}}.tfvars
-      - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
+      - ../../../scripts/internal/ensure-buckets.sh envs/workload-{{.PROVIDER}}.tfvars
+      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
       - tofu apply -var-file="envs/workload-{{.PROVIDER}}.tfvars" -var talos_bootstrap=false
-      - ../../../scripts/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
+      - ../../../scripts/ops/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
 
   management:
     desc: "Phase 2: open SSH tunnels (from state) + bootstrap the management cluster. Usage: task management [PROVIDER=scaleway|ovh|outscale] KEY=~/.ssh/yourkey"
@@ -107,18 +107,18 @@ tasks:
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
     env:
       AWS_ACCESS_KEY_ID:
-        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
+        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak
       AWS_SECRET_ACCESS_KEY:
-        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
+        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} sk
       TF_VAR_outscale_access_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale ak || true'
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale ak || true'
       TF_VAR_outscale_secret_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale sk || true'
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale sk || true'
     cmds:
-      - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
-      - SSH_KEY="{{.KEY}}" ../../../scripts/talos-tunnels.sh open .
+      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
+      - SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh open .
       - tofu apply -var-file="envs/management-{{.PROVIDER}}.tfvars" -var talos_bootstrap=true
-      - ../../../scripts/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
+      - ../../../scripts/ops/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
 
   workload:
     desc: "Phase 2: open tunnels + bootstrap a workload cluster. Usage: task workload PROVIDER=ovh KEY=~/.ssh/yourkey"
@@ -128,28 +128,28 @@ tasks:
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
     env:
       AWS_ACCESS_KEY_ID:
-        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
+        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak
       AWS_SECRET_ACCESS_KEY:
-        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
+        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} sk
       TF_VAR_outscale_access_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale ak || true'
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale ak || true'
       TF_VAR_outscale_secret_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale sk || true'
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale sk || true'
     cmds:
-      - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
-      - SSH_KEY="{{.KEY}}" ../../../scripts/talos-tunnels.sh open .
+      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
+      - SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh open .
       - tofu apply -var-file="envs/workload-{{.PROVIDER}}.tfvars" -var talos_bootstrap=true
-      - ../../../scripts/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
+      - ../../../scripts/ops/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
 
   close-tunnels:
     desc: "Close the Talos API SSH tunnels opened for Phase 2"
     cmds:
-      - ./scripts/talos-tunnels.sh close infrastructure/opentofu/cluster
+      - ./scripts/bootstrap/talos-tunnels.sh close infrastructure/opentofu/cluster
 
   backup-state:
     desc: "Replicate the (encrypted) tfstate to the -backup store (post-apply). Set BACKUP_AWS_* for a cross-provider replica."
     cmds:
-      - ./scripts/backup-state.sh infrastructure/opentofu/cluster
+      - ./scripts/ops/backup-state.sh infrastructure/opentofu/cluster
 
   destroy-management:
     desc: "Destroy a management cluster. Usage: task destroy-management PROVIDER=ovh"
@@ -158,15 +158,15 @@ tasks:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
     env:
       AWS_ACCESS_KEY_ID:
-        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
+        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak
       AWS_SECRET_ACCESS_KEY:
-        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
+        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} sk
       TF_VAR_outscale_access_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale ak || true'
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale ak || true'
       TF_VAR_outscale_secret_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale sk || true'
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale sk || true'
     cmds:
-      - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
+      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
       - tofu state rm module.talos.talos_machine_secrets.this
       - tofu destroy -var-file="envs/management-{{.PROVIDER}}.tfvars"
 
@@ -177,15 +177,15 @@ tasks:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
     env:
       AWS_ACCESS_KEY_ID:
-        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} ak
+        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak
       AWS_SECRET_ACCESS_KEY:
-        sh: ../../../scripts/resolve-s3-cred.sh {{.PROVIDER}} sk
+        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} sk
       TF_VAR_outscale_access_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale ak || true'
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale ak || true'
       TF_VAR_outscale_secret_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/resolve-s3-cred.sh outscale sk || true'
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale sk || true'
     cmds:
-      - tofu init -reconfigure $(../../../scripts/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
+      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
       - tofu destroy -var-file="envs/workload-{{.PROVIDER}}.tfvars"
 
   # ===========================================================================
@@ -197,7 +197,7 @@ tasks:
     vars:
       PROVIDER: '{{.PROVIDER | default "ovh"}}'
     cmds:
-      - ./scripts/failover-management.sh "{{.PROVIDER}}"
+      - ./scripts/bootstrap/failover-management.sh "{{.PROVIDER}}"
 
   # ===========================================================================
   # Local Testing (Docker / WSL2)
@@ -206,7 +206,7 @@ tasks:
   local-render-manifests:
     desc: "Render simplified Cilium manifest for local Docker testing (no WireGuard)"
     cmds:
-      - ./scripts/render-bootstrap-manifests.sh --local
+      - ./scripts/bootstrap/render-bootstrap-manifests.sh --local
 
   local-up:
     desc: "Deploy the local Talos cluster — 3 CP + 2 workers (config + containers + bootstrap + kubeconfig)"
@@ -220,7 +220,7 @@ tasks:
   local-test:
     desc: "Full end-to-end local test: 3 CP + 2 workers + etcd quorum + Cilium + Flux + GitOps"
     cmds:
-      - ./scripts/test-talos-local.sh
+      - ./scripts/dev/test-talos-local.sh
 
   local-status:
     desc: "Check local cluster health (3 CP + 2 workers)"
@@ -249,7 +249,7 @@ tasks:
       # cluster down (machine_secrets is prevent_destroy'd, so it errors and
       # leaves containers + state behind). --destroy also removes the containers,
       # volumes, network, and the ephemeral local state for a clean slate.
-      - ./scripts/test-talos-local.sh --destroy
+      - ./scripts/dev/test-talos-local.sh --destroy
 
   # ===========================================================================
   # Bootstrap & Secrets
@@ -271,17 +271,12 @@ tasks:
       CLUSTER: '{{.CLUSTER | default ""}}'
       PROVIDER: '{{.PROVIDER | default ""}}'
     cmds:
-      - ./scripts/register-spoke.sh "{{.CLUSTER}}" "{{.PROVIDER}}"
+      - ./scripts/bootstrap/register-spoke.sh "{{.CLUSTER}}" "{{.PROVIDER}}"
 
   render-manifests:
     desc: Render/update bootstrap manifests (Cilium + Flux)
     cmds:
-      - ./scripts/render-bootstrap-manifests.sh
-
-  secrets:
-    desc: Initialize OpenBao secrets
-    cmds:
-      - ./scripts/init_secrets.sh
+      - ./scripts/bootstrap/render-bootstrap-manifests.sh
 
   kubeconfig:
     desc: Retrieve kubeconfig from OpenTofu outputs
