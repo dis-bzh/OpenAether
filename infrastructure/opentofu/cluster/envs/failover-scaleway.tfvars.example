@@ -12,7 +12,7 @@
 #   task failover PROVIDER=scaleway
 #
 # After rebuild:
-#   1. ArgoCD bootstrap -> syncs from Git automatically
+#   1. Flux bootstrap -> syncs from Git automatically
 #   2. Re-register spoke clusters: task register-spoke CLUSTER=<name> PROVIDER=<provider>
 #   3. Update DNS for management endpoints (automated in Phase 4)
 # ==============================================================================
@@ -43,7 +43,6 @@ bastion_ssh_keys = {
 }
 
 git_repo_url     = "https://github.com/dis-bzh/OpenAether-apps.git"
-argocd_namespace = "management-gitops"
 
 # --- Backup / DR object stores ------------------------------------------------
 # Derived buckets: state -> s3-openaether-scaleway-tfstate-prod (+ -backup),

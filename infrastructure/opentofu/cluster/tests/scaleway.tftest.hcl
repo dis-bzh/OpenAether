@@ -147,8 +147,7 @@ variables {
       zones          = ["fr-par-1", "fr-par-2", "fr-par-1"]
     }
   }
-  git_repo_url     = "https://github.com/test/repo.git"
-  argocd_namespace = "management-gitops"
+  git_repo_url = "https://github.com/test/repo.git"
 
   # Non-placeholder manifest to pass precondition
   cilium_manifest = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium"
