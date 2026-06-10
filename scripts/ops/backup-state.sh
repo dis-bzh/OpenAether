@@ -11,12 +11,12 @@
 #
 # Creds:
 #   primary : the ambient AWS_* (the Taskfile sets it to the cluster provider's keys)
-#   replica : <PU>_BACKUP_AWS_* -> BACKUP_AWS_* -> primary    (lib/common.sh::s3_cred)
+#   replica : <PU>_BACKUP_AWS_* -> BACKUP_AWS_* -> primary    (../lib/common.sh::s3_cred)
 #
 # Usage: ./scripts/backup-state.sh [tofu_dir]   (default: infrastructure/opentofu/cluster)
 # ==============================================================================
 set -euo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 
 TOFU_DIR="${1:-infrastructure/opentofu/cluster}"
 command -v aws >/dev/null 2>&1 || { echo "✗ aws CLI required"; exit 1; }

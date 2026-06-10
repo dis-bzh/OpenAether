@@ -14,12 +14,12 @@
 #   PROVIDER                          cluster provider (scaleway|ovh|outscale)
 #   PRIMARY_BUCKET / PRIMARY_EP / PRIMARY_REGION
 #   REPLICA_BUCKET / REPLICA_EP / REPLICA_REGION
-# Creds are resolved by lib/common.sh::s3_cred from PROVIDER (primary + replica).
+# Creds are resolved by ../lib/common.sh::s3_cred from PROVIDER (primary + replica).
 #
 # Restore (DR): see cluster/README.md → "Restore a backup".
 # ==============================================================================
 set -euo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 
 command -v aws >/dev/null 2>&1 || { echo "✗ aws CLI required for backups (or set backup_enabled=false)"; exit 1; }
 command -v gpg >/dev/null 2>&1 || { echo "✗ gpg required for client-side encryption (or set backup_enabled=false)"; exit 1; }

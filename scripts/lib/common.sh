@@ -2,7 +2,7 @@
 # ==============================================================================
 # OpenAether — shared shell helpers (source this; do not execute)
 #
-#   source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+#   source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 #
 # Single source of truth for: tfvars parsing, provider detection, the
 # provider→prefix mapping, S3 credential resolution (primary + cross-provider
