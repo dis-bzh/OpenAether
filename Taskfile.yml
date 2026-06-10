@@ -167,7 +167,7 @@ tasks:
         sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale sk || true'
     cmds:
       - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
-      - tofu state rm module.talos.talos_machine_secrets.this
+      - tofu state rm module.talos.talos_machine_secrets.this 2>/dev/null || true
       - tofu destroy -var-file="envs/management-{{.PROVIDER}}.tfvars"
 
   destroy-workload:
