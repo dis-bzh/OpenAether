@@ -19,7 +19,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="${SCRIPT_DIR}/.."
+ROOT_DIR="${SCRIPT_DIR}/../.."
 TOFU_DIR="${ROOT_DIR}/infrastructure/opentofu-local"
 MANIFESTS_DIR="${ROOT_DIR}/infrastructure/opentofu/cluster/bootstrap-manifests"
 
@@ -107,7 +107,7 @@ success "Preflight passed"
 # ==============================================================================
 info "Step 1 — Rendering local Cilium manifest..."
 if [[ ! -f "${MANIFESTS_DIR}/cilium-local.yaml" ]] || grep -q "Placeholder" "${MANIFESTS_DIR}/cilium-local.yaml" 2>/dev/null; then
-  "${SCRIPT_DIR}/render-bootstrap-manifests.sh" --local
+  "${SCRIPT_DIR}/../bootstrap/render-bootstrap-manifests.sh" --local
 fi
 export TF_VAR_cilium_manifest="$(cat "${MANIFESTS_DIR}/cilium-local.yaml")"
 success "Cilium manifest ready"

@@ -21,7 +21,7 @@
 # Usage: ./scripts/ensure-buckets.sh <path/to/cluster.tfvars>
 # ==============================================================================
 set -euo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 
 TFVARS="${1:?usage: ensure-buckets.sh <cluster.tfvars>}"
 [ -f "$TFVARS" ] || { echo "✗ tfvars not found: $TFVARS"; exit 1; }

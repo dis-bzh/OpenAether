@@ -6,5 +6,5 @@
 # before `tofu init` / `tofu apply`.
 # ==============================================================================
 set -euo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 s3_cred "${1:?usage: resolve-s3-cred.sh <provider> <ak|sk>}" primary "${2:?usage: resolve-s3-cred.sh <provider> <ak|sk>}"

@@ -11,7 +11,7 @@
 #   tofu init -reconfigure $(scripts/tf-backend.sh envs/management-scaleway.tfvars)
 # ==============================================================================
 set -euo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 
 TFVARS="${1:?usage: tf-backend.sh <cluster.tfvars>}"
 [ -f "$TFVARS" ] || { echo "tf-backend.sh: tfvars not found: $TFVARS" >&2; exit 1; }

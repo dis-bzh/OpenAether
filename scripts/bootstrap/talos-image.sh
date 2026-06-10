@@ -29,11 +29,11 @@ case "$P" in
   *) echo "✗ unknown provider: $RAW (expected scaleway|ovh|outscale)"; exit 1 ;;
 esac
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../infrastructure/opentofu/talos-image" && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../infrastructure/opentofu/talos-image" && pwd)"
 command -v tofu >/dev/null 2>&1 || { echo "✗ tofu required"; exit 1; }
 command -v aws  >/dev/null 2>&1 || { echo "✗ aws CLI required"; exit 1; }
 
-source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 oa_aws_compat
 
 # Resolve the target provider's S3 creds into AWS_* (aws CLI + tofu S3 backend),
