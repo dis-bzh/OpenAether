@@ -15,7 +15,7 @@ locals {
   net_prefix       = "10.5.0"
   cp_count         = var.control_plane_count
   cp_ips           = [for i in range(local.cp_count) : "${local.net_prefix}.${10 + i}"]
-  cp_endpoints     = [for i in range(local.cp_count) : "127.0.0.1:${50000 + i}"]
+  cp_endpoints     = [for i in range(local.cp_count) : "127.0.0.1:${51000 + i}"]
   cluster_endpoint = "https://${local.cp_ips[0]}:6443" # cp0 is the API endpoint (no LB locally)
 
   # Workers share the same deterministic scheme: IPs at .20+ (worker_ip_base) and
@@ -23,7 +23,7 @@ locals {
   # modules/providers/local. Dedicated workers stay untainted (schedulable).
   worker_count     = var.worker_count
   worker_ips       = [for i in range(local.worker_count) : "${local.net_prefix}.${20 + i}"]
-  worker_endpoints = [for i in range(local.worker_count) : "127.0.0.1:${50010 + i}"]
+  worker_endpoints = [for i in range(local.worker_count) : "127.0.0.1:${51010 + i}"]
 
   manifests_dir = "${path.module}/../opentofu/bootstrap-manifests"
   cilium_manifest = var.cilium_manifest != null ? var.cilium_manifest : (
@@ -87,7 +87,7 @@ module "local" {
   network_cidr        = "${local.net_prefix}.0/24"
   cp_ip_base          = 10
   worker_ip_base      = 20
-  talos_api_port_base = 50000
+  talos_api_port_base = 51000
   k8s_api_port        = 6443
 
   # Generated configs from modules/talos (one per node — identical, node-agnostic)

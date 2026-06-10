@@ -4,8 +4,10 @@
 #
 # Opens one SSH tunnel per node to its Talos API (50000/TCP) THROUGH the bastion,
 # reading the node IPs from the current tofu state. Control planes map to
-# localhost 5000+i, workers to 5010+i — matching control_plane_endpoints /
-# worker_endpoints in the talos module.
+# localhost 50000+i, workers to 50100+i — matching control_plane_endpoints /
+# worker_endpoints in the talos module (cloud cluster).
+#
+# Local Docker cluster uses 52000+ to avoid port conflicts.
 #
 # Talos nodes have no SSH, so the bastion relays the TCP (ssh -L ...:node:50000).
 # Tunnels are detached (nohup) so they survive the task and the `tofu apply` that
@@ -24,10 +26,14 @@ KEY="${KEY/#\~/$HOME}"
 PIDFILE="${TOFU_DIR}/.talos-tunnels.pids"
 
 close_tunnels() {
+  # Primary: kill tracked PIDs from pidfile
   if [[ -f "$PIDFILE" ]]; then
     while read -r pid; do [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true; done <"$PIDFILE"
     rm -f "$PIDFILE"
   fi
+  # Fallback: kill any SSH process forwarding port 50000+ to a remote :50000
+  # (catches orphaned tunnels from failed/interrupted runs)
+  pkill -f "ssh.*-L 5[01][0-9][0-9][0-9]:.*:50000" 2>/dev/null || true
 }
 
 if [[ "$ACTION" == "close" ]]; then
