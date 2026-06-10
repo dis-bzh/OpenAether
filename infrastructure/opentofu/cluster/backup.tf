@@ -63,7 +63,7 @@ resource "terraform_data" "backup" {
 
   provisioner "local-exec" {
     interpreter = ["/usr/bin/env", "bash"]
-    command     = abspath("${path.module}/../../../scripts/backup-artifacts.sh")
+    command     = abspath("${path.module}/../../../scripts/ops/backup-artifacts.sh")
 
     # Secrets (passphrase) and the artifacts go via env (binary-safe base64). The
     # script resolves the S3 creds from PROVIDER (primary + <PU>_BACKUP_AWS_*).
