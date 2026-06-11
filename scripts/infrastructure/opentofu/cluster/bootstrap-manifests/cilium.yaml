@@ -107,6 +107,7 @@ data:
   # Specifies the ratio (0.0-1.0] of total system memory to use for dynamic
   # sizing of the TCP CT, non-TCP CT, NAT and policy BPF maps.
   bpf-map-dynamic-size-ratio: "0.0025"
+  enable-host-legacy-routing: "false"
   # bpf-policy-map-max specifies the maximum number of entries in endpoint
   # policy map (per endpoint)
   bpf-policy-map-max: "16384"
@@ -189,8 +190,6 @@ data:
   enable-no-service-endpoints-routable: "true"
   bpf-lb-sock: "true"
   bpf-lb-sock-hostns-only: "false"
-  enable-host-legacy-routing: "false"
-  enable-bpf-masquerade: "true"
   nodeport-addresses: ""
   enable-health-check-nodeport: "true"
   enable-health-check-loadbalancer-ip: "false"
@@ -211,7 +210,7 @@ data:
   enable-health-checking: "true"
   health-check-icmp-failure-threshold: "3"
   enable-well-known-identities: "false"
-  enable-node-selector-labels: "true"
+  enable-node-selector-labels: "false"
   synchronize-k8s-nodes: "true"
   operator-api-serve-addr: "127.0.0.1:9234"
 
