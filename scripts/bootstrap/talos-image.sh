@@ -15,12 +15,12 @@
 #
 # Usage:
 #   ./scripts/talos-image.sh <scaleway|ovh|outscale> [talos_version]
-#   task talos-image PROVIDER=ovh [VERSION=v1.13.3]
+#   task talos-image PROVIDER=ovh [VERSION=v1.13.4]
 # ==============================================================================
 set -euo pipefail
 
 RAW="${1:?usage: talos-image.sh <scaleway|ovh|outscale> [talos_version]}"
-VERSION="${2:-v1.13.3}"
+VERSION="${2:-v1.13.4}"
 P="$(printf '%s' "$RAW" | tr '[:upper:]' '[:lower:]')"
 case "$P" in
   scw | scaleway) P=scaleway; TGT=scaleway; SREGION=fr-par;    SEP="https://s3.fr-par.scw.cloud" ;;
