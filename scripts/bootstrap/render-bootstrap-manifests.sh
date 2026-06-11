@@ -64,11 +64,16 @@ if [[ "$LOCAL_MODE" == "true" ]]; then
   echo "  ✅ Written to bootstrap-manifests/cilium-local.yaml"
 else
   # Production mode: full Cilium with WireGuard encryption + kube-proxy replacement
+  # socketLB.hostNamespaceOnly=false: extends Socket LB to host-network processes
+  # (kube-apiserver needs this to reach ClusterIPs, e.g. webhook services).
   helm template cilium cilium/cilium \
     --version "${CILIUM_VERSION}" \
     --namespace kube-system \
     --set ipam.mode=kubernetes \
     --set kubeProxyReplacement=true \
+    --set socketLB.enabled=true \
+    --set socketLB.hostNamespaceOnly=false \
+    --set bpf.hostLegacyRouting=false \
     --set cgroup.autoMount.enabled=false \
     --set cgroup.hostRoot=/sys/fs/cgroup \
     --set k8sServiceHost=localhost \
