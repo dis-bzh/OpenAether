@@ -74,6 +74,7 @@ else
     --set socketLB.enabled=true \
     --set socketLB.hostNamespaceOnly=false \
     --set bpf.hostLegacyRouting=false \
+    --set bpf.masquerade=true \
     --set cgroup.autoMount.enabled=false \
     --set cgroup.hostRoot=/sys/fs/cgroup \
     --set k8sServiceHost=localhost \

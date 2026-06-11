@@ -190,6 +190,7 @@ data:
   bpf-lb-sock: "true"
   bpf-lb-sock-hostns-only: "false"
   enable-host-legacy-routing: "false"
+  enable-bpf-masquerade: "true"
   nodeport-addresses: ""
   enable-health-check-nodeport: "true"
   enable-health-check-loadbalancer-ip: "false"
