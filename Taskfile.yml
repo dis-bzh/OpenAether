@@ -48,10 +48,10 @@ tasks:
   # ===========================================================================
 
   talos-image:
-    desc: "Build + publish the Talos image for a provider. Usage: task talos-image PROVIDER=scaleway|ovh|outscale [VERSION=v1.13.3]"
+    desc: "Build + publish the Talos image for a provider. Usage: task talos-image PROVIDER=scaleway|ovh|outscale [VERSION=v1.13.4]"
     vars:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
-      VERSION: '{{.VERSION | default "v1.13.3"}}'
+      VERSION: '{{.VERSION | default "v1.13.4"}}'
     cmds:
       - ./scripts/bootstrap/talos-image.sh {{.PROVIDER}} {{.VERSION}}
 
