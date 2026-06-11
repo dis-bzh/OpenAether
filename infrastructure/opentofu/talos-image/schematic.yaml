@@ -5,4 +5,7 @@
 # produce a new, reproducible image. Empty customization = the base platform image.
 customization:
   systemExtensions:
-    officialExtensions: []
+    officialExtensions:
+      - siderolabs/qemu-guest-agent
+      - siderolabs/iscsi-tools
+      - siderolabs/util-linux-tools
