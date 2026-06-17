@@ -56,3 +56,49 @@ resource "outscale_vm" "worker" {
     value = var.cluster_name
   }
 }
+
+# ==============================================================================
+# Dedicated data disks per worker (worker × disk matrix). Each worker_storage.disks
+# entry becomes one BSU volume per worker, linked to the VM. device_name follows
+# the disk index (/dev/sdb, /dev/sdc, …). Volumes live in the workers' subregion
+# (the private subnet's AZ). Used for Longhorn / local-path (Talos mounts under
+# /var/mnt via UserVolumeConfig).
+# ==============================================================================
+
+locals {
+  worker_data_disks = flatten([
+    for w in range(var.worker_count) : [
+      for d in range(length(var.worker_storage.disks)) : {
+        key         = "w${w}-d${d}"
+        worker      = w
+        disk_index  = d
+        size_gb     = var.worker_storage.disks[d].size_gb
+        device_name = "/dev/sd${substr("bcdefghijklmnop", d, 1)}"
+      }
+    ]
+  ])
+}
+
+resource "outscale_volume" "worker_data" {
+  for_each = { for disk in local.worker_data_disks : disk.key => disk }
+
+  subregion_name = var.availability_zones[0]
+  size           = each.value.size_gb
+
+  tags {
+    key   = "Name"
+    value = "${var.cluster_name}-worker-data-${each.value.worker}-${each.key}"
+  }
+  tags {
+    key   = "cluster"
+    value = var.cluster_name
+  }
+}
+
+resource "outscale_volume_link" "worker_data" {
+  for_each = { for disk in local.worker_data_disks : disk.key => disk }
+
+  device_name = each.value.device_name
+  volume_id   = outscale_volume.worker_data[each.key].volume_id
+  vm_id       = outscale_vm.worker[each.value.worker].vm_id
+}

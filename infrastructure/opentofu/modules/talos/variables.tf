@@ -147,3 +147,28 @@ variable "container_mode" {
   type        = bool
   default     = false
 }
+
+variable "worker_storage" {
+  description = <<-EOT
+    Dedicated data storage for worker nodes, materialized as encrypted Talos
+    UserVolumeConfig documents (LUKS2, mounted at /var/mnt/<name>).
+    `volumes = []` (default) → no user volumes (e.g. local Docker: container_mode
+    also forces this off). The `disks` field is consumed by the provider modules
+    (block volumes to create+attach); this module only reads `volumes`.
+    Each `volume` targets a disk via `disk_match` (CEL diskSelector). Multiple
+    volumes of volumeType=partition can coexist on a single shared data disk.
+  EOT
+  type = object({
+    disks = optional(list(object({
+      size_gb = number
+    })), [])
+    volumes = optional(list(object({
+      name       = string
+      disk_match = string
+      min_size   = optional(string)
+      max_size   = optional(string)
+      grow       = optional(bool, false)
+    })), [])
+  })
+  default = { disks = [], volumes = [] }
+}

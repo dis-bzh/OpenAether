@@ -91,6 +91,44 @@ variable "node_distribution" {
   default = {}
 }
 
+variable "worker_storage" {
+  description = <<-EOT
+    Dedicated data storage for worker nodes (the active provider only — one
+    provider is active per apply). Decouples the block volumes created/attached
+    by the provider module (`disks`) from the encrypted Talos UserVolumeConfig
+    documents (`volumes`, mounted at /var/mnt/<name>, LUKS2).
+
+    Default (empty) = no dedicated data disks (workers use the system disk only).
+
+    Examples:
+      # Dev — one shared 50GB data disk, two volumes (local-path + Longhorn):
+      worker_storage = {
+        disks = [{ size_gb = 50 }]
+        volumes = [
+          { name = "local-path-provisioner", disk_match = "!system_disk", min_size = "20GB", max_size = "25GB" },
+          { name = "longhorn",                disk_match = "!system_disk", grow = true },
+        ]
+      }
+      # Prod — one large shared disk: disks = [{ size_gb = 500 }] (same volumes).
+      # Prod — dedicated disks: disks = [{ size_gb = 100 }, { size_gb = 400 }]
+      #   with disk_match discriminating by size, e.g.
+      #   "disk.size < 200000000000u" vs "disk.size > 200000000000u".
+  EOT
+  type = object({
+    disks = optional(list(object({
+      size_gb = number
+    })), [])
+    volumes = optional(list(object({
+      name       = string
+      disk_match = string
+      min_size   = optional(string)
+      max_size   = optional(string)
+      grow       = optional(bool, false)
+    })), [])
+  })
+  default = { disks = [], volumes = [] }
+}
+
 variable "admin_ip" {
   description = "Allowed source IPs/CIDRs for admin access (SSH, K8s API LB ACL)"
   type        = list(string)

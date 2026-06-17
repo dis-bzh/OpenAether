@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# OpenAether — Local Talos Deployment Test (3 control planes + 2 workers, Docker)
+# OpenAether — Local Talos Deployment Test (3 control planes + 3 workers, Docker)
 #
 # Exercises the PRODUCTION modules/talos (config generation, bootstrap,
-# kubeconfig) on a real 3-CP etcd quorum with 2 dedicated (schedulable) workers,
+# kubeconfig) on a real 3-CP etcd quorum with 3 dedicated (schedulable) workers,
 # then deploys Cilium + Flux + the GitOps Kustomizations — no cloud creds.
 #
 # Config is delivered via USERDATA (the Talos Docker platform mechanism); the
@@ -41,10 +41,10 @@ fi
 CLUSTER_NAME="openaether-local-dev"
 CP_IPS=("10.5.0.10" "10.5.0.11" "10.5.0.12")
 CP_ENDPOINTS=("127.0.0.1:50000" "127.0.0.1:50001" "127.0.0.1:50002")
-# Dedicated workers (worker_count=2 in opentofu-local/variables.tf): IPs at .20+,
+# Dedicated workers (worker_count=3 in opentofu-local/variables.tf): IPs at .20+,
 # host ports at 50010+i. Schedulable/untainted, for HA and real workload scheduling tests.
-WORKER_IPS=("10.5.0.20" "10.5.0.21")
-WORKER_ENDPOINTS=("127.0.0.1:50010" "127.0.0.1:50011")
+WORKER_IPS=("10.5.0.20" "10.5.0.21" "10.5.0.22")
+WORKER_ENDPOINTS=("127.0.0.1:50010" "127.0.0.1:50011" "127.0.0.1:50012")
 TOTAL_NODES=$(( ${#CP_IPS[@]} + ${#WORKER_IPS[@]} ))
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
@@ -116,7 +116,7 @@ success "Cilium manifest ready"
 # Step 2 — Deploy the 3-CP cluster via the production modules/talos
 # (config generation → USERDATA containers → bootstrap → kubeconfig)
 # ==============================================================================
-info "Step 2 — Deploying Talos cluster: 3 CP + 2 workers (OpenTofu + modules/talos)..."
+info "Step 2 — Deploying Talos cluster: 3 CP + 3 workers (OpenTofu + modules/talos)..."
 cd "${TOFU_DIR}"
 tofu init -upgrade >/dev/null 2>&1 || tofu init >/dev/null
 # If no live cluster is running, any pre-existing local state is stale: its

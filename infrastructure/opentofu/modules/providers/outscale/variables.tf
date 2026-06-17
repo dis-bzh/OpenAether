@@ -20,6 +20,21 @@ variable "image_id" {
   type        = string
 }
 
+variable "worker_storage" {
+  description = <<-EOT
+    Dedicated data disks per worker. Each `disks` entry creates one BSU volume
+    attached to EVERY worker (worker × disk matrix). `volumes` is consumed by
+    modules/talos (UserVolumeConfig), not here. Empty = no extra disks.
+  EOT
+  type = object({
+    disks = optional(list(object({
+      size_gb = number
+    })), [])
+    volumes = optional(any, [])
+  })
+  default = { disks = [], volumes = [] }
+}
+
 variable "subnet_id" {
   description = "Subnet ID for node placement"
   type        = string
