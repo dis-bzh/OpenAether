@@ -38,6 +38,23 @@ node_distribution = {
   }
 }
 
+# --- Worker data storage (dedicated, encrypted) ------------------------------
+# Decouples cloud block volumes (`disks`, attached to each worker) from the
+# encrypted Talos user volumes (`volumes`, LUKS2, mounted at /var/mnt/<name>).
+# Leave unset for no dedicated data disk (workers use the system disk only).
+#
+# Dev — one shared 50GB disk, two volumes (local-path + Longhorn):
+# worker_storage = {
+#   disks = [{ size_gb = 50 }]
+#   volumes = [
+#     { name = "local-path-provisioner", disk_match = "!system_disk", min_size = "20GB", max_size = "25GB" },
+#     { name = "longhorn", disk_match = "!system_disk", grow = true },
+#   ]
+# }
+# Prod (single large shared disk): disks = [{ size_gb = 500 }] (same volumes).
+# Prod (dedicated disks): disks = [{ size_gb = 100 }, { size_gb = 400 }] and
+#   discriminate by size, e.g. disk_match "disk.size < 200000000000u" vs "> ...".
+
 admin_ip = ["YOUR_IP/32"]
 
 bastion_ssh_keys = {

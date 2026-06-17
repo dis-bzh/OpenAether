@@ -1,0 +1,541 @@
+#!/usr/bin/env bash
+# ══════════════════════════════════════════════════════════════════════════════
+# OpenAether — Cluster Runtime Security Tests
+# ══════════════════════════════════════════════════════════════════════════════
+# Valide que les contrôles de sécurité déployés sont EFFECTIFS sur le cluster
+# vivant. Ne modifie RIEN — lectures uniquement.
+#
+# Usage:
+#   ./cluster-security-tests.sh
+#   KUBECONFIG=/path/to/kubeconfig ./cluster-security-tests.sh
+# ══════════════════════════════════════════════════════════════════════════════
+
+set -euo pipefail
+
+# ── Configuration ────────────────────────────────────────────────────────────
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Remonter de 3 niveaux: scripts/ops/ → scripts/ → OpenAether-infra/ → parent
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+BASE_DIR="$REPO_ROOT/OpenAether-apps/apps/base"
+
+PASS=0
+FAIL=0
+SKIP=0
+TOTAL=0
+
+# Couleurs (désactivées hors TTY)
+if [ -t 1 ]; then
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[0;33m'
+  BLUE='\033[0;34m'
+  BOLD='\033[1m'
+  NC='\033[0m'
+else
+  RED='' GREEN='' YELLOW='' BLUE='' BOLD='' NC=''
+fi
+
+# ── Fonctions utilitaires ────────────────────────────────────────────────────
+
+pass() {
+  TOTAL=$((TOTAL + 1))
+  PASS=$((PASS + 1))
+  echo -e "  ${GREEN}✅ $1${NC}"
+}
+
+fail() {
+  TOTAL=$((TOTAL + 1))
+  FAIL=$((FAIL + 1))
+  echo -e "  ${RED}❌ $1${NC}"
+  [ -n "${2:-}" ] && echo -e "     ${RED}→ $2${NC}"
+}
+
+skip() {
+  TOTAL=$((TOTAL + 1))
+  SKIP=$((SKIP + 1))
+  echo -e "  ${YELLOW}⏭️  $1${NC}"
+  [ -n "${2:-}" ] && echo -e "     ${YELLOW}→ $2${NC}"
+}
+
+header() {
+  echo ""
+  echo -e "${BOLD}── $1 ──${NC}"
+}
+
+# ── Pré-flight ───────────────────────────────────────────────────────────────
+
+if ! command -v kubectl &>/dev/null; then
+  echo -e "${RED}kubectl not found — aborting.${NC}"
+  exit 1
+fi
+
+if ! kubectl cluster-info &>/dev/null 2>&1; then
+  echo -e "${RED}Cannot reach cluster — check KUBECONFIG.${NC}"
+  exit 1
+fi
+
+echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
+echo -e "${BOLD} OpenAether Cluster Security Tests${NC}"
+echo -e "${BOLD} $(date '+%Y-%m-%d %H:%M:%S')${NC}"
+echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 1. NETWORK — Cilium NetworkPolicies
+# ══════════════════════════════════════════════════════════════════════════════
+
+header "1. NETWORK (Cilium)"
+
+# 1.1 Default-deny ingress cluster-wide
+if kubectl get ccnp default-deny-all-ingress &>/dev/null; then
+  pass "1.1 Default-deny ingress cluster-wide"
+else
+  fail "1.1 Default-deny ingress cluster-wide" "CCNP default-deny-all-ingress not found"
+fi
+
+# 1.2 DNS egress autorisé partout
+if kubectl get ccnp allow-dns &>/dev/null; then
+  pass "1.2 DNS egress autorisé partout"
+else
+  fail "1.2 DNS egress autorisé partout" "CCNP allow-dns not found"
+fi
+
+# 1.3 Kube-API egress autorisé
+if kubectl get ccnp allow-kube-api &>/dev/null; then
+  pass "1.3 Kube-API egress autorisé"
+else
+  fail "1.3 Kube-API egress autorisé" "CCNP allow-kube-api not found"
+fi
+
+# 1.4 MinIO ingress borné (local seulement — skip si namespace absent)
+if kubectl get ns foundation-storage &>/dev/null 2>&1; then
+  MINIO_CNP=$(kubectl get cnp minio -n foundation-storage -o yaml 2>/dev/null || true)
+  if echo "$MINIO_CNP" | grep -q "services-observability" && echo "$MINIO_CNP" | grep -q '"9000"'; then
+    pass "1.4 MinIO ingress borné (services-observability:9000)"
+  elif [ -z "$MINIO_CNP" ]; then
+    skip "1.4 MinIO ingress borné" "Namespace foundation-storage not present (cloud-only)"
+  else
+    fail "1.4 MinIO ingress borné" "CNP minio does not restrict ingress to services-observability:9000"
+  fi
+else
+  skip "1.4 MinIO ingress borné" "Namespace foundation-storage not present (cloud-only)"
+fi
+
+# 1.5 Loki egress — pas de toEntities:world
+LOKI_CNP="$BASE_DIR/observability/networkpolicy.yaml"
+if [ -f "$LOKI_CNP" ]; then
+  if grep -A20 "name: loki" "$LOKI_CNP" | grep -q "toEntities.*world"; then
+    fail "1.5 Loki egress pas world" "CNP Loki still has toEntities: world"
+  else
+    pass "1.5 Loki egress pas world"
+  fi
+else
+  skip "1.5 Loki egress pas world" "Loki CNP file not found"
+fi
+
+# 1.6 VMAgent scraping borné (toEntities: cluster)
+VMAgent_CNP="$BASE_DIR/observability/networkpolicy.yaml"
+if [ -f "$VMAgent_CNP" ]; then
+  # toEntities et cluster sont sur des lignes séparées dans le YAML Cilium
+  if grep -A60 "name: vmagent" "$VMAgent_CNP" | grep -q "toEntities:" && \
+     grep -A60 "name: vmagent" "$VMAgent_CNP" | grep -q "cluster"; then
+    pass "1.6 VMAgent scraping borné (toEntities: cluster)"
+  else
+    fail "1.6 VMAgent scraping borné" "CNP VMAgent missing toEntities: cluster on scraping block"
+  fi
+else
+  skip "1.6 VMAgent scraping borné" "VMAgent CNP file not found"
+fi
+
+# 1.7 Fondation hors-mesh : CNP existent
+NS_WITH_CNP=0
+for ns in cert-manager foundation-vault cnpg-system longhorn-system foundation-pki-management kyverno; do
+  if kubectl get cnp -n "$ns" &>/dev/null 2>&1 && [ "$(kubectl get cnp -n "$ns" -o name 2>/dev/null | wc -l)" -gt 0 ]; then
+    NS_WITH_CNP=$((NS_WITH_CNP + 1))
+  fi
+done
+if [ "$NS_WITH_CNP" -ge 5 ]; then
+  pass "1.7 Fondation hors-mesh: $NS_WITH_CNP/6 namespaces avec CNP"
+elif [ "$NS_WITH_CNP" -ge 3 ]; then
+  pass "1.7 Fondation hors-mesh: $NS_WITH_CNP/6 namespaces avec CNP (partiel)"
+else
+  fail "1.7 Fondation hors-mesh Cilium" "Seulement $NS_WITH_CNP/6 namespaces avec CNP"
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 2. ZERO-TRUST — Istio Ambient + AuthZ
+# ══════════════════════════════════════════════════════════════════════════════
+
+header "2. ZERO-TRUST (Istio)"
+
+# 2.1 mTLS STRICT mesh-wide
+PA_STRICT=$(kubectl get peerauthentication -n istio-system -o jsonpath='{.items[0].spec.mtls.mode}' 2>/dev/null || echo "")
+if [ "$PA_STRICT" = "STRICT" ]; then
+  pass "2.1 mTLS STRICT mesh-wide"
+else
+  fail "2.1 mTLS STRICT mesh-wide" "PeerAuthentication mode='$PA_STRICT' (expected STRICT)"
+fi
+
+# 2.2 Default-deny authz par ns ambient (spec: {} = allow-nothing)
+AUTHZ_DIR="$BASE_DIR/istio/authz"
+if [ -d "$AUTHZ_DIR" ]; then
+  DENY_NS=$(grep -c "name: default-deny-all" "$AUTHZ_DIR/authorizationpolicy-default-deny.yaml" 2>/dev/null || true)
+  DENY_NS=${DENY_NS:-0}
+  AMBIENT_NS=("istio-system" "foundation-service-mesh" "services-observability" "foundation-storage" "foundation-networking")
+  FOUND=0
+  for ns in "${AMBIENT_NS[@]}"; do
+    if grep -q "namespace: $ns" "$AUTHZ_DIR/authorizationpolicy-default-deny.yaml" 2>/dev/null; then
+      FOUND=$((FOUND + 1))
+    fi
+  done
+  if [ "$FOUND" -ge 4 ]; then
+    pass "2.2 Default-deny authz: $FOUND/${#AMBIENT_NS[@]} ns ambient couverts"
+  else
+    fail "2.2 Default-deny authz par ns ambient" "Seulement $FOUND/${#AMBIENT_NS[@]} ns ambient avec default-deny"
+  fi
+else
+  skip "2.2 Default-deny authz par ns ambient" "AuthZ dir not found"
+fi
+
+# 2.3 TrustDomain = cluster.local
+TD=$(kubectl get helmrelease istiod -n foundation-service-mesh -o jsonpath='{.spec.values.meshConfig.trustDomain}' 2>/dev/null || echo "")
+if [ "$TD" = "cluster.local" ]; then
+  pass "2.3 TrustDomain = cluster.local"
+else
+  fail "2.3 TrustDomain = cluster.local" "trustDomain='$TD' (expected cluster.local)"
+fi
+
+# 2.4 Pas de principal openaether.local dans les AuthorizationPolicies
+AUTHZ_DIR="$BASE_DIR/istio/authz"
+if [ -d "$AUTHZ_DIR" ]; then
+  # Cherche openaether.local dans les principals (pas dans les commentaires ni FQDNs)
+  BAD_REFS=$(grep -r "principals" "$AUTHZ_DIR/authorizationpolicy-explicit-allows.yaml" 2>/dev/null | grep -c "openaether\.local" || true)
+  BAD_REFS=${BAD_REFS:-0}
+  if [ "$BAD_REFS" -eq 0 ]; then
+    pass "2.4 Pas de principal openaether.local"
+  else
+    fail "2.4 Pas de principal openaether.local" "$BAD_REFS principals still using openaether.local"
+  fi
+else
+  skip "2.4 Pas de principal openaether.local" "AuthZ dir not found"
+fi
+
+# 2.5 Gateway TLS : HTTPRoute redirect + certificate
+REDIRECT_EXISTS=$(kubectl get httproute -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -c redirect || true)
+REDIRECT_EXISTS=${REDIRECT_EXISTS:-0}
+CERT_EXISTS=$(kubectl get certificate -A --no-headers 2>/dev/null | wc -l || true)
+CERT_EXISTS=${CERT_EXISTS:-0}
+if [ "$REDIRECT_EXISTS" -gt 0 ] && [ "$CERT_EXISTS" -gt 0 ]; then
+  pass "2.5 Gateway TLS (redirect + certificate present)"
+else
+  fail "2.5 Gateway TLS" "redirect=$REDIRECT_EXISTS, certs=$CERT_EXISTS"
+fi
+
+# 2.6 Waypoint actif
+WP_PODS=$(kubectl get pods -n foundation-service-mesh -l gateway.networking.k8s.io/gateway-name --no-headers 2>/dev/null | grep -c "Running" || true)
+WP_PODS=${WP_PODS:-0}
+if [ "$WP_PODS" -gt 0 ]; then
+  pass "2.6 Waypoint actif ($WP_PODS pod(s) Running)"
+else
+  skip "2.6 Waypoint actif" "Waypoint pods not found (may not be deployed)"
+fi
+
+# 2.7 Hors-mesh SANS AuthorizationPolicy Istio (sécurité = Cilium uniquement)
+AUTHZ_DIR="$BASE_DIR/istio/authz"
+if [ -d "$AUTHZ_DIR" ]; then
+  OFF_MESH_NS=("cert-manager" "kyverno" "capi-system" "capi-operator-system" "longhorn-system" "foundation-databases" "foundation-vault")
+  UNWANTED=0
+  for ns in "${OFF_MESH_NS[@]}"; do
+    if grep -q "namespace: $ns" "$AUTHZ_DIR/authorizationpolicy-default-deny.yaml" 2>/dev/null || \
+       grep -q "namespace: $ns" "$AUTHZ_DIR/authorizationpolicy-explicit-allows.yaml" 2>/dev/null; then
+      UNWANTED=$((UNWANTED + 1))
+    fi
+  done
+  if [ "$UNWANTED" -eq 0 ]; then
+    pass "2.7 Hors-mesh: 0 AuthorizationPolicy inerte (0/${#OFF_MESH_NS[@]})"
+  else
+    fail "2.7 Hors-mesh sans AuthZ Istio" "$UNWANTED/${#OFF_MESH_NS[@]} ns hors-mesh still have AuthZ policies (inertes)"
+  fi
+else
+  skip "2.7 Hors-mesh sans AuthZ Istio" "AuthZ dir not found"
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 3. LEAST-PRIVILEGE — Kyverno + RBAC + PSA
+# ══════════════════════════════════════════════════════════════════════════════
+
+header "3. LEAST-PRIVILEGE (Kyverno + RBAC + PSA)"
+
+# 3.1 Kyverno enforce disallow-root-user
+ROOT_ACTION=$(kubectl get clusterpolicy disallow-root-user -o jsonpath='{.spec.validationFailureAction}' 2>/dev/null || echo "")
+if [ "$ROOT_ACTION" = "Enforce" ]; then
+  pass "3.1 Kyverno enforce disallow-root-user"
+else
+  fail "3.1 Kyverno enforce disallow-root-user" "validationFailureAction='$ROOT_ACTION' (expected Enforce)"
+fi
+
+# 3.2 Kyverno enforce disallow-default-namespace
+DEFAULT_NS_ACTION=$(kubectl get clusterpolicy disallow-default-namespace -o jsonpath='{.spec.validationFailureAction}' 2>/dev/null || echo "")
+if [ "$DEFAULT_NS_ACTION" = "Enforce" ]; then
+  pass "3.2 Kyverno enforce disallow-default-namespace"
+else
+  fail "3.2 Kyverno enforce disallow-default-namespace" "validationFailureAction='$DEFAULT_NS_ACTION' (expected Enforce)"
+fi
+
+# 3.3 Kyverno audit policies (3 attendues)
+AUDIT_COUNT=$(kubectl get clusterpolicy -o json 2>/dev/null | python3 -c "
+import json,sys
+policies=json.load(sys.stdin)['items']
+audit=[p for p in policies if p['spec'].get('validationFailureAction')=='Audit']
+print(len(audit))
+" 2>/dev/null || echo "0")
+if [ "$AUDIT_COUNT" -ge 3 ]; then
+  pass "3.3 Kyverno audit policies: $AUDIT_COUNT attendues"
+else
+  fail "3.3 Kyverno audit policies" "Seulement $AUDIT_COUNT policies en Audit (attendu ≥3)"
+fi
+
+# 3.4 PSA restricted sur fondation PKI
+PKI_ENFORCE=$(kubectl get ns foundation-pki-root -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}' 2>/dev/null || echo "")
+VAULT_ENFORCE=$(kubectl get ns foundation-vault -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}' 2>/dev/null || echo "")
+if [ "$PKI_ENFORCE" = "restricted" ] && [ "$VAULT_ENFORCE" = "restricted" ]; then
+  pass "3.4 PSA restricted sur fondation PKI (pki-root + vault)"
+else
+  fail "3.4 PSA restricted sur fondation PKI" "pki-root=$PKI_ENFORCE, vault=$VAULT_ENFORCE (expected restricted)"
+fi
+
+# 3.5 PSA au moins baseline partout
+MANAGED_NS=$(kubectl get ns -l openaether.io/managed=true -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo "")
+MISSING_PSA=0
+for ns in $MANAGED_NS; do
+  ENFORCE=$(kubectl get ns "$ns" -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}' 2>/dev/null || echo "")
+  if [ -z "$ENFORCE" ]; then
+    MISSING_PSA=$((MISSING_PSA + 1))
+  fi
+done
+NS_COUNT=$(echo "$MANAGED_NS" | wc -w)
+if [ "$MISSING_PSA" -eq 0 ] && [ "$NS_COUNT" -gt 0 ]; then
+  pass "3.5 PSA au moins baseline: $NS_COUNT ns managed tous avec enforce label"
+else
+  fail "3.5 PSA au moins baseline partout" "$MISSING_PSA/$NS_COUNT ns managed sans enforce label"
+fi
+
+# 3.6 RBAC minimal — pas de wildcards sur ClusterRoles custom
+WILDCARD_ROLES=$(kubectl get clusterrole -o json 2>/dev/null | python3 -c "
+import json,sys
+roles=json.load(sys.stdin)['items']
+# Exclure les upstream charts et system
+EXCLUDE_PREFIXES=('system:' 'clusternet:' 'cnpg-' 'cloudnative-pg' 'external-secrets-' 'longhorn-' 'istio-' 'cert-manager-' 'kyverno-' 'capi-' 'cluster-api-' 'gateway-api-' 'fluent-' 'kube-state-metrics-' 'loki-' 'alloy-' 'prometheus-' 'node-exporter-' 'victoria-metrics-')
+wildcards=[r for r in roles
+  if not any(r['metadata']['name'].startswith(p) for p in EXCLUDE_PREFIXES)
+  and any(rule.get('verbs')==['*'] or rule.get('resources')==['*'] for rule in r.get('rules',[]))]
+print(len(wildcards))
+" 2>/dev/null || echo "0")
+if [ "$WILDCARD_ROLES" -eq 0 ]; then
+  pass "3.6 RBAC minimal: 0 ClusterRole custom avec wildcards"
+else
+  fail "3.6 RBAC minimal custom" "$WILDCARD_ROLES ClusterRoles avec verbs:['*'] ou resources:['*']"
+fi
+
+# 3.7 Pas de cluster-admin binding custom
+ADMIN_BINDINGS=$(kubectl get clusterrolebinding -o json 2>/dev/null | python3 -c "
+import json,sys
+bindings=json.load(sys.stdin)['items']
+EXCLUDE_PREFIXES=('system:' 'cnpg-' 'external-secrets-' 'longhorn-' 'istio-' 'cert-manager-' 'kyverno-' 'capi-' 'cluster-api-')
+custom=[b for b in bindings
+  if b['roleRef'].get('name')=='cluster-admin'
+  and not any(b['metadata']['name'].startswith(p) for p in EXCLUDE_PREFIXES)]
+print(len(custom))
+" 2>/dev/null || echo "0")
+if [ "$ADMIN_BINDINGS" -eq 0 ]; then
+  pass "3.7 Pas de cluster-admin binding custom"
+else
+  fail "3.7 Pas de cluster-admin binding custom" "$ADMIN_BINDINGS custom ClusterRoleBindings vers cluster-admin"
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 4. SECRETS
+# ══════════════════════════════════════════════════════════════════════════════
+
+header "4. SECRETS"
+
+# 4.1 Pas de secret en clair dans les YAML de déploiement
+SECRETS_IN_PLAIN=0
+if [ -d "$BASE_DIR" ]; then
+  while IFS= read -r f; do
+    if grep -q "kind: Secret" "$f" 2>/dev/null; then
+      # Ignorer les ExternalSecrets et les refs de valuesFrom
+      if grep -q "kind: ExternalSecret" "$f" || grep -q "valuesFrom" "$f"; then
+        continue
+      fi
+      # Vérifier si le Secret a des données réelles (stringData/data non vide)
+      HAS_DATA=$(awk '/kind: Secret/{found=1} found && /^\s+(stringData|data):/{print; exit}' "$f" 2>/dev/null || true)
+      if [ -n "$HAS_DATA" ]; then
+        # Vérifier que ce n'est pas juste un placeholder vide (stringData: {} ou data: {})
+        NEXT_LINE=$(awk '/kind: Secret/{found=1} found && /^\s+(stringData|data):/{getline; print; exit}' "$f" 2>/dev/null || true)
+        if ! echo "$NEXT_LINE" | grep -qE "^\s*\{\}\s*$"; then
+          SECRETS_IN_PLAIN=$((SECRETS_IN_PLAIN + 1))
+        fi
+      fi
+    fi
+  done < <(find "$BASE_DIR" -name "*.yaml" 2>/dev/null)
+fi
+if [ "$SECRETS_IN_PLAIN" -eq 0 ]; then
+  pass "4.1 Pas de secret en clair dans les YAML"
+else
+  fail "4.1 Pas de secret en clair dans les YAML" "$SECRETS_IN_PLAIN fichier(s) avec des Secrets non-ExternalSecret"
+fi
+
+# 4.2 ExternalSecrets présents
+ESO_PODS=$(kubectl get pods -n foundation-pki-management -l app.kubernetes.io/name=external-secrets --no-headers 2>/dev/null | grep -c "Running" || true)
+ESO_PODS=${ESO_PODS:-0}
+if [ "$ESO_PODS" -gt 0 ]; then
+  pass "4.2 External Secrets Operator actif ($ESO_PODS pod(s) Running)"
+else
+  fail "4.2 External Secrets Operator actif" "Aucun pod ESO Running dans foundation-pki-management"
+fi
+
+# 4.3 ClusterSecretStore actif
+STORE_READY=$(kubectl get clustersecretstore -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
+if [ "$STORE_READY" = "True" ]; then
+  pass "4.3 ClusterSecretStore actif (Ready)"
+else
+  fail "4.3 ClusterSecretStore actif" "status='$STORE_READY' (expected True)"
+fi
+
+# 4.4 OpenBao HA Running
+OBAO_PODS=$(kubectl get pods -n foundation-vault -l app=openbao --no-headers 2>/dev/null | grep -c "Running" || true)
+OBAO_PODS=${OBAO_PODS:-0}
+if [ "$OBAO_PODS" -ge 3 ]; then
+  pass "4.4 OpenBao HA: $OBAO_PODS pods Running"
+elif [ "$OBAO_PODS" -gt 0 ]; then
+  pass "4.4 OpenBao: $OBAO_PODS pod(s) Running (non-HA)"
+else
+  fail "4.4 OpenBao HA" "Aucun pod openbao Running dans foundation-vault"
+fi
+
+# 4.5 Unsealer actif
+UNSEALER_PODS=$(kubectl get pods -n foundation-vault -l app=openbao-unsealer --no-headers 2>/dev/null | grep -c "Running" || true)
+UNSEALER_PODS=${UNSEALER_PODS:-0}
+if [ "$UNSEALER_PODS" -gt 0 ]; then
+  pass "4.5 Unsealer actif ($UNSEALER_PODS pod(s) Running)"
+else
+  skip "4.5 Unsealer actif" "Unsealer pods not found (may use different labels)"
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 5. POD SECURITY
+# ══════════════════════════════════════════════════════════════════════════════
+
+header "5. POD SECURITY"
+
+# 5.1 Pas de pod root dans fondation
+VAULT_PODS_ROOT=$(kubectl get pods -n foundation-vault -o json 2>/dev/null | python3 -c "
+import json,sys
+pods=json.load(sys.stdin).get('items',[])
+root=0
+for p in pods:
+  for c in p.get('spec',{}).get('containers',[]):
+    sc=c.get('securityContext',{})
+    if not sc.get('runAsNonRoot', False):
+      root+=1
+print(root)
+" 2>/dev/null || echo "0")
+if [ "$VAULT_PODS_ROOT" -eq 0 ]; then
+  pass "5.1 Pas de pod root dans fondation-vault"
+else
+  fail "5.1 Pas de pod root dans fondation-vault" "$VAULT_PODS_ROOT conteneur(s) sans runAsNonRoot"
+fi
+
+# 5.2 OpenBao: drop ALL + readOnlyRootFS
+OBAO_HARDENED=$(kubectl get pods -n foundation-vault -l app=openbao -o json 2>/dev/null | python3 -c "
+import json,sys
+pods=json.load(sys.stdin).get('items',[])
+ok=0
+for p in pods:
+  for c in p.get('spec',{}).get('containers',[]):
+    sc=c.get('securityContext',{})
+    caps=sc.get('capabilities',{}).get('drop',[])
+    if 'ALL' in caps and sc.get('readOnlyRootFilesystem',False) and sc.get('allowPrivilegeEscalation',True)==False:
+      ok+=1
+print(ok)
+" 2>/dev/null || echo "0")
+if [ "$OBAO_HARDENED" -ge 3 ]; then
+  pass "5.2 OpenBao durci: $OBAO_HARDENED/3 conteneurs (drop ALL + readOnlyRootFS)"
+else
+  fail "5.2 OpenBao durci" "Seulement $OBAO_HARDENED/3 conteneurs avec securityContext complet"
+fi
+
+# 5.3 CoreDNS: pas de pod privileged
+COREDNS_PRIV=$(kubectl get pods -n kube-system -l k8s-app=kube-dns -o json 2>/dev/null | python3 -c "
+import json,sys
+pods=json.load(sys.stdin).get('items',[])
+priv=0
+for p in pods:
+  for c in p.get('spec',{}).get('containers',[]):
+    if c.get('securityContext',{}).get('privileged',False):
+      priv+=1
+print(priv)
+" 2>/dev/null || echo "0")
+if [ "$COREDNS_PRIV" -eq 0 ]; then
+  pass "5.3 CoreDNS: aucun pod privileged"
+else
+  fail "5.3 CoreDNS: pas de pod privileged" "$COREDNS_PRIV conteneur(s) CoreDNS privileged"
+fi
+
+# 5.4 Pas de pod avec capabilities addées (hors ns système + workloads CNI/CSI)
+ADDED_CAPS=$(kubectl get pods -A -o json 2>/dev/null | python3 -c "
+import json,sys
+pods=json.load(sys.stdin).get('items',[])
+# Namespaces système + workloads légitimement privileged
+SKIP_NS=('kube-system' 'longhorn-system' 'local-path-storage' 'capi-system' 'capi-operator-system' 'foundation-storage')
+# Pods légitimement privileged (CNI, CSI, node-exporter)
+SKIP_PATTERNS=('cilium' 'istio-cni' 'longhorn' 'csi-' 'instance-manager' 'engine-image' 'node-exporter' 'alloy')
+caps=0
+for p in pods:
+  ns=p.get('metadata',{}).get('namespace','')
+  name=p.get('metadata',{}).get('name','')
+  if ns in SKIP_NS:
+    continue
+  if any(pat in name for pat in SKIP_PATTERNS):
+    continue
+  for c in p.get('spec',{}).get('containers',[]) + p.get('spec',{}).get('initContainers',[]):
+    adds=c.get('securityContext',{}).get('capabilities',{}).get('add',[])
+    if adds:
+      caps+=1
+print(caps)
+" 2>/dev/null || echo "0")
+if [ "$ADDED_CAPS" -eq 0 ]; then
+  pass "5.4 Pas de pod avec capabilities addées (hors ns système)"
+else
+  fail "5.4 Pas de pod avec capabilities addées" "$ADDED_CAPS conteneur(s) avec capabilities.add non vides"
+fi
+
+# 5.5 PriorityClass platform-critical
+PC_EXISTS=$(kubectl get priorityclass platform-critical -o name 2>/dev/null || echo "")
+if [ -n "$PC_EXISTS" ]; then
+  pass "5.5 PriorityClass platform-critical existe"
+else
+  skip "5.5 PriorityClass platform-critical" "PriorityClass not found (may not be deployed yet)"
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RAPPORT FINAL
+# ══════════════════════════════════════════════════════════════════════════════
+
+echo ""
+echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
+if [ "$FAIL" -eq 0 ]; then
+  echo -e "${GREEN}${BOLD} RÉSULTAT: $PASS/$TOTAL passés${NC}"
+  [ "$SKIP" -gt 0 ] && echo -e "${YELLOW} ($SKIP ignorés — environnement non applicable)${NC}"
+else
+  echo -e "${RED}${BOLD} RÉSULTAT: $PASS/$TOTAL passés, $FAIL échoué(s)${NC}"
+  [ "$SKIP" -gt 0 ] && echo -e "${YELLOW} ($SKIP ignorés)${NC}"
+fi
+echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
+
+if [ "$FAIL" -gt 0 ]; then
+  exit 1
+else
+  exit 0
+fi

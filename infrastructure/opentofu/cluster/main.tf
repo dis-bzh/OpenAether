@@ -108,6 +108,8 @@ module "scw" {
   instance_type    = local.scw_dist.instance_type
   additional_zones = local.scw_dist.zones != null ? local.scw_dist.zones : ["fr-par-1", "fr-par-2", "fr-par-3"]
 
+  worker_storage = var.worker_storage
+
   admin_ip         = var.admin_ip
   bastion_ssh_keys = lookup(var.bastion_ssh_keys, "scaleway", [])
 }
@@ -132,6 +134,8 @@ module "ovh" {
   availability_zones = local.ovh_dist.availability_zones
   bastion_image_id   = local.ovh_dist.bastion_image_id
 
+  worker_storage = var.worker_storage
+
   admin_ip         = var.admin_ip
   bastion_ssh_keys = lookup(var.bastion_ssh_keys, "ovh", [])
 }
@@ -154,6 +158,8 @@ module "outscale" {
   image_id           = local.osc_dist.image_id
   availability_zones = local.osc_dist.availability_zones
   bastion_image_id   = local.osc_dist.bastion_image_id
+
+  worker_storage = var.worker_storage
 
   admin_ip         = var.admin_ip
   bastion_ssh_keys = lookup(var.bastion_ssh_keys, "outscale", [])
@@ -267,6 +273,9 @@ module "talos" {
   cilium_manifest             = local.cilium_manifest
   flux_manifest               = local.flux_manifest
   flux_bootstrap_manifest     = local.flux_bootstrap_manifest
+
+  # Dedicated worker data volumes (encrypted UserVolumeConfig). Empty on local.
+  worker_storage = var.worker_storage
 
   depends_on = [module.scw, module.ovh, module.outscale]
 }

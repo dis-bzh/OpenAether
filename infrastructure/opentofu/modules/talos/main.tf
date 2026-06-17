@@ -17,6 +17,18 @@ resource "random_bytes" "etcd_encryption_secret" {
   length = 32
 }
 
+# 32-byte random passphrase for disk encryption at rest (LUKS2).
+# Generated once, stored in tfstate — stable across applies (Talos decrypts at boot).
+# Covers: EPHEMERAL (/var — where local-path provisioner writes after remap)
+# and STATE (system state, etcd DB, PKI).
+# Does NOT protect against runtime compromise (the node must hold the key in RAM).
+# Uses random_password (returns plain string) rather than random_bytes to avoid
+# double-encoding issues with base64encode().
+resource "random_password" "disk_encryption_secret" {
+  length  = 32
+  special = false
+}
+
 # ==============================================================================
 # Client Configuration (talosctl)
 # ==============================================================================
@@ -82,6 +94,46 @@ locals {
 }
 
 # ==============================================================================
+# Worker data volumes — encrypted Talos UserVolumeConfig documents.
+# One additional config document per worker_storage.volumes entry, appended to
+# the worker machine config as a separate patch. Mounted at /var/mnt/<name>,
+# LUKS2-encrypted with the same passphrase as the system disk (random_password).
+# Skipped entirely in container mode (Docker has no block devices) and when no
+# volumes are declared (e.g. local). volumeType defaults to "partition", so
+# several volumes can share one data disk (selected via disk_match).
+# ==============================================================================
+
+locals {
+  worker_volume_encryption = {
+    provider = "luks2"
+    keys = [{
+      slot = 0
+      static = {
+        passphrase = random_password.disk_encryption_secret.result
+      }
+    }]
+  }
+
+  worker_user_volume_patches = var.container_mode ? [] : [
+    for v in var.worker_storage.volumes : yamlencode({
+      apiVersion = "v1alpha1"
+      kind       = "UserVolumeConfig"
+      name       = v.name
+      provisioning = merge(
+        { diskSelector = { match = v.disk_match } },
+        v.min_size != null ? { minSize = v.min_size } : {},
+        v.max_size != null ? { maxSize = v.max_size } : {},
+        # Talos requires minSize or maxSize — default to 1GiB when both are
+        # omitted (avoids "min size or max size is required" apply errors).
+        v.min_size == null && v.max_size == null ? { minSize = "1GiB" } : {},
+        v.grow ? { grow = true } : {},
+      )
+      encryption = local.worker_volume_encryption
+    })
+  ]
+}
+
+# ==============================================================================
 # Control Plane Machine Configuration
 # ==============================================================================
 
@@ -113,6 +165,28 @@ data "talos_machine_configuration" "control_plane" {
               port    = 7445
             }
           }, local.container_features)
+          # Disk encryption at rest (LUKS2). Safe in container mode — Talos ignores
+          # it when no block device is present.
+          systemDiskEncryption = {
+            state = {
+              provider = "luks2"
+              keys = [{
+                static = {
+                  passphrase = random_password.disk_encryption_secret.result
+                }
+                slot = 0
+              }]
+            }
+            ephemeral = {
+              provider = "luks2"
+              keys = [{
+                static = {
+                  passphrase = random_password.disk_encryption_secret.result
+                }
+                slot = 0
+              }]
+            }
+          }
         },
         # In container mode (Docker local testing), skip disk install.
         # Talos detects the container platform and runs without a block device.
@@ -162,7 +236,9 @@ data "talos_machine_configuration" "worker" {
   talos_version      = var.talos_version
   kubernetes_version = var.kubernetes_version
 
-  config_patches = [
+  # Base patch (machine + cluster) plus one UserVolumeConfig patch per declared
+  # worker data volume (see local.worker_user_volume_patches).
+  config_patches = concat([
     yamlencode({
       machine = merge(
         {
@@ -181,7 +257,31 @@ data "talos_machine_configuration" "worker" {
               port    = 7445
             }
           }, local.container_features)
+          # Disk encryption at rest (LUKS2). Safe in container mode — Talos ignores
+          # it when no block device is present.
+          systemDiskEncryption = {
+            state = {
+              provider = "luks2"
+              keys = [{
+                static = {
+                  passphrase = random_password.disk_encryption_secret.result
+                }
+                slot = 0
+              }]
+            }
+            ephemeral = {
+              provider = "luks2"
+              keys = [{
+                static = {
+                  passphrase = random_password.disk_encryption_secret.result
+                }
+                slot = 0
+              }]
+            }
+          }
         },
+        # In container mode (Docker local testing), skip disk install.
+        # Talos detects the container platform and runs without a block device.
         var.container_mode ? {} : {
           install = {
             disk  = "/dev/vda"
@@ -201,7 +301,7 @@ data "talos_machine_configuration" "worker" {
         }
       }
     })
-  ]
+  ], local.worker_user_volume_patches)
 }
 
 # ==============================================================================

@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+**Réorientation produit + identité Zitadel.** Le projet se recentre sur un
+**cluster de management qui provisionne des clusters clients autonomes**
+(abandon du multi-cloud actif-actif), avec backup + DR auto + sécu by design +
+souveraineté comme proposition de valeur. Priorité : compléter Scaleway
+bout-en-bout. Voir la review/roadmap complète dans le plan de session.
+
+### Changed — Identité : Keycloak → Zitadel
+
+- **Zitadel remplace Keycloak** (décision actée). Zitadel (Go, multi-tenant
+  natif) est plus léger et mieux adapté à la mutualisation clients que Keycloak
+  (JVM). Repo `OpenAether-apps` :
+  - Nouveau `apps/base/identity/zitadel/` — HelmRelease `zitadel` 10.0.2
+    (appVersion v4.14.0), namespace `services-identity` (ambient), HTTPRoute via
+    `openaether-gateway`, CiliumNetworkPolicy L4 (egress CNPG/DNS/kube-api),
+    AuthorizationPolicy Istio (default-deny + allow gateway), ExternalSecrets
+    (masterkey 32 o + password DB) depuis OpenBao.
+  - CNPG `keycloak-db` → **`zitadel-db`** (DB/owner `zitadel`), ESO
+    `keycloak-db-app` → `zitadel-db-app` (`secret/zitadel/db`).
+  - Seeder OpenBao (`bootstrap-roles-job`) : seed `zitadel/db` + `zitadel/masterkey`
+    (remplace `keycloak/db`), policy `secret/data/zitadel/*`.
+  - Flux DAG : `apps/flux/base/35-identity.yaml` (Kustomization `identity`,
+    dependsOn cnpg/external-secrets/istio/services-gateway). Suspendu en local
+    (cloud-only : dépend de la Gateway TLS).
+
+### Fixed — drift fondation (root OpenBao supprimé)
+
+- Namespace mort `foundation-pki-root` retiré de `apps/base/namespaces/`
+  (le root OpenBao n'existe plus depuis la refonte seal Shamir + unsealer HA).
+- Règle egress cert-manager → ancien `foundation-pki-root` supprimée
+  (cert-manager signe via l'unique OpenBao `pki/sign/openaether`).
+- Commentaire DAG de l'overlay `management` mis à jour (plus de « 10 pki-root »).
+
+---
+
 ## [0.4.0] — 2026-06-04
 
 **Milestone: multi-cloud management + GitOps foundations, ready for external testers.**
@@ -82,7 +118,7 @@ inline-manifest fix above.
 ### Added
 
 - **Local cluster gains 2 dedicated workers** — the Docker test setup is now
-  **3 CP + 2 workers** (`worker_count`, default 2) instead of 3 single-role CPs.
+  **3 CP + 3 workers** (`worker_count`, default 3) instead of 3 single-role CPs.
   Workers stay schedulable while the control planes keep their taint, so the
   local harness now covers HA and real pod scheduling. Worker Talos APIs map to
   `127.0.0.1:50010/50011`, node IPs `10.5.0.20/21`. `modules/providers/local`
