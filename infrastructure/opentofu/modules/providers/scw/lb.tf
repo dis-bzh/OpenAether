@@ -98,24 +98,27 @@ resource "scaleway_lb_frontend" "k8s_api" {
   backend_id   = scaleway_lb_backend.k8s_api.id
   name         = "k8s-api-frontend"
   inbound_port = 6443
-}
 
-# --- ACLs K8s API LB (admin_ip only + private subnets) ---
-
-resource "scaleway_lb_acl" "k8s_whitelist" {
-  frontend_id = scaleway_lb_frontend.k8s_api.id
-  name        = "k8s-api-whitelist"
-  index       = 1
-  action { type = "allow" }
-  match {
-    ip_subnet = concat(var.admin_ip, ["172.16.0.0/12", "10.0.0.0/8"])
+  acl {
+    name = "k8s-api-whitelist"
+    action {
+      type = "allow"
+    }
+    match {
+      ip_subnet = concat(var.admin_ip, ["172.16.0.0/12", "10.0.0.0/8"])
+    }
+  }
+  acl {
+    name = "k8s-api-deny"
+    action {
+      type = "deny"
+    }
+    match {
+      ip_subnet = ["0.0.0.0/0"]
+    }
   }
 }
 
-resource "scaleway_lb_acl" "k8s_deny" {
-  frontend_id = scaleway_lb_frontend.k8s_api.id
-  name        = "k8s-api-deny"
-  index       = 2
-  action { type = "deny" }
-  match { ip_subnet = ["0.0.0.0/0"] }
-}
+# --- ACLs K8s API LB (admin_ip only + private subnets) ---
+# Les ACLs sont inline dans le frontend pour éviter le conflit
+# entre ressources standalone scaleway_lb_acl et le state du frontend.

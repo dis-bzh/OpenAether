@@ -51,6 +51,21 @@ variable "root_volume_type" {
   default     = "sbs_volume"
 }
 
+variable "worker_storage" {
+  description = <<-EOT
+    Dedicated data disks per worker. Each `disks` entry creates one SBS block
+    volume attached to EVERY worker (worker × disk matrix). `volumes` is consumed
+    by modules/talos (UserVolumeConfig), not here. Empty = no extra disks.
+  EOT
+  type = object({
+    disks = optional(list(object({
+      size_gb = number
+    })), [])
+    volumes = optional(any, [])
+  })
+  default = { disks = [], volumes = [] }
+}
+
 variable "image_id" {
   description = "Talos image ID (zonal, overrides image_name)"
   type        = string

@@ -42,7 +42,7 @@ variable "control_plane_count" {
 variable "worker_count" {
   description = "Number of dedicated worker containers. 2 gives schedulable, untainted nodes for HA/scheduling tests; 0 falls back to scheduling on the (untainted) control planes."
   type        = number
-  default     = 2
+  default     = 3
   validation {
     condition     = var.worker_count >= 0 && var.worker_count <= 3
     error_message = "worker_count must be between 0 and 3 for local testing."
