@@ -76,3 +76,9 @@ variable "bastion_image_id" {
   type        = string
   default     = null
 }
+
+variable "bastion_vm_type" {
+  description = "VM type for the bastion host (jump box; the default is the minimum recommended)."
+  type        = string
+  default     = "tinav5.c2r2p2"
+}

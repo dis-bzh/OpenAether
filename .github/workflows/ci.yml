@@ -165,7 +165,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run Trivy IaC scan
-        uses: aquasecurity/trivy-action@master
+        # Pinned to a release tag instead of @master (supply-chain hardening).
+        # TODO: convert to a commit SHA pin for full immutability.
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: config
           scan-ref: infrastructure/
@@ -177,4 +179,7 @@ jobs:
         with:
           directory: infrastructure/opentofu
           framework: terraform
-          soft_fail: true
+          # soft_fail removed: Checkov now gates the pipeline. Add explicit,
+          # justified exceptions in .checkov.yaml (skip-check) rather than
+          # silencing every finding.
+          config_file: .checkov.yaml
