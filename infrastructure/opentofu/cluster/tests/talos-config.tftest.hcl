@@ -147,8 +147,8 @@ run "cilium_placeholder_detection_covered_by_precondition" {
   }
 
   assert {
-    condition     = !strcontains(var.cilium_manifest, "Placeholder")
-    error_message = "Cilium manifest must not contain 'Placeholder' — run scripts/render-bootstrap-manifests.sh first."
+    condition     = !strcontains(var.cilium_manifest, "CILIUM-MANIFEST-PLACEHOLDER")
+    error_message = "Cilium manifest must not be the unrendered placeholder — run scripts/render-bootstrap-manifests.sh first."
   }
 }
 

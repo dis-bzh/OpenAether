@@ -1,0 +1,21 @@
+# Checkov configuration for the OpenTofu IaC.
+#
+# The CI runs Checkov as a HARD gate (no soft_fail). Real exceptions must be
+# declared here explicitly and with a justification comment, so that policy
+# violations cannot merge silently while legitimate, reviewed exceptions stay
+# auditable in git history.
+#
+# Add suppressions under skip-check, one CKV id per line, e.g.:
+#   skip-check:
+#     - CKV_AWS_123   # <why this control does not apply to us>
+#
+# Keep this list short and reviewed. Prefer fixing the finding over skipping it.
+
+framework:
+  - terraform
+
+# No global skips by default — surface everything.
+skip-check: []
+
+compact: true
+quiet: true

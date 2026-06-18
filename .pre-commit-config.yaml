@@ -24,13 +24,13 @@ repos:
         args: ["--args=-recursive", "--hook-config=--tf-path=tofu"]
       - id: terraform_validate
         args: ["--hook-config=--retry-once-with-cleanup=true", "--hook-config=--tf-path=tofu"]
-      # - id: terraform_tflint
-      #   args: ["--args=--recursive"]
+      - id: terraform_tflint
+        args: ["--args=--recursive"]
 
-  # # YAML linting
-  # - repo: https://github.com/adrienverge/yamllint
-  #   rev: v1.35.1
-  #   hooks:
-  #     - id: yamllint
-  #       args: ["-c", "infrastructure/.yamllint"]
-  #       files: \.(yaml|yml)$
+  # YAML linting (same config the CI uses)
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        args: ["-c", "infrastructure/.yamllint"]
+        files: \.(yaml|yml)$

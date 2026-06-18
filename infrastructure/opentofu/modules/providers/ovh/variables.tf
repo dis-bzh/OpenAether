@@ -88,3 +88,9 @@ variable "bastion_image_id" {
   type        = string
   default     = "Ubuntu 22.04"
 }
+
+variable "bastion_flavor_name" {
+  description = "OpenStack flavor for the bastion host (jump box; the default is the minimum recommended)."
+  type        = string
+  default     = "b3-8"
+}
