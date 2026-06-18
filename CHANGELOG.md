@@ -15,6 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 souveraineté comme proposition de valeur. Priorité : compléter Scaleway
 bout-en-bout. Voir la review/roadmap complète dans le plan de session.
 
+### Added — remplacement rolling des nœuds (sans coupure)
+
+- **`task rolling-replace PROVIDER=…`** + `scripts/ops/rolling-replace.sh` : remplace
+  les nœuds **un par un** lors d'un changement ForceNew (`instance_type`, image Talos).
+  `task infra-management` recréait les 6 VM **en parallèle** → les 3 control-planes
+  rebootaient ensemble → perte de quorum etcd → coupure. Le script draine puis
+  recrée chaque nœud isolément (`tofu apply -target` instance + NIC, `-replace` du
+  `talos_machine_configuration_apply` pour reconfigurer la VM fraîche), et attend la
+  reconvergence Talos / etcd 3-3 / Longhorn entre chaque. Workers d'abord, puis CP
+  (strictement 1 CP à la fois, gated sur le retour du quorum). Garde-fous : pré-check
+  santé, arrêt au premier échec, `--dry-run`, `--workers-only` / `--cp-only`.
+  Les data disks Longhorn (block volumes séparés) sont préservés ; seul le disque
+  système est recréé. Avertissement ForceNew ajouté dans `modules/providers/scw/main.tf`.
+
 ### Changed — Identité : Keycloak → Zitadel
 
 - **Zitadel remplace Keycloak** (décision actée). Zitadel (Go, multi-tenant
