@@ -106,7 +106,7 @@ success "Preflight passed"
 # Step 1 — Render simplified Cilium manifest for local
 # ==============================================================================
 info "Step 1 — Rendering local Cilium manifest..."
-if [[ ! -f "${MANIFESTS_DIR}/cilium-local.yaml" ]] || grep -q "Placeholder" "${MANIFESTS_DIR}/cilium-local.yaml" 2>/dev/null; then
+if [[ ! -f "${MANIFESTS_DIR}/cilium-local.yaml" ]] || grep -q "CILIUM-MANIFEST-PLACEHOLDER" "${MANIFESTS_DIR}/cilium-local.yaml" 2>/dev/null; then
   "${SCRIPT_DIR}/../bootstrap/render-bootstrap-manifests.sh" --local
 fi
 export TF_VAR_cilium_manifest="$(cat "${MANIFESTS_DIR}/cilium-local.yaml")"

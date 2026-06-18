@@ -217,8 +217,11 @@ data "talos_machine_configuration" "control_plane" {
 
   lifecycle {
     precondition {
-      condition     = var.control_plane_count == 0 || !strcontains(var.cilium_manifest, "Placeholder")
-      error_message = "Cilium manifest is a placeholder. Run ./scripts/render-bootstrap-manifests.sh before bootstrapping."
+      # Match a distinctive sentinel rather than the generic word "Placeholder",
+      # so a real manifest that happens to contain that word in a comment can't
+      # falsely trip the guard.
+      condition     = var.control_plane_count == 0 || !strcontains(var.cilium_manifest, "CILIUM-MANIFEST-PLACEHOLDER")
+      error_message = "Cilium manifest is an unrendered placeholder. Run ./scripts/render-bootstrap-manifests.sh before bootstrapping."
     }
   }
 }

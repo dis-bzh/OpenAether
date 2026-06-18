@@ -15,7 +15,7 @@ Management Cluster (Hub) — Scaleway HA (3 zones)
   ├── OpenBao (secrets management — HA Raft)
   ├── Zitadel + CloudNativePG (identity)
   ├── VictoriaMetrics (observability aggregator)
-  └── Traefik (Gateway API)
+  └── Istio (ambient mesh + Gateway API)
           │
      ┌────┴──────────────────────┐
      ▼                           ▼
@@ -33,7 +33,7 @@ SCW Workload Cluster     OVH Workload Cluster     Outscale Workload Cluster
 | **OS** | Talos Linux v1.13.3 (Immutable) | ✅ |
 | **CNI** | Cilium 1.19.2 (WireGuard) | ✅ |
 | **GitOps** | Flux v3.3.2 (hub/spoke) | ✅ |
-| **Gateway** | Traefik v3.0 (Gateway API) | 🚧 Phase 2 |
+| **Gateway / Mesh** | Istio 1.24.2 (ambient mesh + Gateway API) | 🚧 Phase 2 |
 | **Identity** | Zitadel 10.0.2 (v4.14) + CloudNativePG | 🚧 Phase 2 |
 | **Secrets** | OpenBao 2.2.0 (Vault fork) | 🚧 Phase 2 |
 | **Observability** | VictoriaMetrics v1.102.0, Grafana 11.2.0 | 🚧 Phase 2 |

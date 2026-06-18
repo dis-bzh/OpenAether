@@ -119,7 +119,7 @@ locals {
 
 resource "scaleway_instance_server" "bastion" {
   name       = "${var.cluster_name}-bastion"
-  type       = "DEV1-S"
+  type       = var.bastion_instance_type
   image      = var.bastion_image_id
   zone       = var.zone
   project_id = var.project_id

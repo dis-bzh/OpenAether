@@ -95,3 +95,9 @@ variable "bastion_image_id" {
   type        = string
   default     = "ubuntu_jammy"
 }
+
+variable "bastion_instance_type" {
+  description = "Instance type for the bastion host (jump box; the default is a minimal, low-cost type)."
+  type        = string
+  default     = "DEV1-S"
+}

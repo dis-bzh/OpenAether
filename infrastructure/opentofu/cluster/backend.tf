@@ -3,6 +3,10 @@ variable "encryption_passphrase" {
   type        = string
   sensitive   = true
 
+  # NOTE: length alone is not security. This MUST be a high-entropy, randomly
+  # generated secret (e.g. `openssl rand -base64 48`) — NOT a dictionary phrase
+  # or keyboard pattern. PBKDF2 only slows brute force; a low-entropy 32-char
+  # passphrase remains guessable. Store it in a password manager / KMS.
   validation {
     condition     = length(var.encryption_passphrase) >= 32
     error_message = "encryption_passphrase must be at least 32 characters long for SSE-C key derivation."
