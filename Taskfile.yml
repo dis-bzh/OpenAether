@@ -125,6 +125,27 @@ tasks:
       - tofu apply -var-file="envs/management-{{.PROVIDER}}.tfvars" -var talos_bootstrap=true
       - ../../../scripts/ops/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
 
+  rolling-replace:
+    desc: "Replace nodes one at a time (drain→targeted apply→wait) with NO downtime. Use after a ForceNew change (instance_type / Talos image) instead of infra-management, which replaces all nodes in parallel and breaks etcd quorum. Usage: task rolling-replace PROVIDER=scaleway [KEY=~/.ssh/key] [-- --workers-only|--cp-only|--dry-run]"
+    dir: infrastructure/opentofu/cluster
+    vars:
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+      KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
+    env:
+      AWS_ACCESS_KEY_ID:
+        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak
+      AWS_SECRET_ACCESS_KEY:
+        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} sk
+      TF_VAR_outscale_access_key_id:
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale ak || true'
+      TF_VAR_outscale_secret_key_id:
+        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale sk || true'
+    cmds:
+      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
+      - SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh open .
+      - ../../../scripts/ops/rolling-replace.sh {{.PROVIDER}} {{.CLI_ARGS}}
+      - ../../../scripts/ops/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
+
   workload:
     desc: "Phase 2: open tunnels + bootstrap a workload cluster. Usage: task workload PROVIDER=ovh KEY=~/.ssh/yourkey"
     dir: infrastructure/opentofu/cluster
