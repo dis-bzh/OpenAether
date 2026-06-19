@@ -173,6 +173,10 @@ jobs:
           scan-ref: infrastructure/
           severity: HIGH,CRITICAL
           exit-code: 1
+          # Justified, per-finding exceptions for the upstream-vendored Cilium
+          # and Flux bootstrap manifests (see .trivyignore.yaml). Referenced
+          # explicitly rather than relying on auto-detection.
+          trivyignores: .trivyignore.yaml
 
       - name: Run Checkov
         uses: bridgecrewio/checkov-action@v12
