@@ -57,7 +57,7 @@ jobs:
         run: |
           rm -f .terraform/terraform.tfstate
           tofu init -backend=false
-        working-directory: infrastructure/opentofu
+        working-directory: infrastructure/opentofu/cluster
         env:
           AWS_DEFAULT_REGION: us-east-1
           AWS_ACCESS_KEY_ID: mock
@@ -66,7 +66,7 @@ jobs:
 
       - name: Validate configuration
         run: tofu validate
-        working-directory: infrastructure/opentofu
+        working-directory: infrastructure/opentofu/cluster
         env:
           AWS_DEFAULT_REGION: us-east-1
           AWS_ACCESS_KEY_ID: mock
@@ -89,7 +89,7 @@ jobs:
         run: |
           rm -f .terraform/terraform.tfstate
           tofu init -backend=false
-        working-directory: infrastructure/opentofu
+        working-directory: infrastructure/opentofu/cluster
         env:
           AWS_DEFAULT_REGION: us-east-1
           AWS_ACCESS_KEY_ID: mock
@@ -98,7 +98,7 @@ jobs:
 
       - name: Run all OpenTofu tests
         run: tofu test
-        working-directory: infrastructure/opentofu
+        working-directory: infrastructure/opentofu/cluster
         env:
           AWS_DEFAULT_REGION: us-east-1
           AWS_ACCESS_KEY_ID: mock
