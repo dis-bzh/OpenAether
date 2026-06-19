@@ -41,18 +41,6 @@ variable "network_name" {
   default     = "Ext-Net"
 }
 
-variable "network_id" {
-  description = "Network ID for port-based networking (required for LB VIP)"
-  type        = string
-  default     = ""
-}
-
-variable "subnet_id" {
-  description = "Subnet ID for LB members (required for Octavia)"
-  type        = string
-  default     = ""
-}
-
 variable "availability_zones" {
   description = "Availability zones for node distribution"
   type        = list(string)

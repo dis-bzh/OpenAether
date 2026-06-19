@@ -153,7 +153,6 @@ module "outscale" {
   control_plane_count = local.osc_dist.control_planes
   worker_count        = local.osc_dist.workers
 
-  region             = local.osc_dist.region
   instance_type      = local.osc_dist.instance_type
   image_id           = local.osc_dist.image_id
   availability_zones = local.osc_dist.availability_zones
