@@ -134,7 +134,7 @@ variables {
   backup_enabled  = false # backups run a local-exec (aws s3 cp); skip in tests
   admin_ip        = ["1.2.3.4/32"]
   bastion_ssh_keys = {
-    scaleway = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMpj9y94C3NzaC1lZDI1NTE5AAAAIOMpj9y9"
+    scaleway = ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMpj9y94C3NzaC1lZDI1NTE5AAAAIOMpj9y9"]
   }
   node_distribution = {
     scaleway = {

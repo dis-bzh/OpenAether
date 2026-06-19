@@ -4,8 +4,9 @@ terraform {
   required_providers {
     talos = {
       source = "siderolabs/talos"
-      # Stable 0.12.x line (was 0.12.0-alpha.2 — no pre-release in the prod root).
-      version = "~> 0.12.0"
+      # Latest stable line. The 0.12.x series only has pre-releases (0.12.0-alpha.*),
+      # so "~> 0.12.0" resolved to nothing; 0.11.0 is the newest published stable.
+      version = "~> 0.11.0"
     }
     scaleway = {
       source  = "scaleway/scaleway"
