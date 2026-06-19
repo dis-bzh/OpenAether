@@ -33,7 +33,7 @@ tasks:
   security:
     desc: Run security scans (Trivy, Checkov, Gitleaks)
     cmds:
-      - trivy config infrastructure/
+      - trivy config infrastructure/ --ignorefile .trivyignore.yaml
       - checkov -d infrastructure/opentofu/cluster
       - gitleaks detect --source . --no-git
 

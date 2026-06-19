@@ -1,0 +1,84 @@
+# Trivy ignore file — JUSTIFIED, SCOPED exceptions only.
+#
+# The CI `security` job runs `trivy config infrastructure/` as a HARD gate
+# (severity HIGH,CRITICAL, exit-code 1). This is NOT a blanket soft-fail:
+# every entry below is pinned to a specific upstream-vendored manifest and
+# carries a rationale, so legitimate platform requirements stay green while
+# any NEW finding (in our own IaC, or a new resource in these files) still
+# fails the build.
+#
+# Both files are regenerated verbatim from upstream by
+# scripts/render-bootstrap-manifests.sh:
+#   - cilium.yaml        = `helm template cilium/cilium`   (the CNI)
+#   - flux-install.yaml  = Flux2 official install.yaml     (GitOps controllers)
+# The flagged privileges/RBAC are inherent to how a CNI and a GitOps
+# reconciler operate; removing them would break pod networking and cluster
+# reconciliation, and would be overwritten on the next manifest render.
+# Re-review these IDs whenever Cilium or Flux is upgraded.
+
+misconfigurations:
+  # --- Cilium (CNI) — kube-system DaemonSet/operator -------------------------
+  - id: KSV-0017  # Privileged container
+    paths: ["**/bootstrap-manifests/cilium.yaml"]
+    statement: >-
+      Cilium agent init-containers run privileged to mount the BPF filesystem
+      (bidirectional mount propagation only works from a privileged container).
+      Mandatory for an eBPF CNI.
+
+  - id: KSV-0005  # SYS_ADMIN capability added
+    paths: ["**/bootstrap-manifests/cilium.yaml"]
+    statement: >-
+      SYS_ADMIN (plus SYS_CHROOT/SYS_PTRACE) is required by the agent to mount
+      cgroups/BPF fs and apply sysctl overwrites on the node. Required for the CNI.
+
+  - id: KSV-0119  # NET_RAW capability added
+    paths: ["**/bootstrap-manifests/cilium.yaml"]
+    statement: >-
+      NET_RAW is required by the Cilium datapath for packet handling. CNI requirement.
+
+  - id: KSV-0009  # Access to host network
+    paths: ["**/bootstrap-manifests/cilium.yaml"]
+    statement: >-
+      A CNI must run in the host network namespace to program node networking
+      (eBPF/iptables/routing). Required.
+
+  - id: KSV-0024  # Access to host ports
+    paths: ["**/bootstrap-manifests/cilium.yaml"]
+    statement: >-
+      The agent binds health/metrics/datapath host ports on the node. CNI requirement.
+
+  - id: KSV-0014  # Root file system is not read-only
+    paths: ["**/bootstrap-manifests/cilium.yaml"]
+    statement: >-
+      The agent writes runtime state and BPF maps to local paths; a read-only
+      root filesystem is not compatible with the CNI agent.
+
+  - id: KSV-0121  # Disallowed volumes mounted (hostPath)
+    paths: ["**/bootstrap-manifests/cilium.yaml"]
+    statement: >-
+      The agent mounts host paths (/sys/fs/bpf, /proc, CNI bin/conf dirs) to
+      program the node datapath. Required.
+
+  - id: KSV-0109  # ConfigMap with secrets
+    paths: ["**/bootstrap-manifests/cilium.yaml"]
+    statement: >-
+      False positive: this is the standard `cilium-config` ConfigMap holding CNI
+      configuration only — no credentials. Flagged on key-name/entropy heuristics.
+
+  # --- Cilium + Flux — RBAC --------------------------------------------------
+  - id: KSV-0041  # Manage secrets (RBAC)
+    paths:
+      - "**/bootstrap-manifests/cilium.yaml"       # LB/BGP/encryption secrets
+      - "**/bootstrap-manifests/flux-install.yaml" # source-controller: git/helm creds
+    statement: >-
+      Cilium needs secrets for LoadBalancer/BGP/encryption; the Flux
+      source-controller reads Git and Helm repository credentials. Both are
+      required for the components to function.
+
+  # --- Flux (GitOps controllers) — aggregated ClusterRoles -------------------
+  - id: KSV-0046  # Manage all resources (wildcard *)
+    paths: ["**/bootstrap-manifests/flux-install.yaml"]
+    statement: >-
+      The aggregated flux-view/flux-edit ClusterRoles use resources "*" because
+      Flux reconciles arbitrary, user-defined resource kinds from Git. Wildcard
+      RBAC is by design in the upstream install manifest.
