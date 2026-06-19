@@ -102,7 +102,7 @@ variables {
   talos_bootstrap     = false
   backup_enabled      = false # backups run a local-exec (aws s3 cp); skip in tests
   admin_ip            = ["10.0.0.1/32"]
-  bastion_ssh_keys    = { scaleway = "ssh-ed25519 test" }
+  bastion_ssh_keys    = { scaleway = ["ssh-ed25519 test"] }
   git_repo_url        = "https://github.com/test/repo.git"
   cilium_manifest     = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium-test"
   s3_primary_endpoint = "https://s3.fr-par.scw.cloud"
