@@ -63,16 +63,3 @@ variable "worker_configs" {
   default     = []
   sensitive   = true
 }
-
-# Provider contract — accepted but unused for local
-variable "admin_ip" {
-  description = "Unused in local mode (no firewall/ACL)"
-  type        = list(string)
-  default     = []
-}
-
-variable "bastion_ssh_key" {
-  description = "Unused in local mode (no bastion)"
-  type        = string
-  default     = ""
-}
