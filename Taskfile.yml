@@ -33,8 +33,11 @@ tasks:
   security:
     desc: Run security scans (Trivy, Checkov, Gitleaks)
     cmds:
-      - trivy config infrastructure/ --ignorefile .trivyignore.yaml
-      - checkov -d infrastructure/opentofu/cluster
+      # Skip the upstream-vendored Cilium/Flux bootstrap manifests (not our
+      # config to fix; reviewed at render time). Matches the CI Trivy step.
+      - trivy config infrastructure/ --skip-files "**/bootstrap-manifests/cilium*.yaml" --skip-files "**/bootstrap-manifests/flux-install.yaml"
+      # Same scope as CI (whole opentofu tree, not just cluster).
+      - checkov -d infrastructure/opentofu --config-file .checkov.yaml
       - gitleaks detect --source . --no-git
 
   test:
