@@ -82,5 +82,11 @@ infrastructure/opentofu/.talos-tunnels.pids
 infrastructure/opentofu/cluster/.talos-tunnels.pids
 
 # Claude Code session artifacts (local state, pas du contenu projet)
-.claude/
+# … sauf le hook SessionStart partagé, qui doit être versionné pour s'appliquer
+# à toutes les sessions Claude Code on the web.
+.claude/*
+!.claude/settings.json
+!.claude/hooks
+.claude/hooks/*
+!.claude/hooks/session-start.sh
 CLAUDE.md

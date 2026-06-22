@@ -41,18 +41,6 @@ variable "network_name" {
   default     = "Ext-Net"
 }
 
-variable "network_id" {
-  description = "Network ID for port-based networking (required for LB VIP)"
-  type        = string
-  default     = ""
-}
-
-variable "subnet_id" {
-  description = "Subnet ID for LB members (required for Octavia)"
-  type        = string
-  default     = ""
-}
-
 variable "availability_zones" {
   description = "Availability zones for node distribution"
   type        = list(string)
@@ -87,4 +75,10 @@ variable "bastion_image_id" {
   description = "Image ID or name for the bastion host"
   type        = string
   default     = "Ubuntu 22.04"
+}
+
+variable "bastion_flavor_name" {
+  description = "OpenStack flavor for the bastion host (jump box; the default is the minimum recommended)."
+  type        = string
+  default     = "b3-8"
 }

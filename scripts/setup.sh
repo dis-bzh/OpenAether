@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 # Colors
 GREEN='\033[0;32m'
@@ -37,7 +37,13 @@ install_tofu() {
 
 install_talosctl() {
     echo "Installing Talosctl..."
-    curl -fsSL https://talos.dev/install | bash
+    # Download first, then execute (avoid piping a partially-fetched script to a
+    # shell — a truncated download could otherwise run incomplete commands).
+    local tmp
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' RETURN
+    curl -fsSL https://talos.dev/install -o "$tmp"
+    bash "$tmp"
 }
 
 install_kubectl() {

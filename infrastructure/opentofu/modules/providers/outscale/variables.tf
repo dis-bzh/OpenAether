@@ -3,12 +3,6 @@ variable "cluster_name" {
   type        = string
 }
 
-variable "region" {
-  description = "Outscale region"
-  type        = string
-  default     = "eu-west-2"
-}
-
 variable "instance_type" {
   description = "VM type for cluster nodes"
   type        = string
@@ -33,12 +27,6 @@ variable "worker_storage" {
     volumes = optional(any, [])
   })
   default = { disks = [], volumes = [] }
-}
-
-variable "subnet_id" {
-  description = "Subnet ID for node placement"
-  type        = string
-  default     = null
 }
 
 variable "availability_zones" {
@@ -75,4 +63,10 @@ variable "bastion_image_id" {
   description = "Image ID for the bastion host"
   type        = string
   default     = null
+}
+
+variable "bastion_vm_type" {
+  description = "VM type for the bastion host (jump box; the default is the minimum recommended)."
+  type        = string
+  default     = "tinav5.c2r2p2"
 }

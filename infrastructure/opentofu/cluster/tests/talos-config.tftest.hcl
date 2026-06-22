@@ -107,7 +107,7 @@ variables {
   backup_enabled  = false # backups run a local-exec (aws s3 cp); skip in tests
   admin_ip        = ["10.0.0.1/32"]
   bastion_ssh_keys = {
-    scaleway = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 test@test"
+    scaleway = ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 test@test"]
   }
   node_distribution = {
     scaleway = {
@@ -147,8 +147,8 @@ run "cilium_placeholder_detection_covered_by_precondition" {
   }
 
   assert {
-    condition     = !strcontains(var.cilium_manifest, "Placeholder")
-    error_message = "Cilium manifest must not contain 'Placeholder' — run scripts/render-bootstrap-manifests.sh first."
+    condition     = !strcontains(var.cilium_manifest, "CILIUM-MANIFEST-PLACEHOLDER")
+    error_message = "Cilium manifest must not be the unrendered placeholder — run scripts/render-bootstrap-manifests.sh first."
   }
 }
 
