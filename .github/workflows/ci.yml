@@ -172,7 +172,7 @@ jobs:
       - name: Run Trivy IaC scan
         # Pinned to a release tag instead of @master (supply-chain hardening).
         # TODO: convert to a commit SHA pin for full immutability.
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: config
           scan-ref: infrastructure/
