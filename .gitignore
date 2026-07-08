@@ -89,4 +89,3 @@ infrastructure/opentofu/cluster/.talos-tunnels.pids
 !.claude/hooks
 .claude/hooks/*
 !.claude/hooks/session-start.sh
-CLAUDE.md
