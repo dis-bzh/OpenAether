@@ -9,11 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Réorientation produit + identité Zitadel.** Le projet se recentre sur un
-**cluster de management qui provisionne des clusters clients autonomes**
-(abandon du multi-cloud actif-actif), avec backup + DR auto + sécu by design +
-souveraineté comme proposition de valeur. Priorité : compléter Scaleway
-bout-en-bout. Voir la review/roadmap complète dans le plan de session.
+**Recentrage produit — socle Talos modulaire, management CAPI optionnel.** OpenAether
+déploie **un cluster Talos sur n'importe quel provider** (Proxmox ou cloud) avec pour
+**seul socle figé CNI (Cilium) + Flux**, puis **pioche modulairement** dans les
+manifests communs d'`OpenAether-apps` selon les dépendances voulues. Le
+**multi-cluster (CAPI) reste un objectif mais devient une surcouche optionnelle**,
+plus le point d'entrée (ni le plus simple ni le plus cheap) — un cluster ne devient
+« management » qu'une fois CAPI + dépendances installés. Ce recentrage **élargit**
+l'usage : du single-cluster autonome au hub multi-cluster. Backup + DR auto + sécu by
+design + souveraineté restent la proposition de valeur. En cours : **ajout du provider
+Proxmox** (SYS-1) aux côtés de Scaleway/OVH/Outscale ; abandon du multi-cloud
+**actif-actif** (le hub/spoke reste possible, mais n'est plus la cible par défaut).
 
 ### Fixed — bootstrap cloud non-déterministe (garde-fou port-ready restauré)
 
