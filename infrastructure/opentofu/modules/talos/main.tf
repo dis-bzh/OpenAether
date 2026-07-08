@@ -314,11 +314,50 @@ data "talos_machine_configuration" "worker" {
 # "userdata") these resources are skipped — config is injected at container
 # creation instead (maintenance-mode apply reboot-loops in containers).
 #
-# TLS note: nodes boot in maintenance mode with an ephemeral CA. The provider
-# retries the TLS handshake until the node transitions maintenance→running.
-# v0.12.0-alpha.2 includes a Go crypto/x509 fix that resolves the Ed25519
-# verification failure seen with v0.10.x on this transition.
+# TLS note: nodes boot in maintenance mode with an ephemeral CA that differs
+# from the cluster CA held in talos_machine_secrets. The provider retries the
+# TLS handshake until the node transitions from maintenance → running (cluster
+# CA). Two guards make this reliable on cloud:
+#   1. terraform_data.talos_port_ready_* — waits until 50000/TCP is open before
+#      starting the provider's retry clock (avoids burning the 15m timeout on a
+#      node that is still booting → flaky bootstrap hangs on slow cloud boot).
+#   2. timeouts.create = "15m" — headroom for slow cloud boot + CA transition.
+# NOTE: the port-ready guard was briefly dropped (commit 0a7eb52) on the
+# assumption that provider 0.12.0-alpha.2's x509 fix made it unnecessary, but
+# the pin was reverted to the published 0.11.0 (commit dab57cb) while the guard
+# stayed removed → non-deterministic cloud bootstrap hangs. Restored here.
+# In container mode (config_delivery = "userdata") do_apply is false → these
+# resources and the config_apply resources below are all skipped (inert local).
 # ==============================================================================
+
+resource "terraform_data" "talos_port_ready_cp" {
+  count = local.do_apply ? var.control_plane_count : 0
+
+  # Re-run when the endpoint changes (e.g. node replacement).
+  triggers_replace = [local.cp_endpoints[count.index]]
+
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    command     = "${path.module}/scripts/wait-talos-port.sh"
+    environment = {
+      ENDPOINT = local.cp_endpoints[count.index]
+    }
+  }
+}
+
+resource "terraform_data" "talos_port_ready_worker" {
+  count = local.do_apply ? var.worker_count : 0
+
+  triggers_replace = [local.worker_endpoints[count.index]]
+
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    command     = "${path.module}/scripts/wait-talos-port.sh"
+    environment = {
+      ENDPOINT = local.worker_endpoints[count.index]
+    }
+  }
+}
 
 resource "talos_machine_configuration_apply" "control_plane" {
   count = local.do_apply ? var.control_plane_count : 0
@@ -331,6 +370,8 @@ resource "talos_machine_configuration_apply" "control_plane" {
   timeouts = {
     create = "15m"
   }
+
+  depends_on = [terraform_data.talos_port_ready_cp]
 }
 
 resource "talos_machine_configuration_apply" "worker" {
@@ -344,6 +385,8 @@ resource "talos_machine_configuration_apply" "worker" {
   timeouts = {
     create = "15m"
   }
+
+  depends_on = [terraform_data.talos_port_ready_worker]
 }
 
 # ==============================================================================

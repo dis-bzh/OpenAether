@@ -15,6 +15,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 souveraineté comme proposition de valeur. Priorité : compléter Scaleway
 bout-en-bout. Voir la review/roadmap complète dans le plan de session.
 
+### Fixed — bootstrap cloud non-déterministe (garde-fou port-ready restauré)
+
+- **`modules/talos` : réintroduction de `terraform_data.talos_port_ready_{cp,worker}`
+  + `scripts/wait-talos-port.sh`.** Le bootstrap cloud pouvait **hang** sur
+  `talos_machine_bootstrap`/`config_apply` (timeout 15m brûlé sur un nœud encore en
+  boot). Cause : `0a7eb52` avait **supprimé** ce garde-fou TCP (`:50000` ready) en
+  pariant sur le fix x509/Ed25519 du provider talos **0.12.0-alpha.2** ; `dab57cb` a
+  ensuite **reverté le pin à `0.11.0`** (la 0.12.x n'a que des pré-releases) **sans
+  remettre le garde-fou** → l'horloge de retry TLS du provider démarrait avant que
+  l'API Talos du nœud cloud ne réponde. Invisible en local (`config_delivery=userdata`
+  → ressources `config_apply` skippées). Restauré : le `config_apply` attend désormais
+  `:50000` ouvert → bootstrap cloud **déterministe**. Inerte en local (`do_apply=false`).
+
 ### Added — remplacement rolling des nœuds (sans coupure)
 
 - **`task rolling-replace PROVIDER=…`** + `scripts/ops/rolling-replace.sh` : remplace
