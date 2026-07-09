@@ -1,0 +1,53 @@
+# ==============================================================================
+# Workload Cluster — Proxmox (single host or multi-host PVE cluster)
+# Client applications cluster (spoke). Same host shape as management-proxmox but
+# cluster_role = "workload" — no CAPI, just the CNI+Flux socle + picked manifests.
+#
+# Prerequisites: identical to management-proxmox.tfvars.example (PROXMOX_VE_* env,
+# host bridge/NAT/nftables, imported Talos image, pve-firewall disabled). See that
+# file + the module README.
+# ==============================================================================
+
+cluster_name       = "openaether-pmx"
+environment        = "prod"
+cluster_role       = "workload"
+talos_version      = "v1.13.3"
+kubernetes_version = "v1.35.3"
+talos_bootstrap    = true
+
+node_distribution = {
+  proxmox = {
+    control_planes = 1
+    workers        = 1
+
+    node_names          = ["pve1"]
+    # node_names        = ["pve1", "pve2", "pve3"]  # HA: 1 CP per physical host
+    talos_image_file_id = "local:iso/talos-1.13.3-nocloud-amd64.img"
+
+    network_bridge = "vmbr1"
+    network_cidr   = "10.0.0.0/24"
+    gateway_ip     = "10.0.0.1"
+    apiserver_vip  = "10.0.0.100"
+
+    enable_bastion = false
+    host_public_ip = "203.0.113.10"
+    host_ssh_user  = "root"
+
+    cpu_cores = 4
+    memory_mb = 8192
+  }
+}
+
+# worker_storage = { ... }   # see management-proxmox.tfvars.example
+
+admin_ip = ["YOUR_IP/32"]
+
+# bastion_ssh_keys = { proxmox = "ssh-ed25519 AAAA... user@host" }  # only if enable_bastion = true
+
+git_repo_url = "https://github.com/dis-bzh/OpenAether-apps.git"
+
+# --- Backup / DR object stores (any S3-compatible store) ----------------------
+s3_primary_endpoint = "https://s3.fr-par.scw.cloud"
+s3_primary_region   = "fr-par"
+s3_replica_endpoint = "https://s3.fr-par.scw.cloud"
+s3_replica_region   = "fr-par"

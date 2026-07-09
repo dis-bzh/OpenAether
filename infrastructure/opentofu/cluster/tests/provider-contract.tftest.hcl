@@ -7,6 +7,7 @@
 mock_provider "scaleway" {}
 mock_provider "openstack" {}
 mock_provider "outscale" {}
+mock_provider "proxmox" {}
 mock_provider "talos" {}
 
 # Scaleway overrides (needed even when inactive to avoid errors if module is not count=0)

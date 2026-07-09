@@ -23,20 +23,23 @@ d'OpenAether : du single-cluster autonome jusqu'au hub multi-cluster.
 `control_plane_count` / `worker_count`. En non-HA, CP taché `NoSchedule` (workloads
 sur le worker sans nodeSelector).
 
-### Ajout provider Proxmox (SYS-1)
+### Ajout provider Proxmox (on-premise)
 
-Cible d'hébergement des apps DIS (seestar-fits, prospection, multisport…) : dédié
-**OVH SYS-1** (Xeon-E 2136, 32 Go, 2 disques) sous **Proxmox** (ZFS mirror), VMs Talos.
+Cible d'hébergement des apps DIS (seestar-fits, prospection, multisport…) : serveurs
+dédiés sous **Proxmox** (ZFS), VMs Talos. Single-host ou multi-host PVE cluster.
 
 - **Nouveau provider `proxmox`** sous `modules/providers/proxmox/`, respectant
   `modules/providers/provider-contract.md` — mêmes variables/outputs que `scw`/`ovh`/
   `outscale` (`control_plane_count`, `worker_count`, IPs privées CP/worker, LB
   k8s/app, bastion). Le reste du stack (module `talos`, `cluster/`) est
   provider-agnostique et **ne doit pas changer**.
+- **`node_names` (list)** : VMs round-robinées via `element()` (même pattern que
+  les zones Scaleway). `["pve1"]` = non-HA, `["pve1","pve2","pve3"]` = vrai HA
+  (1 CP par hôte physique, etcd distribué).
 - **VIP apiserver posé dès le 1 CP** : endpoint k8s sur une VIP Talos (pas l'IP nue
   du CP) pour que le passage futur à 3 CP ne re-adresse pas l'apiserver.
-- HA réelle du CP = **multi-hôtes** (3 CP répartis via scaleway/ovh/outscale) — 3 CP
-  sur une seule box Proxmox n'est pas de la vraie HA.
+- HA réelle du CP on-premise = **multi-hôtes** (3 CP sur 3 dédiés dans un cluster
+  PVE) ; 3 CP sur une seule box Proxmox n'est pas de la vraie HA.
 - `k3s-cluster` = **archive / inspiration seule**, jamais fusionnée ; refaire de 0 si
   plus propre.
 
