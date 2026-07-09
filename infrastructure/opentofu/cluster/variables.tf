@@ -87,6 +87,31 @@ variable "node_distribution" {
     bastion_image_id   = optional(string)
     talos_api_port     = optional(number, 50000)
     k8s_api_port       = optional(number, 6443)
+
+    # Proxmox-specific (single host or multi-host cluster). All optional → no
+    # impact on the cloud providers. Defaults live in the TYPE (like image_name/
+    # network_name): with map(object) an unset field arrives as null and would
+    # clobber a merge() default, so type-level defaults are what actually apply.
+    # See modules/providers/proxmox for semantics. Host-specific keys with no
+    # sane default (talos_image_file_id, gateway_ip, apiserver_vip, host_public_ip)
+    # stay null → supplied per-host in the tfvars.
+    node_names              = optional(list(string))
+    datastore_id            = optional(string, "local-zfs")
+    iso_datastore_id        = optional(string, "local")
+    talos_image_file_id     = optional(string)
+    network_bridge          = optional(string, "vmbr1")
+    network_cidr            = optional(string, "10.0.0.0/24")
+    gateway_ip              = optional(string)
+    apiserver_vip           = optional(string)
+    cpu_cores               = optional(number, 4)
+    memory_mb               = optional(number, 8192)
+    root_disk_gb            = optional(number, 20)
+    control_plane_ip_offset = optional(number, 10)
+    worker_ip_offset        = optional(number, 20)
+    nameservers             = optional(list(string), ["1.1.1.1", "8.8.8.8"])
+    enable_bastion          = optional(bool, false)
+    host_public_ip          = optional(string)
+    host_ssh_user           = optional(string, "root")
   }))
   default = {}
 }
