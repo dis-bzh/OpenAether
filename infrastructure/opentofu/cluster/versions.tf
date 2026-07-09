@@ -20,6 +20,10 @@ terraform {
       source  = "outscale/outscale"
       version = ">= 0.12.0"
     }
+    proxmox = {
+      source  = "bpg/proxmox"
+      version = ">= 0.66.0"
+    }
     local = {
       source  = "hashicorp/local"
       version = ">= 2.5.0"

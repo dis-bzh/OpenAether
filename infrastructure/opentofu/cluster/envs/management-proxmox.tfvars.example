@@ -1,0 +1,80 @@
+# ==============================================================================
+# Management Cluster — Proxmox (single host or multi-host PVE cluster)
+# Non-HA: 1 control plane + 1 worker on ONE host. CAPI + deps make it a
+# "management" cluster; without them it's a standalone autonomous cluster.
+# HA: 3 CP across 3 hosts (node_names = ["pve1","pve2","pve3"]) — true HA.
+#
+# Prerequisites:
+#   export PROXMOX_VE_ENDPOINT=https://<host-ip-or-fqdn>:8006/
+#   export PROXMOX_VE_API_TOKEN='terraform@pve!tofu=<uuid-secret>'
+#   export PROXMOX_VE_INSECURE=true        # self-signed 8006 cert
+#
+#   On the host (manual / Ansible — NOT managed by this tofu, see the module
+#   README "Host NAT/DNAT" + "Host hardening"):
+#     - a bridge vmbr1 for 10.0.0.0/24, host holding the gateway IP, NAT egress
+#     - nftables: DNAT public :80/:443 -> the worker, SSH from admin_ip only
+#     - the Talos nocloud image imported (build via ../../talos-image), referenced
+#       by talos_image_file_id
+#     - pve-firewall disabled (raw nftables owns the perimeter)
+# ==============================================================================
+
+cluster_name       = "openaether-pmx"
+environment        = "prod"
+cluster_role       = "management"
+talos_version      = "v1.13.3"
+kubernetes_version = "v1.35.3"
+talos_bootstrap    = true
+
+node_distribution = {
+  proxmox = {
+    control_planes = 1
+    workers        = 1
+
+    node_names          = ["pve1"]                                   # `pvesh get /nodes`
+    # node_names        = ["pve1", "pve2", "pve3"]                   # HA: 1 CP per physical host
+    talos_image_file_id = "local:iso/talos-1.13.3-nocloud-amd64.img"
+
+    # Networking (static, no cloud LB/NAT). gateway_ip = the host's vmbr1 IP.
+    network_bridge = "vmbr1"
+    network_cidr   = "10.0.0.0/24"
+    gateway_ip     = "10.0.0.1"
+    apiserver_vip  = "10.0.0.100" # spare IP the CP owns; posé dès 1 CP for 3-CP later
+
+    # Host-as-bastion (default): the Proxmox host is the SSH jump. Supply its
+    # public IP + user (the same access you keep for Debian/Proxmox upgrades).
+    enable_bastion = false
+    host_public_ip = "203.0.113.10" # the SYS-1 public IPv4
+    host_ssh_user  = "root"
+
+    # Node sizing (SYS-1 = 32 GB; leave headroom for the host + ZFS ARC).
+    cpu_cores = 4
+    memory_mb = 8192
+  }
+}
+
+# --- Worker data storage (dedicated, encrypted) ------------------------------
+# Extra disk(s) per worker → encrypted Talos user volumes (LUKS2, /var/mnt/<name>).
+# Leave unset for no dedicated data disk (worker uses the system disk only).
+# worker_storage = {
+#   disks = [{ size_gb = 100 }]
+#   volumes = [
+#     { name = "local-path-provisioner", disk_match = "!system_disk", min_size = "20GB", max_size = "25GB" },
+#     { name = "longhorn", disk_match = "!system_disk", grow = true },
+#   ]
+# }
+
+admin_ip = ["YOUR_IP/32"]
+
+# Not used with host-as-bastion (no bastion VM). Only needed if enable_bastion = true.
+# bastion_ssh_keys = { proxmox = "ssh-ed25519 AAAA... user@host" }
+
+git_repo_url = "https://github.com/dis-bzh/OpenAether-apps.git"
+
+# --- Backup / DR object stores (any S3-compatible store) ----------------------
+# Proxmox has no native object storage — point these at an external S3 (e.g. a
+# Scaleway/OVH bucket). PRIMARY = AWS_*; REPLICA = the "-backup" store, ideally a
+# different provider + BACKUP_AWS_* in prod.
+s3_primary_endpoint = "https://s3.fr-par.scw.cloud"
+s3_primary_region   = "fr-par"
+s3_replica_endpoint = "https://s3.fr-par.scw.cloud"
+s3_replica_region   = "fr-par"

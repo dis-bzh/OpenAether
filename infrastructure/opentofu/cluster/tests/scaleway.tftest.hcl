@@ -1,6 +1,7 @@
 mock_provider "scaleway" {}
 mock_provider "openstack" {}
 mock_provider "outscale" {}
+mock_provider "proxmox" {}
 mock_provider "talos" {}
 
 # --- Scaleway image data sources ---

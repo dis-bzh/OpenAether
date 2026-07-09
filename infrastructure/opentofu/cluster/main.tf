@@ -21,6 +21,14 @@ provider "outscale" {
   region        = local.active_provider == "outscale" ? local.osc_dist.region : null
 }
 
+# Proxmox (bpg) reads creds from the environment:
+#   PROXMOX_VE_ENDPOINT=https://<host>:8006/
+#   PROXMOX_VE_API_TOKEN=<user>@<realm>!<tokenid>=<secret>
+#   PROXMOX_VE_INSECURE=true   # self-signed 8006 cert
+# Empty block is safe when Proxmox is inactive: bpg validates lazily (no resource
+# → no API call), same as the scaleway block above.
+provider "proxmox" {}
+
 # Backups go through the AWS CLI (scripts/ops/backup-artifacts.sh + backup-state.sh),
 # not a Terraform provider — the artifacts/state are streamed to S3-compatible
 # stores with per-call creds/endpoints (primary + cross-provider replica), which
@@ -66,6 +74,30 @@ locals {
     availability_zones = ["eu-west-2a", "eu-west-2b", "eu-west-2c"]
     bastion_image_id   = null
   }, try(var.node_distribution["outscale"], {}))
+
+  # Proxmox (single host or multi-host PVE cluster). VMs round-robined across
+  # node_names via element(). 1 entry = non-HA, 3 entries = true HA.
+  pmx_dist = merge({
+    control_planes          = 0
+    workers                 = 0
+    node_names              = null
+    datastore_id            = "local-zfs"
+    iso_datastore_id        = "local"
+    talos_image_file_id     = null
+    network_bridge          = "vmbr1"
+    network_cidr            = "10.0.0.0/24"
+    gateway_ip              = null
+    apiserver_vip           = null
+    cpu_cores               = 4
+    memory_mb               = 8192
+    root_disk_gb            = 20
+    control_plane_ip_offset = 10
+    worker_ip_offset        = 20
+    nameservers             = ["1.1.1.1", "8.8.8.8"]
+    enable_bastion          = false
+    host_public_ip          = null
+    host_ssh_user           = "root"
+  }, try(var.node_distribution["proxmox"], {}))
 }
 
 # ==============================================================================
@@ -78,6 +110,7 @@ locals {
     (local.scw_dist.control_planes + local.scw_dist.workers) > 0 ? "scaleway" : null,
     (local.ovh_dist.control_planes + local.ovh_dist.workers) > 0 ? "ovh" : null,
     (local.osc_dist.control_planes + local.osc_dist.workers) > 0 ? "outscale" : null,
+    (local.pmx_dist.control_planes + local.pmx_dist.workers) > 0 ? "proxmox" : null,
   ])
 }
 
@@ -165,6 +198,47 @@ module "outscale" {
 }
 
 # ==============================================================================
+# Proxmox Infrastructure (single host or multi-host PVE cluster)
+# No managed LB/NAT/SG: k8s_lb_ip = Talos VIP, host-as-bastion by default.
+# ==============================================================================
+
+module "proxmox" {
+  source = "../modules/providers/proxmox"
+
+  count = (local.pmx_dist.control_planes + local.pmx_dist.workers) > 0 ? 1 : 0
+
+  cluster_name        = "${var.cluster_name}-${var.environment}"
+  control_plane_count = local.pmx_dist.control_planes
+  worker_count        = local.pmx_dist.workers
+
+  node_names          = local.pmx_dist.node_names
+  datastore_id        = local.pmx_dist.datastore_id
+  iso_datastore_id    = local.pmx_dist.iso_datastore_id
+  talos_image_file_id = local.pmx_dist.talos_image_file_id
+
+  network_bridge          = local.pmx_dist.network_bridge
+  network_cidr            = local.pmx_dist.network_cidr
+  gateway_ip              = local.pmx_dist.gateway_ip
+  apiserver_vip           = local.pmx_dist.apiserver_vip
+  control_plane_ip_offset = local.pmx_dist.control_plane_ip_offset
+  worker_ip_offset        = local.pmx_dist.worker_ip_offset
+  nameservers             = local.pmx_dist.nameservers
+
+  cpu_cores    = local.pmx_dist.cpu_cores
+  memory_mb    = local.pmx_dist.memory_mb
+  root_disk_gb = local.pmx_dist.root_disk_gb
+
+  enable_bastion = local.pmx_dist.enable_bastion
+  host_public_ip = local.pmx_dist.host_public_ip
+  host_ssh_user  = local.pmx_dist.host_ssh_user
+
+  worker_storage = var.worker_storage
+
+  admin_ip         = var.admin_ip
+  bastion_ssh_keys = lookup(var.bastion_ssh_keys, "proxmox", [])
+}
+
+# ==============================================================================
 # Provider-Agnostic Junction Point
 #
 # CONTRACT between the cloud provider layer and the Talos layer.
@@ -179,6 +253,7 @@ locals {
     try(module.scw[0].k8s_lb_ip, null),
     try(module.ovh[0].k8s_lb_ip, null),
     try(module.outscale[0].k8s_lb_ip, null),
+    try(module.proxmox[0].k8s_lb_ip, null),
     "127.0.0.1"
   )
 
@@ -186,6 +261,7 @@ locals {
     try(module.scw[0].bastion_ip, null),
     try(module.ovh[0].bastion_ip, null),
     try(module.outscale[0].bastion_ip, null),
+    try(module.proxmox[0].bastion_ip, null),
     "<bastion-ip>"
   )
 
@@ -193,16 +269,20 @@ locals {
   #   scaleway — a dedicated unprivileged "bastion" user via cloud-init (no root login)
   #   ovh      — the OpenStack Ubuntu image's default "ubuntu"
   #   outscale — Outscale's official OMIs default to "outscale" (NOT "ubuntu")
+  #   proxmox  — host-as-bastion → the host SSH user (host_ssh_user, default root);
+  #              not a literal like the others, so resolved from pmx_dist here.
   bastion_user = lookup({
     scaleway = "bastion"
     ovh      = "ubuntu"
     outscale = "outscale"
+    proxmox  = local.pmx_dist.host_ssh_user
   }, local.active_provider, "ubuntu")
 
   control_plane_ips = coalesce(
     length(try(module.scw[0].control_plane_private_ips, [])) > 0 ? module.scw[0].control_plane_private_ips : null,
     length(try(module.ovh[0].control_plane_private_ips, [])) > 0 ? module.ovh[0].control_plane_private_ips : null,
     length(try(module.outscale[0].control_plane_private_ips, [])) > 0 ? module.outscale[0].control_plane_private_ips : null,
+    length(try(module.proxmox[0].control_plane_private_ips, [])) > 0 ? module.proxmox[0].control_plane_private_ips : null,
     []
   )
 
@@ -210,6 +290,7 @@ locals {
     length(try(module.scw[0].worker_private_ips, [])) > 0 ? module.scw[0].worker_private_ips : null,
     length(try(module.ovh[0].worker_private_ips, [])) > 0 ? module.ovh[0].worker_private_ips : null,
     length(try(module.outscale[0].worker_private_ips, [])) > 0 ? module.outscale[0].worker_private_ips : null,
+    length(try(module.proxmox[0].worker_private_ips, [])) > 0 ? module.proxmox[0].worker_private_ips : null,
     []
   )
 
@@ -218,8 +299,8 @@ locals {
   # Planned node counts from node_distribution — known at PLAN time, unlike the
   # private IPs above (which are unknown until the VMs exist). Use these to gate
   # count/for_each so the plan can be computed.
-  total_control_planes = local.scw_dist.control_planes + local.ovh_dist.control_planes + local.osc_dist.control_planes
-  total_workers        = local.scw_dist.workers + local.ovh_dist.workers + local.osc_dist.workers
+  total_control_planes = local.scw_dist.control_planes + local.ovh_dist.control_planes + local.osc_dist.control_planes + local.pmx_dist.control_planes
+  total_workers        = local.scw_dist.workers + local.ovh_dist.workers + local.osc_dist.workers + local.pmx_dist.workers
 }
 
 # ==============================================================================
