@@ -48,6 +48,19 @@ and junction point work without modification.
 
 Between phases, establish SSH tunnels via the bastion for Talos API access (port 50000).
 
+### apiserver VIP / `k8s_lb_mode` (Scaleway, OVH)
+
+By default the Kubernetes API is fronted by each cloud's managed LB
+(`k8s_lb_mode = "managed"`). Set `node_distribution.<provider>.k8s_lb_mode = "vip"`
+to drop the LB and front the API with a Talos Layer2 VIP instead — like Proxmox
+always does — reserving a private address on the node network rather than
+paying for a managed LB. Trade-off: the API becomes **private-only**, reachable
+via the bastion SSH tunnel (`talos-tunnels.sh` opens an extra `localhost:6443`
+tunnel automatically whenever `k8s_lb_ip` resolves to an RFC1918 address), not
+from the public internet. Outscale rejects `"vip"` (its Net is an L3 SDN with
+no ARP/broadcast domain for a floating VIP). Scaleway's `"vip"` mode is marked
+experimental — validate it before relying on it in prod.
+
 ## Prerequisites
 
 | Tool | Required for |

@@ -88,6 +88,12 @@ variable "node_distribution" {
     talos_api_port     = optional(number, 50000)
     k8s_api_port       = optional(number, 6443)
 
+    # Cloud-only (scaleway/ovh): "managed" (default, an LB) or "vip" (no LB —
+    # a Talos Layer2 VIP on the private network instead). Outscale rejects
+    # "vip" (its Net is an L3 SDN, no ARP/broadcast domain). See each
+    # provider's k8s_lb_mode variable for the per-cloud mechanism.
+    k8s_lb_mode = optional(string, "managed")
+
     # Proxmox-specific (single host or multi-host cluster). All optional → no
     # impact on the cloud providers. Defaults live in the TYPE (like image_name/
     # network_name): with map(object) an unset field arrives as null and would

@@ -82,3 +82,21 @@ variable "bastion_flavor_name" {
   type        = string
   default     = "b3-8"
 }
+
+variable "k8s_lb_mode" {
+  description = <<-EOT
+    How the Kubernetes API is fronted:
+      "managed" (default) - an Octavia LB + floating IP (public, ACL-restricted).
+      "vip"     - no LB: reserves a private port on the subnet instead, and
+                  relies on modules/talos's Layer2 VIP on the private network.
+                  Control plane ports get an allowed_address_pairs entry for the
+                  VIP so Neutron's anti-spoofing filter doesn't drop it. The API
+                  is then private-only, reachable via the bastion SSH tunnel.
+  EOT
+  type        = string
+  default     = "managed"
+  validation {
+    condition     = contains(["managed", "vip"], var.k8s_lb_mode)
+    error_message = "k8s_lb_mode must be \"managed\" or \"vip\"."
+  }
+}

@@ -34,6 +34,17 @@ close_tunnels() {
   # Fallback: kill any SSH process forwarding port 50000+ to a remote :50000
   # (catches orphaned tunnels from failed/interrupted runs)
   pkill -f "ssh.*-L 5[01][0-9][0-9][0-9]:.*:50000" 2>/dev/null || true
+  # Same, for the private k8s API tunnel opened in k8s_lb_mode = "vip".
+  pkill -f "ssh.*-L 6443:.*:6443" 2>/dev/null || true
+}
+
+# RFC1918 check (k8s_lb_mode = "vip": k8s_lb_ip is a private address instead of
+# a public managed LB, so the API needs its own tunnel through the bastion).
+is_private_ip() {
+  [[ "$1" =~ ^10\. ]] && return 0
+  [[ "$1" =~ ^192\.168\. ]] && return 0
+  [[ "$1" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]] && return 0
+  return 1
 }
 
 if [[ "$ACTION" == "close" ]]; then
@@ -60,6 +71,7 @@ fi
 BUSER="$(jq -r '.bastion_user.value // "root"' <<<"$OUTPUTS")"
 mapfile -t CPS < <(jq -r '.control_plane_private_ips.value[]? // empty' <<<"$OUTPUTS")
 mapfile -t WKS < <(jq -r '.worker_private_ips.value[]? // empty' <<<"$OUTPUTS")
+K8S_LB_IP="$(jq -r '.k8s_lb_ip.value // empty' <<<"$OUTPUTS")"
 
 close_tunnels # drop any stale tunnels (old IPs) before reopening
 : >"$PIDFILE"
@@ -82,15 +94,31 @@ echo "▶ Opening tunnels via ${BUSER}@${BASTION} (key: $KEY)"
 i=0; for ip in "${CPS[@]}"; do open_one "$((50000 + i))" "$ip"; i=$((i + 1)); done
 i=0; for ip in "${WKS[@]}"; do open_one "$((50100 + i))" "$ip"; i=$((i + 1)); done
 
+# k8s_lb_mode = "vip": k8s_lb_ip is a private Talos VIP, not a public managed
+# LB — open a dedicated tunnel to reach the API from the operator's machine.
+K8S_API_TUNNELED=false
+if [[ -n "$K8S_LB_IP" ]] && is_private_ip "$K8S_LB_IP"; then
+  nohup ssh -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes \
+    -o ServerAliveInterval=15 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
+    -i "$KEY" -N -L "6443:${K8S_LB_IP}:6443" "${BUSER}@${BASTION}" \
+    >/dev/null 2>&1 &
+  echo $! >>"$PIDFILE"
+  K8S_API_TUNNELED=true
+fi
+
 # Give SSH a moment to establish the forwards, then verify.
 sleep 4
 ports=()
 for j in "${!CPS[@]}"; do ports+=("$((50000 + j))"); done
 for j in "${!WKS[@]}"; do ports+=("$((50100 + j))"); done
+[[ "$K8S_API_TUNNELED" == true ]] && ports+=("6443")
 ok=0
 for p in "${ports[@]}"; do nc -z 127.0.0.1 "$p" 2>/dev/null && ok=$((ok + 1)); done
 
 echo "✓ ${ok}/${#ports[@]} tunnels up — CPs on 50000+i, workers on 50100+i"
+if [[ "$K8S_API_TUNNELED" == true ]]; then
+  echo "  k8s_lb_mode=vip: API tunneled — kubectl --server https://127.0.0.1:6443 get nodes"
+fi
 if [[ "$ok" -ne "${#ports[@]}" ]]; then
   echo "⚠ some tunnels failed. Check: SSH_KEY is correct, the bastion is reachable"
   echo "  (ssh -i $KEY ${BUSER}@${BASTION}), and its routing fix has converged."

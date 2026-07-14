@@ -47,6 +47,21 @@ variable "worker_count" {
   default     = 0
 }
 
+variable "k8s_lb_mode" {
+  description = "How the Kubernetes API is fronted. Outscale only supports \"managed\" (a load balancer) — see validation."
+  type        = string
+  default     = "managed"
+  validation {
+    # Outscale Net is an L3 SDN (like AWS VPC): no ARP/broadcast domain and NIC
+    # anti-spoofing on by default, so a Talos Layer2 VIP has nothing to float
+    # on. The k8s LB also sits on the public subnet and returns a DNS name, not
+    # an IP, which a Talos VIP can't be either. Unlike Scaleway/OVH (both L2
+    # private networks), there's no vip mode here — managed LB only.
+    condition     = var.k8s_lb_mode == "managed"
+    error_message = "Outscale only supports k8s_lb_mode = \"managed\" — its Net is an L3 SDN with no ARP/broadcast domain for a Talos Layer2 VIP to float on, and the k8s LB is DNS-based on the public subnet, not a floatable IP."
+  }
+}
+
 # Security
 variable "admin_ip" {
   description = "Allowed source IPs/CIDRs for admin access (SSH, K8s API)"

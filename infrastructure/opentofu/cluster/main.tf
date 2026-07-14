@@ -50,6 +50,7 @@ locals {
     image_name         = "talos"
     zones              = null
     availability_zones = null
+    k8s_lb_mode        = "managed"
   }, try(var.node_distribution["scaleway"], {}))
 
   ovh_dist = merge({
@@ -62,6 +63,7 @@ locals {
     network_name       = "Ext-Net"
     availability_zones = ["nova"]
     bastion_image_id   = "Ubuntu 22.04"
+    k8s_lb_mode        = "managed"
   }, try(var.node_distribution["ovh"], {}))
 
   osc_dist = merge({
@@ -73,6 +75,7 @@ locals {
     image_name         = "talos"
     availability_zones = ["eu-west-2a", "eu-west-2b", "eu-west-2c"]
     bastion_image_id   = null
+    k8s_lb_mode        = "managed"
   }, try(var.node_distribution["outscale"], {}))
 
   # Proxmox (single host or multi-host PVE cluster). VMs round-robined across
@@ -141,6 +144,7 @@ module "scw" {
   region           = local.scw_dist.region
   instance_type    = local.scw_dist.instance_type
   additional_zones = local.scw_dist.zones != null ? local.scw_dist.zones : ["fr-par-1", "fr-par-2", "fr-par-3"]
+  k8s_lb_mode      = local.scw_dist.k8s_lb_mode
 
   worker_storage = var.worker_storage
 
@@ -167,6 +171,7 @@ module "ovh" {
   network_name       = local.ovh_dist.network_name
   availability_zones = local.ovh_dist.availability_zones
   bastion_image_id   = local.ovh_dist.bastion_image_id
+  k8s_lb_mode        = local.ovh_dist.k8s_lb_mode
 
   worker_storage = var.worker_storage
 
@@ -191,6 +196,7 @@ module "outscale" {
   image_id           = local.osc_dist.image_id
   availability_zones = local.osc_dist.availability_zones
   bastion_image_id   = local.osc_dist.bastion_image_id
+  k8s_lb_mode        = local.osc_dist.k8s_lb_mode
 
   worker_storage = var.worker_storage
 
@@ -279,6 +285,22 @@ locals {
     proxmox  = local.pmx_dist.host_ssh_user
   }, local.active_provider, "ubuntu")
 
+  # k8s_lb_mode only applies to scaleway/ovh (outscale rejects "vip" via its
+  # own variable validation; proxmox has no LB to begin with — see below).
+  active_k8s_lb_mode = lookup({
+    scaleway = local.scw_dist.k8s_lb_mode
+    ovh      = local.ovh_dist.k8s_lb_mode
+  }, local.active_provider, "managed")
+
+  # Proxmox always wires its own VIP (its k8s_lb_ip output IS var.apiserver_vip
+  # — see modules/providers/proxmox/outputs.tf). Clouds only get one in
+  # k8s_lb_mode = "vip", where k8s_lb_ip already resolves to the reserved
+  # private address instead of the managed LB (see each provider's outputs.tf).
+  apiserver_vip = local.pmx_dist.apiserver_vip != null ? local.pmx_dist.apiserver_vip : (
+    local.active_k8s_lb_mode == "vip" ? local.k8s_lb_ip : null
+  )
+  apiserver_vip_interface = local.active_provider == "proxmox" ? local.pmx_dist.apiserver_vip_interface : "eth0"
+
   control_plane_ips = coalesce(
     length(try(module.scw[0].control_plane_private_ips, [])) > 0 ? module.scw[0].control_plane_private_ips : null,
     length(try(module.ovh[0].control_plane_private_ips, [])) > 0 ? module.ovh[0].control_plane_private_ips : null,
@@ -342,11 +364,10 @@ module "talos" {
   control_plane_ips = local.control_plane_ips
   worker_ips        = local.worker_ips
 
-  # Only Proxmox wires a VIP today (its k8s_lb_ip IS the VIP — see
-  # modules/providers/proxmox/outputs.tf). Null for every other provider, so
-  # this has zero effect on scw/ovh/outscale/local.
-  apiserver_vip           = local.pmx_dist.apiserver_vip
-  apiserver_vip_interface = local.pmx_dist.apiserver_vip_interface
+  # Proxmox always wires a VIP; scw/ovh only in k8s_lb_mode = "vip"; outscale
+  # and local never do (both resolve to null — see the locals above).
+  apiserver_vip           = local.apiserver_vip
+  apiserver_vip_interface = local.apiserver_vip_interface
 
   # Phase 2 reaches the private nodes through per-node SSH tunnels on localhost
   # (see the `instructions` output). `endpoint` is where the provider connects;

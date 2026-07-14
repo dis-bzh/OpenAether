@@ -15,6 +15,16 @@ resource "openstack_networking_port_v2" "control_plane" {
   fixed_ip {
     subnet_id = openstack_networking_subnet_v2.private.id
   }
+
+  # k8s_lb_mode = "vip": let the apiserver VIP (owned by whichever CP Talos
+  # currently assigns it to) pass Neutron's anti-spoofing filter on every CP
+  # port — only one port actually carries it at a time.
+  dynamic "allowed_address_pairs" {
+    for_each = var.k8s_lb_mode == "vip" ? [1] : []
+    content {
+      ip_address = openstack_networking_port_v2.k8s_vip[0].all_fixed_ips[0]
+    }
+  }
 }
 
 resource "openstack_compute_instance_v2" "control_plane" {
