@@ -135,7 +135,9 @@ variables {
 # The module-internal lifecycle precondition on data.talos_machine_configuration
 # cannot be referenced via expect_failures from outside the module
 # (OpenTofu limitation: expect_failures only supports root-level checkable objects).
-# The precondition code in modules/talos/main.tf:107-110 is the source of truth.
+# The precondition on data.talos_machine_configuration.control_plane in
+# modules/talos/main.tf (guarding the CILIUM-MANIFEST-PLACEHOLDER sentinel) is the
+# source of truth.
 # It is validated indirectly via Test 2 (valid manifest passes).
 # ==============================================================================
 

@@ -123,7 +123,7 @@ the **same production `modules/talos/`** used in the cloud. Best first step.
 ```bash
 task local-test                     # full deploy + verify (3 CP + 2 workers)
 task local-status                   # etcd members + nodes + Flux
-task local-flux                   # Flux UI → https://localhost:8080
+task local-flux                   # Flux UI → http://localhost:9090
 task local-down                     # tear down (containers + volumes + state)
 ```
 

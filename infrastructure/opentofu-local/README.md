@@ -37,7 +37,7 @@ TF_VAR_encryption_passphrase="local-test-passphrase-32chars-minimum" \
 task local-render-manifests   # render simplified Cilium (no WireGuard)
 task local-up                 # deploy the cluster (3 CP + 2 workers)
 task local-status             # etcd members + nodes + Flux
-task local-flux             # Flux UI → https://localhost:8080
+task local-flux             # Flux UI → http://localhost:9090
 task local-down               # tear down
 ```
 

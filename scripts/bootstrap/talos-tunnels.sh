@@ -90,7 +90,7 @@ for j in "${!WKS[@]}"; do ports+=("$((50100 + j))"); done
 ok=0
 for p in "${ports[@]}"; do nc -z 127.0.0.1 "$p" 2>/dev/null && ok=$((ok + 1)); done
 
-echo "✓ ${ok}/${#ports[@]} tunnels up — CPs on 5000+i, workers on 5010+i"
+echo "✓ ${ok}/${#ports[@]} tunnels up — CPs on 50000+i, workers on 50100+i"
 if [[ "$ok" -ne "${#ports[@]}" ]]; then
   echo "⚠ some tunnels failed. Check: SSH_KEY is correct, the bastion is reachable"
   echo "  (ssh -i $KEY ${BUSER}@${BASTION}), and its routing fix has converged."

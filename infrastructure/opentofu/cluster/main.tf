@@ -343,7 +343,7 @@ module "talos" {
 
   # Phase 2 reaches the private nodes through per-node SSH tunnels on localhost
   # (see the `instructions` output). `endpoint` is where the provider connects;
-  # node identity stays the private IP. CPs: 127.0.0.1:5000+i, workers: :5010+i.
+  # node identity stays the private IP. CPs: 127.0.0.1:50000+i, workers: :50100+i.
   control_plane_endpoints = var.talos_bootstrap ? [for i in range(local.total_control_planes) : "127.0.0.1:${50000 + i}"] : []
   worker_endpoints        = var.talos_bootstrap ? [for i in range(local.total_workers) : "127.0.0.1:${50100 + i}"] : []
 
@@ -357,7 +357,7 @@ module "talos" {
   # Dedicated worker data volumes (encrypted UserVolumeConfig). Empty on local.
   worker_storage = var.worker_storage
 
-  depends_on = [module.scw, module.ovh, module.outscale]
+  depends_on = [module.scw, module.ovh, module.outscale, module.proxmox]
 }
 
 # ==============================================================================

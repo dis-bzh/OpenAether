@@ -30,7 +30,7 @@ variable "cluster_role" {
 }
 
 variable "talos_bootstrap" {
-  description = "Whether to configure Talos via SSH tunnel (Phase 2). Default false (Phase 1 infra only)."
+  description = "Whether to configure Talos via SSH tunnel (Phase 2). Default true — pass -var talos_bootstrap=false for Phase 1 (infra only)."
   type        = bool
   default     = true
 }
