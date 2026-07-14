@@ -54,6 +54,10 @@ variable "worker_count" {
   default     = 0
 }
 
+#tflint-ignore: terraform_unused_declarations -- only referenced by its own
+# validation block (rejects "vip"). Exists so cluster/main.tf can pass
+# k8s_lb_mode uniformly to all three cloud provider modules; Outscale simply
+# never acts on it beyond validating it.
 variable "k8s_lb_mode" {
   description = "How the Kubernetes API is fronted. Outscale only supports \"managed\" (a load balancer) — see validation."
   type        = string

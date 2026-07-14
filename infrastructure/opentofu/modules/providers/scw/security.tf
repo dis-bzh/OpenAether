@@ -15,12 +15,18 @@ resource "scaleway_instance_security_group" "this" {
 
   inbound_default_policy = "drop"
 
-  # Kubernetes API — From K8s LB
-  inbound_rule {
-    action   = "accept"
-    port     = 6443
-    ip_range = "${scaleway_lb_ip.k8s.ip_address}/32"
-    protocol = "TCP"
+  # Kubernetes API — From K8s LB (managed mode only; in vip mode the apiserver
+  # VIP lives directly on a control plane's private interface — there is no
+  # LB IP to allow here, and inter-node/private-subnet rules below already
+  # cover VIP traffic on the private network).
+  dynamic "inbound_rule" {
+    for_each = var.k8s_lb_mode == "managed" ? [1] : []
+    content {
+      action   = "accept"
+      port     = 6443
+      ip_range = "${scaleway_lb_ip.k8s[0].ip_address}/32"
+      protocol = "TCP"
+    }
   }
 
   # Kubernetes API — From App LB (for internal service communication)
