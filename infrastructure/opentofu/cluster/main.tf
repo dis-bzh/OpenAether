@@ -47,7 +47,7 @@ locals {
     zone               = null
     instance_type      = null
     image_id           = null
-    image_name         = "talos"
+    image_name         = null
     zones              = null
     availability_zones = null
     k8s_lb_mode        = "managed"
@@ -59,7 +59,7 @@ locals {
     region             = "EU-WEST-PAR"
     flavor_name        = "b3-8"
     image_id           = null
-    image_name         = "talos"
+    image_name         = null
     network_name       = "Ext-Net"
     availability_zones = ["nova"]
     bastion_image_id   = "Ubuntu 22.04"
@@ -72,7 +72,7 @@ locals {
     region             = "eu-west-2"
     instance_type      = "tinav5.c2r4p1"
     image_id           = null
-    image_name         = "talos"
+    image_name         = null
     availability_zones = ["eu-west-2a", "eu-west-2b", "eu-west-2c"]
     bastion_image_id   = null
     k8s_lb_mode        = "managed"
@@ -102,6 +102,30 @@ locals {
     host_public_ip          = null
     host_ssh_user           = "root"
   }, try(var.node_distribution["proxmox"], {}))
+}
+
+# ==============================================================================
+# Image lookup convention — when a provider's image_id/image_name/
+# talos_image_file_id is left unset, fall back to the exact name the
+# talos-image root publishes/downloads under (see talos-image/main.tf's
+# local.image_name and modules/talos-image/proxmox), so the operator rarely
+# needs to hand-copy an ID between the two roots. An explicit value always
+# wins (coalesce picks the first non-null). Computed here rather than as a
+# merge() default in *_dist above: node_distribution's map(object) type fills
+# every unset field with null (not "absent"), which would silently clobber a
+# literal default placed inside merge() — see the comment on pmx_dist's
+# host-specific keys above.
+# ==============================================================================
+
+locals {
+  scw_image_name = coalesce(local.scw_dist.image_name, "talos-scaleway-amd64-${var.talos_version}")
+  ovh_image_name = coalesce(local.ovh_dist.image_name, "talos-ovh-amd64-${var.talos_version}")
+  osc_image_name = coalesce(local.osc_dist.image_name, "talos-outscale-amd64-${var.talos_version}")
+
+  pmx_talos_image_file_id = coalesce(
+    local.pmx_dist.talos_image_file_id,
+    "${local.pmx_dist.iso_datastore_id}:iso/talos-${trimprefix(var.talos_version, "v")}-nocloud-amd64.img"
+  )
 }
 
 # ==============================================================================
@@ -139,7 +163,7 @@ module "scw" {
   worker_count        = local.scw_dist.workers
 
   image_id         = local.scw_dist.image_id
-  image_name       = local.scw_dist.image_name
+  image_name       = local.scw_image_name
   zone             = local.scw_dist.zone
   region           = local.scw_dist.region
   instance_type    = local.scw_dist.instance_type
@@ -168,6 +192,7 @@ module "ovh" {
   region             = local.ovh_dist.region
   flavor_name        = local.ovh_dist.flavor_name
   image_id           = local.ovh_dist.image_id
+  image_name         = local.ovh_image_name
   network_name       = local.ovh_dist.network_name
   availability_zones = local.ovh_dist.availability_zones
   bastion_image_id   = local.ovh_dist.bastion_image_id
@@ -194,6 +219,7 @@ module "outscale" {
 
   instance_type      = local.osc_dist.instance_type
   image_id           = local.osc_dist.image_id
+  image_name         = local.osc_image_name
   availability_zones = local.osc_dist.availability_zones
   bastion_image_id   = local.osc_dist.bastion_image_id
   k8s_lb_mode        = local.osc_dist.k8s_lb_mode
@@ -221,7 +247,7 @@ module "proxmox" {
   node_names          = local.pmx_dist.node_names
   datastore_id        = local.pmx_dist.datastore_id
   iso_datastore_id    = local.pmx_dist.iso_datastore_id
-  talos_image_file_id = local.pmx_dist.talos_image_file_id
+  talos_image_file_id = local.pmx_talos_image_file_id
 
   network_bridge          = local.pmx_dist.network_bridge
   network_cidr            = local.pmx_dist.network_cidr

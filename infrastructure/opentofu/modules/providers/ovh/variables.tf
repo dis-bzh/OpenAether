@@ -16,8 +16,15 @@ variable "flavor_name" {
 }
 
 variable "image_id" {
-  description = "OpenStack image ID for Talos Linux"
+  description = "OpenStack (Glance) image UUID for Talos Linux. Null (default) looks it up by image_name instead — the name the talos-image root publishes under."
   type        = string
+  default     = null
+}
+
+variable "image_name" {
+  description = "Glance image name to look up when image_id is null (most recent match)."
+  type        = string
+  default     = "talos"
 }
 
 variable "worker_storage" {

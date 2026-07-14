@@ -81,7 +81,7 @@ variable "node_distribution" {
     instance_type      = optional(string)
     flavor_name        = optional(string)
     image_id           = optional(string)
-    image_name         = optional(string, "talos")
+    image_name         = optional(string)
     availability_zones = optional(list(string))
     network_name       = optional(string, "Ext-Net")
     bastion_image_id   = optional(string)

@@ -10,8 +10,15 @@ variable "instance_type" {
 }
 
 variable "image_id" {
-  description = "OMI ID for Talos Linux"
+  description = "OMI ID for Talos Linux. Null (default) looks it up by image_name instead — the name the talos-image root publishes under."
   type        = string
+  default     = null
+}
+
+variable "image_name" {
+  description = "OMI name to look up when image_id is null."
+  type        = string
+  default     = "talos"
 }
 
 variable "worker_storage" {

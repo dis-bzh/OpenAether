@@ -68,8 +68,11 @@ surfaces it as `k8s_lb_ip`; `cluster/main.tf` passes it straight through to
    holding `gateway_ip` and routing/NAT to the internet. **Multi-host**: the bridge
    must be L2-connected across all hosts (VXLAN, WireGuard L2, or provider VLAN) so
    Talos VIP + Cilium work across hosts.
-3. The Talos nocloud image imported and referenced by `talos_image_file_id`
-   (build via `../../talos-image`).
+3. The Talos nocloud image downloaded onto `iso_datastore_id` — run
+   `task talos-image PROVIDER=proxmox` (uses `../../talos-image/modules/talos-image/proxmox`,
+   `proxmox_virtual_environment_download_file`) once per Talos version. `talos_image_file_id`
+   defaults to that download's path (`<iso_datastore_id>:iso/talos-<version>-nocloud-amd64.img`)
+   and rarely needs to be set explicitly.
 4. An API token for the `bpg/proxmox` provider (configured in `cluster/main.tf`,
    not here — modules only declare `required_providers`).
 5. **Host NAT/DNAT + SSH restriction** on the host (nftables) — see below. Not

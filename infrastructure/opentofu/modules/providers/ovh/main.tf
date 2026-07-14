@@ -5,6 +5,19 @@
 # No user_data — Talos configuration is applied via the Talos API after provisioning.
 # ==============================================================================
 
+# Looked up by name only when image_id is left unset — mirrors the Scaleway
+# module's data.scaleway_instance_image (the talos-image root publishes under
+# this same name convention; see talos-image/main.tf's local.image_name).
+data "openstack_images_image_v2" "talos" {
+  count       = var.image_id == null ? 1 : 0
+  name        = var.image_name
+  most_recent = true
+}
+
+locals {
+  resolved_image_id = coalesce(var.image_id, try(data.openstack_images_image_v2.talos[0].id, null))
+}
+
 resource "openstack_networking_port_v2" "control_plane" {
   count              = var.control_plane_count
   name               = "${var.cluster_name}-cp-port-${count.index}"
@@ -30,7 +43,7 @@ resource "openstack_networking_port_v2" "control_plane" {
 resource "openstack_compute_instance_v2" "control_plane" {
   count             = var.control_plane_count
   name              = "${var.cluster_name}-cp-${count.index}"
-  image_id          = var.image_id
+  image_id          = local.resolved_image_id
   flavor_name       = var.flavor_name
   region            = var.region
   availability_zone = element(var.availability_zones, count.index)
@@ -47,7 +60,7 @@ resource "openstack_compute_instance_v2" "control_plane" {
 resource "openstack_compute_instance_v2" "worker" {
   count             = var.worker_count
   name              = "${var.cluster_name}-worker-${count.index}"
-  image_id          = var.image_id
+  image_id          = local.resolved_image_id
   flavor_name       = var.flavor_name
   region            = var.region
   availability_zone = element(var.availability_zones, count.index)

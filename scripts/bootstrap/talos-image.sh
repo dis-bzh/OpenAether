@@ -8,25 +8,30 @@
 #
 # Consistent cred rule: working on provider X uses AWS_* = X's S3 keys (for the
 # build state, same as deploying a cluster on X) PLUS X's compute creds:
-#   scaleway -> SCW_* ; ovh -> OS_* ; outscale -> OSC_*. Plus TF_VAR_encryption_passphrase.
+#   scaleway -> SCW_* ; ovh -> OS_* ; outscale -> OSC_* ; proxmox -> PROXMOX_VE_*.
+#   Plus TF_VAR_encryption_passphrase.
 #
 # State: s3-openaether-<provider>-talos-image / talos-image.tfstate (its own bucket
-# per provider — building one provider's image never disturbs another's).
+# per provider — building one provider's image never disturbs another's). Proxmox
+# has no native object storage, so its state (like its cluster state) lives on an
+# external S3-compatible store — same PROXMOX_AWS_*/PROXMOX_S3_* convention as the
+# cluster root.
 #
 # Usage:
-#   ./scripts/talos-image.sh <scaleway|ovh|outscale> [talos_version]
+#   ./scripts/talos-image.sh <scaleway|ovh|outscale|proxmox> [talos_version]
 #   task talos-image PROVIDER=ovh [VERSION=v1.13.4]
 # ==============================================================================
 set -euo pipefail
 
-RAW="${1:?usage: talos-image.sh <scaleway|ovh|outscale> [talos_version]}"
+RAW="${1:?usage: talos-image.sh <scaleway|ovh|outscale|proxmox> [talos_version]}"
 VERSION="${2:-v1.13.4}"
 P="$(printf '%s' "$RAW" | tr '[:upper:]' '[:lower:]')"
 case "$P" in
   scw | scaleway) P=scaleway; TGT=scaleway; SREGION=fr-par;    SEP="https://s3.fr-par.scw.cloud" ;;
   ovh)            TGT=ovh;      SREGION=eu-west-par;        SEP="https://s3.eu-west-par.io.cloud.ovh.net" ;;
   outscale)       TGT=outscale; SREGION=eu-west-2; SEP="https://oos.eu-west-2.outscale.com" ;;
-  *) echo "✗ unknown provider: $RAW (expected scaleway|ovh|outscale)"; exit 1 ;;
+  proxmox)        TGT=proxmox;  SREGION="${PROXMOX_S3_REGION:-fr-par}"; SEP="${PROXMOX_S3_ENDPOINT:-https://s3.fr-par.scw.cloud}" ;;
+  *) echo "✗ unknown provider: $RAW (expected scaleway|ovh|outscale|proxmox)"; exit 1 ;;
 esac
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../infrastructure/opentofu/talos-image" && pwd)"
@@ -56,6 +61,17 @@ if [ "$P" = outscale ]; then
   export TF_VAR_outscale_secret_key_id="$AWS_SECRET_ACCESS_KEY"
 fi
 
+# Proxmox downloads server-side onto the host's datastore (no local convert
+# step), so it needs the bpg provider's own creds — fail fast if missing
+# rather than let `tofu apply` surface an opaque auth error.
+if [ "$P" = proxmox ]; then
+  [ -n "${PROXMOX_VE_ENDPOINT:-}" ] && [ -n "${PROXMOX_VE_API_TOKEN:-}" ] || {
+    echo "✗ Proxmox creds missing: export PROXMOX_VE_ENDPOINT + PROXMOX_VE_API_TOKEN"
+    echo "  (PROXMOX_VE_INSECURE=true for a self-signed 8006 cert)"
+    exit 1
+  }
+fi
+
 STATE_BUCKET="s3-openaether-${TGT}-talos-image"
 
 ensure() { # bucket
@@ -75,6 +91,17 @@ case "$P" in
     ensure "$STAGING"
     APPLY_VARS+=(-var "staging_bucket=$STAGING" -var "region=$SREGION" -var "s3_endpoint=$SEP")
     ;;
+  proxmox)
+    # No staging bucket — the download lands straight on the host's datastore.
+    # PROXMOX_NODE_NAMES is comma-separated (e.g. "pve1,pve2,pve3"); match
+    # node_distribution.proxmox.node_names in the cluster envs/*.tfvars.
+    IFS=',' read -ra PMX_NODES <<<"${PROXMOX_NODE_NAMES:-pve1}"
+    PMX_NODES_HCL="[$(printf '"%s",' "${PMX_NODES[@]}" | sed 's/,$//')]"
+    APPLY_VARS+=(
+      -var "proxmox_node_names=${PMX_NODES_HCL}"
+      -var "proxmox_iso_datastore_id=${PROXMOX_ISO_DATASTORE_ID:-local}"
+    )
+    ;;
 esac
 
 cd "$ROOT"
@@ -89,4 +116,6 @@ tofu apply "${APPLY_VARS[@]}"
 echo
 echo "→ image_name: $(tofu output -raw image_name 2>/dev/null || echo '?')"
 tofu output image_id 2>/dev/null || true
-echo "  (Scaleway: cluster looks up by image_name; OVH/Outscale: put image_id in the cluster envs/*.tfvars)"
+[ "$P" = proxmox ] && tofu output image_file_id 2>/dev/null
+echo "  (Scaleway: cluster looks up by image_name; OVH/Outscale: put image_id in the cluster envs/*.tfvars;"
+echo "   Proxmox: talos_image_file_id defaults to the same convention — usually no override needed)"
