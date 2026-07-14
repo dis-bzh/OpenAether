@@ -15,8 +15,8 @@ tasks:
     desc: Lint and format code (OpenTofu, YAML)
     cmds:
       - tofu fmt -check -recursive infrastructure/opentofu
-      - yamllint -c infrastructure/.yamllint apps/ infrastructure/
-      - tflint --chdir=infrastructure/opentofu/cluster --recursive
+      - yamllint -c infrastructure/.yamllint infrastructure/
+      - tflint --chdir=infrastructure/opentofu --recursive
 
   fmt:
     desc: Format OpenTofu code
@@ -24,14 +24,16 @@ tasks:
       - tofu fmt -recursive infrastructure/opentofu
 
   validate:
-    desc: Validate the cluster OpenTofu root
-    dir: infrastructure/opentofu/cluster
+    desc: "Validate an OpenTofu root. Usage: task validate [ROOT=cluster|talos-image]"
+    vars:
+      ROOT: '{{.ROOT | default "cluster"}}'
+    dir: "infrastructure/opentofu/{{.ROOT}}"
     cmds:
       - tofu init -backend=false
       - tofu validate
 
   security:
-    desc: Run security scans (Trivy, Checkov, Gitleaks)
+    desc: "Run security scans (Trivy, Checkov, Gitleaks)"
     cmds:
       # Skip the upstream-vendored Cilium/Flux bootstrap manifests (not our
       # config to fix; reviewed at render time). Matches the CI Trivy step.
@@ -44,6 +46,9 @@ tasks:
     desc: Run OpenTofu tests (cluster root)
     dir: infrastructure/opentofu/cluster
     cmds:
+      # Self-sufficient from a cold shell/CI runner (matches `validate`'s own
+      # init step) — `tofu test` needs providers/modules resolved first.
+      - tofu init -backend=false
       - tofu test
 
   cluster-security:
@@ -65,14 +70,20 @@ tasks:
 
   # ===========================================================================
   # Cluster Lifecycle
+  #
+  # infra / bootstrap-phase2 / destroy each take ROLE=management|workload (the
+  # tfvars file is envs/<ROLE>-<PROVIDER>.tfvars) — these used to be six
+  # separate tasks (infra-management/infra-workload, management/workload,
+  # destroy-management/destroy-workload) differing only in that filename.
   # ===========================================================================
 
-  infra-management:
-    desc: "Deploy the management cluster. Usage: task infra-management [PROVIDER=scaleway|ovh|outscale]"
+  infra:
+    desc: "Phase 1: deploy infra (VMs/network, no Talos yet). Usage: task infra ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox]"
     dir: infrastructure/opentofu/cluster
     vars:
+      ROLE: '{{.ROLE | default "management"}}'
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
-    env:
+    env: &provider-env
       AWS_ACCESS_KEY_ID:
         sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak
       AWS_SECRET_ACCESS_KEY:
@@ -82,93 +93,55 @@ tasks:
       TF_VAR_outscale_secret_key_id:
         sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale sk || true'
     cmds:
-      - ../../../scripts/internal/ensure-buckets.sh envs/management-{{.PROVIDER}}.tfvars
-      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
-      - tofu apply -var-file="envs/management-{{.PROVIDER}}.tfvars" -var talos_bootstrap=false
-      - ../../../scripts/ops/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
+      - ../../../scripts/internal/ensure-buckets.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars
+      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
+      - tofu apply -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=false
+      - task: _backup-state
 
-  infra-workload:
-    desc: "Deploy a workload cluster. Usage: task infra-workload PROVIDER=ovh"
+  bootstrap-phase2:
+    desc: "Phase 2: open SSH tunnels (from state) + bootstrap Talos. Usage: task bootstrap-phase2 ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox] [KEY=~/.ssh/yourkey]"
     dir: infrastructure/opentofu/cluster
     vars:
-      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
-    env:
-      AWS_ACCESS_KEY_ID:
-        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak
-      AWS_SECRET_ACCESS_KEY:
-        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} sk
-      TF_VAR_outscale_access_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale ak || true'
-      TF_VAR_outscale_secret_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale sk || true'
-    cmds:
-      - ../../../scripts/internal/ensure-buckets.sh envs/workload-{{.PROVIDER}}.tfvars
-      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
-      - tofu apply -var-file="envs/workload-{{.PROVIDER}}.tfvars" -var talos_bootstrap=false
-      - ../../../scripts/ops/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
-
-  management:
-    desc: "Phase 2: open SSH tunnels (from state) + bootstrap the management cluster. Usage: task management [PROVIDER=scaleway|ovh|outscale] KEY=~/.ssh/yourkey"
-    dir: infrastructure/opentofu/cluster
-    vars:
+      ROLE: '{{.ROLE | default "management"}}'
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
-    env:
-      AWS_ACCESS_KEY_ID:
-        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak
-      AWS_SECRET_ACCESS_KEY:
-        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} sk
-      TF_VAR_outscale_access_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale ak || true'
-      TF_VAR_outscale_secret_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale sk || true'
+    env: *provider-env
     cmds:
-      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
+      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
       - SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh open .
-      - tofu apply -var-file="envs/management-{{.PROVIDER}}.tfvars" -var talos_bootstrap=true
-      - ../../../scripts/ops/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
+      - tofu apply -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=true
+      - task: _backup-state
 
   rolling-replace:
-    desc: "Replace nodes one at a time (drain→targeted apply→wait) with NO downtime. Use after a ForceNew change (instance_type / Talos image) instead of infra-management, which replaces all nodes in parallel and breaks etcd quorum. Usage: task rolling-replace PROVIDER=scaleway [KEY=~/.ssh/key] [-- --workers-only|--cp-only|--dry-run]"
+    desc: "Replace nodes one at a time (drain→targeted apply→wait) with NO downtime. Use after a ForceNew change (instance_type / Talos image) instead of infra, which replaces all nodes in parallel and breaks etcd quorum. Management clusters only (see scripts/ops/rolling-replace.sh). Usage: task rolling-replace PROVIDER=scaleway [KEY=~/.ssh/key] [-- --workers-only|--cp-only|--dry-run]"
     dir: infrastructure/opentofu/cluster
     vars:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
-    env:
-      AWS_ACCESS_KEY_ID:
-        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak
-      AWS_SECRET_ACCESS_KEY:
-        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} sk
-      TF_VAR_outscale_access_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale ak || true'
-      TF_VAR_outscale_secret_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale sk || true'
+    env: *provider-env
     cmds:
       - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
       - SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh open .
       - ../../../scripts/ops/rolling-replace.sh {{.PROVIDER}} {{.CLI_ARGS}}
-      - ../../../scripts/ops/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
+      - task: _backup-state
 
-  workload:
-    desc: "Phase 2: open tunnels + bootstrap a workload cluster. Usage: task workload PROVIDER=ovh KEY=~/.ssh/yourkey"
+  destroy:
+    desc: "Destroy a cluster. Usage: task destroy ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox]"
     dir: infrastructure/opentofu/cluster
     vars:
+      ROLE: '{{.ROLE | default "management"}}'
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
-      KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
-    env:
-      AWS_ACCESS_KEY_ID:
-        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak
-      AWS_SECRET_ACCESS_KEY:
-        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} sk
-      TF_VAR_outscale_access_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale ak || true'
-      TF_VAR_outscale_secret_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale sk || true'
+    env: *provider-env
     cmds:
-      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
-      - SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh open .
-      - tofu apply -var-file="envs/workload-{{.PROVIDER}}.tfvars" -var talos_bootstrap=true
-      - ../../../scripts/ops/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
+      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
+      # machine_secrets carries prevent_destroy (the PKI is the cluster's root
+      # of trust) — untrack it first so `tofu destroy` doesn't refuse.
+      - tofu state rm module.talos.talos_machine_secrets.this 2>/dev/null || true
+      # talos_bootstrap=false resolves module.talos to count=0, so the destroy
+      # plan skips data.talos_cluster_health — which would otherwise re-read
+      # through the SSH tunnels and hang if they're already closed (see
+      # cluster/README.md's Teardown section).
+      - tofu destroy -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=false
 
   close-tunnels:
     desc: "Close the Talos API SSH tunnels opened for Phase 2"
@@ -180,70 +153,48 @@ tasks:
     cmds:
       - ./scripts/ops/backup-state.sh infrastructure/opentofu/cluster
 
-  destroy-management:
-    desc: "Destroy a management cluster. Usage: task destroy-management PROVIDER=ovh"
+  _backup-state:
+    internal: true
     dir: infrastructure/opentofu/cluster
-    vars:
-      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
-    env:
-      AWS_ACCESS_KEY_ID:
-        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak
-      AWS_SECRET_ACCESS_KEY:
-        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} sk
-      TF_VAR_outscale_access_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale ak || true'
-      TF_VAR_outscale_secret_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale sk || true'
     cmds:
-      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
-      - tofu state rm module.talos.talos_machine_secrets.this 2>/dev/null || true
-      - tofu destroy -var-file="envs/management-{{.PROVIDER}}.tfvars"
+      - ../../../scripts/ops/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
 
-  destroy-workload:
-    desc: "Destroy a workload cluster. Usage: task destroy-workload PROVIDER=ovh"
-    dir: infrastructure/opentofu/cluster
-    vars:
-      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
-    env:
-      AWS_ACCESS_KEY_ID:
-        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak
-      AWS_SECRET_ACCESS_KEY:
-        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} sk
-      TF_VAR_outscale_access_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale ak || true'
-      TF_VAR_outscale_secret_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale sk || true'
-    cmds:
-      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/workload-{{.PROVIDER}}.tfvars)
-      - tofu destroy -var-file="envs/workload-{{.PROVIDER}}.tfvars"
-
-  state-list:
-    desc: "tofu state list (show resources in the state)"
-    dir: infrastructure/opentofu/cluster
-    vars:
-      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
-      KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
-    env:
-      AWS_ACCESS_KEY_ID:
-        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak
-      AWS_SECRET_ACCESS_KEY:
-        sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} sk
-      TF_VAR_outscale_access_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale ak || true'
-      TF_VAR_outscale_secret_key_id:
-        sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale sk || true'
-    cmds:
-      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
-      - tofu state list
+  # ===========================================================================
   # Multi-Cluster Management
   # ===========================================================================
 
   failover:
-    desc: "Cross-provider failover: stand up a 2nd management cluster on another cloud. Usage: task failover PROVIDER=ovh"
+    desc: "Cross-provider failover: stand up a 2nd management cluster on another cloud/on-prem target. Usage: task failover PROVIDER=ovh"
     vars:
       PROVIDER: '{{.PROVIDER | default "ovh"}}'
     cmds:
       - ./scripts/bootstrap/failover-management.sh "{{.PROVIDER}}"
+
+  register-spoke:
+    desc: "Register a spoke cluster in Flux hub. Usage: task register-spoke CLUSTER=openaether-ovh-prod PROVIDER=ovh"
+    vars:
+      CLUSTER: '{{.CLUSTER | default ""}}'
+      PROVIDER: '{{.PROVIDER | default ""}}'
+    cmds:
+      - ./scripts/bootstrap/register-spoke.sh "{{.CLUSTER}}" "{{.PROVIDER}}"
+
+  render-manifests:
+    desc: Render/update bootstrap manifests (Cilium + Flux)
+    cmds:
+      - ./scripts/bootstrap/render-bootstrap-manifests.sh
+
+  kubeconfig:
+    desc: "Retrieve kubeconfig/talosconfig from OpenTofu outputs (re-inits the backend, so this works from a cold shell). Usage: task kubeconfig ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox]"
+    dir: infrastructure/opentofu/cluster
+    vars:
+      ROLE: '{{.ROLE | default "management"}}'
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    env: *provider-env
+    cmds:
+      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
+      - tofu output -raw kubeconfig > kubeconfig
+      - tofu output -raw talosconfig > talosconfig
+      - echo "KUBECONFIG and TALOSCONFIG written to infrastructure/opentofu/cluster/"
 
   # ===========================================================================
   # Local Testing (Docker / WSL2)
@@ -296,38 +247,3 @@ tasks:
       # leaves containers + state behind). --destroy also removes the containers,
       # volumes, network, and the ephemeral local state for a clean slate.
       - ./scripts/dev/test-talos-local.sh --destroy
-
-  # ===========================================================================
-  # Bootstrap & Secrets
-  # ===========================================================================
-
-  bootstrap:
-    desc: "Bootstrap Flux on a running cluster (if inline manifests failed). Usage: task bootstrap [ROLE=management|local]"
-    vars:
-      ROLE: '{{.ROLE | default "local"}}'
-    cmds:
-      - |
-        export KUBECONFIG=infrastructure/opentofu-local/kubeconfig
-        flux install
-        kubectl apply -k apps/flux/{{.ROLE}}
-
-  register-spoke:
-    desc: "Register a spoke cluster in Flux hub. Usage: task register-spoke CLUSTER=openaether-ovh-prod PROVIDER=ovh"
-    vars:
-      CLUSTER: '{{.CLUSTER | default ""}}'
-      PROVIDER: '{{.PROVIDER | default ""}}'
-    cmds:
-      - ./scripts/bootstrap/register-spoke.sh "{{.CLUSTER}}" "{{.PROVIDER}}"
-
-  render-manifests:
-    desc: Render/update bootstrap manifests (Cilium + Flux)
-    cmds:
-      - ./scripts/bootstrap/render-bootstrap-manifests.sh
-
-  kubeconfig:
-    desc: Retrieve kubeconfig from OpenTofu outputs
-    dir: infrastructure/opentofu/cluster
-    cmds:
-      - tofu output -raw kubeconfig > kubeconfig
-      - tofu output -raw talosconfig > talosconfig
-      - echo "KUBECONFIG and TALOSCONFIG written to infrastructure/opentofu/cluster/"

@@ -131,16 +131,16 @@ task talos-image PROVIDER=scaleway               # -> image "talos-scaleway-amd6
 ./scripts/bootstrap/render-bootstrap-manifests.sh
 
 # Phase 1 — infra (IPs land in the state). The task ensures the buckets + inits the
-# per-cluster backend for you. PROVIDER defaults to scaleway (also ovh, outscale).
-task infra-management                      # or: task infra-management PROVIDER=ovh
+# per-cluster backend for you. PROVIDER defaults to scaleway (also ovh, outscale, proxmox).
+task infra ROLE=management                 # or: task infra ROLE=management PROVIDER=ovh
 #   manual equivalent:
 #     ./scripts/internal/ensure-buckets.sh envs/management-scaleway.tfvars
 #     tofu init -reconfigure $(./scripts/internal/tf-backend.sh envs/management-scaleway.tfvars)
 #     tofu apply -var-file=envs/management-scaleway.tfvars -var talos_bootstrap=false
 #     ./scripts/ops/backup-state.sh infrastructure/opentofu   # replicate state to the -backup store
 
-# Phase 2 — `task management` opens the SSH tunnels (read from the state) then bootstraps
-task management KEY=~/.ssh/yourkey         # or: task management PROVIDER=ovh KEY=~/.ssh/yourkey
+# Phase 2 — `task bootstrap-phase2` opens the SSH tunnels (read from the state) then bootstraps
+task bootstrap-phase2 ROLE=management KEY=~/.ssh/yourkey   # or: ROLE=management PROVIDER=ovh KEY=...
 # (manual equivalent: open one tunnel per node per `tofu output instructions`, then
 #  tofu apply -var-file=envs/management-scaleway.tfvars -var talos_bootstrap=true)
 
@@ -151,8 +151,8 @@ task close-tunnels
 ### Deploy workload cluster
 
 ```bash
-task infra-workload PROVIDER=ovh
-task workload PROVIDER=ovh KEY=~/.ssh/yourkey
+task infra ROLE=workload PROVIDER=ovh
+task bootstrap-phase2 ROLE=workload PROVIDER=ovh KEY=~/.ssh/yourkey
 ```
 
 ### Cross-provider failover — second management on another cloud
@@ -174,7 +174,11 @@ tofu apply -var-file=envs/management-scaleway.tfvars -var talos_bootstrap=true
 
 ### Teardown (destroy)
 
-Destroying is intentionally **manual** (no task). Two steps are required:
+```bash
+task destroy ROLE=management                # or: ROLE=workload PROVIDER=ovh
+```
+
+Manual equivalent (two steps are required):
 
 ```bash
 # 1. Untrack the machine secrets first. They carry prevent_destroy (the PKI is the
@@ -212,8 +216,8 @@ the Phase-2 apply (`backup-artifacts.sh`); the state is replicated **after** the
 apply (`backup-state.sh` / `task backup-state`), because the backend only flushes
 the new state on apply exit.
 
-The four buckets are **auto-provisioned** (idempotent) by `task infra-management` /
-`task infra-workload` before `tofu init` — `scripts/ensure-buckets.sh` derives their
+The four buckets are **auto-provisioned** (idempotent) by `task infra ROLE=management` /
+`task infra ROLE=workload` before `tofu init` — `scripts/ensure-buckets.sh` derives their
 names from the cluster's tfvars and `aws s3 mb`s any that are missing (primary with
 `<PU>_AWS_*`, replicas with `<PU>_BACKUP_AWS_*`). Manual equivalent:
 `./scripts/ensure-buckets.sh envs/<cluster>.tfvars`.
