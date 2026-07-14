@@ -35,6 +35,27 @@ variable "talos_bootstrap" {
   default     = true
 }
 
+variable "auto_tunnels" {
+  description = <<-EOT
+    EXPERIMENTAL — collapses the two-phase bootstrap into a single `tofu apply`.
+    When true (with talos_bootstrap=true), a terraform_data resource opens the
+    SSH tunnels itself (scripts/bootstrap/talos-tunnels.sh open-direct) between
+    the provider module and modules/talos, using node/bastion IPs that are only
+    known once the VMs exist — ordering falls out of the reference graph, no
+    manual tunnel step needed. Default false: the documented two-phase flow
+    (`task infra` then `task bootstrap-phase2`) remains the supported path.
+    Not exercised against a real host yet; validate on a disposable env first.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "ssh_key_path" {
+  description = "SSH private key path used by auto_tunnels=true's terraform_data provisioner (passed to talos-tunnels.sh open-direct --key). Unused when auto_tunnels=false."
+  type        = string
+  default     = "~/.ssh/id_ed25519"
+}
+
 variable "talos_version" {
   description = "Talos Linux version"
   type        = string

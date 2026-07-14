@@ -48,6 +48,29 @@ and junction point work without modification.
 
 Between phases, establish SSH tunnels via the bastion for Talos API access (port 50000).
 
+### One-shot bring-up: `task up`
+
+```bash
+task up ROLE=management                    # or: ROLE=workload PROVIDER=ovh KEY=~/.ssh/yourkey
+```
+
+Chains image → render manifests → Phase 1 (`infra`) → tunnels → Phase 2
+(`bootstrap-phase2`) in one command. Every step is idempotent (image build
+skips if already published/downloaded, manifests skip re-rendering unless
+`FORCE=1`, `infra`/`bootstrap-phase2` are plain `tofu apply`s) — if any step
+fails, fix the issue and re-run `task up`; completed steps are no-ops. This
+doesn't replace the two-phase flow above, it just automates running both
+phases back to back — same tasks, same `tofu apply`s underneath.
+
+**Fully single-apply (`var.auto_tunnels`, EXPERIMENTAL):** set
+`auto_tunnels = true` (+ `ssh_key_path`) in the cluster tfvars to collapse
+Phase 1 and Phase 2 into one `tofu apply` — a `terraform_data` resource opens
+the SSH tunnels itself (`talos-tunnels.sh open-direct`) between the provider
+module and `modules/talos`, using node/bastion IPs unknown until the VMs
+exist. Default `false`: not exercised against a real host yet, validate on a
+disposable environment before relying on it. `talos_bootstrap` remains the
+break-glass/two-phase path either way (e.g. for `task destroy`).
+
 ### apiserver VIP / `k8s_lb_mode` (Scaleway, OVH)
 
 By default the Kubernetes API is fronted by each cloud's managed LB
@@ -277,12 +300,12 @@ modules/
 ## Tests
 
 ```bash
-# All unit tests (37 tests, mock providers — no cloud credentials needed)
+# All unit tests (38 tests, mock providers — no cloud credentials needed)
 tofu test
 
 # Individual test suites
 tofu test -filter=tests/scaleway.tftest.hcl       # SCW module (9 tests)
-tofu test -filter=tests/talos-config.tftest.hcl   # Talos config logic (11 tests)
+tofu test -filter=tests/talos-config.tftest.hcl   # Talos config logic (12 tests)
 tofu test -filter=tests/provider-contract.tftest.hcl  # Junction point (7 tests)
 tofu test -filter=tests/proxmox.tftest.hcl        # Proxmox module + VIP + image convention (7 tests)
 tofu test -filter=tests/k8s-lb-mode.tftest.hcl     # k8s_lb_mode=vip on scw/ovh, rejected on outscale (3 tests)

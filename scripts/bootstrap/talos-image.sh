@@ -18,13 +18,26 @@
 # cluster root.
 #
 # Usage:
-#   ./scripts/talos-image.sh <scaleway|ovh|outscale|proxmox> [talos_version]
+#   ./scripts/talos-image.sh <scaleway|ovh|outscale|proxmox> [talos_version] [--ensure]
 #   task talos-image PROVIDER=ovh [VERSION=v1.13.4]
+#
+# --ensure: idempotence gate for `task up` — plans first (tofu plan
+#   -detailed-exitcode) and only applies if it detects real changes (exit 2),
+#   skipping the apply entirely when the image is already up to date (exit 0).
 # ==============================================================================
 set -euo pipefail
 
-RAW="${1:?usage: talos-image.sh <scaleway|ovh|outscale|proxmox> [talos_version]}"
-VERSION="${2:-v1.13.4}"
+ENSURE=false
+ARGS=()
+for a in "$@"; do
+  case "$a" in
+    --ensure) ENSURE=true ;;
+    *) ARGS+=("$a") ;;
+  esac
+done
+
+RAW="${ARGS[0]:?usage: talos-image.sh <scaleway|ovh|outscale|proxmox> [talos_version] [--ensure]}"
+VERSION="${ARGS[1]:-v1.13.4}"
 P="$(printf '%s' "$RAW" | tr '[:upper:]' '[:lower:]')"
 case "$P" in
   scw | scaleway) P=scaleway; TGT=scaleway; SREGION=fr-par;    SEP="https://s3.fr-par.scw.cloud" ;;
@@ -111,7 +124,21 @@ tofu init -reconfigure \
   -backend-config="region=$SREGION" \
   -backend-config="endpoint=$SEP"
 
-tofu apply "${APPLY_VARS[@]}"
+if [ "$ENSURE" = true ]; then
+  echo "▶ --ensure: checking whether the image needs (re)building..."
+  PLAN_EXIT=0
+  tofu plan -detailed-exitcode "${APPLY_VARS[@]}" || PLAN_EXIT=$?
+  case "$PLAN_EXIT" in
+    0) echo "✓ image already up to date — skipping apply" ;;
+    2) tofu apply "${APPLY_VARS[@]}" ;;
+    *)
+      echo "✗ tofu plan failed (exit ${PLAN_EXIT})"
+      exit 1
+      ;;
+  esac
+else
+  tofu apply "${APPLY_VARS[@]}"
+fi
 
 echo
 echo "→ image_name: $(tofu output -raw image_name 2>/dev/null || echo '?')"

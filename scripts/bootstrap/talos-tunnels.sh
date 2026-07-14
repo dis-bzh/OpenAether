@@ -16,13 +16,78 @@
 # Usage:
 #   SSH_KEY=~/.ssh/mykey ./scripts/talos-tunnels.sh open [tofu_dir]
 #   ./scripts/talos-tunnels.sh close [tofu_dir]
+#
+#   ./scripts/talos-tunnels.sh open-direct --bastion <ip> --user <user> \
+#       --cps <ip1,ip2,...> [--workers <ip1,ip2,...>] [--key <path>]
+#     EXPERIMENTAL — for the opt-in single-apply path (cluster/main.tf's
+#     terraform_data.talos_tunnels, var.auto_tunnels). Takes IPs as arguments
+#     instead of reading `tofu output` (there is no state to read yet: this
+#     runs as a local-exec provisioner between the provider module and
+#     modules/talos in the SAME apply). Not exercised against a real host —
+#     validate before enabling auto_tunnels=true anywhere real.
 # ==============================================================================
 set -euo pipefail
 
 ACTION="${1:-open}"
-TOFU_DIR="${2:-infrastructure/opentofu/cluster}"
 KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
 KEY="${KEY/#\~/$HOME}"
+
+if [[ "$ACTION" == "open-direct" ]]; then
+  shift
+  BASTION=""; BUSER="root"; CPS_CSV=""; WKS_CSV=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --bastion) BASTION="$2"; shift 2 ;;
+      --user) BUSER="$2"; shift 2 ;;
+      --cps) CPS_CSV="$2"; shift 2 ;;
+      --workers) WKS_CSV="$2"; shift 2 ;;
+      --key) KEY="$2"; shift 2 ;;
+      *) echo "✗ open-direct: unknown argument $1"; exit 1 ;;
+    esac
+  done
+  KEY="${KEY/#\~/$HOME}"
+  [[ -n "$BASTION" ]] || { echo "✗ open-direct requires --bastion <ip>"; exit 1; }
+  command -v nc >/dev/null 2>&1 || { echo "✗ nc is required"; exit 1; }
+  [[ -f "$KEY" ]] || { echo "✗ SSH key not found: $KEY (set --key or SSH_KEY=/path/to/key)"; exit 1; }
+
+  # Runs as a local-exec provisioner with cwd = the cluster root (Terraform's
+  # own working directory) — a plain relative pidfile name is stable there,
+  # same convention as the state-driven `open` path's ${TOFU_DIR}-relative one.
+  DIRECT_PIDFILE=".talos-tunnels-direct.pids"
+  if [[ -f "$DIRECT_PIDFILE" ]]; then
+    while read -r pid; do [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true; done <"$DIRECT_PIDFILE"
+  fi
+  : >"$DIRECT_PIDFILE"
+
+  ssh-keygen -R "$BASTION" >/dev/null 2>&1 || true
+
+  IFS=',' read -ra CPS <<<"$CPS_CSV"
+  IFS=',' read -ra WKS <<<"${WKS_CSV:-}"
+
+  open_direct_one() { # localport nodeip
+    nohup ssh -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes \
+      -o ServerAliveInterval=15 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
+      -i "$KEY" -N -L "$1:$2:50000" "${BUSER}@${BASTION}" \
+      >/dev/null 2>&1 &
+    echo $! >>"$DIRECT_PIDFILE"
+  }
+
+  echo "▶ [open-direct] opening tunnels via ${BUSER}@${BASTION} (key: $KEY)"
+  i=0; for ip in "${CPS[@]}"; do [[ -n "$ip" ]] && open_direct_one "$((50000 + i))" "$ip"; i=$((i + 1)); done
+  i=0; for ip in "${WKS[@]}"; do [[ -n "$ip" ]] && open_direct_one "$((50100 + i))" "$ip"; i=$((i + 1)); done
+
+  sleep 4
+  ports=()
+  for j in "${!CPS[@]}"; do ports+=("$((50000 + j))"); done
+  [[ -n "${WKS_CSV:-}" ]] && for j in "${!WKS[@]}"; do ports+=("$((50100 + j))"); done
+  ok=0
+  for p in "${ports[@]}"; do nc -z 127.0.0.1 "$p" 2>/dev/null && ok=$((ok + 1)); done
+  echo "✓ [open-direct] ${ok}/${#ports[@]} tunnels up"
+  [[ "$ok" -eq "${#ports[@]}" ]] || { echo "⚠ some tunnels failed — see 'open' path's troubleshooting notes"; exit 1; }
+  exit 0
+fi
+
+TOFU_DIR="${2:-infrastructure/opentofu/cluster}"
 PIDFILE="${TOFU_DIR}/.talos-tunnels.pids"
 
 close_tunnels() {

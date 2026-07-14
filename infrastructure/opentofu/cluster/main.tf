@@ -369,6 +369,44 @@ locals {
 }
 
 # ==============================================================================
+# EXPERIMENTAL — single-apply SSH tunnels (var.auto_tunnels)
+#
+# Opens the tunnels itself between the provider module and modules/talos, in
+# the SAME apply, instead of the operator running `task bootstrap-phase2`
+# separately between two `tofu apply`s. Ordering falls out of the reference
+# graph: local.bastion_ip/control_plane_ips/worker_ips are unknown until the
+# provider module's VMs exist, so this resource (and, via depends_on,
+# module.talos after it) can't evaluate/run until they do.
+#
+# Default off (var.auto_tunnels = false) — the documented two-phase flow
+# remains the supported path; this is not exercised against a real host yet.
+# ==============================================================================
+
+resource "terraform_data" "talos_tunnels" {
+  count = var.talos_bootstrap && var.auto_tunnels && local.total_control_planes > 0 ? 1 : 0
+
+  triggers_replace = [
+    local.bastion_ip,
+    local.bastion_user,
+    join(",", local.control_plane_ips),
+    join(",", local.worker_ips),
+  ]
+
+  provisioner "local-exec" {
+    command = join(" ", concat(
+      [
+        "${path.module}/../../../scripts/bootstrap/talos-tunnels.sh", "open-direct",
+        "--bastion", local.bastion_ip,
+        "--user", local.bastion_user,
+        "--cps", join(",", local.control_plane_ips),
+        "--key", var.ssh_key_path,
+      ],
+      length(local.worker_ips) > 0 ? ["--workers", join(",", local.worker_ips)] : []
+    ))
+  }
+}
+
+# ==============================================================================
 # Talos Cluster (secrets, config, bootstrap, kubeconfig)
 # ==============================================================================
 
@@ -411,7 +449,11 @@ module "talos" {
   # Dedicated worker data volumes (encrypted UserVolumeConfig). Empty on local.
   worker_storage = var.worker_storage
 
-  depends_on = [module.scw, module.ovh, module.outscale, module.proxmox]
+  # terraform_data.talos_tunnels only exists when auto_tunnels=true (count=0
+  # otherwise) — depending on it is then a no-op, not a hard requirement, so
+  # this list works identically for both the documented two-phase flow and
+  # the experimental single-apply path.
+  depends_on = [module.scw, module.ovh, module.outscale, module.proxmox, terraform_data.talos_tunnels]
 }
 
 # ==============================================================================

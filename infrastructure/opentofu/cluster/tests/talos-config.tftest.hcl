@@ -316,3 +316,18 @@ run "vip_injected_only_when_set" {
     error_message = "apiserver_vip must stay null when no provider requests one (Scaleway, k8s_lb_mode=managed)."
   }
 }
+
+# ==============================================================================
+# Test 12: auto_tunnels defaults to false — the experimental single-apply
+# terraform_data.talos_tunnels resource (cluster/main.tf) must never run
+# unless explicitly opted into, including under `tofu test`'s apply mode.
+# ==============================================================================
+
+run "auto_tunnels_disabled_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(terraform_data.talos_tunnels) == 0
+    error_message = "terraform_data.talos_tunnels must have count=0 when auto_tunnels is left at its default (false)."
+  }
+}

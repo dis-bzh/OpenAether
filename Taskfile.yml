@@ -61,12 +61,44 @@ tasks:
   # ===========================================================================
 
   talos-image:
-    desc: "Build + publish the Talos image for a provider. Usage: task talos-image PROVIDER=scaleway|ovh|outscale|proxmox [VERSION=v1.13.4]"
+    desc: "Build + publish the Talos image for a provider. Usage: task talos-image PROVIDER=scaleway|ovh|outscale|proxmox [VERSION=v1.13.4] [ENSURE=1]"
     vars:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
       VERSION: '{{.VERSION | default "v1.13.4"}}'
+      ENSURE: '{{.ENSURE | default ""}}'
     cmds:
-      - ./scripts/bootstrap/talos-image.sh {{.PROVIDER}} {{.VERSION}}
+      - './scripts/bootstrap/talos-image.sh {{.PROVIDER}} {{.VERSION}}{{if .ENSURE}} --ensure{{end}}'
+
+  up:
+    desc: "Idempotent one-shot bring-up: image -> render manifests -> infra -> tunnels -> bootstrap. Usage: task up ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox] [KEY=~/.ssh/yourkey] [VERSION=v1.13.4] [FORCE=1]"
+    vars:
+      ROLE: '{{.ROLE | default "management"}}'
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+      KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
+      VERSION: '{{.VERSION | default "v1.13.4"}}'
+    cmds:
+      - task: talos-image
+        vars:
+          PROVIDER: "{{.PROVIDER}}"
+          VERSION: "{{.VERSION}}"
+          ENSURE: "1"
+      - |
+        CILIUM=infrastructure/opentofu/cluster/bootstrap-manifests/cilium.yaml
+        if [ "{{.FORCE}}" = "1" ] || [ ! -s "$CILIUM" ] || grep -q "CILIUM-MANIFEST-PLACEHOLDER" "$CILIUM"; then
+          ./scripts/bootstrap/render-bootstrap-manifests.sh
+        else
+          echo "✓ bootstrap manifests already rendered — skipping (FORCE=1 to re-render)"
+        fi
+      - task: infra
+        vars:
+          ROLE: "{{.ROLE}}"
+          PROVIDER: "{{.PROVIDER}}"
+      - task: bootstrap-phase2
+        vars:
+          ROLE: "{{.ROLE}}"
+          PROVIDER: "{{.PROVIDER}}"
+          KEY: "{{.KEY}}"
+      - echo "✓ task up complete — every step above is idempotent, re-run 'task up' after fixing any failure to resume."
 
   # ===========================================================================
   # Cluster Lifecycle
