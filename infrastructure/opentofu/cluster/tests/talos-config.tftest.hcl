@@ -300,3 +300,19 @@ run "cluster_role_validation" {
     error_message = "cluster_role must be 'management' or 'workload'."
   }
 }
+
+# ==============================================================================
+# Test 11: apiserver VIP is only injected when explicitly set. This suite's
+# shared variables block (see top of file) is Scaleway with k8s_lb_mode left at
+# its default ("managed"), so no provider here ever sets an apiserver_vip —
+# module.talos should always receive null, matching pre-VIP-support behavior.
+# ==============================================================================
+
+run "vip_injected_only_when_set" {
+  command = plan
+
+  assert {
+    condition     = module.talos.apiserver_vip == null
+    error_message = "apiserver_vip must stay null when no provider requests one (Scaleway, k8s_lb_mode=managed)."
+  }
+}

@@ -14,6 +14,16 @@ output "cluster_role" {
   value       = var.cluster_role
 }
 
+output "resolved_image_ref" {
+  description = "Image identifier actually used by the active provider (name/ID/file_id), after applying the by-name/convention fallback when it was left unset in the tfvars."
+  value = lookup({
+    scaleway = local.scw_image_name
+    ovh      = coalesce(local.ovh_dist.image_id, local.ovh_image_name)
+    outscale = coalesce(local.osc_dist.image_id, local.osc_image_name)
+    proxmox  = local.pmx_talos_image_file_id
+  }, local.active_provider, "n/a")
+}
+
 # --- Cluster Access ---
 
 output "k8s_lb_ip" {
