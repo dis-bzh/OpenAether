@@ -56,9 +56,9 @@ confirm on your model in the Manager.
 
 `apiserver_vip` is a spare address in `network_cidr` the control plane owns so a
 later move from 1 CP → 3 CP does **not** re-address the apiserver. This module
-surfaces it as `k8s_lb_ip`; **injecting the VIP into the Talos machineconfig
-(`machine.network.interfaces[].vip`) is a `modules/talos` follow-up** — the Talos
-module has no VIP support yet.
+surfaces it as `k8s_lb_ip`; `cluster/main.tf` passes it straight through to
+`modules/talos`, which injects it into the control plane machineconfig
+(`machine.network.interfaces[].vip`) and adds it to `cluster.apiServer.certSANs`.
 
 ## Host prerequisites (manual, once)
 

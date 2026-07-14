@@ -40,6 +40,11 @@ output "cluster_endpoint" {
   value       = var.cluster_endpoint
 }
 
+output "apiserver_vip" {
+  description = "Talos Layer2 VIP configured on the control plane interface, if any"
+  value       = var.apiserver_vip
+}
+
 output "bootstrap_manifests_enabled" {
   description = "Whether bootstrap manifests (Flux) are injected via inlineManifests"
   value       = var.bootstrap_manifests_enabled

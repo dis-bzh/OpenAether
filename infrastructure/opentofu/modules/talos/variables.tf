@@ -111,6 +111,40 @@ variable "k8s_lb_ip" {
 }
 
 # ==============================================================================
+# Control Plane apiserver VIP (Talos Layer2 VIP)
+# ==============================================================================
+
+variable "apiserver_vip" {
+  description = <<-EOT
+    Optional Talos Layer2 VIP for the kube-apiserver, held by the control plane
+    interface (moves to another CP on failure). Null (default) = no VIP — the
+    provider's own LB/endpoint is the sole apiserver front door.
+    When set, it is injected as machine.network.interfaces[].vip and added to
+    cluster.apiServer.certSANs (alongside 127.0.0.1, for kubectl over a
+    localhost SSH tunnel). Ignored in container_mode (no shared L2 to hold a
+    VIP on).
+  EOT
+  type        = string
+  default     = null
+}
+
+variable "apiserver_vip_interface" {
+  description = "Network interface name the VIP binds to (ignored if apiserver_vip_device_selector is set)."
+  type        = string
+  default     = "eth0"
+}
+
+variable "apiserver_vip_device_selector" {
+  description = "Talos deviceSelector for the VIP interface (busPath/hardwareAddr/physical), takes precedence over apiserver_vip_interface when set."
+  type = object({
+    busPath      = optional(string)
+    hardwareAddr = optional(string)
+    physical     = optional(bool)
+  })
+  default = null
+}
+
+# ==============================================================================
 # Bootstrap Manifests (injected via Talos inlineManifests)
 # ==============================================================================
 

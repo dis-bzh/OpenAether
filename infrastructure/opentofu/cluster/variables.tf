@@ -103,6 +103,7 @@ variable "node_distribution" {
     network_cidr            = optional(string, "10.0.0.0/24")
     gateway_ip              = optional(string)
     apiserver_vip           = optional(string)
+    apiserver_vip_interface = optional(string, "eth0")
     cpu_cores               = optional(number, 4)
     memory_mb               = optional(number, 8192)
     root_disk_gb            = optional(number, 20)

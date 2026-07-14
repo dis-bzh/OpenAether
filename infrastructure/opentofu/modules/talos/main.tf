@@ -104,6 +104,33 @@ locals {
 # ==============================================================================
 
 locals {
+  # Talos Layer2 VIP for the apiserver, additively merged onto whatever network
+  # config the platform (nocloud static IP, DHCP, ...) already applies — only
+  # `vip` is set on the interface, never `addresses`/`dhcp`. Skipped entirely
+  # when unset or in container mode (no shared L2 to hold a VIP on).
+  apiserver_vip_network_patch = var.apiserver_vip == null || var.container_mode ? {} : {
+    network = {
+      interfaces = [merge(
+        var.apiserver_vip_device_selector != null ? {
+          deviceSelector = { for k, v in var.apiserver_vip_device_selector : k => v if v != null }
+        } : { interface = var.apiserver_vip_interface },
+        { vip = { ip = var.apiserver_vip } }
+      )]
+    }
+  }
+
+  # machine.certSANs (apid) already covers the VIP via k8s_lb_ip when active;
+  # this is cluster.apiServer.certSANs (kube-apiserver's own serving cert) —
+  # needed so kubectl over a localhost SSH tunnel (127.0.0.1) and the VIP both
+  # validate cleanly.
+  apiserver_vip_certsans = var.apiserver_vip == null ? {} : {
+    apiServer = {
+      certSANs = ["127.0.0.1", var.apiserver_vip]
+    }
+  }
+}
+
+locals {
   worker_volume_encryption = {
     provider = "luks2"
     keys = [{
@@ -196,22 +223,26 @@ data "talos_machine_configuration" "control_plane" {
             wipe  = true
             image = "ghcr.io/siderolabs/installer:${var.talos_version}"
           }
-        }
+        },
+        local.apiserver_vip_network_patch
       )
-      cluster = {
-        network = {
-          cni = {
-            name = "none" # Cilium injected via inlineManifests
+      cluster = merge(
+        {
+          network = {
+            cni = {
+              name = "none" # Cilium injected via inlineManifests
+            }
           }
-        }
-        proxy = {
-          disabled = true # kube-proxy replaced by Cilium
-        }
-        # Encrypt all Kubernetes Secrets in etcd at rest (AES-256-GCM / secretbox).
-        # Key is generated once and stored in tfstate — stable across applies.
-        secretboxEncryptionSecret = random_bytes.etcd_encryption_secret.base64
-        inlineManifests           = local.inline_manifests
-      }
+          proxy = {
+            disabled = true # kube-proxy replaced by Cilium
+          }
+          # Encrypt all Kubernetes Secrets in etcd at rest (AES-256-GCM / secretbox).
+          # Key is generated once and stored in tfstate — stable across applies.
+          secretboxEncryptionSecret = random_bytes.etcd_encryption_secret.base64
+          inlineManifests           = local.inline_manifests
+        },
+        local.apiserver_vip_certsans
+      )
     })
   ]
 

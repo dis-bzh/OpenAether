@@ -88,6 +88,7 @@ locals {
     network_cidr            = "10.0.0.0/24"
     gateway_ip              = null
     apiserver_vip           = null
+    apiserver_vip_interface = "eth0"
     cpu_cores               = 4
     memory_mb               = 8192
     root_disk_gb            = 20
@@ -340,6 +341,12 @@ module "talos" {
   k8s_lb_ip         = local.k8s_lb_ip
   control_plane_ips = local.control_plane_ips
   worker_ips        = local.worker_ips
+
+  # Only Proxmox wires a VIP today (its k8s_lb_ip IS the VIP — see
+  # modules/providers/proxmox/outputs.tf). Null for every other provider, so
+  # this has zero effect on scw/ovh/outscale/local.
+  apiserver_vip           = local.pmx_dist.apiserver_vip
+  apiserver_vip_interface = local.pmx_dist.apiserver_vip_interface
 
   # Phase 2 reaches the private nodes through per-node SSH tunnels on localhost
   # (see the `instructions` output). `endpoint` is where the provider connects;
