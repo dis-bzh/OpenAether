@@ -35,7 +35,7 @@ resource "openstack_networking_port_v2" "control_plane" {
   dynamic "allowed_address_pairs" {
     for_each = var.k8s_lb_mode == "vip" ? [1] : []
     content {
-      ip_address = openstack_networking_port_v2.k8s_vip[0].all_fixed_ips[0]
+      ip_address = try(openstack_networking_port_v2.k8s_vip[0].all_fixed_ips[0], "0.0.0.0")
     }
   }
 }

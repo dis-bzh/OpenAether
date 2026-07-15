@@ -14,7 +14,7 @@ output "worker_private_ips" {
 # Load Balancer IPs (floating IPs)
 output "k8s_lb_ip" {
   description = "Public IP of the Kubernetes API LB (6443), or the private Talos VIP when k8s_lb_mode = \"vip\""
-  value       = var.k8s_lb_mode == "managed" ? openstack_networking_floatingip_v2.k8s[0].address : openstack_networking_port_v2.k8s_vip[0].all_fixed_ips[0]
+  value       = var.k8s_lb_mode == "managed" ? openstack_networking_floatingip_v2.k8s[0].address : try(openstack_networking_port_v2.k8s_vip[0].all_fixed_ips[0], "")
 }
 
 output "app_lb_ip" {
