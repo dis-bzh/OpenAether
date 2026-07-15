@@ -48,6 +48,42 @@ and junction point work without modification.
 
 Between phases, establish SSH tunnels via the bastion for Talos API access (port 50000).
 
+### One-shot bring-up: `task up`
+
+```bash
+task up ROLE=management                    # or: ROLE=workload PROVIDER=ovh KEY=~/.ssh/yourkey
+```
+
+Chains image → render manifests → Phase 1 (`infra`) → tunnels → Phase 2
+(`bootstrap-phase2`) in one command. Every step is idempotent (image build
+skips if already published/downloaded, manifests skip re-rendering unless
+`FORCE=1`, `infra`/`bootstrap-phase2` are plain `tofu apply`s) — if any step
+fails, fix the issue and re-run `task up`; completed steps are no-ops. This
+doesn't replace the two-phase flow above, it just automates running both
+phases back to back — same tasks, same `tofu apply`s underneath.
+
+**Fully single-apply (`var.auto_tunnels`, EXPERIMENTAL):** set
+`auto_tunnels = true` (+ `ssh_key_path`) in the cluster tfvars to collapse
+Phase 1 and Phase 2 into one `tofu apply` — a `terraform_data` resource opens
+the SSH tunnels itself (`talos-tunnels.sh open-direct`) between the provider
+module and `modules/talos`, using node/bastion IPs unknown until the VMs
+exist. Default `false`: not exercised against a real host yet, validate on a
+disposable environment before relying on it. `talos_bootstrap` remains the
+break-glass/two-phase path either way (e.g. for `task destroy`).
+
+### apiserver VIP / `k8s_lb_mode` (Scaleway, OVH)
+
+By default the Kubernetes API is fronted by each cloud's managed LB
+(`k8s_lb_mode = "managed"`). Set `node_distribution.<provider>.k8s_lb_mode = "vip"`
+to drop the LB and front the API with a Talos Layer2 VIP instead — like Proxmox
+always does — reserving a private address on the node network rather than
+paying for a managed LB. Trade-off: the API becomes **private-only**, reachable
+via the bastion SSH tunnel (`talos-tunnels.sh` opens an extra `localhost:6443`
+tunnel automatically whenever `k8s_lb_ip` resolves to an RFC1918 address), not
+from the public internet. Outscale rejects `"vip"` (its Net is an L3 SDN with
+no ARP/broadcast domain for a floating VIP). Scaleway's `"vip"` mode is marked
+experimental — validate it before relying on it in prod.
+
 ## Prerequisites
 
 | Tool | Required for |
@@ -118,16 +154,16 @@ task talos-image PROVIDER=scaleway               # -> image "talos-scaleway-amd6
 ./scripts/bootstrap/render-bootstrap-manifests.sh
 
 # Phase 1 — infra (IPs land in the state). The task ensures the buckets + inits the
-# per-cluster backend for you. PROVIDER defaults to scaleway (also ovh, outscale).
-task infra-management                      # or: task infra-management PROVIDER=ovh
+# per-cluster backend for you. PROVIDER defaults to scaleway (also ovh, outscale, proxmox).
+task infra ROLE=management                 # or: task infra ROLE=management PROVIDER=ovh
 #   manual equivalent:
 #     ./scripts/internal/ensure-buckets.sh envs/management-scaleway.tfvars
 #     tofu init -reconfigure $(./scripts/internal/tf-backend.sh envs/management-scaleway.tfvars)
 #     tofu apply -var-file=envs/management-scaleway.tfvars -var talos_bootstrap=false
 #     ./scripts/ops/backup-state.sh infrastructure/opentofu   # replicate state to the -backup store
 
-# Phase 2 — `task management` opens the SSH tunnels (read from the state) then bootstraps
-task management KEY=~/.ssh/yourkey         # or: task management PROVIDER=ovh KEY=~/.ssh/yourkey
+# Phase 2 — `task bootstrap-phase2` opens the SSH tunnels (read from the state) then bootstraps
+task bootstrap-phase2 ROLE=management KEY=~/.ssh/yourkey   # or: ROLE=management PROVIDER=ovh KEY=...
 # (manual equivalent: open one tunnel per node per `tofu output instructions`, then
 #  tofu apply -var-file=envs/management-scaleway.tfvars -var talos_bootstrap=true)
 
@@ -138,8 +174,8 @@ task close-tunnels
 ### Deploy workload cluster
 
 ```bash
-task infra-workload PROVIDER=ovh
-task workload PROVIDER=ovh KEY=~/.ssh/yourkey
+task infra ROLE=workload PROVIDER=ovh
+task bootstrap-phase2 ROLE=workload PROVIDER=ovh KEY=~/.ssh/yourkey
 ```
 
 ### Cross-provider failover — second management on another cloud
@@ -161,14 +197,18 @@ tofu apply -var-file=envs/management-scaleway.tfvars -var talos_bootstrap=true
 
 ### Teardown (destroy)
 
-Destroying is intentionally **manual** (no task). Two steps are required:
+```bash
+task destroy ROLE=management                # or: ROLE=workload PROVIDER=ovh
+```
+
+Manual equivalent (two steps are required):
 
 ```bash
 # 1. Untrack the machine secrets first. They carry prevent_destroy (the PKI is the
 #    cluster's root of trust) and are state-only (no cloud object). You cannot just
 #    -exclude them either: module.talos depends_on module.scw, so excluding the
 #    secrets cascades to keeping the whole provider module (0 destroyed).
-tofu state rm module.talos.talos_machine_secrets.this
+tofu state rm module.talos.talos_machine_secrets.this[0]
 
 # 2. Destroy with talos_bootstrap=false so the Talos resources resolve to count=0.
 #    This skips data.talos_cluster_health, which would otherwise re-read through the
@@ -199,8 +239,8 @@ the Phase-2 apply (`backup-artifacts.sh`); the state is replicated **after** the
 apply (`backup-state.sh` / `task backup-state`), because the backend only flushes
 the new state on apply exit.
 
-The four buckets are **auto-provisioned** (idempotent) by `task infra-management` /
-`task infra-workload` before `tofu init` — `scripts/ensure-buckets.sh` derives their
+The four buckets are **auto-provisioned** (idempotent) by `task infra ROLE=management` /
+`task infra ROLE=workload` before `tofu init` — `scripts/ensure-buckets.sh` derives their
 names from the cluster's tfvars and `aws s3 mb`s any that are missing (primary with
 `<PU>_AWS_*`, replicas with `<PU>_BACKUP_AWS_*`). Manual equivalent:
 `./scripts/ensure-buckets.sh envs/<cluster>.tfvars`.
@@ -260,13 +300,15 @@ modules/
 ## Tests
 
 ```bash
-# All unit tests (26 tests, mock providers — no cloud credentials needed)
+# All unit tests (38 tests, mock providers — no cloud credentials needed)
 tofu test
 
 # Individual test suites
 tofu test -filter=tests/scaleway.tftest.hcl       # SCW module (9 tests)
-tofu test -filter=tests/talos-config.tftest.hcl   # Talos config logic (10 tests)
+tofu test -filter=tests/talos-config.tftest.hcl   # Talos config logic (12 tests)
 tofu test -filter=tests/provider-contract.tftest.hcl  # Junction point (7 tests)
+tofu test -filter=tests/proxmox.tftest.hcl        # Proxmox module + VIP + image convention (7 tests)
+tofu test -filter=tests/k8s-lb-mode.tftest.hcl     # k8s_lb_mode=vip on scw/ovh, rejected on outscale (3 tests)
 
 # Full local validation (tests + kustomize + talosctl + yamllint)
 ./scripts/dev/test-local-stack.sh

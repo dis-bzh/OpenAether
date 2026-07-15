@@ -16,8 +16,15 @@ variable "flavor_name" {
 }
 
 variable "image_id" {
-  description = "OpenStack image ID for Talos Linux"
+  description = "OpenStack (Glance) image UUID for Talos Linux. Null (default) looks it up by image_name instead — the name the talos-image root publishes under."
   type        = string
+  default     = null
+}
+
+variable "image_name" {
+  description = "Glance image name to look up when image_id is null (most recent match)."
+  type        = string
+  default     = "talos"
 }
 
 variable "worker_storage" {
@@ -81,4 +88,22 @@ variable "bastion_flavor_name" {
   description = "OpenStack flavor for the bastion host (jump box; the default is the minimum recommended)."
   type        = string
   default     = "b3-8"
+}
+
+variable "k8s_lb_mode" {
+  description = <<-EOT
+    How the Kubernetes API is fronted:
+      "managed" (default) - an Octavia LB + floating IP (public, ACL-restricted).
+      "vip"     - no LB: reserves a private port on the subnet instead, and
+                  relies on modules/talos's Layer2 VIP on the private network.
+                  Control plane ports get an allowed_address_pairs entry for the
+                  VIP so Neutron's anti-spoofing filter doesn't drop it. The API
+                  is then private-only, reachable via the bastion SSH tunnel.
+  EOT
+  type        = string
+  default     = "managed"
+  validation {
+    condition     = contains(["managed", "vip"], var.k8s_lb_mode)
+    error_message = "k8s_lb_mode must be \"managed\" or \"vip\"."
+  }
 }

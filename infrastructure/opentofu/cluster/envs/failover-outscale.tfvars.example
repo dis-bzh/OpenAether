@@ -30,7 +30,9 @@ node_distribution = {
     workers            = 2
     region             = "eu-west-2"
     instance_type      = "tinav5.c2r4p1"
-    image_id           = "TALOS_OMI_ID" # Replace with actual Outscale OMI ID
+    # image_id optional — defaults to looking up "talos-outscale-amd64-<talos_version>" by
+    # name (published by talos-image). Override only if you use a different name/OMI:
+    # image_id           = "TALOS_OMI_ID"
     availability_zones = ["eu-west-2a", "eu-west-2b", "eu-west-2c"]
   }
 }

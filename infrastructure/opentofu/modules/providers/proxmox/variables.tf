@@ -116,8 +116,9 @@ variable "apiserver_vip" {
   description = <<-EOT
     Kubernetes API VIP — a spare address in network_cidr the Talos control plane
     owns (Talos machine.network.interfaces[].vip). Posé dès 1 CP so a later move to
-    3 CP does not re-address the apiserver. The Talos module injects the VIP into
-    the machineconfig (follow-up); this module only surfaces it as `k8s_lb_ip`.
+    3 CP does not re-address the apiserver. This module only surfaces it as
+    `k8s_lb_ip`; `cluster/main.tf` passes it to `modules/talos`, which injects it
+    into the machineconfig.
   EOT
   type        = string
 }

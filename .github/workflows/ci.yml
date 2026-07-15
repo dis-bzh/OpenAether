@@ -21,26 +21,26 @@ jobs:
         with:
           tofu_version: "1.12.2"
 
-      - name: Check OpenTofu formatting
-        run: tofu fmt -check -recursive
-        working-directory: infrastructure/opentofu
-
       - name: Setup TFLint
         uses: terraform-linters/setup-tflint@v4
         with:
           tflint_version: latest
 
-      - name: Run TFLint
-        run: |
-          tflint --init
-          tflint --recursive
-        working-directory: infrastructure/opentofu
+      - name: Setup Task
+        uses: arduino/setup-task@v2
 
       - name: Install yamllint
         run: pip install yamllint
 
-      - name: Run yamllint
-        run: yamllint -c infrastructure/.yamllint apps/ infrastructure/opentofu/cluster/bootstrap-manifests/
+      # One-time per-runner setup task itself doesn't need — tflint plugin init
+      # is CI-specific (a fresh runner has no cached plugins); local dev covers
+      # this via `task setup`.
+      - name: tflint init
+        run: tflint --init
+        working-directory: infrastructure/opentofu
+
+      - name: task lint
+        run: task lint
 
   validate:
     name: Validate
@@ -48,7 +48,7 @@ jobs:
     strategy:
       matrix:
         # Validate every OpenTofu root, not just the cluster. talos-image is a
-        # separate root (own backend + providers) and was previously uncovered.
+        # separate root (own backend + providers).
         root: [cluster, talos-image]
     steps:
       - uses: actions/checkout@v4
@@ -58,20 +58,11 @@ jobs:
         with:
           tofu_version: "1.12.2"
 
-      - name: Initialize OpenTofu (no backend)
-        run: |
-          rm -f .terraform/terraform.tfstate
-          tofu init -backend=false
-        working-directory: infrastructure/opentofu/${{ matrix.root }}
-        env:
-          AWS_DEFAULT_REGION: us-east-1
-          AWS_ACCESS_KEY_ID: mock
-          AWS_SECRET_ACCESS_KEY: mock
-          TF_VAR_encryption_passphrase: ci-mock-passphrase-for-validation-only-ci
+      - name: Setup Task
+        uses: arduino/setup-task@v2
 
-      - name: Validate configuration
-        run: tofu validate
-        working-directory: infrastructure/opentofu/${{ matrix.root }}
+      - name: task validate
+        run: task validate ROOT=${{ matrix.root }}
         env:
           AWS_DEFAULT_REGION: us-east-1
           AWS_ACCESS_KEY_ID: mock
@@ -90,46 +81,16 @@ jobs:
         with:
           tofu_version: "1.12.2"
 
-      - name: Initialize OpenTofu (no backend)
-        run: |
-          rm -f .terraform/terraform.tfstate
-          tofu init -backend=false
-        working-directory: infrastructure/opentofu/cluster
+      - name: Setup Task
+        uses: arduino/setup-task@v2
+
+      - name: task test
+        run: task test
         env:
           AWS_DEFAULT_REGION: us-east-1
           AWS_ACCESS_KEY_ID: mock
           AWS_SECRET_ACCESS_KEY: mock
           TF_VAR_encryption_passphrase: ci-mock-passphrase-for-validation-only-ci
-
-      - name: Run all OpenTofu tests
-        run: tofu test
-        working-directory: infrastructure/opentofu/cluster
-        env:
-          AWS_DEFAULT_REGION: us-east-1
-          AWS_ACCESS_KEY_ID: mock
-          AWS_SECRET_ACCESS_KEY: mock
-          TF_VAR_encryption_passphrase: ci-mock-passphrase-for-validation-only-ci
-
-  kustomize:
-    name: Validate Kustomize
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@v4
-
-      - name: Validate Flux base overlay
-        run: kubectl kustomize apps/flux/base/ > /dev/null
-
-      - name: Validate Flux management overlay
-        run: kubectl kustomize apps/flux/management/ > /dev/null
-
-      - name: Validate Flux workload overlay
-        run: kubectl kustomize apps/flux/workload/ > /dev/null
-
-      - name: Validate Flux local overlay
-        run: kubectl kustomize apps/flux/local/ > /dev/null
 
   talos:
     name: Talos Config Validation

@@ -123,7 +123,7 @@ the **same production `modules/talos/`** used in the cloud. Best first step.
 ```bash
 task local-test                     # full deploy + verify (3 CP + 2 workers)
 task local-status                   # etcd members + nodes + Flux
-task local-flux                   # Flux UI → https://localhost:8080
+task local-flux                   # Flux UI → http://localhost:9090
 task local-down                     # tear down (containers + volumes + state)
 ```
 
@@ -144,12 +144,12 @@ cp infrastructure/opentofu/cluster/envs/management-scaleway.tfvars.example \
 task talos-image PROVIDER=scaleway
 
 # Phase 1 — ensures the backup buckets, derives + inits the backend, provisions the
-# infra, replicates the state. PROVIDER defaults to scaleway (also ovh, outscale).
-task infra-management PROVIDER=scaleway
+# infra, replicates the state. PROVIDER defaults to scaleway (also ovh, outscale, proxmox).
+task infra ROLE=management PROVIDER=scaleway
 
 # Phase 2 — opens the SSH tunnels (from state), bootstraps Talos + Flux, and pushes
 # the client-side-encrypted backups (kube/talosconfig + state replica).
-task management PROVIDER=scaleway KEY=~/.ssh/yourkey
+task bootstrap-phase2 ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
 ```
 
 ### 🚧 Deploy a Workload Cluster
@@ -158,8 +158,8 @@ task management PROVIDER=scaleway KEY=~/.ssh/yourkey
 cp infrastructure/opentofu/cluster/envs/workload-ovh.tfvars.example \
    infrastructure/opentofu/cluster/envs/workload-ovh.tfvars   # then edit (image_id, admin_ip…)
 
-task infra-workload PROVIDER=ovh
-task workload PROVIDER=ovh KEY=~/.ssh/yourkey
+task infra ROLE=workload PROVIDER=ovh
+task bootstrap-phase2 ROLE=workload PROVIDER=ovh KEY=~/.ssh/yourkey
 task register-spoke CLUSTER=openaether-ovh-prod PROVIDER=ovh   # register in the Flux hub
 ```
 

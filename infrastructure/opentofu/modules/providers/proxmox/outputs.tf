@@ -11,8 +11,8 @@ output "worker_private_ips" {
 }
 
 # No cloud LB on a single Proxmox host: the Kubernetes API is fronted by the
-# Talos VIP (owned by the control plane). Injecting the VIP into the Talos
-# machineconfig is a modules/talos follow-up; here we only surface the address.
+# Talos VIP (owned by the control plane), injected into the machineconfig by
+# modules/talos; here we only surface the address.
 output "k8s_lb_ip" {
   description = "Kubernetes API endpoint (Talos VIP, port 6443)"
   value       = var.apiserver_vip

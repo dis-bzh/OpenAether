@@ -7,9 +7,26 @@
 # No user_data — Talos configuration is applied via the Talos API after provisioning.
 # ==============================================================================
 
+# Looked up by name only when image_id is left unset — mirrors the Scaleway
+# module's data.scaleway_instance_image (the talos-image root publishes under
+# this same name convention; see talos-image/main.tf's local.image_name).
+# NOT validated against a real Outscale account yet — confirm the `images[0]`
+# shape (most-recent-first ordering, image_id attribute) before relying on it.
+data "outscale_images" "talos" {
+  count = var.image_id == null ? 1 : 0
+  filter {
+    name   = "image_names"
+    values = [var.image_name]
+  }
+}
+
+locals {
+  resolved_image_id = coalesce(var.image_id, try(data.outscale_images.talos[0].images[0].image_id, null))
+}
+
 resource "outscale_vm" "control_plane" {
   count    = var.control_plane_count
-  image_id = var.image_id
+  image_id = local.resolved_image_id
   vm_type  = var.instance_type
 
   subnet_id = outscale_subnet.private.subnet_id
@@ -34,7 +51,7 @@ resource "outscale_vm" "control_plane" {
 
 resource "outscale_vm" "worker" {
   count    = var.worker_count
-  image_id = var.image_id
+  image_id = local.resolved_image_id
   vm_type  = var.instance_type
 
   subnet_id = outscale_subnet.private.subnet_id

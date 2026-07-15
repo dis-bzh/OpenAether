@@ -1,12 +1,12 @@
 output "machine_secrets" {
   description = "Talos machine secrets (for backup and DR)"
-  value       = talos_machine_secrets.this.machine_secrets
+  value       = local.machine_secrets.machine_secrets
   sensitive   = true
 }
 
 output "client_configuration" {
   description = "Talos client configuration (for talosctl)"
-  value       = talos_machine_secrets.this.client_configuration
+  value       = local.machine_secrets.client_configuration
   sensitive   = true
 }
 
@@ -38,6 +38,11 @@ output "worker_config" {
 output "cluster_endpoint" {
   description = "Kubernetes API cluster endpoint (https://<lb_ip>:6443)"
   value       = var.cluster_endpoint
+}
+
+output "apiserver_vip" {
+  description = "Talos Layer2 VIP configured on the control plane interface, if any"
+  value       = var.apiserver_vip
 }
 
 output "bootstrap_manifests_enabled" {

@@ -11,8 +11,8 @@ output "worker_private_ips" {
 
 # Load Balancer IPs
 output "k8s_lb_ip" {
-  description = "Public IP of the Kubernetes API LB (6443)"
-  value       = scaleway_lb_ip.k8s.ip_address
+  description = "Public IP of the Kubernetes API LB (6443), or the private Talos VIP when k8s_lb_mode = \"vip\""
+  value       = var.k8s_lb_mode == "managed" ? scaleway_lb_ip.k8s[0].ip_address : split("/", scaleway_ipam_ip.k8s_vip[0].address)[0]
 }
 
 output "app_lb_ip" {
