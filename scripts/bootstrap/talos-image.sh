@@ -130,7 +130,10 @@ if [ "$ENSURE" = true ]; then
   tofu plan -detailed-exitcode "${APPLY_VARS[@]}" || PLAN_EXIT=$?
   case "$PLAN_EXIT" in
     0) echo "✓ image already up to date — skipping apply" ;;
-    2) tofu apply "${APPLY_VARS[@]}" ;;
+    # --ensure is the non-interactive idempotence gate for `task up`, so the
+    # apply must not stop to prompt for approval (it would EOF and abort the
+    # pipeline). The plain `task talos-image` path below stays interactive.
+    2) tofu apply -auto-approve "${APPLY_VARS[@]}" ;;
     *)
       echo "✗ tofu plan failed (exit ${PLAN_EXIT})"
       exit 1
