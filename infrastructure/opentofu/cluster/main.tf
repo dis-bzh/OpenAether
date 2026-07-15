@@ -21,13 +21,22 @@ provider "outscale" {
   region        = local.active_provider == "outscale" ? local.osc_dist.region : null
 }
 
-# Proxmox (bpg) reads creds from the environment:
+# Proxmox (bpg) reads creds from the environment for a real Proxmox deploy:
 #   PROXMOX_VE_ENDPOINT=https://<host>:8006/
 #   PROXMOX_VE_API_TOKEN=<user>@<realm>!<tokenid>=<secret>
 #   PROXMOX_VE_INSECURE=true   # self-signed 8006 cert
-# Empty block is safe when Proxmox is inactive: bpg validates lazily (no resource
-# → no API call), same as the scaleway block above.
-provider "proxmox" {}
+# bpg validates the endpoint AND credentials EAGERLY at plan time, even when the
+# proxmox module is inactive (count = 0) — so an empty block breaks every
+# Scaleway/OVH/Outscale apply that carries no PROXMOX_* creds. When Proxmox is
+# inactive we feed benign localhost placeholders that are never contacted (no
+# proxmox resource → no API call); when it IS the active provider these are null,
+# so bpg falls back to the PROXMOX_VE_* env vars above — same as before. (Mirrors
+# the openstack/outscale blocks, which gate the same way.)
+provider "proxmox" {
+  endpoint  = local.active_provider == "proxmox" ? null : "https://127.0.0.1:8006/"
+  api_token = local.active_provider == "proxmox" ? null : "placeholder@pam!inactive=00000000-0000-0000-0000-000000000000"
+  insecure  = local.active_provider == "proxmox" ? null : true
+}
 
 # Backups go through the AWS CLI (scripts/ops/backup-artifacts.sh + backup-state.sh),
 # not a Terraform provider — the artifacts/state are streamed to S3-compatible

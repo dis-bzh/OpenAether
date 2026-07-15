@@ -1,9 +1,17 @@
 provider "scaleway" {}
 
 # Proxmox (bpg) reads creds from the environment (PROXMOX_VE_ENDPOINT/
-# PROXMOX_VE_API_TOKEN/PROXMOX_VE_INSECURE) — same as cluster/main.tf. Empty
-# block is safe when Proxmox isn't the target: bpg validates lazily.
-provider "proxmox" {}
+# PROXMOX_VE_API_TOKEN/PROXMOX_VE_INSECURE) — same as cluster/main.tf. bpg
+# validates the endpoint AND credentials EAGERLY at plan time, even when proxmox
+# isn't the target (module.proxmox count = 0), so an empty block breaks
+# scaleway/ovh/outscale image builds that carry no PROXMOX_* creds. Feed benign
+# localhost placeholders (never contacted — no proxmox resource) unless proxmox
+# IS the target, in which case they're null and bpg falls back to the env.
+provider "proxmox" {
+  endpoint  = var.target_provider == "proxmox" ? null : "https://127.0.0.1:8006/"
+  api_token = var.target_provider == "proxmox" ? null : "placeholder@pam!inactive=00000000-0000-0000-0000-000000000000"
+  insecure  = var.target_provider == "proxmox" ? null : true
+}
 
 # OpenStack (OVH). Placeholder auth_url unless we're building the OVH image, so a
 # scaleway/outscale build doesn't require OS_* creds (auth_url=null falls back to
