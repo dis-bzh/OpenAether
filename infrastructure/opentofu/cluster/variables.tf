@@ -30,9 +30,56 @@ variable "cluster_role" {
 }
 
 variable "talos_bootstrap" {
-  description = "Whether to configure Talos via SSH tunnel (Phase 2). Default false (Phase 1 infra only)."
+  description = "Whether to configure Talos via SSH tunnel (Phase 2). Default true — pass -var talos_bootstrap=false for Phase 1 (infra only)."
   type        = bool
   default     = true
+}
+
+variable "skip_port_ready_wait" {
+  description = <<-EOT
+    Skip modules/talos's local-exec wait for 50000/TCP before config-apply.
+    That wait is a plain OS-level TCP connect (not part of the "talos"
+    provider, so mock_provider doesn't fake it) — under `tofu test` with
+    mocked endpoints it would retry forever. Set true only for
+    tofu test/CI; keep false for real deploys, where the wait is what makes
+    cloud bootstrap deterministic.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "secrets_prevent_destroy" {
+  description = <<-EOT
+    Protect module.talos's talos_machine_secrets (the cluster's root-of-trust
+    PKI) from destruction. Keep true for real deploys. Set false only for
+    tofu test, whose automatic post-run cleanup destroys everything an
+    apply-mode run block created — with prevent_destroy = true that cleanup
+    errors out (lifecycle arguments can't be variable-driven, so this flows
+    into modules/talos as a plain bool instead).
+  EOT
+  type        = bool
+  default     = true
+}
+
+variable "auto_tunnels" {
+  description = <<-EOT
+    EXPERIMENTAL — collapses the two-phase bootstrap into a single `tofu apply`.
+    When true (with talos_bootstrap=true), a terraform_data resource opens the
+    SSH tunnels itself (scripts/bootstrap/talos-tunnels.sh open-direct) between
+    the provider module and modules/talos, using node/bastion IPs that are only
+    known once the VMs exist — ordering falls out of the reference graph, no
+    manual tunnel step needed. Default false: the documented two-phase flow
+    (`task infra` then `task bootstrap-phase2`) remains the supported path.
+    Not exercised against a real host yet; validate on a disposable env first.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "ssh_key_path" {
+  description = "SSH private key path used by auto_tunnels=true's terraform_data provisioner (passed to talos-tunnels.sh open-direct --key). Unused when auto_tunnels=false."
+  type        = string
+  default     = "~/.ssh/id_ed25519"
 }
 
 variable "talos_version" {
@@ -81,12 +128,18 @@ variable "node_distribution" {
     instance_type      = optional(string)
     flavor_name        = optional(string)
     image_id           = optional(string)
-    image_name         = optional(string, "talos")
+    image_name         = optional(string)
     availability_zones = optional(list(string))
     network_name       = optional(string, "Ext-Net")
     bastion_image_id   = optional(string)
     talos_api_port     = optional(number, 50000)
     k8s_api_port       = optional(number, 6443)
+
+    # Cloud-only (scaleway/ovh): "managed" (default, an LB) or "vip" (no LB —
+    # a Talos Layer2 VIP on the private network instead). Outscale rejects
+    # "vip" (its Net is an L3 SDN, no ARP/broadcast domain). See each
+    # provider's k8s_lb_mode variable for the per-cloud mechanism.
+    k8s_lb_mode = optional(string, "managed")
 
     # Proxmox-specific (single host or multi-host cluster). All optional → no
     # impact on the cloud providers. Defaults live in the TYPE (like image_name/
@@ -103,6 +156,7 @@ variable "node_distribution" {
     network_cidr            = optional(string, "10.0.0.0/24")
     gateway_ip              = optional(string)
     apiserver_vip           = optional(string)
+    apiserver_vip_interface = optional(string, "eth0")
     cpu_cores               = optional(number, 4)
     memory_mb               = optional(number, 8192)
     root_disk_gb            = optional(number, 20)

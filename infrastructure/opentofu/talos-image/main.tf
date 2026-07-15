@@ -1,5 +1,18 @@
 provider "scaleway" {}
 
+# Proxmox (bpg) reads creds from the environment (PROXMOX_VE_ENDPOINT/
+# PROXMOX_VE_API_TOKEN/PROXMOX_VE_INSECURE) — same as cluster/main.tf. bpg
+# validates the endpoint AND credentials EAGERLY at plan time, even when proxmox
+# isn't the target (module.proxmox count = 0), so an empty block breaks
+# scaleway/ovh/outscale image builds that carry no PROXMOX_* creds. Feed benign
+# localhost placeholders (never contacted — no proxmox resource) unless proxmox
+# IS the target, in which case they're null and bpg falls back to the env.
+provider "proxmox" {
+  endpoint  = var.target_provider == "proxmox" ? null : "https://127.0.0.1:8006/"
+  api_token = var.target_provider == "proxmox" ? null : "placeholder@pam!inactive=00000000-0000-0000-0000-000000000000"
+  insecure  = var.target_provider == "proxmox" ? null : true
+}
+
 # OpenStack (OVH). Placeholder auth_url unless we're building the OVH image, so a
 # scaleway/outscale build doesn't require OS_* creds (auth_url=null falls back to
 # the OS_AUTH_URL env var).
@@ -82,4 +95,18 @@ module "outscale" {
   region        = var.region
   s3_endpoint   = var.s3_endpoint
   cache_dir     = local.cache_dir
+}
+
+# Proxmox: server-side download straight onto each PVE host's datastore — no
+# Object Storage staging, no local fetch/convert (unlike ovh/scaleway/outscale
+# above). One download per node_names entry.
+module "proxmox" {
+  source = "../modules/talos-image/proxmox"
+  count  = var.target_provider == "proxmox" ? 1 : 0
+
+  talos_version    = var.talos_version
+  arch             = var.arch
+  schematic_id     = local.schematic_id
+  node_names       = var.proxmox_node_names
+  iso_datastore_id = var.proxmox_iso_datastore_id
 }

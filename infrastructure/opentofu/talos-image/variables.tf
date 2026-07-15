@@ -1,11 +1,11 @@
 variable "target_provider" {
-  description = "Which cloud to build the Talos image for: scaleway, ovh, or outscale."
+  description = "Which provider to build the Talos image for: scaleway, ovh, outscale, or proxmox."
   type        = string
   default     = "scaleway"
 
   validation {
-    condition     = contains(["scaleway", "ovh", "outscale"], var.target_provider)
-    error_message = "target_provider must be one of: scaleway, ovh, outscale."
+    condition     = contains(["scaleway", "ovh", "outscale", "proxmox"], var.target_provider)
+    error_message = "target_provider must be one of: scaleway, ovh, outscale, proxmox."
   }
 }
 
@@ -50,6 +50,20 @@ variable "s3_endpoint" {
   description = "S3-compatible endpoint for the Object Storage upload (Scaleway/Outscale)."
   type        = string
   default     = "https://s3.fr-par.scw.cloud"
+}
+
+# --- Proxmox-specific (unused by the scaleway/ovh/outscale builds) -----------
+
+variable "proxmox_node_names" {
+  description = "Proxmox node (host) names to download the image onto (one copy per PVE host). Match the cluster's node_distribution.proxmox.node_names."
+  type        = list(string)
+  default     = ["pve1"]
+}
+
+variable "proxmox_iso_datastore_id" {
+  description = "Proxmox datastore to store the downloaded image on. Match the cluster's node_distribution.proxmox.iso_datastore_id."
+  type        = string
+  default     = "local"
 }
 
 # --- Outscale API creds (fed by the orchestrator; same AK/SK as OOS) ----------

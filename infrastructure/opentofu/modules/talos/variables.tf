@@ -86,6 +86,37 @@ variable "skip_kubernetes_health_checks" {
   default     = false
 }
 
+variable "skip_port_ready_wait" {
+  description = <<-EOT
+    Skip terraform_data.talos_port_ready_* (the local-exec that waits for
+    50000/TCP before starting the config-apply retry clock). This provisioner
+    is a plain OS-level TCP connect — unlike every talos_* resource/data
+    source, it is NOT part of the "talos" provider, so mock_provider "talos"
+    in tofu test does not fake it: it runs for real and, with mocked
+    endpoints, would loop until a real host answers, i.e. never. Set true
+    for `tofu test`/`command = apply` runs; keep false for real deploys
+    (config_delivery = "apply"), where the wait is what makes cloud
+    bootstrap deterministic (see the comment above
+    talos_port_ready_cp/worker).
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "secrets_prevent_destroy" {
+  description = <<-EOT
+    Protect talos_machine_secrets (the cluster's root-of-trust PKI) from
+    destruction. Lifecycle arguments cannot be driven by a variable, so this
+    toggles between two resource blocks (see locals.machine_secrets in
+    main.tf) rather than a conditional lifecycle block. Keep true for real
+    deploys. Set false only for `tofu test`, whose automatic post-run cleanup
+    destroys everything an apply-mode run block created — with
+    prevent_destroy = true that cleanup errors out.
+  EOT
+  type        = bool
+  default     = true
+}
+
 variable "config_delivery" {
   description = <<-EOT
     How machine configuration reaches nodes:
@@ -108,6 +139,40 @@ variable "config_delivery" {
 variable "k8s_lb_ip" {
   description = "IP of the Kubernetes API load balancer (for certSANs)"
   type        = string
+}
+
+# ==============================================================================
+# Control Plane apiserver VIP (Talos Layer2 VIP)
+# ==============================================================================
+
+variable "apiserver_vip" {
+  description = <<-EOT
+    Optional Talos Layer2 VIP for the kube-apiserver, held by the control plane
+    interface (moves to another CP on failure). Null (default) = no VIP — the
+    provider's own LB/endpoint is the sole apiserver front door.
+    When set, it is injected as machine.network.interfaces[].vip and added to
+    cluster.apiServer.certSANs (alongside 127.0.0.1, for kubectl over a
+    localhost SSH tunnel). Ignored in container_mode (no shared L2 to hold a
+    VIP on).
+  EOT
+  type        = string
+  default     = null
+}
+
+variable "apiserver_vip_interface" {
+  description = "Network interface name the VIP binds to (ignored if apiserver_vip_device_selector is set)."
+  type        = string
+  default     = "eth0"
+}
+
+variable "apiserver_vip_device_selector" {
+  description = "Talos deviceSelector for the VIP interface (busPath/hardwareAddr/physical), takes precedence over apiserver_vip_interface when set."
+  type = object({
+    busPath      = optional(string)
+    hardwareAddr = optional(string)
+    physical     = optional(bool)
+  })
+  default = null
 }
 
 # ==============================================================================

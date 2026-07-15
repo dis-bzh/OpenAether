@@ -12,11 +12,12 @@
 #   ./scripts/failover-management.sh <provider>
 #   task failover PROVIDER=ovh
 #
-# Supported providers: scaleway, ovh, outscale (pick one that is NOT your primary)
+# Supported providers: scaleway, ovh, outscale, proxmox (pick one that is NOT your primary)
 #
 # Prerequisites:
 #   - tofu CLI available
-#   - Credentials for fallback provider exported (OS_* for OVH, OSC_* for Outscale)
+#   - Credentials for fallback provider exported (OS_* for OVH, OSC_* for Outscale,
+#     PROXMOX_VE_* for Proxmox)
 #   - S3 access to backup bucket (primary tfstate, via AWS_ACCESS_KEY_ID/SECRET)
 #   - Talos image pre-uploaded on fallback provider
 # ==============================================================================
@@ -26,7 +27,7 @@ PROVIDER="${1:-${PROVIDER:-}}"
 
 if [[ -z "$PROVIDER" ]]; then
   echo "Usage: $0 <provider>"
-  echo "       Supported: scaleway, ovh, outscale (pick one that is NOT your primary)"
+  echo "       Supported: scaleway, ovh, outscale, proxmox (pick one that is NOT your primary)"
   exit 1
 fi
 
@@ -68,10 +69,11 @@ tofu init -reconfigure $("${SCRIPT_DIR}/tf-backend.sh" "${ENVFILE}")
 tofu apply -var-file="${ENVFILE}" -auto-approve
 
 BASTION_IP=$(tofu output -raw bastion_ip)
+BASTION_USER=$(tofu output -raw bastion_user)
 CONTROL_PLANE_IPS=$(tofu output -json control_plane_private_ips)
 
 echo "  ✅ Infrastructure ready"
-echo "     Bastion: ${BASTION_IP}"
+echo "     Bastion: ${BASTION_USER}@${BASTION_IP}"
 echo "     Control planes: ${CONTROL_PLANE_IPS}"
 
 # ─── Phase 2: SSH Tunnels ──────────────────────────────────────────────────────
@@ -82,11 +84,11 @@ echo "   Opening tunnels to control planes via bastion ${BASTION_IP}..."
 TUNNEL_PIDS=()
 PORT=50000
 for ip in $(echo "${CONTROL_PLANE_IPS}" | jq -r '.[]'); do
-  echo "   Tunnel: localhost:${PORT} → ${ip}:50000 via ${BASTION_IP}"
+  echo "   Tunnel: localhost:${PORT} → ${ip}:50000 via ${BASTION_USER}@${BASTION_IP}"
   ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     -i ~/.ssh/id_ed25519 \
     -L "${PORT}:${ip}:50000" \
-    "ubuntu@${BASTION_IP}" -N &
+    "${BASTION_USER}@${BASTION_IP}" -N &
   TUNNEL_PIDS+=($!)
   PORT=$((PORT + 1))
 done

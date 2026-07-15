@@ -24,10 +24,10 @@ tfv() {
     | sed -E 's/^[^=]*=[[:space:]]*"?([^"#]*)"?.*/\1/' | sed 's/[[:space:]]*$//'
 }
 
-# --- Detect the active provider (scaleway|ovh|outscale) from node_distribution.
+# --- Detect the active provider (scaleway|ovh|outscale|proxmox) from node_distribution.
 # Usage: tfv_provider <tfvars-file>
 tfv_provider() {
-  grep -E '^[[:space:]]*(scaleway|ovh|outscale)[[:space:]]*=' "$1" 2>/dev/null \
+  grep -E '^[[:space:]]*(scaleway|ovh|outscale|proxmox)[[:space:]]*=' "$1" 2>/dev/null \
     | head -1 | sed -E 's/^[[:space:]]*([a-z]+).*/\1/'
 }
 
@@ -37,6 +37,7 @@ provider_pu() {
     scw | scaleway) printf 'SCW' ;;
     ovh)            printf 'OVH' ;;
     outscale)       printf 'OUTSCALE' ;;
+    proxmox)        printf 'PROXMOX' ;;
     *) return 1 ;;
   esac
 }

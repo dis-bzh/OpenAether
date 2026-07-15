@@ -54,32 +54,39 @@ resource "scaleway_lb_frontend" "https" {
 
 # ==============================================================================
 # LB Kubernetes API (permanent) — Port 6443 only
-# Always active. No 50000/TCP — Talos API is accessed via bastion tunnel.
+# Only created when k8s_lb_mode = "managed" (default). In "vip" mode the API
+# is fronted by a Talos Layer2 VIP instead (see network.tf's k8s_vip IPAM
+# reservation) — no LB, no public IP.
+# No 50000/TCP — Talos API is accessed via bastion tunnel.
 # ACL-restricted to admin_ip + private network ranges.
 # ==============================================================================
 
 resource "scaleway_lb_ip" "k8s" {
+  count      = var.k8s_lb_mode == "managed" ? 1 : 0
   zone       = var.zone
   project_id = var.project_id
 }
 
 resource "scaleway_lb" "k8s" {
+  count      = var.k8s_lb_mode == "managed" ? 1 : 0
   name       = "${var.cluster_name}-k8s-lb"
-  ip_ids     = [scaleway_lb_ip.k8s.id]
+  ip_ids     = [scaleway_lb_ip.k8s[0].id]
   zone       = var.zone
   type       = "LB-S"
   project_id = var.project_id
 }
 
 resource "scaleway_lb_private_network" "k8s" {
-  lb_id              = scaleway_lb.k8s.id
+  count              = var.k8s_lb_mode == "managed" ? 1 : 0
+  lb_id              = scaleway_lb.k8s[0].id
   private_network_id = scaleway_vpc_private_network.this.id
 }
 
 # --- K8s API backend (6443) ---
 
 resource "scaleway_lb_backend" "k8s_api" {
-  lb_id                  = scaleway_lb.k8s.id
+  count                  = var.k8s_lb_mode == "managed" ? 1 : 0
+  lb_id                  = scaleway_lb.k8s[0].id
   name                   = "k8s-api-backend"
   forward_port           = 6443
   forward_port_algorithm = "roundrobin"
@@ -94,8 +101,9 @@ resource "scaleway_lb_backend" "k8s_api" {
 }
 
 resource "scaleway_lb_frontend" "k8s_api" {
-  lb_id        = scaleway_lb.k8s.id
-  backend_id   = scaleway_lb_backend.k8s_api.id
+  count        = var.k8s_lb_mode == "managed" ? 1 : 0
+  lb_id        = scaleway_lb.k8s[0].id
+  backend_id   = scaleway_lb_backend.k8s_api[0].id
   name         = "k8s-api-frontend"
   inbound_port = 6443
 

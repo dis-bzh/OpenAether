@@ -10,21 +10,33 @@ works the same before or after a cluster exists.
 ```
 schematic.yaml ──POST──▶ Factory schematic ID
                               │
-              ┌───────────────┼────────────────────────────┐
-              ▼ scaleway       ▼ ovh (openstack)            ▼ outscale
-  download·zstd·qemu→qcow2   download·zstd·qemu→qcow2        (not yet)
-              │                │
-   Object Storage→snapshot    Glance image (region-wide)
-   →Instance Image /zone      → image_id (UUID)
-   (lookup by name)           (set as image_id in cluster tfvars)
+        ┌───────────────┬─────┴──────────────┬────────────────────┐
+        ▼ scaleway       ▼ ovh (openstack)     ▼ outscale           ▼ proxmox
+  download·zstd·qemu→qcow2 download·zstd·qemu→qcow2  (nocloud raw)   bpg download_file
+        │                 │                    │                    (server-side, no
+   Object Storage→snapshot Glance image         OOS staging→         local convert step)
+   →Instance Image /zone   (region-wide)        snapshot→OMI              │
+   (lookup by name)        → image_id (UUID)    (outscale_image)   iso_datastore_id
+                                                                    (lookup by name/
+                                                                     convention path)
 ```
+
+Every provider now also supports a **by-name convention lookup**: when
+`image_id`/`image_name`/`talos_image_file_id` is left unset in the cluster's
+`envs/*.tfvars`, the cluster root falls back to the exact name/path this
+builder publishes/downloads under (`talos-<provider>-amd64-<talos_version>`,
+or for Proxmox `<iso_datastore_id>:iso/talos-<talos_version>-nocloud-amd64.img`)
+— so the operator rarely needs to hand-copy an ID between the two roots
+anymore. An explicit value in the tfvars always overrides the convention.
 
 ## State
 
 State lives on the **target provider's** S3 — its own bucket per provider
 (`s3-openaether-<provider>-talos-image` / `talos-image.tfstate`), so building one
 provider's image never disturbs another's. The state bucket (and the Scaleway
-staging bucket) are **auto-created** by `scripts/talos-image.sh`.
+staging bucket) are **auto-created** by `scripts/talos-image.sh`. Proxmox has no
+native object storage, so its state lives on an external S3-compatible store
+(same convention as the cluster root's Proxmox backend).
 
 ## Prerequisites
 
@@ -33,12 +45,13 @@ Set credentials once in `.env.sh` (`cp .env.example .env.sh`, edit, `source`) �
 What this builder needs:
 
 - **Compute creds** for the target provider: `SCW_*` (scaleway), `OS_*` (ovh,
-  OpenStack), `OSC_*` (outscale).
+  OpenStack), `OSC_*` (outscale), `PROXMOX_VE_*` (proxmox).
 - **S3 creds** for the target provider's Object Storage (state + staging),
   namespaced so you keep all providers in `.env.sh` at once:
   - `SCW_AWS_ACCESS_KEY_ID` / `SCW_AWS_SECRET_ACCESS_KEY` — default to `SCW_*` (Scaleway S3 == API keys).
   - `OVH_AWS_ACCESS_KEY_ID` / `OVH_AWS_SECRET_ACCESS_KEY` — **separate** keys (`openstack ec2 credentials create`), *not* `OS_PASSWORD`.
   - `OUTSCALE_AWS_ACCESS_KEY_ID` / `OUTSCALE_AWS_SECRET_ACCESS_KEY` — default to `OSC_*` (OOS == API keys).
+  - `PROXMOX_AWS_ACCESS_KEY_ID` / `PROXMOX_AWS_SECRET_ACCESS_KEY` — external S3 (Proxmox has no native object storage); `PROXMOX_S3_ENDPOINT`/`PROXMOX_S3_REGION` pick the store (default: the Scaleway fr-par bucket).
   - (no ambient `AWS_*` fallback — it could silently use another provider's keys.)
 - `TF_VAR_encryption_passphrase` (≥32 chars).
 - Local CLI tools: `curl`, `zstd`, `qemu-img`, `aws` (installed by `task setup`).
@@ -46,17 +59,21 @@ What this builder needs:
 ## Usage
 
 ```bash
-task talos-image PROVIDER=scaleway                 # or ovh ; [VERSION=v1.13.3]
+task talos-image PROVIDER=scaleway                 # or ovh, outscale, proxmox ; [VERSION=v1.13.3]
 # equivalent: ./scripts/talos-image.sh scaleway v1.13.3
 ```
 
 - **Scaleway** — the cluster looks the image up by **name**
   (`tofu output image_name` → `talos-scaleway-amd64-<version>`), already the
   default in the `envs/*.tfvars.example`.
-- **OVH** — Glance gives a UUID: `tofu output image_id` → put it as `image_id` in
-  the cluster `envs/<env>/<cluster>.tfvars`.
-- **Outscale** — the OMI registration gives an `ami-…` id: `tofu output image_id` →
-  put it as `image_id` in the cluster `envs/*.tfvars`.
+- **OVH** — looked up by name by default (same convention); Glance also gives a
+  UUID (`tofu output image_id`) if you'd rather pin an explicit `image_id`.
+- **Outscale** — looked up by name by default; the OMI registration also gives
+  an `ami-…` id (`tofu output image_id`) if you'd rather pin it explicitly.
+- **Proxmox** — `PROXMOX_NODE_NAMES` (comma-separated, default `pve1`) and
+  `PROXMOX_ISO_DATASTORE_ID` (default `local`) control where the image lands;
+  match `node_distribution.proxmox.node_names`/`iso_datastore_id` in the
+  cluster tfvars. `talos_image_file_id` defaults to the resulting path.
 
 ## Customising the image
 
@@ -71,3 +88,4 @@ the build is reproducible and auditable.
 | `scaleway` | ✅ implemented | qcow2 → Object Storage → block snapshot import → Instance Image (per zone) |
 | `ovh` | ✅ implemented | qcow2 → Glance (`openstack_images_image_v2`, local upload — region-wide) |
 | `outscale` | ✅ implemented | `nocloud` raw → OOS staging → `outscale_snapshot` import (pre-signed URL) → OMI (`outscale_image`) |
+| `proxmox` | ✅ implemented | `nocloud` raw.zst → `proxmox_virtual_environment_download_file` (server-side fetch+decompress, one copy per PVE host) |
