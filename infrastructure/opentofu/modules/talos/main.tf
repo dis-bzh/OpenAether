@@ -362,7 +362,7 @@ data "talos_machine_configuration" "worker" {
 # ==============================================================================
 
 resource "terraform_data" "talos_port_ready_cp" {
-  count = local.do_apply ? var.control_plane_count : 0
+  count = local.do_apply && !var.skip_port_ready_wait ? var.control_plane_count : 0
 
   # Re-run when the endpoint changes (e.g. node replacement).
   triggers_replace = [local.cp_endpoints[count.index]]
@@ -377,7 +377,7 @@ resource "terraform_data" "talos_port_ready_cp" {
 }
 
 resource "terraform_data" "talos_port_ready_worker" {
-  count = local.do_apply ? var.worker_count : 0
+  count = local.do_apply && !var.skip_port_ready_wait ? var.worker_count : 0
 
   triggers_replace = [local.worker_endpoints[count.index]]
 

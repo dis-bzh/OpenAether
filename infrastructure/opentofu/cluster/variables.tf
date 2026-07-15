@@ -35,6 +35,19 @@ variable "talos_bootstrap" {
   default     = true
 }
 
+variable "skip_port_ready_wait" {
+  description = <<-EOT
+    Skip modules/talos's local-exec wait for 50000/TCP before config-apply.
+    That wait is a plain OS-level TCP connect (not part of the "talos"
+    provider, so mock_provider doesn't fake it) — under `tofu test` with
+    mocked endpoints it would retry forever. Set true only for
+    tofu test/CI; keep false for real deploys, where the wait is what makes
+    cloud bootstrap deterministic.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "auto_tunnels" {
   description = <<-EOT
     EXPERIMENTAL — collapses the two-phase bootstrap into a single `tofu apply`.

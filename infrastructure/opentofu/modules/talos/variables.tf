@@ -86,6 +86,23 @@ variable "skip_kubernetes_health_checks" {
   default     = false
 }
 
+variable "skip_port_ready_wait" {
+  description = <<-EOT
+    Skip terraform_data.talos_port_ready_* (the local-exec that waits for
+    50000/TCP before starting the config-apply retry clock). This provisioner
+    is a plain OS-level TCP connect — unlike every talos_* resource/data
+    source, it is NOT part of the "talos" provider, so mock_provider "talos"
+    in tofu test does not fake it: it runs for real and, with mocked
+    endpoints, would loop until a real host answers, i.e. never. Set true
+    for `tofu test`/`command = apply` runs; keep false for real deploys
+    (config_delivery = "apply"), where the wait is what makes cloud
+    bootstrap deterministic (see the comment above
+    talos_port_ready_cp/worker).
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "config_delivery" {
   description = <<-EOT
     How machine configuration reaches nodes:
