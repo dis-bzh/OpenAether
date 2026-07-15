@@ -208,7 +208,7 @@ Manual equivalent (two steps are required):
 #    cluster's root of trust) and are state-only (no cloud object). You cannot just
 #    -exclude them either: module.talos depends_on module.scw, so excluding the
 #    secrets cascades to keeping the whole provider module (0 destroyed).
-tofu state rm module.talos.talos_machine_secrets.this
+tofu state rm module.talos.talos_machine_secrets.this[0]
 
 # 2. Destroy with talos_bootstrap=false so the Talos resources resolve to count=0.
 #    This skips data.talos_cluster_health, which would otherwise re-read through the

@@ -103,6 +103,20 @@ variable "skip_port_ready_wait" {
   default     = false
 }
 
+variable "secrets_prevent_destroy" {
+  description = <<-EOT
+    Protect talos_machine_secrets (the cluster's root-of-trust PKI) from
+    destruction. Lifecycle arguments cannot be driven by a variable, so this
+    toggles between two resource blocks (see locals.machine_secrets in
+    main.tf) rather than a conditional lifecycle block. Keep true for real
+    deploys. Set false only for `tofu test`, whose automatic post-run cleanup
+    destroys everything an apply-mode run block created — with
+    prevent_destroy = true that cleanup errors out.
+  EOT
+  type        = bool
+  default     = true
+}
+
 variable "config_delivery" {
   description = <<-EOT
     How machine configuration reaches nodes:

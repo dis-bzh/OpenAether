@@ -16,13 +16,14 @@ mock_provider "talos" {}
 # ==============================================================================
 
 variables {
-  cluster_name         = "test-cluster"
-  environment          = "dev"
-  cluster_role         = "management"
-  talos_bootstrap      = true
-  skip_port_ready_wait = true # local-exec TCP wait isn't mocked — see modules/talos/variables.tf
-  backup_enabled       = false # backups run a local-exec (aws s3 cp); skip in tests
-  admin_ip             = ["1.2.3.4/32"]
+  cluster_name            = "test-cluster"
+  environment             = "dev"
+  cluster_role            = "management"
+  talos_bootstrap         = true
+  skip_port_ready_wait    = true  # local-exec TCP wait isn't mocked — see modules/talos/variables.tf
+  secrets_prevent_destroy = false # tofu test's post-run cleanup destroys apply-mode state — see cluster/variables.tf
+  backup_enabled          = false # backups run a local-exec (aws s3 cp); skip in tests
+  admin_ip                = ["1.2.3.4/32"]
 
   node_distribution = {
     proxmox = {

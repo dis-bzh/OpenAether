@@ -3,11 +3,29 @@
 # ==============================================================================
 
 resource "talos_machine_secrets" "this" {
+  count = var.secrets_prevent_destroy ? 1 : 0
+
   talos_version = var.talos_version
 
   lifecycle {
     prevent_destroy = true
   }
+}
+
+# Same resource, unprotected — only instantiated when secrets_prevent_destroy
+# = false (tofu test). prevent_destroy can't be a variable-driven literal, so
+# the toggle is two resource blocks selected by count rather than one
+# conditional lifecycle. See locals.machine_secrets below for the resolved
+# reference every other resource/data source/output uses instead of
+# talos_machine_secrets.this directly.
+resource "talos_machine_secrets" "unprotected" {
+  count = var.secrets_prevent_destroy ? 0 : 1
+
+  talos_version = var.talos_version
+}
+
+locals {
+  machine_secrets = one(concat(talos_machine_secrets.this[*], talos_machine_secrets.unprotected[*]))
 }
 
 # 32-byte random key for Kubernetes Secrets encryption at rest (AES-256-GCM via
@@ -58,7 +76,7 @@ locals {
 
 data "talos_client_configuration" "this" {
   cluster_name         = var.cluster_name
-  client_configuration = talos_machine_secrets.this.client_configuration
+  client_configuration = local.machine_secrets.client_configuration
   endpoints            = local.cp_endpoints
 }
 
@@ -169,7 +187,7 @@ data "talos_machine_configuration" "control_plane" {
   cluster_name       = var.cluster_name
   cluster_endpoint   = var.cluster_endpoint
   machine_type       = "controlplane"
-  machine_secrets    = talos_machine_secrets.this.machine_secrets
+  machine_secrets    = local.machine_secrets.machine_secrets
   talos_version      = var.talos_version
   kubernetes_version = var.kubernetes_version
 
@@ -266,7 +284,7 @@ data "talos_machine_configuration" "worker" {
   cluster_name       = var.cluster_name
   cluster_endpoint   = var.cluster_endpoint
   machine_type       = "worker"
-  machine_secrets    = talos_machine_secrets.this.machine_secrets
+  machine_secrets    = local.machine_secrets.machine_secrets
   talos_version      = var.talos_version
   kubernetes_version = var.kubernetes_version
 
@@ -393,7 +411,7 @@ resource "terraform_data" "talos_port_ready_worker" {
 resource "talos_machine_configuration_apply" "control_plane" {
   count = local.do_apply ? var.control_plane_count : 0
 
-  client_configuration        = talos_machine_secrets.this.client_configuration
+  client_configuration        = local.machine_secrets.client_configuration
   machine_configuration_input = data.talos_machine_configuration.control_plane[count.index].machine_configuration
   endpoint                    = local.cp_endpoints[count.index]
   node                        = var.control_plane_ips[count.index]
@@ -408,7 +426,7 @@ resource "talos_machine_configuration_apply" "control_plane" {
 resource "talos_machine_configuration_apply" "worker" {
   count = local.do_apply ? var.worker_count : 0
 
-  client_configuration        = talos_machine_secrets.this.client_configuration
+  client_configuration        = local.machine_secrets.client_configuration
   machine_configuration_input = data.talos_machine_configuration.worker[count.index].machine_configuration
   endpoint                    = local.worker_endpoints[count.index]
   node                        = var.worker_ips[count.index]
@@ -430,7 +448,7 @@ resource "talos_machine_configuration_apply" "worker" {
 resource "talos_machine_bootstrap" "this" {
   count = var.control_plane_count > 0 ? 1 : 0
 
-  client_configuration = talos_machine_secrets.this.client_configuration
+  client_configuration = local.machine_secrets.client_configuration
   endpoint             = local.cp_endpoints[0]
   node                 = var.control_plane_ips[0]
 
@@ -449,7 +467,7 @@ resource "talos_machine_bootstrap" "this" {
 data "talos_cluster_health" "this" {
   count = var.control_plane_count > 0 && !var.skip_health_check ? 1 : 0
 
-  client_configuration = talos_machine_secrets.this.client_configuration
+  client_configuration = local.machine_secrets.client_configuration
   control_plane_nodes  = var.control_plane_ips
   worker_nodes         = var.worker_ips
   # A single reachable endpoint is sufficient — apid checks the whole cluster
@@ -475,7 +493,7 @@ data "talos_cluster_health" "this" {
 resource "talos_cluster_kubeconfig" "this" {
   count = var.control_plane_count > 0 ? 1 : 0
 
-  client_configuration = talos_machine_secrets.this.client_configuration
+  client_configuration = local.machine_secrets.client_configuration
   node                 = var.control_plane_ips[0]
   endpoint             = local.cp_endpoints[0]
 

@@ -48,6 +48,19 @@ variable "skip_port_ready_wait" {
   default     = false
 }
 
+variable "secrets_prevent_destroy" {
+  description = <<-EOT
+    Protect module.talos's talos_machine_secrets (the cluster's root-of-trust
+    PKI) from destruction. Keep true for real deploys. Set false only for
+    tofu test, whose automatic post-run cleanup destroys everything an
+    apply-mode run block created — with prevent_destroy = true that cleanup
+    errors out (lifecycle arguments can't be variable-driven, so this flows
+    into modules/talos as a plain bool instead).
+  EOT
+  type        = bool
+  default     = true
+}
+
 variable "auto_tunnels" {
   description = <<-EOT
     EXPERIMENTAL — collapses the two-phase bootstrap into a single `tofu apply`.

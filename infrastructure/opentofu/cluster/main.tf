@@ -433,7 +433,8 @@ module "talos" {
   apiserver_vip           = local.apiserver_vip
   apiserver_vip_interface = local.apiserver_vip_interface
 
-  skip_port_ready_wait = var.skip_port_ready_wait
+  skip_port_ready_wait    = var.skip_port_ready_wait
+  secrets_prevent_destroy = var.secrets_prevent_destroy
 
   # Phase 2 reaches the private nodes through per-node SSH tunnels on localhost
   # (see the `instructions` output). `endpoint` is where the provider connects;

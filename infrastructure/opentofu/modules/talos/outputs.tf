@@ -1,12 +1,12 @@
 output "machine_secrets" {
   description = "Talos machine secrets (for backup and DR)"
-  value       = talos_machine_secrets.this.machine_secrets
+  value       = local.machine_secrets.machine_secrets
   sensitive   = true
 }
 
 output "client_configuration" {
   description = "Talos client configuration (for talosctl)"
-  value       = talos_machine_secrets.this.client_configuration
+  value       = local.machine_secrets.client_configuration
   sensitive   = true
 }
 
