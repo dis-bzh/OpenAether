@@ -80,6 +80,8 @@ infrastructure/opentofu/cluster/bootstrap-manifests/cilium-local.yaml
 # Phase 2 SSH tunnel PIDs (Talos API via bastion)
 infrastructure/opentofu/.talos-tunnels.pids
 infrastructure/opentofu/cluster/.talos-tunnels.pids
+infrastructure/opentofu/.talos-bastion-known-hosts
+infrastructure/opentofu/cluster/.talos-bastion-known-hosts
 
 # Claude Code session artifacts (local state, pas du contenu projet)
 # … sauf le hook SessionStart partagé, qui doit être versionné pour s'appliquer

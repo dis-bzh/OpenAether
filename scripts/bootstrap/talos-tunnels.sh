@@ -59,13 +59,16 @@ if [[ "$ACTION" == "open-direct" ]]; then
   fi
   : >"$DIRECT_PIDFILE"
 
-  ssh-keygen -R "$BASTION" >/dev/null 2>&1 || true
+  # Dedicated known_hosts, reset per run — see the state-driven path below for why
+  # ssh-keygen -R is not enough (reused bastion IP + hashed entries).
+  BASTION_KH=".talos-bastion-known-hosts"
+  : >"$BASTION_KH"
 
   IFS=',' read -ra CPS <<<"$CPS_CSV"
   IFS=',' read -ra WKS <<<"${WKS_CSV:-}"
 
   open_direct_one() { # localport nodeip
-    nohup ssh -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes \
+    nohup ssh -o UserKnownHostsFile="$BASTION_KH" -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes \
       -o ServerAliveInterval=15 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
       -i "$KEY" -N -L "$1:$2:50000" "${BUSER}@${BASTION}" \
       >/dev/null 2>&1 &
@@ -141,14 +144,18 @@ K8S_LB_IP="$(jq -r '.k8s_lb_ip.value // empty' <<<"$OUTPUTS")"
 close_tunnels # drop any stale tunnels (old IPs) before reopening
 : >"$PIDFILE"
 
-# The bastion is re-created by `tofu apply` (its EIP/public IP is stable), so a
-# changed host key on the same IP is expected after a redeploy — not an attack.
-# Drop any stale known_hosts entry so accept-new re-pins it, instead of SSH
-# refusing every tunnel with a host-key mismatch (which shows up as 0/N up).
-ssh-keygen -R "$BASTION" >/dev/null 2>&1 || true
+# The bastion is re-created by `tofu apply` and its public IP is frequently
+# REUSED across clusters, so its host key legitimately changes between deploys.
+# `ssh-keygen -R` does NOT reliably drop *hashed* known_hosts entries (HashKnownHosts),
+# so accept-new would then refuse every tunnel with a host-key mismatch — which
+# surfaces as a partial/zero "N/M tunnels up" and a failed bootstrap-phase2. Pin
+# the bastion in a DEDICATED known_hosts file, reset each run: this keeps
+# in-session host-key pinning without ever carrying a stale key across redeploys.
+BASTION_KH=".talos-bastion-known-hosts"
+: >"$BASTION_KH"
 
 open_one() { # localport nodeip
-  nohup ssh -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes \
+  nohup ssh -o UserKnownHostsFile="$BASTION_KH" -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes \
     -o ServerAliveInterval=15 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
     -i "$KEY" -N -L "$1:$2:50000" "${BUSER}@${BASTION}" \
     >/dev/null 2>&1 &
@@ -163,7 +170,7 @@ i=0; for ip in "${WKS[@]}"; do open_one "$((50100 + i))" "$ip"; i=$((i + 1)); do
 # LB — open a dedicated tunnel to reach the API from the operator's machine.
 K8S_API_TUNNELED=false
 if [[ -n "$K8S_LB_IP" ]] && is_private_ip "$K8S_LB_IP"; then
-  nohup ssh -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes \
+  nohup ssh -o UserKnownHostsFile="$BASTION_KH" -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes \
     -o ServerAliveInterval=15 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
     -i "$KEY" -N -L "6443:${K8S_LB_IP}:6443" "${BUSER}@${BASTION}" \
     >/dev/null 2>&1 &
