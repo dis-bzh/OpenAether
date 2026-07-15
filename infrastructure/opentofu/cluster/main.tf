@@ -445,6 +445,17 @@ module "talos" {
   skip_port_ready_wait    = var.skip_port_ready_wait
   secrets_prevent_destroy = var.secrets_prevent_destroy
 
+  # The health data source's Kubernetes-level checks connect to the cluster
+  # endpoint directly. In managed mode that's a public LB (reachable, so keep
+  # them), but in vip mode / Proxmox it's a PRIVATE Talos VIP that is only
+  # reachable through the bastion SSH tunnel — which the data source's K8s client
+  # can't use (unlike the Talos API, which we already tunnel via
+  # control_plane_endpoints). Skip only the K8s-level checks there so
+  # `talos_cluster_health` completes instead of hanging on the private endpoint;
+  # the etcd/Talos checks still validate the cluster through the tunnel. Same
+  # rationale as local Docker (see the module's skip_kubernetes_health_checks).
+  skip_kubernetes_health_checks = local.apiserver_vip != null
+
   # Phase 2 reaches the private nodes through per-node SSH tunnels on localhost
   # (see the `instructions` output). `endpoint` is where the provider connects;
   # node identity stays the private IP. CPs: 127.0.0.1:50000+i, workers: :50100+i.
