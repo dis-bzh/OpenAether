@@ -14,6 +14,16 @@ output "cluster_role" {
   value       = var.cluster_role
 }
 
+output "resolved_image_ref" {
+  description = "Image identifier actually used by the active provider (name/ID/file_id), after applying the by-name/convention fallback when it was left unset in the tfvars."
+  value = lookup({
+    scaleway = local.scw_image_name
+    ovh      = coalesce(local.ovh_dist.image_id, local.ovh_image_name)
+    outscale = coalesce(local.osc_dist.image_id, local.osc_image_name)
+    proxmox  = local.pmx_talos_image_file_id
+  }, local.active_provider, "n/a")
+}
+
 # --- Cluster Access ---
 
 output "k8s_lb_ip" {
@@ -29,6 +39,11 @@ output "app_lb_ip" {
     try(module.outscale[0].app_lb_ip, null),
     "N/A"
   )
+}
+
+output "worker_ingress_targets" {
+  description = "Worker IPs for manual ingress (providers without a managed app LB, e.g. Proxmox)"
+  value       = try(module.proxmox[0].worker_ingress_targets, null)
 }
 
 output "kubeconfig" {
@@ -96,7 +111,7 @@ output "backup_targets" {
 # --- Operational Instructions ---
 
 output "talos_access_commands" {
-  description = "SSH tunnel commands to reach each Talos node's API (50000) via the bastion. CPs map to localhost 5000+i, workers to 5010+i — distinct ports so all tunnels coexist."
+  description = "SSH tunnel commands to reach each Talos node's API (50000) via the bastion. CPs map to localhost 50000+i, workers to 50100+i — distinct ports so all tunnels coexist."
   value = merge(
     { for idx, ip in local.control_plane_ips : "cp-${idx}" => "ssh -q -i ~/.ssh/key -L ${50000 + idx}:${ip}:50000 ${local.bastion_user}@${local.bastion_ip} -N &" },
     { for idx, ip in local.worker_ips : "worker-${idx}" => "ssh -q -i ~/.ssh/key -L ${50100 + idx}:${ip}:50000 ${local.bastion_user}@${local.bastion_ip} -N &" },
@@ -112,9 +127,9 @@ output "instructions" {
     #   tofu apply -var-file=envs/<cluster>.tfvars
     #
     # Phase 2: Talos Bootstrap (Requires SSH tunnels via Bastion — one per node)
-    #   1. Open tunnels (control planes -> localhost 5000+i):
+    #   1. Open tunnels (control planes -> localhost 50000+i):
     %{for idx, ip in local.control_plane_ips}#      ssh -q -i ~/.ssh/key -L ${50000 + idx}:${ip}:50000 ${local.bastion_user}@${local.bastion_ip} -N &
-    %{endfor}#      ... and workers -> localhost 5010+i:
+    %{endfor}#      ... and workers -> localhost 50100+i:
     %{for idx, ip in local.worker_ips}#      ssh -q -i ~/.ssh/key -L ${50100 + idx}:${ip}:50000 ${local.bastion_user}@${local.bastion_ip} -N &
     %{endfor}#
     #   2. Bootstrap:

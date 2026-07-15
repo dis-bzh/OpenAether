@@ -21,13 +21,22 @@ provider "outscale" {
   region        = local.active_provider == "outscale" ? local.osc_dist.region : null
 }
 
-# Proxmox (bpg) reads creds from the environment:
+# Proxmox (bpg) reads creds from the environment for a real Proxmox deploy:
 #   PROXMOX_VE_ENDPOINT=https://<host>:8006/
 #   PROXMOX_VE_API_TOKEN=<user>@<realm>!<tokenid>=<secret>
 #   PROXMOX_VE_INSECURE=true   # self-signed 8006 cert
-# Empty block is safe when Proxmox is inactive: bpg validates lazily (no resource
-# → no API call), same as the scaleway block above.
-provider "proxmox" {}
+# bpg validates the endpoint AND credentials EAGERLY at plan time, even when the
+# proxmox module is inactive (count = 0) — so an empty block breaks every
+# Scaleway/OVH/Outscale apply that carries no PROXMOX_* creds. When Proxmox is
+# inactive we feed benign localhost placeholders that are never contacted (no
+# proxmox resource → no API call); when it IS the active provider these are null,
+# so bpg falls back to the PROXMOX_VE_* env vars above — same as before. (Mirrors
+# the openstack/outscale blocks, which gate the same way.)
+provider "proxmox" {
+  endpoint  = local.active_provider == "proxmox" ? null : "https://127.0.0.1:8006/"
+  api_token = local.active_provider == "proxmox" ? null : "placeholder@pam!inactive=00000000-0000-0000-0000-000000000000"
+  insecure  = local.active_provider == "proxmox" ? null : true
+}
 
 # Backups go through the AWS CLI (scripts/ops/backup-artifacts.sh + backup-state.sh),
 # not a Terraform provider — the artifacts/state are streamed to S3-compatible
@@ -47,9 +56,10 @@ locals {
     zone               = null
     instance_type      = null
     image_id           = null
-    image_name         = "talos"
+    image_name         = null
     zones              = null
     availability_zones = null
+    k8s_lb_mode        = "managed"
   }, try(var.node_distribution["scaleway"], {}))
 
   ovh_dist = merge({
@@ -58,10 +68,11 @@ locals {
     region             = "EU-WEST-PAR"
     flavor_name        = "b3-8"
     image_id           = null
-    image_name         = "talos"
+    image_name         = null
     network_name       = "Ext-Net"
     availability_zones = ["nova"]
     bastion_image_id   = "Ubuntu 22.04"
+    k8s_lb_mode        = "managed"
   }, try(var.node_distribution["ovh"], {}))
 
   osc_dist = merge({
@@ -70,9 +81,10 @@ locals {
     region             = "eu-west-2"
     instance_type      = "tinav5.c2r4p1"
     image_id           = null
-    image_name         = "talos"
+    image_name         = null
     availability_zones = ["eu-west-2a", "eu-west-2b", "eu-west-2c"]
     bastion_image_id   = null
+    k8s_lb_mode        = "managed"
   }, try(var.node_distribution["outscale"], {}))
 
   # Proxmox (single host or multi-host PVE cluster). VMs round-robined across
@@ -88,6 +100,7 @@ locals {
     network_cidr            = "10.0.0.0/24"
     gateway_ip              = null
     apiserver_vip           = null
+    apiserver_vip_interface = "eth0"
     cpu_cores               = 4
     memory_mb               = 8192
     root_disk_gb            = 20
@@ -98,6 +111,30 @@ locals {
     host_public_ip          = null
     host_ssh_user           = "root"
   }, try(var.node_distribution["proxmox"], {}))
+}
+
+# ==============================================================================
+# Image lookup convention — when a provider's image_id/image_name/
+# talos_image_file_id is left unset, fall back to the exact name the
+# talos-image root publishes/downloads under (see talos-image/main.tf's
+# local.image_name and modules/talos-image/proxmox), so the operator rarely
+# needs to hand-copy an ID between the two roots. An explicit value always
+# wins (coalesce picks the first non-null). Computed here rather than as a
+# merge() default in *_dist above: node_distribution's map(object) type fills
+# every unset field with null (not "absent"), which would silently clobber a
+# literal default placed inside merge() — see the comment on pmx_dist's
+# host-specific keys above.
+# ==============================================================================
+
+locals {
+  scw_image_name = coalesce(local.scw_dist.image_name, "talos-scaleway-amd64-${var.talos_version}")
+  ovh_image_name = coalesce(local.ovh_dist.image_name, "talos-ovh-amd64-${var.talos_version}")
+  osc_image_name = coalesce(local.osc_dist.image_name, "talos-outscale-amd64-${var.talos_version}")
+
+  pmx_talos_image_file_id = coalesce(
+    local.pmx_dist.talos_image_file_id,
+    "${local.pmx_dist.iso_datastore_id}:iso/talos-${trimprefix(var.talos_version, "v")}-nocloud-amd64.img"
+  )
 }
 
 # ==============================================================================
@@ -135,11 +172,12 @@ module "scw" {
   worker_count        = local.scw_dist.workers
 
   image_id         = local.scw_dist.image_id
-  image_name       = local.scw_dist.image_name
+  image_name       = local.scw_image_name
   zone             = local.scw_dist.zone
   region           = local.scw_dist.region
   instance_type    = local.scw_dist.instance_type
   additional_zones = local.scw_dist.zones != null ? local.scw_dist.zones : ["fr-par-1", "fr-par-2", "fr-par-3"]
+  k8s_lb_mode      = local.scw_dist.k8s_lb_mode
 
   worker_storage = var.worker_storage
 
@@ -163,9 +201,11 @@ module "ovh" {
   region             = local.ovh_dist.region
   flavor_name        = local.ovh_dist.flavor_name
   image_id           = local.ovh_dist.image_id
+  image_name         = local.ovh_image_name
   network_name       = local.ovh_dist.network_name
   availability_zones = local.ovh_dist.availability_zones
   bastion_image_id   = local.ovh_dist.bastion_image_id
+  k8s_lb_mode        = local.ovh_dist.k8s_lb_mode
 
   worker_storage = var.worker_storage
 
@@ -188,8 +228,10 @@ module "outscale" {
 
   instance_type      = local.osc_dist.instance_type
   image_id           = local.osc_dist.image_id
+  image_name         = local.osc_image_name
   availability_zones = local.osc_dist.availability_zones
   bastion_image_id   = local.osc_dist.bastion_image_id
+  k8s_lb_mode        = local.osc_dist.k8s_lb_mode
 
   worker_storage = var.worker_storage
 
@@ -214,7 +256,7 @@ module "proxmox" {
   node_names          = local.pmx_dist.node_names
   datastore_id        = local.pmx_dist.datastore_id
   iso_datastore_id    = local.pmx_dist.iso_datastore_id
-  talos_image_file_id = local.pmx_dist.talos_image_file_id
+  talos_image_file_id = local.pmx_talos_image_file_id
 
   network_bridge          = local.pmx_dist.network_bridge
   network_cidr            = local.pmx_dist.network_cidr
@@ -278,6 +320,22 @@ locals {
     proxmox  = local.pmx_dist.host_ssh_user
   }, local.active_provider, "ubuntu")
 
+  # k8s_lb_mode only applies to scaleway/ovh (outscale rejects "vip" via its
+  # own variable validation; proxmox has no LB to begin with — see below).
+  active_k8s_lb_mode = lookup({
+    scaleway = local.scw_dist.k8s_lb_mode
+    ovh      = local.ovh_dist.k8s_lb_mode
+  }, local.active_provider, "managed")
+
+  # Proxmox always wires its own VIP (its k8s_lb_ip output IS var.apiserver_vip
+  # — see modules/providers/proxmox/outputs.tf). Clouds only get one in
+  # k8s_lb_mode = "vip", where k8s_lb_ip already resolves to the reserved
+  # private address instead of the managed LB (see each provider's outputs.tf).
+  apiserver_vip = local.pmx_dist.apiserver_vip != null ? local.pmx_dist.apiserver_vip : (
+    local.active_k8s_lb_mode == "vip" ? local.k8s_lb_ip : null
+  )
+  apiserver_vip_interface = local.active_provider == "proxmox" ? local.pmx_dist.apiserver_vip_interface : "eth0"
+
   control_plane_ips = coalesce(
     length(try(module.scw[0].control_plane_private_ips, [])) > 0 ? module.scw[0].control_plane_private_ips : null,
     length(try(module.ovh[0].control_plane_private_ips, [])) > 0 ? module.ovh[0].control_plane_private_ips : null,
@@ -320,6 +378,44 @@ locals {
 }
 
 # ==============================================================================
+# EXPERIMENTAL — single-apply SSH tunnels (var.auto_tunnels)
+#
+# Opens the tunnels itself between the provider module and modules/talos, in
+# the SAME apply, instead of the operator running `task bootstrap-phase2`
+# separately between two `tofu apply`s. Ordering falls out of the reference
+# graph: local.bastion_ip/control_plane_ips/worker_ips are unknown until the
+# provider module's VMs exist, so this resource (and, via depends_on,
+# module.talos after it) can't evaluate/run until they do.
+#
+# Default off (var.auto_tunnels = false) — the documented two-phase flow
+# remains the supported path; this is not exercised against a real host yet.
+# ==============================================================================
+
+resource "terraform_data" "talos_tunnels" {
+  count = var.talos_bootstrap && var.auto_tunnels && local.total_control_planes > 0 ? 1 : 0
+
+  triggers_replace = [
+    local.bastion_ip,
+    local.bastion_user,
+    join(",", local.control_plane_ips),
+    join(",", local.worker_ips),
+  ]
+
+  provisioner "local-exec" {
+    command = join(" ", concat(
+      [
+        "${path.module}/../../../scripts/bootstrap/talos-tunnels.sh", "open-direct",
+        "--bastion", local.bastion_ip,
+        "--user", local.bastion_user,
+        "--cps", join(",", local.control_plane_ips),
+        "--key", var.ssh_key_path,
+      ],
+      length(local.worker_ips) > 0 ? ["--workers", join(",", local.worker_ips)] : []
+    ))
+  }
+}
+
+# ==============================================================================
 # Talos Cluster (secrets, config, bootstrap, kubeconfig)
 # ==============================================================================
 
@@ -341,9 +437,17 @@ module "talos" {
   control_plane_ips = local.control_plane_ips
   worker_ips        = local.worker_ips
 
+  # Proxmox always wires a VIP; scw/ovh only in k8s_lb_mode = "vip"; outscale
+  # and local never do (both resolve to null — see the locals above).
+  apiserver_vip           = local.apiserver_vip
+  apiserver_vip_interface = local.apiserver_vip_interface
+
+  skip_port_ready_wait    = var.skip_port_ready_wait
+  secrets_prevent_destroy = var.secrets_prevent_destroy
+
   # Phase 2 reaches the private nodes through per-node SSH tunnels on localhost
   # (see the `instructions` output). `endpoint` is where the provider connects;
-  # node identity stays the private IP. CPs: 127.0.0.1:5000+i, workers: :5010+i.
+  # node identity stays the private IP. CPs: 127.0.0.1:50000+i, workers: :50100+i.
   control_plane_endpoints = var.talos_bootstrap ? [for i in range(local.total_control_planes) : "127.0.0.1:${50000 + i}"] : []
   worker_endpoints        = var.talos_bootstrap ? [for i in range(local.total_workers) : "127.0.0.1:${50100 + i}"] : []
 
@@ -357,7 +461,11 @@ module "talos" {
   # Dedicated worker data volumes (encrypted UserVolumeConfig). Empty on local.
   worker_storage = var.worker_storage
 
-  depends_on = [module.scw, module.ovh, module.outscale]
+  # terraform_data.talos_tunnels only exists when auto_tunnels=true (count=0
+  # otherwise) — depending on it is then a no-op, not a hard requirement, so
+  # this list works identically for both the documented two-phase flow and
+  # the experimental single-apply path.
+  depends_on = [module.scw, module.ovh, module.outscale, module.proxmox, terraform_data.talos_tunnels]
 }
 
 # ==============================================================================

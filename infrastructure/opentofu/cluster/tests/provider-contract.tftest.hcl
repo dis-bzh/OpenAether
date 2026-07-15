@@ -97,19 +97,20 @@ override_resource {
 # ==============================================================================
 
 variables {
-  cluster_name        = "contract-test"
-  environment         = "dev"
-  cluster_role        = "workload"
-  talos_bootstrap     = false
-  backup_enabled      = false # backups run a local-exec (aws s3 cp); skip in tests
-  admin_ip            = ["10.0.0.1/32"]
-  bastion_ssh_keys    = { scaleway = ["ssh-ed25519 test"] }
-  git_repo_url        = "https://github.com/test/repo.git"
-  cilium_manifest     = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium-test"
-  s3_primary_endpoint = "https://s3.fr-par.scw.cloud"
-  s3_primary_region   = "fr-par"
-  s3_replica_endpoint = "https://s3.fr-par.scw.cloud"
-  s3_replica_region   = "fr-par"
+  cluster_name            = "contract-test"
+  environment             = "dev"
+  cluster_role            = "workload"
+  talos_bootstrap         = false
+  secrets_prevent_destroy = false # tofu test's post-run cleanup destroys apply-mode state — see cluster/variables.tf (talos_machine_secrets is created unconditionally, even with talos_bootstrap=false)
+  backup_enabled          = false # backups run a local-exec (aws s3 cp); skip in tests
+  admin_ip                = ["10.0.0.1/32"]
+  bastion_ssh_keys        = { scaleway = ["ssh-ed25519 test"] }
+  git_repo_url            = "https://github.com/test/repo.git"
+  cilium_manifest         = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cilium-test"
+  s3_primary_endpoint     = "https://s3.fr-par.scw.cloud"
+  s3_primary_region       = "fr-par"
+  s3_replica_endpoint     = "https://s3.fr-par.scw.cloud"
+  s3_replica_region       = "fr-par"
 }
 
 # ==============================================================================

@@ -39,7 +39,7 @@ data "scaleway_instance_image" "worker" {
 }
 
 # ⚠ ForceNew: `type` (and `image`) replace the instance when changed. A plain
-# `task infra-management` then recreates ALL nodes in PARALLEL → the control planes
+# `task infra ROLE=management` then recreates ALL nodes in PARALLEL → the control planes
 # reboot together → etcd loses quorum → outage. To change instance_type or the
 # Talos image WITHOUT downtime, use `task rolling-replace` (drains + replaces one
 # node at a time, gated on etcd/Longhorn reconvergence). See scripts/ops/rolling-replace.sh.

@@ -5,6 +5,19 @@
 # No user_data — Talos configuration is applied via the Talos API after provisioning.
 # ==============================================================================
 
+# Looked up by name only when image_id is left unset — mirrors the Scaleway
+# module's data.scaleway_instance_image (the talos-image root publishes under
+# this same name convention; see talos-image/main.tf's local.image_name).
+data "openstack_images_image_v2" "talos" {
+  count       = var.image_id == null ? 1 : 0
+  name        = var.image_name
+  most_recent = true
+}
+
+locals {
+  resolved_image_id = coalesce(var.image_id, try(data.openstack_images_image_v2.talos[0].id, null))
+}
+
 resource "openstack_networking_port_v2" "control_plane" {
   count              = var.control_plane_count
   name               = "${var.cluster_name}-cp-port-${count.index}"
@@ -15,12 +28,22 @@ resource "openstack_networking_port_v2" "control_plane" {
   fixed_ip {
     subnet_id = openstack_networking_subnet_v2.private.id
   }
+
+  # k8s_lb_mode = "vip": let the apiserver VIP (owned by whichever CP Talos
+  # currently assigns it to) pass Neutron's anti-spoofing filter on every CP
+  # port — only one port actually carries it at a time.
+  dynamic "allowed_address_pairs" {
+    for_each = var.k8s_lb_mode == "vip" ? [1] : []
+    content {
+      ip_address = try(openstack_networking_port_v2.k8s_vip[0].all_fixed_ips[0], "0.0.0.0")
+    }
+  }
 }
 
 resource "openstack_compute_instance_v2" "control_plane" {
   count             = var.control_plane_count
   name              = "${var.cluster_name}-cp-${count.index}"
-  image_id          = var.image_id
+  image_id          = local.resolved_image_id
   flavor_name       = var.flavor_name
   region            = var.region
   availability_zone = element(var.availability_zones, count.index)
@@ -37,7 +60,7 @@ resource "openstack_compute_instance_v2" "control_plane" {
 resource "openstack_compute_instance_v2" "worker" {
   count             = var.worker_count
   name              = "${var.cluster_name}-worker-${count.index}"
-  image_id          = var.image_id
+  image_id          = local.resolved_image_id
   flavor_name       = var.flavor_name
   region            = var.region
   availability_zone = element(var.availability_zones, count.index)

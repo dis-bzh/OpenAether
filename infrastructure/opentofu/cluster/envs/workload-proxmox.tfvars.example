@@ -22,7 +22,9 @@ node_distribution = {
 
     node_names          = ["pve1"]
     # node_names        = ["pve1", "pve2", "pve3"]  # HA: 1 CP per physical host
-    talos_image_file_id = "local:iso/talos-1.13.3-nocloud-amd64.img"
+    # talos_image_file_id optional — defaults to "<iso_datastore_id>:iso/talos-<talos_version>-nocloud-amd64.img"
+    # (downloaded by `task talos-image PROVIDER=proxmox`). Override only for a different path:
+    # talos_image_file_id = "local:iso/talos-1.13.3-nocloud-amd64.img"
 
     network_bridge = "vmbr1"
     network_cidr   = "10.0.0.0/24"

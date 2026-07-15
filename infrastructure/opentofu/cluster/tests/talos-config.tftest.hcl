@@ -135,7 +135,9 @@ variables {
 # The module-internal lifecycle precondition on data.talos_machine_configuration
 # cannot be referenced via expect_failures from outside the module
 # (OpenTofu limitation: expect_failures only supports root-level checkable objects).
-# The precondition code in modules/talos/main.tf:107-110 is the source of truth.
+# The precondition on data.talos_machine_configuration.control_plane in
+# modules/talos/main.tf (guarding the CILIUM-MANIFEST-PLACEHOLDER sentinel) is the
+# source of truth.
 # It is validated indirectly via Test 2 (valid manifest passes).
 # ==============================================================================
 
@@ -296,5 +298,36 @@ run "cluster_role_validation" {
   assert {
     condition     = contains(["management", "workload"], var.cluster_role)
     error_message = "cluster_role must be 'management' or 'workload'."
+  }
+}
+
+# ==============================================================================
+# Test 11: apiserver VIP is only injected when explicitly set. This suite's
+# shared variables block (see top of file) is Scaleway with k8s_lb_mode left at
+# its default ("managed"), so no provider here ever sets an apiserver_vip —
+# module.talos should always receive null, matching pre-VIP-support behavior.
+# ==============================================================================
+
+run "vip_injected_only_when_set" {
+  command = plan
+
+  assert {
+    condition     = module.talos.apiserver_vip == null
+    error_message = "apiserver_vip must stay null when no provider requests one (Scaleway, k8s_lb_mode=managed)."
+  }
+}
+
+# ==============================================================================
+# Test 12: auto_tunnels defaults to false — the experimental single-apply
+# terraform_data.talos_tunnels resource (cluster/main.tf) must never run
+# unless explicitly opted into, including under `tofu test`'s apply mode.
+# ==============================================================================
+
+run "auto_tunnels_disabled_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(terraform_data.talos_tunnels) == 0
+    error_message = "terraform_data.talos_tunnels must have count=0 when auto_tunnels is left at its default (false)."
   }
 }

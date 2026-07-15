@@ -46,6 +46,20 @@ resource "scaleway_instance_private_nic" "worker" {
   zone               = element(var.additional_zones, count.index)
 }
 
+# Reserve a private IP for the Talos-managed apiserver VIP (k8s_lb_mode = "vip").
+# Deliberately not attached to any NIC — Talos claims it via gratuitous ARP on
+# whichever control plane currently holds it; IPAM just guarantees the address
+# itself is never handed out to another node.
+resource "scaleway_ipam_ip" "k8s_vip" {
+  count      = var.k8s_lb_mode == "vip" ? 1 : 0
+  project_id = var.project_id
+  region     = var.region
+
+  source {
+    private_network_id = scaleway_vpc_private_network.this.id
+  }
+}
+
 # Attach bastion to private network (for access to nodes)
 resource "scaleway_instance_private_nic" "bastion" {
   server_id          = scaleway_instance_server.bastion.id

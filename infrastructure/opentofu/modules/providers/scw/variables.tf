@@ -101,3 +101,23 @@ variable "bastion_instance_type" {
   type        = string
   default     = "DEV1-S"
 }
+
+variable "k8s_lb_mode" {
+  description = <<-EOT
+    How the Kubernetes API is fronted:
+      "managed" (default) - a Scaleway LB (public IP, ACL-restricted).
+      "vip"     - EXPERIMENTAL. No LB: reserves a private IPAM address instead,
+                  and relies on modules/talos's Layer2 VIP (ARP-announced by
+                  whichever control plane holds it) on the private network.
+                  The API is then private-only, reachable via the bastion SSH
+                  tunnel — no public IP for 6443. Scaleway's private network
+                  anti-spoofing behavior with a floating ARP-announced address
+                  is undocumented; validate before relying on this in prod.
+  EOT
+  type        = string
+  default     = "managed"
+  validation {
+    condition     = contains(["managed", "vip"], var.k8s_lb_mode)
+    error_message = "k8s_lb_mode must be \"managed\" or \"vip\"."
+  }
+}
