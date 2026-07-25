@@ -34,6 +34,25 @@ Proxmox** (SYS-1) aux côtés de Scaleway/OVH/Outscale ; abandon du multi-cloud
   → ressources `config_apply` skippées). Restauré : le `config_apply` attend désormais
   `:50000` ouvert → bootstrap cloud **déterministe**. Inerte en local (`do_apply=false`).
 
+### Added — snapshot etcd chiffré multi-destinations
+
+- **`task etcd-snapshot PROVIDER=…`** + `scripts/ops/etcd-snapshot.sh` : snapshot etcd
+  via `talosctl` (premier CP sain, tunnels 50000+i), chiffré **côté client** (gpg
+  AES-256, S2K durci, même passphrase que le tfstate) puis poussé vers les buckets
+  artifacts **primary + replica** (`backup_targets`), rétention `KEEP=30`. GitOps rend
+  etcd reconstructible — c'est une bretelle RTO, complémentaire des backups in-cluster
+  d'`OpenAether-apps` (brique `backup` : snapshot raft OpenBao + dumps CNPG via restic).
+
+### Changed — rolling-replace généralisé aux 4 providers
+
+- **`scripts/ops/rolling-replace.sh`** ne hard-code plus les adresses `module.scw` :
+  les cibles sont dérivées de `tofu state list` (`module.<mod>[0].*.<type>[i]`), en
+  **excluant les volumes de données** (qui survivent au remplacement) mais en incluant
+  les ressources attach/link (recréées sur la VM neuve). Accepte
+  `scaleway|ovh|outscale|proxmox` ; seul Scaleway a été exercé live — les autres
+  affichent un avertissement (dry-run d'abord). Proxmox : disques workers inline →
+  wipe + rebuild Longhorn depuis les répliques (avertissement dédié).
+
 ### Added — remplacement rolling des nœuds (sans coupure)
 
 - **`task rolling-replace PROVIDER=…`** + `scripts/ops/rolling-replace.sh` : remplace
