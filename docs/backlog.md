@@ -33,6 +33,14 @@ Alimenté au fil des sessions (humain + assistant). Retirer les entrées faites.
       n'est pas `completed` (le destroy préalable a supprimé l'OMI v1.13.3).
 - [ ] **Purge du staging Outscale** : `s3-openaether-outscale-talos-staging`
       conserve un .raw de 4,1 Go par version, jamais supprimé après import.
+- [ ] **DETTE — state talos-image Outscale désynchronisé** (2026-07-25) : l'OMI
+      `ami-6711ec55` (Talos v1.13.4, variante aws) a été enregistrée VIA L'API
+      depuis le snapshot `snap-73e9b29e`, parce qu'un `tofu apply` relançait un
+      import de ~1 h au lieu de réutiliser le snapshot abouti. À réconcilier :
+      `tofu import module.outscale[0].outscale_snapshot.talos snap-73e9b29e` +
+      `… outscale_image.talos ami-6711ec55`, sinon le prochain apply recréera
+      tout. Un snapshot orphelin (`snap-6bc67b02`, import relancé puis
+      abandonné) est également à supprimer — il est facturé.
 - [ ] **Enfants durcis** : `network.controlPlaneLoadBalancer` (aujourd'hui
       endpoint = IP publique du CP, non-HA) + private network / gateway au lieu
       d'une IPv4 publique par nœud.
