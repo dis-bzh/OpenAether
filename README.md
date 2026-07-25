@@ -166,6 +166,10 @@ task infra ROLE=management PROVIDER=scaleway
 task bootstrap-phase2 ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
 ```
 
+**Après le déploiement** : suivre le parcours jour-1 (`docs/admin-access.md`) —
+escrow Shamir/root/restic, signature offline de l'intermediate PKI (HTTPS),
+seed des destinations backup, accès admin aux UIs, secrets CAPI enfants.
+
 ### 🚧 Deploy a Workload Cluster
 
 ```bash
