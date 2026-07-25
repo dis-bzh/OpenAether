@@ -1,17 +1,27 @@
 # ==============================================================================
 # Talos image — Outscale (OMI)
 # Outscale has no foreign-image import primitive, so (mirrors Scaleway):
-#   Factory (nocloud-<arch>.raw.zst) -> raw -> OOS (Object Storage)
+#   Factory (aws-<arch>.raw.zst) -> raw -> OOS (Object Storage)
 #     -> outscale_snapshot (import via file_location) -> outscale_image (OMI)
-# Outscale is EC2-compatible; the generic `nocloud` Talos image boots into
-# maintenance mode and the cluster's two-phase apply pushes the config over the
-# SSH tunnel (no cloud-metadata dependency needed at boot).
+#
+# PLATEFORME `aws` (et non `nocloud`) : Outscale est EC2-compatible et expose
+# une IMDS EC2. La variante aws de Talos la lit, ce qui apporte DEUX choses
+# indispensables à CAPI (CAPOSC livre la machine config en user-data, comme EC2) :
+#   1. ingestion du user-data  -> sans elle les VMs CAPI resteraient en
+#      maintenance mode, jamais configurées ;
+#   2. lecture de public-ipv4  -> l'IP publique (NAT 1:1 côté Outscale, donc
+#      invisible de la NIC) devient une NodeAddress et entre dans les SAN du
+#      certificat apid ; sans elle, CACPPT échouerait en TLS sur <IP>:50000
+#      ("certificate is valid for 10.x, not <IP publique>") et ne pourrait ni
+#      bootstrapper etcd ni récupérer le kubeconfig de l'enfant.
+# Le flux OpenTofu (two-phase apply) reste inchangé : sans user-data, l'image
+# aws démarre elle aussi en maintenance mode et reçoit sa config par l'API Talos.
 # ==============================================================================
 
 locals {
-  factory_url = "https://factory.talos.dev/image/${var.schematic_id}/${var.talos_version}/nocloud-${var.arch}.raw.zst"
-  raw_path    = "${var.cache_dir}/nocloud-${var.arch}-${var.talos_version}.raw"
-  object_key  = "talos/nocloud-${var.arch}-${var.talos_version}.raw"
+  factory_url = "https://factory.talos.dev/image/${var.schematic_id}/${var.talos_version}/aws-${var.arch}.raw.zst"
+  raw_path    = "${var.cache_dir}/aws-${var.arch}-${var.talos_version}.raw"
+  object_key  = "talos/aws-${var.arch}-${var.talos_version}.raw"
 }
 
 # Fetch from Image Factory, decompress, upload the raw disk to OOS for import.
@@ -34,14 +44,14 @@ resource "terraform_data" "build_and_upload" {
         command -v "$bin" >/dev/null 2>&1 || { echo "✗ required tool not found: $bin — run 'task setup'"; exit 1; }
       done
       mkdir -p "${var.cache_dir}"
-      echo "▶ Downloading Talos ${var.talos_version} (nocloud-${var.arch}) from Image Factory..."
-      curl -fL --retry 3 "${local.factory_url}" -o "${var.cache_dir}/nocloud.raw.zst"
+      echo "▶ Downloading Talos ${var.talos_version} (aws-${var.arch}) from Image Factory..."
+      curl -fL --retry 3 "${local.factory_url}" -o "${var.cache_dir}/aws.raw.zst"
       echo "▶ Decompressing (zstd)..."
-      zstd -f -d "${var.cache_dir}/nocloud.raw.zst" -o "${local.raw_path}"
+      zstd -f -d "${var.cache_dir}/aws.raw.zst" -o "${local.raw_path}"
       echo "▶ Uploading to OOS: s3://${var.bucket_name}/${local.object_key}"
       aws s3 cp "${local.raw_path}" "s3://${var.bucket_name}/${local.object_key}" \
         --endpoint-url "${var.s3_endpoint}" --region "${var.region}"
-      rm -f "${var.cache_dir}/nocloud.raw.zst" "${local.raw_path}"
+      rm -f "${var.cache_dir}/aws.raw.zst" "${local.raw_path}"
       echo "✓ Raw image staged for snapshot import."
     EOT
   }
