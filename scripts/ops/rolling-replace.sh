@@ -13,15 +13,27 @@
 #   that node → wait for Talos/etcd/Longhorn to reconverge → uncordon → next. The
 #   rest of the cluster stays up throughout.
 #
-# WHAT IT DOES PER NODE
+# WHAT IT DOES PER NODE (provider-agnostic)
 #   tofu apply
-#     -target=module.scw[0].scaleway_instance_server.<T>[i]      # recreate VM (ForceNew)
-#     -target=module.scw[0].scaleway_instance_private_nic.<T>[i] # reattach same IPAM IP
+#     -target=<every module.<mod>[0] resource of THIS node>   # VM, NIC/port, volume attach/link
 #     -replace=module.talos.talos_machine_configuration_apply.<T>[i]
+#   The target list is derived from `tofu state list` (module.<mod>[0].*.<T>[i]),
+#   EXCLUDING the data-volume resources themselves (scaleway_block_volume,
+#   openstack_blockstorage_volume_v3, outscale_volume) which must SURVIVE the
+#   replacement, but INCLUDING the attach/link resources (they reference the old
+#   instance id and must be recreated onto the fresh VM).
 #   The -replace is ESSENTIAL: talos_machine_configuration_apply references only the
 #   stable endpoint/node/config (never the instance ID), so replacing the VM yields
 #   NO diff on it → without -replace the fresh VM stays in maintenance mode, never
 #   configured. -replace forces Talos to re-apply the machine config to the new VM.
+#
+# PROVIDER STATUS
+#   scaleway : exercised end-to-end on a live management cluster.
+#   ovh/outscale/proxmox : code-complete, NEVER exercised live (test matrix ⬜) —
+#     always start with --dry-run and inspect the printed target list.
+#   proxmox  : worker data disks are defined INLINE on the VM (no separate volume
+#     resource) → replacing a worker WIPES its Longhorn disk; Longhorn rebuilds
+#     from the surviving replicas. Verify volumes are healthy (x2+) first.
 #
 # SAFETY
 #   * Workers first, then control planes (workers carry the heavy stateful load).
@@ -63,14 +75,22 @@ for arg in "$@"; do
   esac
 done
 
+# Provider → module name in cluster/main.tf (junction modules, count-gated).
 case "$PROVIDER" in
-  scaleway) ;;
-  ovh|outscale)
-    echo "✗ rolling-replace currently implements the Scaleway module addresses only." >&2
-    echo "  (OVH/Outscale instances differ — extend the address helpers before use.)" >&2
-    exit 2 ;;
-  *) echo "✗ unknown provider: $PROVIDER (expected scaleway|ovh|outscale)" >&2; exit 2 ;;
+  scaleway) MOD="scw" ;;
+  ovh)      MOD="ovh" ;;
+  outscale) MOD="outscale" ;;
+  proxmox)  MOD="proxmox" ;;
+  *) echo "✗ unknown provider: $PROVIDER (expected scaleway|ovh|outscale|proxmox)" >&2; exit 2 ;;
 esac
+if [[ "$PROVIDER" != "scaleway" ]]; then
+  echo "⚠ ${PROVIDER}: rolling-replace path is code-complete but has NEVER been exercised" >&2
+  echo "  on a live cluster (deployment-test-matrix ⬜) — run --dry-run first and review targets." >&2
+fi
+if [[ "$PROVIDER" == "proxmox" ]]; then
+  echo "⚠ proxmox: worker data disks are inline on the VM — replacing a worker WIPES its" >&2
+  echo "  Longhorn disk (rebuild from surviving replicas). Check volume health/replicas first." >&2
+fi
 
 # --- config ------------------------------------------------------------------
 TFVARS="envs/management-${PROVIDER}.tfvars"
@@ -226,18 +246,35 @@ wait_longhorn_healthy() {
 # ==============================================================================
 # Per-node replacement
 # ==============================================================================
+
+# All state resources of THIS node under module.<mod>[0]: the VM/instance and its
+# NIC/port (named exactly <tf_t>[i]) plus, for workers, the volume attach/link
+# resources (named worker_data[i]) — but NOT the data volumes themselves, which
+# must survive the replacement.
+node_targets() { # <tf_t> <index>
+  tofu state list 2>/dev/null | grep -F "module.${MOD}[0]." | awk -v t="$1" -v i="$2" '
+    $0 ~ ("\\." t "\\[" i "\\]$") { print; next }
+    t == "worker" && $0 ~ ("\\.worker_data\\[" i "\\]$") \
+      && $0 !~ /(scaleway_block_volume|openstack_blockstorage_volume_v3|outscale_volume)\./ { print }
+  '
+}
+
 replace_node() { # <type: cp|worker> <index>
   local t="$1" i="$2"
-  local node_name node_ip ep srv_addr nic_addr cfg_addr tf_t
+  local node_name node_ip ep cfg_addr tf_t
   if [[ "$t" == "cp" ]]; then
     node_name="${NODE_PREFIX}-cp-${i}"; node_ip="${CP_IPS[$i]}"; tf_t="control_plane"
   else
     node_name="${NODE_PREFIX}-worker-${i}"; node_ip="${WK_IPS[$i]}"; tf_t="worker"
   fi
   ep="$(talos_ep "$t" "$i")"
-  srv_addr="module.scw[0].scaleway_instance_server.${tf_t}[${i}]"
-  nic_addr="module.scw[0].scaleway_instance_private_nic.${tf_t}[${i}]"
   cfg_addr="module.talos.talos_machine_configuration_apply.${tf_t}[${i}]"
+
+  local -a targets=()
+  local addr
+  while IFS= read -r addr; do targets+=("-target=${addr}"); done < <(node_targets "$tf_t" "$i")
+  [[ ${#targets[@]} -gt 0 ]] \
+    || die "no state resources match module.${MOD}[0].*.${tf_t}[${i}] — wrong PROVIDER, or state not initialized?"
 
   hr
   info "Node ${node_name}  (ip ${node_ip}, talos ${ep})"
@@ -246,7 +283,8 @@ replace_node() { # <type: cp|worker> <index>
     echo "  would: kubectl cordon ${node_name}"
     echo "  would: kubectl drain ${node_name} --ignore-daemonsets --delete-emptydir-data --timeout=${DRAIN_TIMEOUT}"
     [[ $t == cp ]] && echo "  would: talosctl etcd remove-member ${node_name} (via a healthy peer CP)"
-    echo "  would: tofu apply -target='${srv_addr}' -target='${nic_addr}' -replace='${cfg_addr}' \\"
+    echo "  would: tofu apply ${targets[*]} \\"
+    echo "                    -replace='${cfg_addr}' \\"
     echo "                    -var-file='${TFVARS}' -var talos_bootstrap=true -auto-approve"
     echo "  would: wait Talos health @ ${ep}, node Ready, $( [[ $t == cp ]] && echo 'etcd 3/3, ' )Longhorn healthy"
     echo "  would: kubectl uncordon ${node_name}"
@@ -270,9 +308,9 @@ replace_node() { # <type: cp|worker> <index>
 
   # 2. targeted recreate of THIS node only + forced Talos config re-apply
   info "tofu apply (targeted) — recreate ${node_name} + reattach NIC/IP + re-apply Talos config…"
+  info "targets: ${targets[*]#-target=}"
   tofu apply \
-    -target="$srv_addr" \
-    -target="$nic_addr" \
+    "${targets[@]}" \
     -replace="$cfg_addr" \
     -var-file="$TFVARS" \
     -var talos_bootstrap=true \
