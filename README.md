@@ -1,29 +1,34 @@
 # OpenAether-infra
 
 > **Store Anywhere, Run Anywhere.**
-> An open-source, resilient, multi-cloud Cloud Management Platform (CMP).
+> Un cluster Talos idempotent sur n'importe quel environnement — local (Docker),
+> on-prem (Proxmox) ou cloud (Scaleway/OVH/Outscale) — avec pour seul socle figé
+> **CNI (Cilium) + Flux**. Tout le reste se pioche dans `OpenAether-apps`.
 
 ## Version
 
-**v0.4.0** — Multi-cloud infrastructure with hub/spoke GitOps, cross-provider failover, and client-side-encrypted dual-store backups. Management cluster validated end-to-end on Scaleway, OVH, and Outscale; full cloud lifecycle re-run clean. Ready for external testers (not yet 1.0).
+**v0.4.0+** — Socle Talos modulaire multi-provider (recentrage : voir `CLAUDE.md`
+et `CHANGELOG.md [Unreleased]`). Management validé end-to-end sur Scaleway, OVH
+et Outscale ; local Docker validé (3 CP + workers) ; Proxmox code-complet
+(jamais appliqué sur matériel réel). Backups tfstate/artifacts chiffrés client,
+double store. Le multi-cloud actif-actif est abandonné ; le hub/spoke CAPI est
+une **surcouche optionnelle** (cf. `OpenAether-apps/apps/clusters/`).
 
 ## Architecture
 
 ```
-Management Cluster (Hub) — Scaleway HA (3 zones)
-  ├── Flux (hub mode — manages all spoke clusters via ApplicationSet)
-  ├── OpenBao (secrets management — HA Raft)
-  ├── Zitadel + CloudNativePG (identity)
-  ├── VictoriaMetrics (observability aggregator)
-  └── Istio (ambient mesh + Gateway API)
-          │
-     ┌────┴──────────────────────┐
-     ▼                           ▼
-SCW Workload Cluster     OVH Workload Cluster     Outscale Workload Cluster
-(spoke — client apps)    (spoke — client apps)    (spoke — client apps)
+Un cluster Talos autonome (socle figé : Cilium + Flux)
+  └── pioche modulaire dans OpenAether-apps (scripts/pick.py) :
+      OpenBao, ESO, cert-manager/PKI, Istio ambient, gateway, CNPG,
+      Longhorn, observability, Zitadel, Kyverno, backups restic…
+
+Surcouche OPTIONNELLE — cluster de management (CAPI pioché) :
+  Management (hub) ──CAPI+Talos──▶ clusters clients (kubeception)
+                    ──Flux kubeConfig──▶ Cilium+Flux injectés,
+                    puis chaque enfant réconcilie SON profil git (gitception)
 ```
 
-**Design principle:** The management cluster is NOT in the client data path. If the management cluster is temporarily unavailable, client workloads continue running unaffected. Management plane RTO: ~30 min (cross-provider failover) → Phase 4 target: <5 min.
+**Design principle:** The management cluster is NOT in the client data path. If the management cluster is temporarily unavailable, client workloads continue running unaffected (each child runs its own Flux).
 
 ## Layer Status
 
@@ -40,15 +45,18 @@ SCW Workload Cluster     OVH Workload Cluster     Outscale Workload Cluster
 | **Autoscaling** | KEDA v2.15.1 | 🚧 Phase 2 |
 | **Policy** | Kyverno v1.12.0 | 🚧 Phase 2 |
 
-## Cloud Provider Support
+## Provider Support
 
-Management cluster validated end-to-end (Talos bootstrap → Cilium → Flux) on **all three** providers.
+Même contrat pour tous (`modules/providers/provider-contract.md`) — le stack
+Talos/cluster est provider-agnostique. Statut détaillé : `docs/deployment-test-matrix.md`.
 
-| Provider | Status | Region | Notes |
-|----------|--------|--------|-------|
-| **Scaleway** | ✅ Management validated | fr-par (3 AZs) | HA control plane, public gateway egress, full networking stack |
+| Provider | Status | Region / cible | Notes |
+|----------|--------|----------------|-------|
+| **Scaleway** | ✅ Management validated | fr-par (3 AZs) | Implémentation de référence ; rolling-replace exercé live |
 | **OVH** | ✅ Management validated | EU-WEST-PAR (OpenStack) | Octavia LB, floating IPs, router SNAT egress, private network |
 | **Outscale / Numspot** | ✅ Management validated | eu-west-2 | LB, NAT-service egress, public/private subnets, VPC |
+| **Proxmox (on-prem)** | 🧪 Code-complet, unit-testé — **jamais appliqué en réel** | PVE single/multi-host | VIP Talos (pas de LB managé), NAT/DNAT nftables hôte, prérequis manuels (cf. `modules/providers/proxmox/README.md`) |
+| **Local (Docker)** | ✅ Validé (`task local-test`) | WSL2/Docker | 3 CP + workers, quorum etcd, Cilium+Flux — preuve creds-free de `modules/talos` |
 
 ## Repository Structure
 
@@ -59,23 +67,27 @@ OpenAether-infra/
 │       ├── cluster/                 # Cluster root (management + workload)
 │       │   ├── main.tf, backup.tf, backend.tf, variables.tf, outputs.tf
 │       │   ├── envs/                # Per-cluster config (<kind>-<provider>)
-│       │   │   ├── management-{scaleway,ovh,outscale}.tfvars(.example)
+│       │   │   ├── management-{scaleway,ovh,outscale,proxmox}.tfvars(.example)
 │       │   │   ├── workload-{scaleway,ovh,outscale}.tfvars(.example)
 │       │   │   └── failover-{scaleway,ovh,outscale}.tfvars(.example)
-│       │   └── tests/               # OpenTofu unit tests (26 tests total)
+│       │   └── tests/               # OpenTofu unit tests (incl. proxmox)
 │       ├── talos-image/             # Image builder root (one-off per version)
 │       │   ├── main.tf, backend.tf, variables.tf
 │       │   └── schematic.yaml       # Image Factory schematic
+│       ├── opentofu-local/          # Local Docker root (reuses modules/talos)
 │       └── modules/                 # Shared modules (both roots)
 │           ├── talos/               # Cluster secrets, config, bootstrap
-│           ├── providers/
+│           ├── providers/           # provider-contract.md = the contract
 │           │   ├── scw/             # Scaleway (reference implementation)
 │           │   ├── ovh/             # OVH / OpenStack
-│           │   └── outscale/        # Outscale / Numspot
+│           │   ├── outscale/        # Outscale / Numspot
+│           │   ├── proxmox/         # Proxmox VE (on-prem, VIP Talos, no managed LB)
+│           │   └── local/           # Docker containers (WSL2-aware)
 │           └── talos-image/
 │               ├── scaleway/        # qcow2 → snapshot → instance image
 │               ├── ovh/             # local qcow2 → Glance
-│               └── outscale/        # raw → OOS → snapshot → OMI
+│               ├── outscale/        # raw → OOS → snapshot → OMI
+│               └── proxmox/         # nocloud image on the PVE host
 └── scripts/
     ├── setup.sh
     ├── lib/common.sh                # Shared helpers (tfvars parsing, S3 creds)
@@ -88,6 +100,8 @@ OpenAether-infra/
     ├── ops/                         # Ongoing operations
     │   ├── backup-state.sh          # Replicate the encrypted tfstate to the -backup store
     │   ├── backup-artifacts.sh      # gpg-encrypt + upload kube/talosconfig (local-exec)
+    │   ├── etcd-snapshot.sh         # Encrypted etcd snapshot → both stores (task etcd-snapshot)
+    │   ├── rolling-replace.sh       # Zero-downtime node replacement (provider-agnostic targets)
     │   ├── bastion-harden-check.sh
     │   └── local-admin-portforward.sh
     ├── dev/                         # Local testing (no cloud)
