@@ -138,6 +138,7 @@ tasks:
       - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
       - tofu apply -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=false
       - task: _backup-state
+        vars: {PROVIDER: "{{.PROVIDER}}"}
 
   bootstrap-phase2:
     desc: >-
@@ -154,6 +155,7 @@ tasks:
       - SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh open .
       - tofu apply -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=true
       - task: _backup-state
+        vars: {PROVIDER: "{{.PROVIDER}}"}
 
   rolling-replace:
     desc: >-
@@ -173,6 +175,7 @@ tasks:
       - SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh open .
       - ../../../scripts/ops/rolling-replace.sh {{.PROVIDER}} {{.CLI_ARGS}}
       - task: _backup-state
+        vars: {PROVIDER: "{{.PROVIDER}}"}
 
   destroy:
     desc: "Destroy a cluster. Usage: task destroy ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox]"
@@ -226,6 +229,9 @@ tasks:
   _backup-state:
     internal: true
     dir: infrastructure/opentofu/cluster
+    vars:
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    env: *provider-env
     cmds:
       - ../../../scripts/ops/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
 

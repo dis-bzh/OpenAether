@@ -91,3 +91,7 @@ infrastructure/opentofu/cluster/.talos-bastion-known-hosts
 !.claude/hooks
 .claude/hooks/*
 !.claude/hooks/session-start.sh
+
+# Kubeconfigs extraits + escrow (jamais commiter)
+*.kubeconfig
+restic-escrow-*.txt
