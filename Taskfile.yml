@@ -200,7 +200,10 @@ tasks:
   backup-state:
     desc: >-
       Replicate the (encrypted) tfstate to the -backup store (post-apply). Set BACKUP_AWS_* for a cross-provider
-      replica.
+      replica. Usage: task backup-state [PROVIDER=scaleway|ovh|outscale|proxmox]
+    vars:
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    env: *provider-env
     cmds:
       - ./scripts/ops/backup-state.sh infrastructure/opentofu/cluster
 
