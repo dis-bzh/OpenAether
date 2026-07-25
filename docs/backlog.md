@@ -72,8 +72,14 @@ Alimenté au fil des sessions (humain + assistant). Retirer les entrées faites.
       *renommage in-place* au lieu de recréer (name non ForceNew côté provider
       Glance) → tout build de version doit passer par `-replace`, sinon l'image
       est mensongèrement étiquetée. À corriger dans le module.
-- [ ] **E2e OVH puis Outscale** : même parcours que Scaleway (image, up, DAG,
-      backups cross, enfant CAPI). Rolling-replace live hors Scaleway.
+- [x] ~~E2e enfants CAPI OVH + Outscale~~ → FAIT (2026-07-25) : edge-2 (OVH) et
+      edge-3 (Outscale) provisionnés et câblés. RESTE à faire hors Scaleway :
+      un cluster de MANAGEMENT complet (task up), les backups cross-provider et
+      le rolling-replace live.
+- [ ] **FIP des CP OpenStack créée hors CAPI** : `preAllocatedFloatingIPs` exige
+      de connaître l'IP avant le boot (certSANs) ; aujourd'hui l'IP est créée à
+      la main côté Neutron. Automatiser (tofu ou pré-création scriptée), et
+      documenter qu'un pool supprimé en reclaimPolicy=Delete DÉTRUIT l'IP.
 - [ ] **Proxmox** : premier apply réel (SYS-1) + hardening Ansible hôte (absent
       du repo, seulement documenté).
 - [ ] **Ingress public** : trancher CCM (LB managé) vs LB-IPAM — CCM Scaleway
