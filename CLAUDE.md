@@ -43,6 +43,12 @@ dédiés sous **Proxmox** (ZFS), VMs Talos. Single-host ou multi-host PVE cluste
 - `k3s-cluster` = **archive / inspiration seule**, jamais fusionnée ; refaire de 0 si
   plus propre.
 
+## Backlog
+
+Toute amélioration identifiée (« mieux que l'existant ») va dans
+**`docs/backlog.md`** — le lire en début de chantier, y ajouter les découvertes,
+retirer ce qui est fait. Parcours post-déploiement : `docs/admin-access.md`.
+
 ## Repère structure
 
 - `infrastructure/opentofu/modules/providers/` : un dossier par provider + `_shared`
