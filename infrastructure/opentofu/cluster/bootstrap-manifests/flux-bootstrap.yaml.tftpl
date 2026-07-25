@@ -35,3 +35,9 @@ spec:
   path: ./apps/flux/${cluster_role}
   prune: true
   wait: false
+  # Injecte la branche dans les objets du layer flux (dont le GitRepository
+  # auto-réappliqué — piège gitception : sans ça, une branche de test se fait
+  # écraser par le `main` en dur au premier reconcile).
+  postBuild:
+    substitute:
+      GIT_BRANCH: ${git_branch}

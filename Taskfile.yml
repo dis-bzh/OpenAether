@@ -37,7 +37,9 @@ tasks:
     cmds:
       # Skip the upstream-vendored Cilium/Flux bootstrap manifests (not our
       # config to fix; reviewed at render time). Matches the CI Trivy step.
-      - trivy config infrastructure/ --skip-files "**/bootstrap-manifests/cilium*.yaml" --skip-files "**/bootstrap-manifests/flux-install.yaml"
+      - >-
+        trivy config infrastructure/ --skip-files "**/bootstrap-manifests/cilium*.yaml"
+        --skip-files "**/bootstrap-manifests/flux-install.yaml"
       # Same scope as CI (whole opentofu tree, not just cluster).
       - checkov -d infrastructure/opentofu --config-file .checkov.yaml
       - gitleaks detect --source . --no-git
@@ -61,7 +63,9 @@ tasks:
   # ===========================================================================
 
   talos-image:
-    desc: "Build + publish the Talos image for a provider. Usage: task talos-image PROVIDER=scaleway|ovh|outscale|proxmox [VERSION=v1.13.4] [ENSURE=1]"
+    desc: >-
+      Build + publish the Talos image for a provider. Usage: task talos-image
+      PROVIDER=scaleway|ovh|outscale|proxmox [VERSION=v1.13.4] [ENSURE=1]
     vars:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
       VERSION: '{{.VERSION | default "v1.13.4"}}'
@@ -70,7 +74,10 @@ tasks:
       - './scripts/bootstrap/talos-image.sh {{.PROVIDER}} {{.VERSION}}{{if .ENSURE}} --ensure{{end}}'
 
   up:
-    desc: "Idempotent one-shot bring-up: image -> render manifests -> infra -> tunnels -> bootstrap. Usage: task up ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox] [KEY=~/.ssh/yourkey] [VERSION=v1.13.4] [FORCE=1]"
+    desc: >-
+      Idempotent one-shot bring-up: image -> render manifests -> infra -> tunnels -> bootstrap. Usage: task up
+      ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox] [KEY=~/.ssh/yourkey] [VERSION=v1.13.4]
+      [FORCE=1]
     vars:
       ROLE: '{{.ROLE | default "management"}}'
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
@@ -110,7 +117,9 @@ tasks:
   # ===========================================================================
 
   infra:
-    desc: "Phase 1: deploy infra (VMs/network, no Talos yet). Usage: task infra ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox]"
+    desc: >-
+      Phase 1: deploy infra (VMs/network, no Talos yet). Usage: task infra ROLE=management|workload
+      [PROVIDER=scaleway|ovh|outscale|proxmox]
     dir: infrastructure/opentofu/cluster
     vars:
       ROLE: '{{.ROLE | default "management"}}'
@@ -129,9 +138,12 @@ tasks:
       - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
       - tofu apply -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=false
       - task: _backup-state
+        vars: {PROVIDER: "{{.PROVIDER}}"}
 
   bootstrap-phase2:
-    desc: "Phase 2: open SSH tunnels (from state) + bootstrap Talos. Usage: task bootstrap-phase2 ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox] [KEY=~/.ssh/yourkey]"
+    desc: >-
+      Phase 2: open SSH tunnels (from state) + bootstrap Talos. Usage: task bootstrap-phase2
+      ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox] [KEY=~/.ssh/yourkey]
     dir: infrastructure/opentofu/cluster
     vars:
       ROLE: '{{.ROLE | default "management"}}'
@@ -143,9 +155,16 @@ tasks:
       - SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh open .
       - tofu apply -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=true
       - task: _backup-state
+        vars: {PROVIDER: "{{.PROVIDER}}"}
 
   rolling-replace:
-    desc: "Replace nodes one at a time (drain→targeted apply→wait) with NO downtime. Use after a ForceNew change (instance_type / Talos image) instead of infra, which replaces all nodes in parallel and breaks etcd quorum. Management clusters only (see scripts/ops/rolling-replace.sh). Usage: task rolling-replace PROVIDER=scaleway [KEY=~/.ssh/key] [-- --workers-only|--cp-only|--dry-run]"
+    desc: >-
+      Replace nodes one at a time (drain→targeted apply→wait) with NO downtime. Use after a ForceNew change
+      (instance_type / Talos image) instead of infra, which replaces all nodes in parallel and breaks etcd
+      quorum. Management clusters only (see scripts/ops/rolling-replace.sh). Targets are derived from `tofu
+      state list` — provider-agnostic, but only exercised live on Scaleway (dry-run first elsewhere).
+      Usage: task rolling-replace PROVIDER=scaleway|ovh|outscale|proxmox [KEY=~/.ssh/key]
+      [-- --workers-only|--cp-only|--dry-run]
     dir: infrastructure/opentofu/cluster
     vars:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
@@ -156,6 +175,7 @@ tasks:
       - SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh open .
       - ../../../scripts/ops/rolling-replace.sh {{.PROVIDER}} {{.CLI_ARGS}}
       - task: _backup-state
+        vars: {PROVIDER: "{{.PROVIDER}}"}
 
   destroy:
     desc: "Destroy a cluster. Usage: task destroy ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox]"
@@ -181,13 +201,37 @@ tasks:
       - ./scripts/bootstrap/talos-tunnels.sh close infrastructure/opentofu/cluster
 
   backup-state:
-    desc: "Replicate the (encrypted) tfstate to the -backup store (post-apply). Set BACKUP_AWS_* for a cross-provider replica."
+    desc: >-
+      Replicate the (encrypted) tfstate to the -backup store (post-apply). Set BACKUP_AWS_* for a cross-provider
+      replica. Usage: task backup-state [PROVIDER=scaleway|ovh|outscale|proxmox]
+    vars:
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    env: *provider-env
     cmds:
       - ./scripts/ops/backup-state.sh infrastructure/opentofu/cluster
+
+  etcd-snapshot:
+    desc: >-
+      Encrypted etcd snapshot → primary + replica buckets (client-side gpg AES-256, same passphrase as the
+      tfstate; retention KEEP=30). GitOps makes etcd reconstructible — this is an RTO shortcut. Usage: task
+      etcd-snapshot PROVIDER=scaleway|ovh|outscale|proxmox [KEY=~/.ssh/key] [KEEP=30]
+    dir: infrastructure/opentofu/cluster
+    vars:
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+      KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
+      KEEP: '{{.KEEP | default "30"}}'
+    env: *provider-env
+    cmds:
+      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
+      - SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh open .
+      - KEEP={{.KEEP}} ../../../scripts/ops/etcd-snapshot.sh
 
   _backup-state:
     internal: true
     dir: infrastructure/opentofu/cluster
+    vars:
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    env: *provider-env
     cmds:
       - ../../../scripts/ops/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
 
@@ -196,7 +240,9 @@ tasks:
   # ===========================================================================
 
   failover:
-    desc: "Cross-provider failover: stand up a 2nd management cluster on another cloud/on-prem target. Usage: task failover PROVIDER=ovh"
+    desc: >-
+      Cross-provider failover: stand up a 2nd management cluster on another cloud/on-prem target. Usage: task
+      failover PROVIDER=ovh
     vars:
       PROVIDER: '{{.PROVIDER | default "ovh"}}'
     cmds:
@@ -216,7 +262,9 @@ tasks:
       - ./scripts/bootstrap/render-bootstrap-manifests.sh
 
   kubeconfig:
-    desc: "Retrieve kubeconfig/talosconfig from OpenTofu outputs (re-inits the backend, so this works from a cold shell). Usage: task kubeconfig ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox]"
+    desc: >-
+      Retrieve kubeconfig/talosconfig from OpenTofu outputs (re-inits the backend, so this works from a cold
+      shell). Usage: task kubeconfig ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox]
     dir: infrastructure/opentofu/cluster
     vars:
       ROLE: '{{.ROLE | default "management"}}'
@@ -243,7 +291,8 @@ tasks:
     cmds:
       - tofu init -upgrade > /dev/null 2>&1 || tofu init > /dev/null
       - |
-        export TF_VAR_cilium_manifest="$(cat ../opentofu/cluster/bootstrap-manifests/cilium-local.yaml 2>/dev/null || echo 'placeholder')"
+        export TF_VAR_cilium_manifest="$(cat ../opentofu/cluster/bootstrap-manifests/cilium-local.yaml \
+          2>/dev/null || echo 'placeholder')"
         tofu apply -var talos_bootstrap=true -auto-approve
 
   local-test:
