@@ -101,8 +101,11 @@ resource "outscale_image" "talos" {
   block_device_mappings {
     device_name = "/dev/sda1"
     bsu {
-      snapshot_id           = outscale_snapshot.talos.snapshot_id
-      volume_size           = 10
+      snapshot_id = outscale_snapshot.talos.snapshot_id
+      # ⚠️ DOIT être ≥ à la taille du snapshot, sinon CreateImage échoue
+      # ("Volume size must be greater than <snap> size") : l'image aws fait
+      # 11 GiB, contre 10 pour l'ancienne nocloud. Marge volontaire.
+      volume_size           = 16
       volume_type           = "standard"
       delete_on_vm_deletion = true
     }
