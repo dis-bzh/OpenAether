@@ -103,6 +103,11 @@ resource "openstack_blockstorage_volume_v3" "worker_data" {
   volume_type = var.worker_data_volume_type
   region      = var.region
   size        = each.value.size_gb
+  # ⚠️ AZ EXPLICITE, la MÊME que le worker qui le montera : sans ce champ le
+  # volume atterrit dans la pseudo-AZ « any » et OVH le laisse en `error status`
+  # (constaté 2026-07-25, quotas et type hors de cause). Un volume et son
+  # instance doivent de toute façon partager l'AZ pour être attachables.
+  availability_zone = element(var.availability_zones, each.value.worker)
 }
 
 resource "openstack_compute_volume_attach_v2" "worker_data" {
