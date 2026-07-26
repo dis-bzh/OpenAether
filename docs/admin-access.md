@@ -88,6 +88,25 @@ kubectl --kubeconfig $KC get secret <enfant>-kubeconfig -n capi-clusters \
   -o jsonpath='{.data.value}' | base64 -d > <enfant>.kubeconfig && chmod 600 <enfant>.kubeconfig
 ```
 
+⚠️ **Ne pas modifier les `values` Cilium d'un enfant déjà vivant.** L'upgrade
+Helm déclenche un rollout du CNI sur un cluster souvent à 2 nœuds, sans marge :
+en 2026-07-26 les deux edges en sont sortis dégradés (l'un avec le datapath
+inter-nœuds définitivement cassé, `cilium-dbg status` → `Cluster health 0/2
+reachable`). **Recréer l'enfant** (`task edge-down` puis réactiver son fichier)
+est plus rapide et plus sûr que de réparer. Les valeurs correctes — dont
+`cni.exclusive: false`, obligatoire dès qu'Istio ambient est pioché — sont déjà
+dans `apps/clusters/*.yaml` : un enfant créé aujourd'hui les reçoit au bootstrap.
+
+Attendu pour un enfant sain avec le profil `workload` : **17/17 Kustomizations**
+(16 du profil + la racine posée par le scaffold).
+
+Vérifier l'état d'un enfant :
+```bash
+kubectl --kubeconfig <enfant>.kubeconfig get kustomization -n flux-system
+# si `kubectl logs/exec` timeout alors que les nœuds sont Ready :
+#   apiserver → kubelet:10250 est bloqué (security group) — cf. docs/backlog.md
+```
+
 ## Checklist récapitulative
 
 - [ ] Escrow Shamir + root token (Bitwarden)
