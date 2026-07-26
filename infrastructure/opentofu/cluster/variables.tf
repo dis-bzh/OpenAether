@@ -29,6 +29,25 @@ variable "cluster_role" {
   }
 }
 
+variable "skip_health_check" {
+  description = <<-EOT
+    Skip the post-bootstrap `talos_cluster_health` data source.
+
+    Ce check peut expirer alors que le cluster est PARFAITEMENT sain — observé
+    sur un management HA OVH (3 CP + 3 workers) : tous les nœuds Ready, etcd
+    HEALTH OK sur les 3 CP, DAG Flux complet, mais le data source retourne
+    "context deadline exceeded" et INTERROMPT l'apply avant les outputs
+    (kubeconfig/talosconfig) et le backup chiffré des artefacts.
+
+    Le mettre à true permet de finaliser un cluster dont la santé a été vérifiée
+    autrement (`talosctl -n <cp> service etcd`, `kubectl get nodes`). À n'activer
+    qu'en connaissance de cause : on perd le garde-fou qui détecte un bootstrap
+    silencieusement raté.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "talos_bootstrap" {
   description = "Whether to configure Talos via SSH tunnel (Phase 2). Default true — pass -var talos_bootstrap=false for Phase 1 (infra only)."
   type        = bool
