@@ -28,6 +28,25 @@ resource "outscale_load_balancer" "k8s" {
   }
 }
 
+# ⚠️ Les défauts Outscale du health check sont healthy_threshold = 10 et
+# check_interval = 30 s : après le moindre hoquet, il faut **5 minutes** pour
+# qu'un backend redevienne UP — pendant lesquelles l'API Kubernetes répond
+# `EOF` (le LB accepte la connexion mais n'a aucun backend sain). Observé
+# plusieurs fois sur le management Outscale. `health_check` étant un attribut
+# calculé sur outscale_load_balancer, il se règle via cette ressource dédiée.
+resource "outscale_load_balancer_attributes" "k8s" {
+  load_balancer_name = outscale_load_balancer.k8s.load_balancer_name
+
+  health_check {
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+    check_interval      = 10
+    timeout             = 5
+    port                = 6443
+    protocol            = "TCP"
+  }
+}
+
 resource "outscale_load_balancer_vms" "k8s" {
   load_balancer_name = outscale_load_balancer.k8s.load_balancer_name
   backend_vm_ids     = outscale_vm.control_plane[*].vm_id
