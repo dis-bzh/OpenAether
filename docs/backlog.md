@@ -74,14 +74,22 @@ Alimenté au fil des sessions (humain + assistant). Retirer les entrées faites.
 - [x] ~~Images Talos OVH : renommage in-place~~ → FAIT : `replace_triggered_by`
       sur `terraform_data.build` (OVH) et `build_and_upload` (Outscale), +
       `timeouts { create = "120m" }` sur le snapshot Outscale (import > 60 min).
-- [x] ~~E2e enfants CAPI OVH + Outscale~~ → FAIT (2026-07-25) : edge-2 (OVH) et
-      edge-3 (Outscale) provisionnés et câblés. RESTE à faire hors Scaleway :
-      un cluster de MANAGEMENT complet (task up), les backups cross-provider et
-      le rolling-replace live.
+- [x] ~~E2e enfants CAPI OVH + Outscale~~ → FAIT (2026-07-25).
+- [x] ~~Management complet hors Scaleway~~ → FAIT (2026-07-26) : management HA
+      3 CP + 3 workers sur **OVH**, DAG 30/30, pilotant les 3 edges (SCW, OVH,
+      OSC) + backups cross-provider OVH→Scaleway. A révélé 3 défauts du module
+      OVH (volumes multiattach, bastion_user, AZ 'any'), tous corrigés.
+      RESTE hors Scaleway : rolling-replace live, management Outscale.
 - [ ] **FIP des CP OpenStack créée hors CAPI** : `preAllocatedFloatingIPs` exige
       de connaître l'IP avant le boot (certSANs) ; aujourd'hui l'IP est créée à
       la main côté Neutron. Automatiser (tofu ou pré-création scriptée), et
       documenter qu'un pool supprimé en reclaimPolicy=Delete DÉTRUIT l'IP.
+- [ ] **`talos_cluster_health` : timeout trop court en HA multi-AZ** — sur OVH
+      (3 CP + 3 workers) le data source expire alors que le cluster EST sain
+      (6/6 Ready, etcd OK), ce qui interrompt l'apply AVANT les outputs
+      (kubeconfig/talosconfig) et les backups d'artefacts. Contournement :
+      relancer `task bootstrap-phase2` (idempotent) ou `talosctl kubeconfig`.
+      À corriger : allonger le timeout du data source.
 - [ ] **Proxmox** : premier apply réel (SYS-1) + hardening Ansible hôte (absent
       du repo, seulement documenté).
 - [ ] **Ingress public** : trancher CCM (LB managé) vs LB-IPAM — CCM Scaleway
