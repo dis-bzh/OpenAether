@@ -47,8 +47,16 @@ Alimenté au fil des sessions (humain + assistant). Retirer les entrées faites.
 - [ ] **Rate-limit GitHub de l'operator CAPI** : fetch anonyme des releases
       (60 req/h/IP) — prévoir fetchConfig avec token ou miroir OCI.
 - [x] ~~Teardown des edges non idempotent~~ → FAIT : `task edge-down` (cascade
-      CAPI dans le bon ordre, attente, filet finalizers + alerte VMs) ; le prune
-      Flux seul est désormais documenté comme insuffisant.
+      CAPI dans le bon ordre) + `task fleet-down` (edges PUIS management, rapport
+      de ce qui survit). Le prune Flux seul est documenté comme insuffisant.
+      ⚠️ LEÇON (2026-07-26) : la 1re version de fleet-down se contentait d'un
+      AVERTISSEMENT quand le management était injoignable (kubeconfig supprimé
+      avec le state) puis détruisait quand même → VMs des 3 edges orphelines sur
+      les 3 clouds, purgées à la main. Corrigé : arrêt bloquant, `--force-no-edges`
+      pour l'assumer explicitement, et un edge-down en échec bloque aussi.
+      À AJOUTER : des scripts de purge d'orphelins par provider (ceux écrits
+      pendant l'incident sont dans le scratchpad — les industrialiser dans
+      scripts/ops/ serait utile : purge-orphans-{ovh,osc}.py).
 - [ ] **Moderniser le template Scaleway** : il est en `cluster.x-k8s.io/v1beta1`
       alors que CAPI v1.13 sert `v1beta2` (refs {apiGroup,kind,name}) — passe
       aujourd'hui par conversion, à aligner sur le template OpenStack.
