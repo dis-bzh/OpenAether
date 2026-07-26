@@ -315,7 +315,7 @@ locals {
   #              not a literal like the others, so resolved from pmx_dist here.
   bastion_user = lookup({
     scaleway = "bastion"
-    ovh      = "ubuntu"
+    ovh      = "bastion" # PAS le user par défaut de l'image (cf. ovh/bastion.tf)
     outscale = "outscale"
     proxmox  = local.pmx_dist.host_ssh_user
   }, local.active_provider, "ubuntu")

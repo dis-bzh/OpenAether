@@ -91,7 +91,13 @@ resource "openstack_compute_instance_v2" "bastion" {
   }
 
   user_data = templatefile("${path.module}/../_shared/bastion-cloud-init.yaml.tftpl", {
-    bastion_user      = "ubuntu"
+    # ⚠️ PAS "ubuntu" : c'est l'utilisateur par défaut de l'image OVH, donc
+    # déjà créé par `users: [default]`. cloud-init ignore alors la seconde
+    # définition et l'utilisateur n'est JAMAIS ajouté au groupe
+    # bastion-admins → sshd le refuse via AllowGroups (constaté en réel :
+    # "Permission denied (publickey)" avec la bonne clé). Un nom dédié,
+    # comme sur Scaleway, évite la collision.
+    bastion_user      = "bastion"
     ssh_keys          = var.bastion_ssh_keys
     private_cidr      = "10.0.0.0/24"
     extra_packages    = []
