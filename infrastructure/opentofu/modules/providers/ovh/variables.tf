@@ -50,8 +50,11 @@ variable "worker_data_volume_type" {
     "Multiattach volumes are only supported starting with compute API version
     2.60" — the provider only negotiates that microversion when multiattach is
     explicitly requested. Observed on a real EU-WEST-PAR apply (2026-07-25).
-    Available types: high-speed-gen2, high-speed, *-luks variants (Longhorn
+    Available types: high-speed, high-speed-gen2, *-luks variants (Longhorn
     already does its own LUKS with an OpenBao-held key, so plain is enough).
+    ⚠️ `high-speed-gen2` a produit des volumes en `error status` sur un 50 GiB
+    en EU-WEST-PAR (2026-07-25) — il a des contraintes de taille/région ;
+    `high-speed` fonctionne. Vérifier le type avant de le changer.
   EOT
   type        = string
   default     = "high-speed-gen2"
