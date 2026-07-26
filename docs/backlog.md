@@ -3,6 +3,54 @@
 Tout ce qui a été identifié comme **mieux que l'existant**, avec le pourquoi.
 Alimenté au fil des sessions (humain + assistant). Retirer les entrées faites.
 
+## Où on en est (mis à jour le 2026-07-26)
+
+**Aucune infrastructure cloud ne tourne** — la flotte a été détruite en fin de
+session (`task fleet-down PROVIDER=outscale` : 2 enfants CAPI en cascade puis
+67 ressources OpenTofu). Vérifié à zéro sur les **trois** comptes : Outscale
+(VMs, volumes, LB, IP, Nets), Scaleway (fr-par-1/2) et OVH — une FIP orpheline
+y a été purgée (`scripts/ops/purge-orphans/ovh.py --apply`). Tout repart de zéro
+via `task up`.
+
+Conservé volontairement (le détruire coûte du temps ou de la restaurabilité) :
+buckets S3 (tfstates, artefacts, **dépôts restic**) et images Talos v1.13.4 sur
+les 3 clouds (~1 h de rebuild sur Outscale). À recréer au prochain run car créés
+hors OpenTofu : keypair Outscale `openaether-capi`, FIP OVH pré-créée (certSAN).
+⚠️ Les dépôts restic survivent aux clusters, **pas leur `RESTIC_PASSWORD`** :
+réutiliser un bucket sans son escrow bloque les backups (« already initialized »).
+Le fichier `infrastructure/opentofu/cluster/restic-escrow-OUTSCALE.txt` a donc
+été **volontairement conservé** — il déverrouille les dépôts restés en bucket.
+Les `kubeconfig` / `talosconfig` / `edge-*.kubeconfig` ont eux été supprimés
+(ils pointaient vers des clusters qui n'existent plus).
+
+Ce qui est **validé en cloud réel** :
+
+- Le socle est **provider-agnostique pour de vrai** : le même code a porté un
+  cluster de management successivement sur **Scaleway, OVH et Outscale**, chaque
+  provider ayant révélé (puis fait corriger) des défauts propres. Dernier run :
+  management Outscale HA, **DAG 32/32**, 6 nœuds Ready.
+- **Backups** restic chiffrés client, multi-destination et **cross-provider**
+  (primary Outscale → replica Scaleway), validés dans les trois sens.
+- **Pioche modulaire** (`scripts/pick.py`) : fermeture transitive des `dependsOn`,
+  profils générés, garde-fou anti-drift (`--check`, `task apps-validate`).
+- **Kubeception/gitception** : le management provisionne des enfants Talos via
+  CAPI puis y injecte Cilium+Flux à distance ; les enfants réconcilient leur
+  propre profil. Fonctionnel de bout en bout sur Scaleway et OVH.
+- **Résilience** : reboot simultané non sollicité des 6 VMs Outscale (événement
+  plateforme) — le cluster est revenu seul, sans intervention.
+
+Ce qui **reste ouvert** (par ordre d'importance pour reprendre) :
+
+1. **Les enfants CAPI ne sont pas fiables en mutation.** Le dernier run les a
+   dégradés en changeant leurs values Cilium à chaud (edge-1 11/17, edge-2
+   0/17). Le correctif de fond est en place pour les **prochains** enfants ;
+   il n'a jamais été validé sur un enfant créé from scratch avec ces valeurs.
+   → **Premier chantier : recréer un edge et vérifier qu'il atteint 17/17.**
+2. `apiserver → kubelet:10250` injoignable sur l'edge OVH (diagnostic à
+   distance impossible) — cf. section CAPI.
+3. Divergence `socketLB.hostNamespaceOnly` parent/enfant, inexpliquée.
+4. Les deux branches Git à garder synchro (cf. « Dette de process »).
+
 ## Identités & accès au quotidien (le chantier ouvert)
 
 - [ ] **Tokens OpenBao nominatifs** : policies admin dédiées + `bao token create`
