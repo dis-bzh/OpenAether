@@ -84,7 +84,14 @@ Alimenté au fil des sessions (humain + assistant). Retirer les entrées faites.
       de connaître l'IP avant le boot (certSANs) ; aujourd'hui l'IP est créée à
       la main côté Neutron. Automatiser (tofu ou pré-création scriptée), et
       documenter qu'un pool supprimé en reclaimPolicy=Delete DÉTRUIT l'IP.
-- [ ] **`talos_cluster_health` : timeout trop court en HA multi-AZ** — sur OVH
+- [ ] **`talos_cluster_health` expire sur cluster SAIN (OVH HA)** — PAS un
+      problème de durée (15 min déjà) : le check etcd du provider talos 0.11.0
+      ne converge jamais alors que `talosctl service etcd` répond HEALTH OK sur
+      les 3 CP et que les 6 nœuds sont Ready. Piste SG écartée (règle inter-node
+      = tout le trafic intra-SG). Contournement en place : `skip_health_check`
+      exposé au niveau root + activé dans management-ovh.tfvars. À investiguer
+      (bump provider talos ? découverte de nœuds ? endpoint unique via tunnel).
+- [ ] ~~timeout trop court en HA multi-AZ~~ (hypothèse invalidée) — sur OVH
       (3 CP + 3 workers) le data source expire alors que le cluster EST sain
       (6/6 Ready, etcd OK), ce qui interrompt l'apply AVANT les outputs
       (kubeconfig/talosconfig) et les backups d'artefacts. Contournement :
