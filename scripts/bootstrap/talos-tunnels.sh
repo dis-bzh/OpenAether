@@ -162,6 +162,24 @@ open_one() { # localport nodeip
   echo $! >>"$PIDFILE"
 }
 
+# Le bastion vient souvent d'être créé : son cloud-init installe des paquets et
+# ne recharge sshd (AuthorizedKeysFile + AllowGroups) qu'à la fin. Tenter les
+# tunnels avant ça donne "Permission denied (publickey)" et 0/N tunnels — vu sur
+# les trois providers. On attend donc que le bastion accepte la clé.
+echo "▶ Waiting for bastion ${BUSER}@${BASTION} to accept SSH (cloud-init)…"
+BASTION_WAIT="${BASTION_WAIT:-300}"
+__deadline=$(( SECONDS + BASTION_WAIT ))
+until ssh -o UserKnownHostsFile="$BASTION_KH" -o StrictHostKeyChecking=accept-new \
+          -o BatchMode=yes -o ConnectTimeout=8 -i "$KEY" \
+          "${BUSER}@${BASTION}" true 2>/dev/null; do
+  if (( SECONDS >= __deadline )); then
+    echo "⚠ bastion toujours inaccessible après ${BASTION_WAIT}s — on tente quand même."
+    echo "  (vérifier: cloud-init terminé ? bonne clé ? admin_ip à jour ?)"
+    break
+  fi
+  sleep 10
+done
+
 echo "▶ Opening tunnels via ${BUSER}@${BASTION} (key: $KEY)"
 i=0; for ip in "${CPS[@]}"; do open_one "$((50000 + i))" "$ip"; i=$((i + 1)); done
 i=0; for ip in "${WKS[@]}"; do open_one "$((50100 + i))" "$ip"; i=$((i + 1)); done
