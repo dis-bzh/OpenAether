@@ -66,6 +66,19 @@ Alimenté au fil des sessions (humain + assistant). Retirer les entrées faites.
 
 ## Backups / DR
 
+- [ ] **Un dépôt restic par cluster (préfixe)** — les dépôts survivent aux
+      clusters, mais pas leur `RESTIC_PASSWORD` (regénéré à chaque bootstrap
+      d'OpenBao). Résultat, en réutilisant un bucket : le nouveau cluster ne
+      peut ni LIRE le dépôt (mauvais password) ni l'initialiser
+      ("already initialized") → backups en échec permanent. Constaté au
+      déploiement Outscale sur le bucket replica Scaleway laissé par le
+      management OVH. Le diagnostic est désormais explicite dans le CronJob ;
+      reste à ajouter un **préfixe par cluster** dans le chemin du dépôt
+      (env issue du secret backup-restic-env, ex. `<cluster>/openbao`), pour
+      que plusieurs clusters puissent partager un bucket sans collision.
+      ⚠️ Corollaire opérationnel : purger les préfixes d'un cluster détruit,
+      ou son password escrowé devient la SEULE façon de relire ses backups.
+
 - [ ] **Alerting échec backups** : VMRule sur `kube_job_status_failed`
       (namespaces foundation-*) — aujourd'hui un CronJob qui échoue est silencieux.
 - [ ] **Test de restauration périodique** : job mensuel `restic restore` vers
