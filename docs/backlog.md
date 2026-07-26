@@ -79,6 +79,16 @@ Alimenté au fil des sessions (humain + assistant). Retirer les entrées faites.
 
 ## Multi-provider / infra
 
+- [ ] **Quotas Outscale serrés — dimensionner la flotte en conséquence** :
+      `core_limit` = 20 sur le compte dev (et `vm_limit` = 10). Un management
+      HA (3 CP + 3 workers en c2r7) consomme déjà 14 cœurs : les enfants CAPI
+      doivent tenir dans les 6 restants (edge-3 est passé de c4r8 à c2r8).
+      Symptôme sinon : `CreateVms → 10042 TooManyResources (QuotaExceeded)`,
+      OscMachine bloquée en VmNotReady avec une IP réallouée en boucle et
+      AUCUNE erreur visible côté CR (il faut lire les logs du manager).
+      À faire : documenter les quotas par provider dans admin-access.md, et
+      envisager un contrôle en amont (pré-vol) avant d'instancier un enfant.
+
 - [x] ~~Images Talos OVH : renommage in-place~~ → FAIT : `replace_triggered_by`
       sur `terraform_data.build` (OVH) et `build_and_upload` (Outscale), +
       `timeouts { create = "120m" }` sur le snapshot Outscale (import > 60 min).
