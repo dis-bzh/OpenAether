@@ -210,6 +210,26 @@ tasks:
     cmds:
       - ./scripts/ops/backup-state.sh infrastructure/opentofu/cluster
 
+  edge-down:
+    desc: >-
+      Décommission PROPRE d'un cluster enfant CAPI (idempotent). À lancer AVANT de
+      retirer le fichier de apps/clusters/kustomization.yaml : le prune Flux seul
+      supprime tout en désordre et bloque la cascade CAPI (VMs orphelines facturées).
+      Usage: task edge-down CLUSTER=edge-1 [NS=capi-clusters] [TIMEOUT=900] [-- --yes]
+    vars:
+      CLUSTER: '{{.CLUSTER}}'
+      NS: '{{.NS | default "capi-clusters"}}'
+      TIMEOUT: '{{.TIMEOUT | default "900"}}'
+    preconditions:
+      - sh: '[ -n "{{.CLUSTER}}" ]'
+        msg: "CLUSTER= est requis (ex: task edge-down CLUSTER=edge-1)"
+      - sh: '[ -n "$KUBECONFIG" ] || [ -f infrastructure/opentofu/cluster/kubeconfig ]'
+        msg: "KUBECONFIG doit pointer le cluster de management"
+    cmds:
+      - |
+        export KUBECONFIG="${KUBECONFIG:-$PWD/infrastructure/opentofu/cluster/kubeconfig}"
+        ./scripts/ops/edge-down.sh {{.CLUSTER}} --namespace {{.NS}} --timeout {{.TIMEOUT}} {{.CLI_ARGS}}
+
   etcd-snapshot:
     desc: >-
       Encrypted etcd snapshot → primary + replica buckets (client-side gpg AES-256, same passphrase as the

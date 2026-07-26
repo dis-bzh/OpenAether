@@ -59,8 +59,15 @@ resource "openstack_images_image_v2" "talos" {
   # It must not trigger a replace on its own: the only signal that the image needs
   # to be rebuilt is a name change (= new version or schematic_id). The build step
   # above handles the file; Glance doesn't care where it came from once uploaded.
+  # ⚠️ `name` n'est PAS ForceNew chez le provider OpenStack : un changement de
+  # version se traduisait par un simple RENOMMAGE in-place de l'ancienne image
+  # (constaté 2026-07-25 : le plan v1.13.4 affichait « update in-place » et
+  # l'image v1.13.3 aurait été étiquetée v1.13.4 sans réupload du disque).
+  # replace_triggered_by sur terraform_data.build (dont triggers_replace porte
+  # version + schematic_id) force la recréation réelle de l'image Glance.
   lifecycle {
-    ignore_changes = [local_file_path]
+    ignore_changes       = [local_file_path]
+    replace_triggered_by = [terraform_data.build]
   }
 
   depends_on = [terraform_data.build]

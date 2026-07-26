@@ -84,8 +84,21 @@ resource "outscale_snapshot" "talos" {
   snapshot_size = tonumber(data.external.oos_object.result.size)
   description   = "Talos ${var.talos_version} (${var.arch}) — imported for OMI registration"
 
+  # ⚠️ L'import de snapshot Outscale est LENT et passe par une file d'attente
+  # côté fournisseur : mesuré > 60 min en `in-queue 0%` (2026-07-25), au-delà
+  # du timeout par défaut du provider (40 min) → l'apply échoue alors que
+  # l'import aboutit ensuite, laissant un snapshot HORS STATE. Si ça se
+  # reproduit : NE PAS relancer l'apply tel quel (il recrée un second import
+  # d'1 h) ; attendre `completed` puis
+  #   tofu import module.outscale[0].outscale_snapshot.talos <snap-id>
+  # avant de continuer.
+  timeouts {
+    create = "120m"
+  }
+
   lifecycle {
-    ignore_changes = [file_location]
+    ignore_changes       = [file_location]
+    replace_triggered_by = [terraform_data.build_and_upload]
   }
 
   depends_on = [terraform_data.build_and_upload]
