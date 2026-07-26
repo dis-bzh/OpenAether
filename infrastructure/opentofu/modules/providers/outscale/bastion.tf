@@ -76,7 +76,12 @@ resource "outscale_vm" "bastion" {
   security_group_ids = [outscale_security_group.bastion.security_group_id]
 
   user_data = base64encode(templatefile("${path.module}/../_shared/bastion-cloud-init.yaml.tftpl", {
-    bastion_user      = "outscale"
+    # ⚠️ PAS "outscale" : c'est l'utilisateur par défaut des images Outscale,
+    # donc déjà créé par `users: [default]` du cloud-init partagé. cloud-init
+    # ignore alors la seconde définition, l'utilisateur n'entre jamais dans le
+    # groupe bastion-admins et sshd le refuse via AllowGroups — même bug que
+    # celui rencontré sur OVH avec "ubuntu" (2026-07-26). Nom dédié comme SCW.
+    bastion_user      = "bastion"
     ssh_keys          = var.bastion_ssh_keys
     private_cidr      = "10.0.0.0/24"
     extra_packages    = []

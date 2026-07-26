@@ -230,6 +230,19 @@ tasks:
         export KUBECONFIG="${KUBECONFIG:-$PWD/infrastructure/opentofu/cluster/kubeconfig}"
         ./scripts/ops/edge-down.sh {{.CLUSTER}} --namespace {{.NS}} --timeout {{.TIMEOUT}} {{.CLI_ARGS}}
 
+  fleet-down:
+    desc: >-
+      Teardown COMPLET et idempotent d'une flotte : chaque cluster enfant CAPI
+      (edge-down, cascade propre) PUIS le management (tofu destroy), puis un
+      rapport de ce qui reste à purger à la main (buckets, images, keypairs).
+      Ordre non négociable : un enfant survivant au management = VMs orphelines
+      facturées. Usage: task fleet-down PROVIDER=ovh [ROLE=management] [-- --yes]
+    vars:
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+      ROLE: '{{.ROLE | default "management"}}'
+    cmds:
+      - ./scripts/ops/fleet-down.sh {{.PROVIDER}} --role {{.ROLE}} {{.CLI_ARGS}}
+
   etcd-snapshot:
     desc: >-
       Encrypted etcd snapshot → primary + replica buckets (client-side gpg AES-256, same passphrase as the
