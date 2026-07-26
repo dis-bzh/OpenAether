@@ -25,10 +25,12 @@ PROVIDER="${1:?usage: fleet-down.sh <scaleway|ovh|outscale|proxmox> [--role mana
 shift
 ROLE=management
 ASSUME_YES=0
+FORCE_NO_EDGES=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --role) ROLE="$2"; shift 2 ;;
     --yes | -y) ASSUME_YES=1; shift ;;
+    --force-no-edges) FORCE_NO_EDGES=1; shift ;;
     --keep-images) shift ;;   # accepté pour la symétrie, sans effet ici
     *) echo "✗ flag inconnu: $1" >&2; exit 2 ;;
   esac
@@ -43,8 +45,35 @@ ok()   { printf '✓ %s\n' "$*"; }
 warn() { printf '⚠ %s\n' "$*" >&2; }
 
 # ---------------------------------------------------------------- 1. les edges
+#
+# ⚠️ FAIL-SAFE (leçon du 2026-07-26) : si le management est injoignable, on NE
+# PEUT PAS savoir s'il pilotait des clusters enfants. Détruire le management
+# dans ce cas laisse leurs VMs orphelines et FACTURÉES — c'est exactement ce qui
+# s'est produit quand une version antérieure de ce script se contentait d'un
+# avertissement. On s'ARRÊTE, sauf --force-no-edges (l'opérateur affirme alors
+# qu'il n'y a pas d'enfant, ou les a déjà purgés côté provider).
 info "Étape 1/3 — clusters enfants CAPI"
-if [ -r "$KUBECONFIG" ] && kubectl cluster-info >/dev/null 2>&1; then
+if [ ! -r "$KUBECONFIG" ] || ! kubectl cluster-info >/dev/null 2>&1; then
+  if [ "$FORCE_NO_EDGES" -eq 1 ]; then
+    warn "management injoignable — étape sautée (--force-no-edges assumé)."
+  else
+    cat >&2 <<'EOT'
+
+✗ ARRÊT : le cluster de management est injoignable (kubeconfig absent ou API down).
+  Impossible de vérifier qu'aucun cluster enfant CAPI ne subsiste. Détruire le
+  management maintenant rendrait leurs VMs ORPHELINES et FACTURÉES.
+
+  Que faire :
+    • kubeconfig perdu ? le régénérer :
+        cd infrastructure/opentofu/cluster && tofu output -raw kubeconfig > kubeconfig
+        (ou  talosctl -e <tunnel> -n <cp-ip> kubeconfig ./kubeconfig --force)
+    • enfants déjà supprimés / jamais créés ? relancer avec --force-no-edges
+    • dans le doute : inventorier côté provider AVANT (chercher le préfixe des
+      clusters enfants dans les VMs, LB, réseaux) — cf. docs/backlog.md
+EOT
+    exit 1
+  fi
+else
   mapfile -t EDGES < <(kubectl get cluster -A -o jsonpath='{range .items[*]}{.metadata.name} {.metadata.namespace}{"\n"}{end}' 2>/dev/null)
   if [ "${#EDGES[@]}" -eq 0 ]; then
     ok "aucun cluster enfant"
@@ -52,14 +81,23 @@ if [ -r "$KUBECONFIG" ] && kubectl cluster-info >/dev/null 2>&1; then
     printf '  %s clusters enfants: %s\n' "${#EDGES[@]}" "$(printf '%s ' "${EDGES[@]%% *}")"
     for e in "${EDGES[@]}"; do
       name="${e%% *}"; ns="${e##* }"
-      "$ROOT/scripts/ops/edge-down.sh" "$name" --namespace "$ns" --timeout 900 \
-        $([ "$ASSUME_YES" -eq 1 ] && echo --yes) \
-        || warn "edge-down $name a signalé un problème — VÉRIFIER les VMs côté provider"
+      if ! "$ROOT/scripts/ops/edge-down.sh" "$name" --namespace "$ns" --timeout 900 \
+             $([ "$ASSUME_YES" -eq 1 ] && echo --yes); then
+        warn "edge-down $name a ÉCHOUÉ."
+        if [ "$FORCE_NO_EDGES" -eq 1 ]; then
+          warn "--force-no-edges : on continue malgré tout (VMs à vérifier côté provider)."
+        else
+          cat >&2 <<EOT
+
+✗ ARRÊT avant de toucher au management : '$name' n'a pas été détruit proprement.
+  Détruire le management maintenant laisserait ses VMs orphelines. Purger d'abord
+  côté provider, puis relancer (ce script est idempotent).
+EOT
+          exit 1
+        fi
+      fi
     done
   fi
-else
-  warn "management injoignable (kubeconfig absent ou API down) — étape sautée."
-  warn "Si des clusters enfants existaient, leurs VMs sont peut-être ORPHELINES."
 fi
 
 # ----------------------------------------------------------- 2. le management
