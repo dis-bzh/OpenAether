@@ -47,7 +47,13 @@ dédiés sous **Proxmox** (ZFS), VMs Talos. Single-host ou multi-host PVE cluste
 
 Toute amélioration identifiée (« mieux que l'existant ») va dans
 **`docs/backlog.md`** — le lire en début de chantier, y ajouter les découvertes,
-retirer ce qui est fait. Parcours post-déploiement : `docs/admin-access.md`.
+retirer ce qui est fait. Sa section **« Où on en est »** (en tête) dit ce qui
+tourne, ce qui est validé en cloud réel et par où reprendre : **c'est le premier
+fichier à ouvrir en début de session**. Parcours post-déploiement :
+`docs/admin-access.md`.
+
+Avant de toucher au DAG Flux d'`OpenAether-apps` : `task apps-validate`
+(intégrité du DAG + profils `pick.py` à jour).
 
 ## Repère structure
 
