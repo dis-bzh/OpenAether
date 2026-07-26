@@ -97,9 +97,12 @@ locals {
 resource "openstack_blockstorage_volume_v3" "worker_data" {
   for_each = { for disk in local.worker_data_disks : disk.key => disk }
 
-  name   = "${var.cluster_name}-worker-data-${each.value.worker}-${each.key}"
-  region = var.region
-  size   = each.value.size_gb
+  name = "${var.cluster_name}-worker-data-${each.value.worker}-${each.key}"
+  # Type EXPLICITE : le défaut projet OVH est multiattach et casse l'attachement
+  # (cf. variable worker_data_volume_type).
+  volume_type = var.worker_data_volume_type
+  region      = var.region
+  size        = each.value.size_gb
 }
 
 resource "openstack_compute_volume_attach_v2" "worker_data" {

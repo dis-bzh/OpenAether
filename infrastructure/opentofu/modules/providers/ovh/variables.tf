@@ -42,6 +42,21 @@ variable "worker_storage" {
   default = { disks = [], volumes = [] }
 }
 
+variable "worker_data_volume_type" {
+  description = <<-EOT
+    Cinder volume type for the worker data disks. MUST NOT be a multiattach type:
+    OVH's project-default type is `classic-multiattach` (extra_specs
+    multiattach="<is> True"), and Nova then rejects the attachment with
+    "Multiattach volumes are only supported starting with compute API version
+    2.60" — the provider only negotiates that microversion when multiattach is
+    explicitly requested. Observed on a real EU-WEST-PAR apply (2026-07-25).
+    Available types: high-speed-gen2, high-speed, *-luks variants (Longhorn
+    already does its own LUKS with an OpenBao-held key, so plain is enough).
+  EOT
+  type        = string
+  default     = "high-speed-gen2"
+}
+
 variable "network_name" {
   description = "Network name for instances (usually Ext-Net for public)"
   type        = string
