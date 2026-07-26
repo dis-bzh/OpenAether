@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# OpenAether — teardown COMPLET et idempotent d'une flotte (edges + management)
+#
+# POURQUOI
+#   L'ordre de destruction n'est pas libre : chaque cluster enfant CAPI doit
+#   disparaître AVANT le management, sinon plus personne ne pilote ses VMs et
+#   elles restent facturées. `task destroy` seul ne gère que le management.
+#   Ce script enchaîne, dans le bon ordre et sans intervention :
+#     1. `edge-down` sur chaque cluster enfant encore présent (cascade CAPI) ;
+#     2. `tofu destroy` du management ;
+#     3. rapport de ce qui reste à purger à la main (buckets, images, keypairs…),
+#        volontairement NON détruit ici : ces objets survivent aux clusters et
+#        leur suppression est un choix, pas une conséquence.
+#
+# Idempotent : relançable à tout moment ; saute ce qui est déjà absent.
+#
+# Usage:
+#   fleet-down.sh <provider> [--role management] [--yes] [--keep-images]
+#   Le KUBECONFIG du management est déduit de infrastructure/opentofu/cluster/.
+# ==============================================================================
+set -uo pipefail
+
+PROVIDER="${1:?usage: fleet-down.sh <scaleway|ovh|outscale|proxmox> [--role management] [--yes]}"
+shift
+ROLE=management
+ASSUME_YES=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --role) ROLE="$2"; shift 2 ;;
+    --yes | -y) ASSUME_YES=1; shift ;;
+    --keep-images) shift ;;   # accepté pour la symétrie, sans effet ici
+    *) echo "✗ flag inconnu: $1" >&2; exit 2 ;;
+  esac
+done
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CLUSTER_DIR="$ROOT/infrastructure/opentofu/cluster"
+export KUBECONFIG="${KUBECONFIG:-$CLUSTER_DIR/kubeconfig}"
+
+info() { printf '\n▶ %s\n' "$*"; }
+ok()   { printf '✓ %s\n' "$*"; }
+warn() { printf '⚠ %s\n' "$*" >&2; }
+
+# ---------------------------------------------------------------- 1. les edges
+info "Étape 1/3 — clusters enfants CAPI"
+if [ -r "$KUBECONFIG" ] && kubectl cluster-info >/dev/null 2>&1; then
+  mapfile -t EDGES < <(kubectl get cluster -A -o jsonpath='{range .items[*]}{.metadata.name} {.metadata.namespace}{"\n"}{end}' 2>/dev/null)
+  if [ "${#EDGES[@]}" -eq 0 ]; then
+    ok "aucun cluster enfant"
+  else
+    printf '  %s clusters enfants: %s\n' "${#EDGES[@]}" "$(printf '%s ' "${EDGES[@]%% *}")"
+    for e in "${EDGES[@]}"; do
+      name="${e%% *}"; ns="${e##* }"
+      "$ROOT/scripts/ops/edge-down.sh" "$name" --namespace "$ns" --timeout 900 \
+        $([ "$ASSUME_YES" -eq 1 ] && echo --yes) \
+        || warn "edge-down $name a signalé un problème — VÉRIFIER les VMs côté provider"
+    done
+  fi
+else
+  warn "management injoignable (kubeconfig absent ou API down) — étape sautée."
+  warn "Si des clusters enfants existaient, leurs VMs sont peut-être ORPHELINES."
+fi
+
+# ----------------------------------------------------------- 2. le management
+info "Étape 2/3 — cluster de management ($ROLE / $PROVIDER)"
+if [ "$ASSUME_YES" -eq 0 ]; then
+  read -rp "Détruire le management $ROLE-$PROVIDER ? [y/N] " a
+  [ "$a" = y ] || [ "$a" = Y ] || { echo "abandon"; exit 1; }
+fi
+( cd "$ROOT" && TF_CLI_ARGS_destroy=-auto-approve task destroy ROLE="$ROLE" PROVIDER="$PROVIDER" ) \
+  && ok "management détruit" \
+  || warn "le destroy du management a échoué — relancer après correction (idempotent)"
+
+# ------------------------------------------------- 3. ce qui reste (rapport)
+info "Étape 3/3 — reste à purger MANUELLEMENT (survit volontairement au teardown)"
+CN="$(grep -E '^[[:space:]]*cluster_name' "$CLUSTER_DIR/envs/$ROLE-$PROVIDER.tfvars" 2>/dev/null | sed -E 's/.*"([^"]+)".*/\1/')"
+ENVN="$(grep -E '^[[:space:]]*environment' "$CLUSTER_DIR/envs/$ROLE-$PROVIDER.tfvars" 2>/dev/null | sed -E 's/.*"([^"]+)".*/\1/')"
+cat <<EOT
+  Buckets S3 (state, artefacts, backups) — les détruire supprime aussi la
+  possibilité de restaurer :
+    s3-${CN:-<projet>}-${PROVIDER}-tfstate-${ENVN:-<env>}      (+ -backup)
+    s3-${CN:-<projet>}-${PROVIDER}-${ROLE}-${ENVN:-<env>}      (+ -backup)
+    s3-${CN:-<projet>}-*-backups-${ENVN:-<env>}                (restic, tous providers)
+  Images Talos (réutilisables — les garder évite un rebuild, ~1 h sur Outscale) :
+    task talos-image PROVIDER=$PROVIDER  ré-applique ; le root talos-image a son
+    propre state (bucket s3-${CN:-<projet>}-${PROVIDER}-talos-image).
+  Objets créés hors OpenTofu pour CAPI (à recréer au prochain déploiement) :
+    keypair Outscale 'openaether-capi', FIP OpenStack pré-créée (certSANs edge-2).
+  Local : kubeconfig, talosconfig, edge-*.kubeconfig, restic-escrow-*.txt
+EOT
+ok "fleet-down terminé"
