@@ -54,9 +54,9 @@ Alimenté au fil des sessions (humain + assistant). Retirer les entrées faites.
       avec le state) puis détruisait quand même → VMs des 3 edges orphelines sur
       les 3 clouds, purgées à la main. Corrigé : arrêt bloquant, `--force-no-edges`
       pour l'assumer explicitement, et un edge-down en échec bloque aussi.
-      À AJOUTER : des scripts de purge d'orphelins par provider (ceux écrits
-      pendant l'incident sont dans le scratchpad — les industrialiser dans
-      scripts/ops/ serait utile : purge-orphans-{ovh,osc}.py).
+      Scripts de purge d'orphelins industrialisés :
+      `scripts/ops/purge-orphans/{ovh,outscale}.py` (+ README) — filet de
+      dernier recours, dry-run par défaut.
 - [ ] **Moderniser le template Scaleway** : il est en `cluster.x-k8s.io/v1beta1`
       alors que CAPI v1.13 sert `v1beta2` (refs {apiGroup,kind,name}) — passe
       aujourd'hui par conversion, à aligner sur le template OpenStack.
