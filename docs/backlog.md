@@ -41,6 +41,49 @@ Alimenté au fil des sessions (humain + assistant). Retirer les entrées faites.
       `… outscale_image.talos ami-6711ec55`, sinon le prochain apply recréera
       tout. Un snapshot orphelin (`snap-6bc67b02`, import relancé puis
       abandonné) est également à supprimer — il est facturé.
+- [x] **Cilium des enfants désaligné du socle parent** (2026-07-26) : les
+      `values` d'`apps/clusters/edge-*.yaml` laissaient `cni.exclusive` au défaut
+      du chart (`true`) et `socketLB.hostNamespaceOnly=false`. Cilium réécrivait
+      donc `05-cilium.conflist` en boucle en retirant le plugin chaîné istio-cni
+      → `istio-cni-node` 0/1 Ready indéfiniment → install Helm expirée → `istio`,
+      `ztunnel`, `services-gateway`, `istio-authorizationpolicies` bloqués sur
+      les DEUX edges. Corrigé + raison documentée dans les manifests.
+- [ ] **`socketLB.hostNamespaceOnly` : parent=true, enfants=false — à comprendre**
+      (2026-07-26). Sur un enfant, le passer à `true` casse les webhooks :
+      kube-apiserver est host-network et n'atteint plus les ClusterIP de
+      `cert-manager-webhook` / du webhook ESO → dry-run Flux en « failed calling
+      webhook » sur `cert-manager-issuers`, `external-secrets-stores`, et
+      `backup-openbao` bloqué derrière. Le socle parent tourne pourtant avec
+      `true` sans ce symptôme (webhooks OK, mesh OK) — la raison de l'asymétrie
+      n'est pas élucidée (HA 3 CP vs 1 CP ? datapath ?). En attendant : `false`
+      sur les enfants, `true` sur le parent, les deux commentés sur place.
+      ⚠️ Ne pas « harmoniser » sans retester les webhooks des deux côtés.
+- [ ] **Vérifier l'alignement parent/enfant automatiquement** : ces `values` sont
+      recopiées à la main dans chaque `apps/clusters/*.yaml` et redivergeront.
+      Piste : les sortir dans un ConfigMap/patch commun, ou un test qui compare
+      le `cilium-config` rendu parent vs enfant. Reste `nodeSelectorLabels=true`
+      côté parent uniquement (sans usage aujourd'hui, volontairement non propagé).
+- [ ] **⚠️ Changer les `values` Cilium d'un enfant EN VIE est risqué** (vécu
+      2026-07-26). Le HelmRelease `<edge>-cilium` du management pousse un upgrade
+      → rollout du DaemonSet CNI sur un cluster à 2 nœuds sans marge : sur edge-2
+      (OVH) le datapath inter-nœuds n'est pas revenu (`cilium-dbg status` :
+      `Cluster health 0/2 reachable`), les IP privées des deux nœuds ont changé
+      au passage (CP .90→.204→.251, worker .237→.36→.113) et le cluster est
+      tombé à 0/17 Kustomizations, pods pourtant tous Running. edge-1 (Scaleway)
+      a mieux encaissé (istio-cni enfin Ready, 11/17). **Préférer recréer
+      l'enfant** (CAPI) plutôt que muter son CNI en place ; réserver la mutation
+      en place aux clusters HA, et un nœud à la fois.
+- [ ] **edge-2/OVH : `apiserver → kubelet:10250` en timeout** — `kubectl
+      logs/exec` inutilisables sur ce cluster (i/o timeout), alors que
+      `kubelet → apiserver` fonctionne (nœuds `Ready`). Empêche tout diagnostic
+      à distance. À vérifier : règle de security group CAPO entre les subnets des
+      nœuds (le CP et le worker ne sont pas dans le même /24), et `10250` en
+      entrée sur le SG worker. Non lié aux rollouts (jamais testé avant).
+- [ ] **Deux branches à garder synchro** : le management réconcilie `main`, les
+      enfants `feat/pioche-backup-gitception` (`CHILD_BRANCH` dans
+      `apps/clusters/*.yaml`). Un correctif poussé sur `main` n'atteint donc PAS
+      les edges — piège vécu le 2026-07-26 (fast-forward manuel de la branche).
+      À supprimer au merge de la branche (cf. « Dette de process »).
 - [ ] **Enfants durcis** : `network.controlPlaneLoadBalancer` (aujourd'hui
       endpoint = IP publique du CP, non-HA) + private network / gateway au lieu
       d'une IPv4 publique par nœud.
@@ -108,6 +151,20 @@ Alimenté au fil des sessions (humain + assistant). Retirer les entrées faites.
       (lecture ReadQuotas + somme des gabarits demandés) ; (c) documenter les
       quotas par provider dans admin-access.md.
 
+- [ ] **Reboot simultané de toute la flotte Outscale observé** (2026-07-26,
+      14:32→14:34 UTC) : les 6 VMs (3 CP + 3 workers) ont redémarré en 2 min,
+      sans action de notre part (aucun apply en cours, objets Node conservés,
+      `initialize sequence` Talos = boot froid). Événement plateforme, pas un
+      défaut du socle — et le cluster est revenu **seul** (etcd a retrouvé son
+      quorum, DAG remonté à 29/32 sans intervention), ce qui valide au passage la
+      résilience. Deux enseignements : (a) l'API a été injoignable ~3 min et le
+      healthcheck LB 2×10 s corrigé plus tôt a bien borné la coupure ; (b) un
+      health check Flux de 15 min (`storage`/Longhorn) expire si le reboot tombe
+      pendant sa fenêtre — il repart au reconcile suivant, mais le message
+      « health check failed » est alors un faux positif à ne pas sur-interpréter.
+      À faire : ne pas conclure à un bug applicatif sans vérifier d'abord
+      `talosctl logs machined | head` (heure de boot) sur plusieurs nœuds.
+
 - [x] ~~Images Talos OVH : renommage in-place~~ → FAIT : `replace_triggered_by`
       sur `terraform_data.build` (OVH) et `build_and_upload` (Outscale), +
       `timeouts { create = "120m" }` sur le snapshot Outscale (import > 60 min).
@@ -147,6 +204,24 @@ Alimenté au fil des sessions (humain + assistant). Retirer les entrées faites.
 - [ ] **`test-local-stack.sh`** : référence `infrastructure/.yamllint` inexistant ;
       fmt bute sur le scratch `_v2/` (à purger).
 - [ ] **kyverno background-controller** désactivé (reports cluster absents).
+
+## Reproductibilité des artefacts générés
+
+- [x] **`bootstrap-manifests/cilium*.yaml` avaient divergé de leur générateur** —
+      les deux artefacts portaient `cni-exclusive=false`, `bpf-lb-sock-hostns-only=true`
+      et `nodeSelectorLabels=true` (édités à la main lors d'un debug ambient),
+      valeurs que `render-bootstrap-manifests.sh` ne passait pas : régénérer
+      cassait Istio ambient en silence. Les `--set` sont désormais dans le script,
+      avec la raison. *(corrigé 2026-07-26)*
+- [ ] **Test de non-régression du rendu** : `task render-manifests` devrait
+      diffé le rendu contre l'artefact committé (aujourd'hui il l'écrase). Il
+      reste des écarts cosmétiques (lignes vides, ordre de clés du ConfigMap)
+      entre l'artefact en service et un rendu neuf du chart 1.19.2 — à réduire à
+      zéro avant d'automatiser le diff, sinon le contrôle est inexploitable.
+- [x] **Profils `pick.py` périmables en silence** : un profil fige la liste des
+      Kustomizations *exclues*, donc toute brique ajoutée au DAG est héritée de
+      `../base` sans avoir été pioché (vécu : `orc` bloqué sur les edges).
+      `pick.py --check` + `task apps-validate` détectent le drift. *(2026-07-26)*
 
 ## Dette de process
 

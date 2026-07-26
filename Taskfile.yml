@@ -32,6 +32,19 @@ tasks:
       - tofu init -backend=false
       - tofu validate
 
+  apps-validate:
+    desc: "Valide le DAG Flux d'OpenAether-apps + l'à-jour des profils générés (pick.py)"
+    dir: ../OpenAether-apps
+    cmds:
+      # --validate : dependsOn inconnus, cycles, spec.path morts, catalogue.
+      # --check    : un profil fige la liste des Kustomizations EXCLUES ; ajouter
+      #   une brique au DAG périme donc tous les profils déjà générés. Sans ce
+      #   contrôle la brique est héritée de ../base sans avoir été pioché et
+      #   reste bloquée si ses dépendances, elles, sont exclues (cas vécu : orc
+      #   hérité par les clusters edge, cluster-api-providers étant exclu).
+      - python3 scripts/pick.py --validate
+      - python3 scripts/pick.py --check
+
   security:
     desc: "Run security scans (Trivy, Checkov, Gitleaks)"
     cmds:

@@ -51,6 +51,8 @@ if [[ "$LOCAL_MODE" == "true" ]]; then
     --namespace kube-system \
     --set ipam.mode=kubernetes \
     --set kubeProxyReplacement=false \
+    --set cni.exclusive=false \
+    --set socketLB.hostNamespaceOnly=true \
     --set cgroup.autoMount.enabled=false \
     --set cgroup.hostRoot=/sys/fs/cgroup \
     --set k8sServiceHost=localhost \
@@ -64,15 +66,24 @@ if [[ "$LOCAL_MODE" == "true" ]]; then
   echo "  ✅ Written to bootstrap-manifests/cilium-local.yaml"
 else
   # Production mode: full Cilium with WireGuard encryption + kube-proxy replacement
-  # socketLB.hostNamespaceOnly=false: extends Socket LB to host-network processes
-  # (kube-apiserver needs this to reach ClusterIPs, e.g. webhook services).
+  #
+  # ⚠️ Ces deux réglages sont EXIGÉS par Istio ambient (apps/base/istio) — ne pas
+  # les retirer sans retirer le mesh, sinon istio-cni ne devient jamais Ready :
+  #  - cni.exclusive=false : Cilium réécrit sinon 05-cilium.conflist en boucle et
+  #    en retire le plugin chaîné istio-cni (« conflicting component constantly
+  #    reverting our work ») → /readyz 503 → Helm install timeout → ztunnel,
+  #    services-gateway et istio-authorizationpolicies bloqués en cascade ;
+  #  - socketLB.hostNamespaceOnly=true : sans ça le socket-LB court-circuite la
+  #    redirection ambient pour les process host-network.
   helm template cilium cilium/cilium \
     --version "${CILIUM_VERSION}" \
     --namespace kube-system \
     --set ipam.mode=kubernetes \
     --set kubeProxyReplacement=true \
     --set socketLB.enabled=true \
-    --set socketLB.hostNamespaceOnly=false \
+    --set cni.exclusive=false \
+    --set socketLB.hostNamespaceOnly=true \
+    --set nodeSelectorLabels=true \
     --set bpf.hostLegacyRouting=false \
     --set bpf.masquerade=true \
     --set cgroup.autoMount.enabled=false \
