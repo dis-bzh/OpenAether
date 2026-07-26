@@ -79,15 +79,21 @@ Alimenté au fil des sessions (humain + assistant). Retirer les entrées faites.
 
 ## Multi-provider / infra
 
-- [ ] **Quotas Outscale serrés — dimensionner la flotte en conséquence** :
-      `core_limit` = 20 sur le compte dev (et `vm_limit` = 10). Un management
-      HA (3 CP + 3 workers en c2r7) consomme déjà 14 cœurs : les enfants CAPI
-      doivent tenir dans les 6 restants (edge-3 est passé de c4r8 à c2r8).
-      Symptôme sinon : `CreateVms → 10042 TooManyResources (QuotaExceeded)`,
-      OscMachine bloquée en VmNotReady avec une IP réallouée en boucle et
-      AUCUNE erreur visible côté CR (il faut lire les logs du manager).
-      À faire : documenter les quotas par provider dans admin-access.md, et
-      envisager un contrôle en amont (pré-vol) avant d'instancier un enfant.
+- [ ] **Quota RAM Outscale : un management HA sature le compte** (2026-07-26).
+      `memory_limit` = **40 Go**, or un management HA (3 CP + 3 workers en
+      tinav5.c2r7p2 = 7 Go + bastion 2 Go) en consomme **44** — dépassement
+      toléré à la création, mais TOUTE VM supplémentaire est ensuite refusée :
+      `CreateVms → 10042 TooManyResources (QuotaExceeded)`, quel que soit le
+      gabarit. Conséquence : sur ce compte, management Outscale HA **et**
+      cluster enfant local sont exclusifs (edge-3 désactivé).
+      Autres quotas serrés : `core_limit` 20 (14 utilisés), `vm_limit` 10 (7).
+      Piège de diagnostic : l'OscMachine reste en `VmNotReady` avec une IP
+      réallouée en boucle et AUCUNE erreur dans le CR — il faut lire les logs
+      du manager CAPOSC.
+      À faire : (a) demander une hausse de quota si la flotte complète est
+      voulue sur Outscale ; (b) pré-vol des quotas avant d'instancier un enfant
+      (lecture ReadQuotas + somme des gabarits demandés) ; (c) documenter les
+      quotas par provider dans admin-access.md.
 
 - [x] ~~Images Talos OVH : renommage in-place~~ → FAIT : `replace_triggered_by`
       sur `terraform_data.build` (OVH) et `build_and_upload` (Outscale), +
