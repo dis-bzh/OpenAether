@@ -16,7 +16,7 @@ des enfants supprimés. `restic-escrow-OUTSCALE.txt` **conservé volontairement*
 Ce run a **validé les quatre points restants** — et fait tomber **cinq défauts
 réels** au passage (tous corrigés et poussés, cf. sections dédiées) :
 
-1. **Enfant neuf 17/17 : VALIDÉ.** edge-2 créé from scratch atteint 17/17 avec
+1. **Enfant neuf 17/17 : VALIDÉ.** edge-2 créé from scratch atteignait 17/17 avec
    les values corrigées. `istio-cni-node` est `1/1 Running` sur les deux nœuds —
    c'est exactement ce qui restait bloqué 3 h le 2026-07-26.
 2. **`apiserver → kubelet:10250` : RÉSOLU.** `kubectl logs` et `kubectl exec`
@@ -29,7 +29,7 @@ réels** au passage (tous corrigés et poussés, cf. sections dédiées) :
    « failed calling webhook ») sont `True`.
 4. **Une seule branche `main`** dans les deux dépôts.
 
-Puis, sur demande, **edge-1 (Scaleway) a été recréé et validé à 17/17** — le
+Puis, sur demande, **edge-1 (Scaleway) a été recréé et validé à 17/17** (18 depuis l'ajout de la brique d'identité backup) — le
 correctif `ipam.mode` tient donc sur **deux providers aux topologies opposées** :
 nœuds en IP publique côté Scaleway (hors `10.0.0.0/8`), en `10.20.0.0/24` côté
 OpenStack (dedans). Au passage, un management OVH pilotant un enfant Scaleway :
@@ -247,34 +247,39 @@ Ce qui **reste ouvert** :
 
 ## Backups / DR
 
-- [ ] **Un dépôt restic par cluster (préfixe)** — les dépôts survivent aux
-      clusters, mais pas leur `RESTIC_PASSWORD` (regénéré à chaque bootstrap
-      d'OpenBao). Résultat, en réutilisant un bucket : le nouveau cluster ne
-      peut ni LIRE le dépôt (mauvais password) ni l'initialiser
-      ("already initialized") → backups en échec permanent. Constaté au
-      déploiement Outscale sur le bucket replica Scaleway laissé par le
-      management OVH. Le diagnostic est désormais explicite dans le CronJob ;
-      reste à ajouter un **préfixe par cluster** dans le chemin du dépôt
-      (env issue du secret backup-restic-env, ex. `<cluster>/openbao`), pour
-      que plusieurs clusters puissent partager un bucket sans collision.
-      ⚠️ Corollaire opérationnel : purger les préfixes d'un cluster détruit,
-      ou son password escrowé devient la SEULE façon de relire ses backups.
+- [x] ~~**Un dépôt restic par cluster (préfixe)**~~ → FAIT (2026-07-27),
+      conception (a) retenue. Le chemin des dépôts devient
+      `s3:<endpoint>/<bucket>/<CLUSTER_NAME>/{openbao,cnpg}`.
 
-      **Analyse 2026-07-27 — deux conceptions possibles, à trancher :**
-      (a) *Variable Flux `CLUSTER_NAME`* : propre et réutilisable au-delà des
-      backups, mais il n'existe AUCUNE substitution de nom de cluster
-      aujourd'hui, ni côté parent (`flux-bootstrap.yaml.tftpl` ne passe que
-      `GIT_BRANCH`) ni côté enfant (`child-gitops` idem). Et les substitutions
-      `postBuild` **ne se propagent pas** aux Kustomizations filles : il faudrait
-      un ConfigMap `cluster-identity` en `flux-system` + un `substituteFrom` sur
-      chaque brique qui en a besoin. Touche les deux dépôts, non testable sans
-      déploiement.
-      (b) *Propriété `prefix` dans les secrets OpenBao `backup/*`* : zéro
-      plomberie Flux, une clé de plus dans l'ExternalSecret. **Mais** une
-      propriété absente fait échouer l'ExternalSecret — donc casse les backups
-      de tout cluster déjà seedé sans elle. Exigerait un défaut côté cronjob,
-      ce qui laisse la collision possible par oubli.
-      Le bon moment pour (a) est **quand rien ne tourne**, comme maintenant.
+      Chaîne complète :
+      - **parent** : `flux-bootstrap.yaml.tftpl` pose un ConfigMap
+        `cluster-identity` (ns flux-system) avec
+        `CLUSTER_NAME = <cluster>-<env>-<provider>` (le provider EN FAIT PARTIE :
+        `openaether-dev` seul est identique sur les trois clouds, donc ne
+        distingue rien) ;
+      - **enfants** : `child-gitops` pose le même ConfigMap, valeur `${CHILD_NAME}`
+        substituée par le management depuis `apps/clusters/edge-*.yaml` (le nom
+        CAPI est déjà unique dans la flotte) ;
+      - **briques `backup-*-identity`** (22a) recopient l'identité dans
+        `foundation-vault` / `foundation-databases` ; les CronJobs la lisent via
+        `envFrom.configMapRef`, au runtime.
+
+      ⚠️ **Piège majeur évité** : mettre `postBuild.substituteFrom` directement
+      sur les briques `backup-*` aurait vidé TOUTES les variables shell nues de
+      leurs CronJobs (`$PRIMARY_ENDPOINT`, `$LEADER`, `$init_err`…) — la
+      substitution Flux s'applique à l'intégralité du rendu d'une Kustomization.
+      D'où deux Kustomizations dédiées qui ne rendent qu'un ConfigMap. **Ne
+      jamais fusionner ces ressources dans `apps/base/backup/*`.**
+
+      Le CronJob refuse de tourner si `CLUSTER_NAME` est vide, avec un message
+      qui pointe la cause — plutôt qu'un `set -u` sec.
+
+      **À valider au prochain déploiement** (non exerçable sans cluster) :
+      substitution effective, et enfant à **18/18** (17 du profil + racine).
+      ⚠️ Corollaire opérationnel inchangé : purger les préfixes d'un cluster
+      détruit, ou son password escrowé devient la SEULE façon de relire ses
+      backups. Les dépôts EXISTANTS (sans préfixe) restent en place : ils ne
+      seront plus alimentés, à archiver ou supprimer sciemment.
 
 - [ ] **Alerting échec backups** : VMRule sur `kube_job_status_failed`
       (namespaces foundation-*) — aujourd'hui un CronJob qui échoue est silencieux.

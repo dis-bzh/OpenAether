@@ -100,8 +100,11 @@ est plus rapide et plus sûr que de réparer. Les valeurs correctes — dont
 `apps/clusters/*.yaml` : un enfant créé aujourd'hui les reçoit au bootstrap.
 `task apps-validate` vérifie cet alignement avant tout déploiement.
 
-Attendu pour un enfant sain avec le profil `workload` : **17/17 Kustomizations**
-(16 du profil + la racine posée par le scaffold).
+Attendu pour un enfant sain avec le profil `workload` : **18/18 Kustomizations**
+(17 du profil + la racine posée par le scaffold). Le compte a changé le
+2026-07-27 : `backup-openbao-identity` s'est ajouté (ConfigMap `CLUSTER_NAME`
+qui préfixe les dépôts restic). Les runs antérieurs à cette date affichaient
+17/17 — ce n'est pas une régression.
 
 Vérifier l'état d'un enfant :
 ```bash

@@ -6,7 +6,28 @@
 #   ${git_repo_url}   — ex: https://github.com/dis-bzh/OpenAether.git
 #   ${git_branch}     — ex: main
 #   ${cluster_role}   — ex: management (→ apps/flux/management)
+#   ${cluster_id}     — ex: openaether-dev-ovh (identité UNIQUE du cluster)
 #   ${namespace}      — ex: flux-system
+---
+# Identité du cluster, consommée par `postBuild.substituteFrom` des briques qui
+# doivent se distinguer d'un AUTRE cluster. Aujourd'hui : le chemin des dépôts
+# restic (apps/flux/base/22-backup.yaml), car plusieurs clusters partagent des
+# buckets cross-provider et un dépôt restic n'est lisible qu'avec le
+# RESTIC_PASSWORD du cluster qui l'a créé — deux clusters sur le même chemin se
+# bloquent mutuellement (« already initialized »).
+#
+# ⚠️ Une brique qui déclare `substituteFrom` ce ConfigMap ÉCHOUE s'il est absent.
+# C'est volontaire : mieux vaut un échec bruyant qu'un chemin de dépôt vide et
+# une collision silencieuse entre clusters.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-identity
+  namespace: ${namespace}
+  labels:
+    openaether.io/managed: "true"
+data:
+  CLUSTER_NAME: ${cluster_id}
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: GitRepository
