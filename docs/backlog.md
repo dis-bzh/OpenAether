@@ -652,4 +652,7 @@ Ce qui **reste ouvert** :
 - [x] ~~Merge `feat/pioche-backup-gitception` → main~~ → FAIT (2026-07-27) :
       une seule branche `main` dans les deux dépôts, `git_branch="main"` côté
       `cluster/main.tf`, plus aucun `CHILD_BRANCH` dans `apps/clusters/`.
-- [ ] CHANGELOG apps inexistant (l'infra en a un).
+- [x] ~~CHANGELOG apps inexistant~~ → FAIT (2026-07-27) :
+      `OpenAether-apps/CHANGELOG.md`, démarré à cette date. Les 200 commits
+      antérieurs ne sont pas rétro-documentés — l'historique git fait foi, et le
+      « pourquoi » des décisions vit ici, dans ce backlog.
