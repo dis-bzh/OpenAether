@@ -125,9 +125,48 @@ Ce qui **reste ouvert** :
       false` fait retomber sur `Viewer` plutôt que de refuser l'accès.
       Reste ouvert (mêmes briques) : login OIDC d'OpenBao via Zitadel, et UI
       Longhorn derrière authn.
-- [~] **Wave 2 OpenBao TLS interne** (`tls_disable=1`). **Prérequis livré,
-      bascule VOLONTAIREMENT non faite** (2026-07-27) — et c'est un choix, pas un
-      oubli.
+- [x] ~~**Wave 2 OpenBao TLS interne**~~ → FAIT et **VALIDÉ sur cluster local**
+      (2026-07-27). `tls_disable=1` est mort ; le listener sert un certificat
+      cert-manager.
+
+      **Conception** : chaîne selfSigned → CA → certificat serveur, **dédiée** et
+      indépendante de la PKI qu'OpenBao sert (l'utiliser créerait un cycle : il
+      devrait être joignable pour émettre le certificat qui le rend joignable).
+      La CA est un **ClusterIssuer** avec son Secret dans le namespace
+      `cert-manager` : c'est le seul endroit où le `ClusterIssuer` vault sait
+      lire un `caBundleSecretRef`. Une CA namespacée aurait imposé de la
+      recopier.
+      Prérequis : `foundation-vault dependsOn cert-manager`, possible seulement
+      depuis le retrait de la dépendance inverse (qui était fausse).
+
+      **Les 8 consommateurs** basculés : config du listener, `retry_join`
+      (`https://` + `leader_ca_cert_file`), StatefulSet (`BAO_CACERT`, probes en
+      `scheme: HTTPS`, montage du Secret), unsealer, job d'init, job de
+      bootstrap, `ClusterSecretStore` d'ESO (`caProvider` avec `namespace`
+      OBLIGATOIRE — un ClusterSecretStore n'en a pas), `ClusterIssuer` vault,
+      CronJob de backup.
+
+      **Validé en réel** (cluster Talos local, 3 CP + 3 workers) :
+      3 réplicas `1/1`, quorum raft reformé en HTTPS, `post-unseal setup
+      complete` ; job d'init OK ; job de bootstrap **intégralement en 204**
+      (policies + auth Kubernetes + rôles) ; unsealer opérant ; ESO
+      `store validated` ; et surtout un `ExternalSecret` de bout en bout —
+      `SecretSynced`, valeur matérialisée. La chaîne ESO → TLS → auth Kubernetes
+      → lecture KV fonctionne.
+
+      **Bugs trouvés PAR le déploiement**, qu'aucune vérification statique
+      n'attrapait : un `volumeMount` sans le `volume` correspondant dans le job
+      de bootstrap (rejeté à l'admission), et les continuations de ligne `\\`
+      des policies (cf. entrée « Tokens nominatifs »).
+
+      **Reste à durcir — une seule chose** : la gateway → UI OpenBao est
+      chiffrée (`DestinationRule`, mode SIMPLE) mais en `insecureSkipVerify`.
+      `caCertificates` exigerait la CA comme FICHIER dans l'Envoy de la gateway,
+      qu'Istio génère ; un chemin inexistant casserait l'UI — pire que l'état
+      d'avant. Deux sorties propres : canal expérimental de Gateway API pour un
+      `BackendTLSPolicy`, ou distribution de la CA aux proxies via trust-manager.
+      Non validé en local (Istio n'y est pas déployé) ; repli inchangé :
+      `scripts/ops/local-admin-portforward.sh`.
 
       **Livré** : la dépendance superflue `cert-manager → foundation-vault` est
       retirée. Elle était fausse (la brique cert-manager n'installe que
