@@ -336,8 +336,22 @@ Ce qui **reste ouvert** :
       sans ce label, aucun egress. Leurs Jobs matchent `BackupJobFailed`, donc
       un test raté alerte comme un backup raté.
       **À valider au prochain déploiement** (non exerçable sans cluster).
-- [ ] **PITR CNPG** : activer `barmanObjectStore` en overlay cloud (RPO actuel
-      = dump quotidien, 24 h).
+- [x] ~~**PITR CNPG**~~ → ACTIVÉ (2026-07-27) sur les deux bases (zitadel-db,
+      grafana-db). `barmanObjectStore` archive les WAL en continu : le RPO passe
+      de **24 h** (le seul filet était le `pg_dump` quotidien) à quelques minutes.
+      - destination `s3://${BACKUP_S3_BUCKET}/cnpg/<base>`, substituée depuis
+        `cluster-identity` ; credentials via ExternalSecret `cnpg-backup-s3`
+        (même destination `backup/s3-primary` que restic et Longhorn) ;
+      - **`ScheduledBackup` quotidiens ajoutés** : sans backup de base, les WAL
+        archivés sont inexploitables — c'est le couple qui fait le PITR ;
+      - rétention 30 j, compression gzip des WAL et des données.
+      ⚠️ Le `schedule` de CNPG porte un champ SECONDES en tête (6 champs, format
+      robfig/cron) — vérifié dans le CRD vendoré. À 5 champs, l'heure serait lue
+      comme des minutes.
+      La substitution est sûre sur cette brique : le manifeste vendoré de
+      l'opérateur contient des `$(VAR_NAME)`, mais **vérifié — les 13 occurrences
+      sont toutes dans des `description` de CRD**, aucune dans un conteneur.
+      **À valider au prochain déploiement.**
 - [x] ~~**Longhorn `backupTarget`**~~ → CÂBLÉ (2026-07-27). Les volumes n'avaient
       **aucune** destination de sauvegarde : `backupTarget: ""` renvoyait à un
       « overlay cloud » qui n'a jamais existé. Désormais :
@@ -533,8 +547,21 @@ Ce qui **reste ouvert** :
       **À valider au prochain déploiement** (non exerçable sans cluster).
       Le CCM redeviendrait le bon choix si Proxmox sortait du périmètre, ou pour
       des LB publics à la demande par application.
-- [ ] **Observability S3 cloud** : Loki pointe encore `minio/root` en cloud
-      (overlay jamais câblé) ; au câblage, penser `rules.dns` sur sa CNP toFQDNs.
+- [x] ~~**Observability S3 cloud**~~ → CÂBLÉ (2026-07-27). Loki lisait
+      `minio/root` : en cloud ses logs atterrissaient sur le MinIO interne, donc
+      sur des volumes Longhorn — ce qui annule l'intérêt d'un stockage objet.
+      Désormais **credentials ET emplacement** (endpoint + bucket) transitent par
+      le Secret `loki-s3-credentials`, injectés en `valuesFrom` : passer du MinIO
+      interne au S3 du provider ne demande **aucun changement de code**, seulement
+      un reseed d'`observability/loki-s3`.
+      Destination volontairement **distincte de `backup/s3-primary`** : réutiliser
+      celle-ci donnerait à Loki un accès en écriture au bucket des sauvegardes —
+      un Loki compromis pourrait les effacer.
+      Pas de substitution Flux sur cette brique : les dashboards Grafana
+      contiennent des `${datasource}` qui seraient vidés.
+      ⚠️ Reste à faire au câblage cloud réel : `rules.dns` sur la CNP `toFQDNs`
+      de Loki (le proxy DNS Cilium, sans quoi les toFQDNs ne matchent jamais).
+      **À valider au prochain déploiement.**
 - [x] ~~**`test-local-stack.sh` / fmt**~~ → réglé (2026-07-27). Deux moitiés :
       `infrastructure/.yamllint` **existe** aujourd'hui (l'entrée était périmée) ;
       et `tofu fmt -recursive infrastructure/opentofu` embarquait le dossier de
