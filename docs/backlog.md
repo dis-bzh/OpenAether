@@ -49,7 +49,8 @@ Ce qui **reste ouvert** (par ordre d'importance pour reprendre) :
 2. `apiserver → kubelet:10250` injoignable sur l'edge OVH (diagnostic à
    distance impossible) — cf. section CAPI.
 3. Divergence `socketLB.hostNamespaceOnly` parent/enfant, inexpliquée.
-4. Les deux branches Git à garder synchro (cf. « Dette de process »).
+4. ~~Les deux branches Git à garder synchro~~ → réglé le 2026-07-27 : plus que
+   `main` dans les deux dépôts, `CHILD_BRANCH` retiré des `apps/clusters/`.
 
 ## Identités & accès au quotidien (le chantier ouvert)
 
@@ -127,11 +128,13 @@ Ce qui **reste ouvert** (par ordre d'importance pour reprendre) :
       à distance. À vérifier : règle de security group CAPO entre les subnets des
       nœuds (le CP et le worker ne sont pas dans le même /24), et `10250` en
       entrée sur le SG worker. Non lié aux rollouts (jamais testé avant).
-- [ ] **Deux branches à garder synchro** : le management réconcilie `main`, les
-      enfants `feat/pioche-backup-gitception` (`CHILD_BRANCH` dans
-      `apps/clusters/*.yaml`). Un correctif poussé sur `main` n'atteint donc PAS
-      les edges — piège vécu le 2026-07-26 (fast-forward manuel de la branche).
-      À supprimer au merge de la branche (cf. « Dette de process »).
+- [x] ~~Deux branches à garder synchro~~ → FAIT (2026-07-27) : plus qu'une
+      branche, `main`, dans les deux dépôts. Les `CHILD_BRANCH` des
+      `apps/clusters/*.yaml` ont été retirés (défaut `${CHILD_BRANCH:=main}`).
+      **Leçon** : la branche de test avait été supprimée côté git *sans* que les
+      overrides le soient — un enfant créé dans cet état aurait suivi une source
+      introuvable. Ne surcharger `CHILD_BRANCH` que le temps d'un test, et le
+      retirer avec la branche.
 - [ ] **Enfants durcis** : `network.controlPlaneLoadBalancer` (aujourd'hui
       endpoint = IP publique du CP, non-HA) + private network / gateway au lieu
       d'une IPv4 publique par nœud.
@@ -273,7 +276,7 @@ Ce qui **reste ouvert** (par ordre d'importance pour reprendre) :
 
 ## Dette de process
 
-- [ ] **Merge `feat/pioche-backup-gitception` → main** (2 repos) puis remettre
-      `git_branch="main"` dans `cluster/main.tf` + `task bootstrap-phase2`
-      (les clusters LIVE réconcilient cette branche).
+- [x] ~~Merge `feat/pioche-backup-gitception` → main~~ → FAIT (2026-07-27) :
+      une seule branche `main` dans les deux dépôts, `git_branch="main"` côté
+      `cluster/main.tf`, plus aucun `CHILD_BRANCH` dans `apps/clusters/`.
 - [ ] CHANGELOG apps inexistant (l'infra en a un).
