@@ -65,12 +65,26 @@ resource "terraform_data" "build_and_upload" {
 data "external" "oos_object" {
   program = ["bash", "-c", <<-EOT
     set -euo pipefail
-    url="$(aws s3 presign "s3://${var.bucket_name}/${local.object_key}" \
-      --endpoint-url "${var.s3_endpoint}" --region "${var.region}" --expires-in 3600)"
-    bytes="$(aws s3api head-object --bucket "${var.bucket_name}" --key "${local.object_key}" \
-      --endpoint-url "${var.s3_endpoint}" --region "${var.region}" --query ContentLength --output text)"
-    gib=1073741824
-    size=$(( (bytes + gib - 1) / gib * gib ))
+    export AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+    # ⚠️ TOLÈRE L'ABSENCE DE L'OBJET. Cette data source est évaluée à CHAQUE
+    # plan/refresh, alors que ses valeurs ne servent qu'à la CRÉATION du
+    # snapshot. Si elle exigeait l'objet, le `.raw` de staging (~11 Gio, facturé
+    # en permanence) ne pourrait jamais être purgé sans casser tout `tofu plan`.
+    # D'où la purge automatique après enregistrement de l'OMI, plus bas.
+    if aws s3api head-object --bucket "${var.bucket_name}" --key "${local.object_key}" \
+         --endpoint-url "${var.s3_endpoint}" --region "${var.region}" >/dev/null 2>&1; then
+      url="$(aws s3 presign "s3://${var.bucket_name}/${local.object_key}" \
+        --endpoint-url "${var.s3_endpoint}" --region "${var.region}" --expires-in 3600)"
+      bytes="$(aws s3api head-object --bucket "${var.bucket_name}" --key "${local.object_key}" \
+        --endpoint-url "${var.s3_endpoint}" --region "${var.region}" --query ContentLength --output text)"
+      gib=1073741824
+      size=$(( (bytes + gib - 1) / gib * gib ))
+    else
+      # Objet purgé après import : le snapshot existe déjà, ces valeurs sont
+      # ignorées (cf. lifecycle.ignore_changes du snapshot).
+      url=""
+      size=0
+    fi
     printf '{"url":"%s","size":"%s"}' "$url" "$size"
   EOT
   ]
@@ -97,7 +111,11 @@ resource "outscale_snapshot" "talos" {
   }
 
   lifecycle {
-    ignore_changes       = [file_location]
+    # `file_location` (URL pré-signée, change à chaque run) ET `snapshot_size`
+    # proviennent tous deux de l'objet de staging, qui est purgé après import :
+    # sans les ignorer, chaque plan verrait une dérive et voudrait recréer un
+    # import d'une heure.
+    ignore_changes       = [file_location, snapshot_size]
     replace_triggered_by = [terraform_data.build_and_upload]
   }
 
@@ -123,4 +141,39 @@ resource "outscale_image" "talos" {
       delete_on_vm_deletion = true
     }
   }
+}
+
+# Purge du `.raw` de staging, une fois l'OMI enregistrée.
+#
+# POURQUOI : l'objet fait ~11 Gio et était conservé indéfiniment, un par version
+# de Talos — facturé en pure perte. Les artefacts DURABLES sont le snapshot et
+# l'OMI ; le `.raw` n'est qu'un intermédiaire d'import, et il est reconstructible
+# à l'identique depuis l'Image Factory (le schematic ID est déterministe).
+#
+# ⚠️ Cette purge n'est possible QUE parce que `data.external.oos_object` tolère
+# désormais l'absence de l'objet (cf. plus haut). Supprimer le `.raw` sans ce
+# correctif casse tout `tofu plan` du root talos-image.
+#
+# Déclenché par le même trigger que l'upload : une nouvelle version repasse par
+# download → upload → import → OMI → purge.
+resource "terraform_data" "purge_staging" {
+  triggers_replace = {
+    key    = local.object_key
+    bucket = var.bucket_name
+    image  = outscale_image.talos.image_id
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["/usr/bin/env", "bash", "-c"]
+    command     = <<-EOT
+      set -euo pipefail
+      export AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+      echo "▶ Purge du staging : s3://${var.bucket_name}/${local.object_key}"
+      aws s3 rm "s3://${var.bucket_name}/${local.object_key}" \
+        --endpoint-url "${var.s3_endpoint}" --region "${var.region}" || true
+      echo "✓ staging purgé (l'OMI et le snapshot restent les artefacts durables)"
+    EOT
+  }
+
+  depends_on = [outscale_image.talos]
 }

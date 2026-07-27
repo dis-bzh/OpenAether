@@ -114,20 +114,40 @@ Ce qui **reste ouvert** :
       → collisions silencieuses entre providers dans un même namespace ;
       (b) CAPS : reconcile silencieusement arrêté quand son webhook de
       conversion est cassé (aucun log), suppression bloquée sur finalizers.
-- [ ] **Outscale : import de snapshot très lent** — OMI Talos v1.13.4 restée
-      `in-queue` 0% > 40 min (timeout du provider). Prévoir un timeout plus long
-      dans le module, et surtout ne PAS `-replace` l'image tant que la nouvelle
-      n'est pas `completed` (le destroy préalable a supprimé l'OMI v1.13.3).
-- [ ] **Purge du staging Outscale** : `s3-openaether-outscale-talos-staging`
-      conserve un .raw de 4,1 Go par version, jamais supprimé après import.
-- [ ] **DETTE — state talos-image Outscale désynchronisé** (2026-07-25) : l'OMI
-      `ami-6711ec55` (Talos v1.13.4, variante aws) a été enregistrée VIA L'API
-      depuis le snapshot `snap-73e9b29e`, parce qu'un `tofu apply` relançait un
-      import de ~1 h au lieu de réutiliser le snapshot abouti. À réconcilier :
-      `tofu import module.outscale[0].outscale_snapshot.talos snap-73e9b29e` +
-      `… outscale_image.talos ami-6711ec55`, sinon le prochain apply recréera
-      tout. Un snapshot orphelin (`snap-6bc67b02`, import relancé puis
-      abandonné) est également à supprimer — il est facturé.
+- [x] ~~**Outscale : import de snapshot très lent**~~ → traité : le module pose
+      `timeouts { create = "120m" }` sur `outscale_snapshot.talos` (le défaut du
+      provider, 40 min, était dépassé par un import mesuré > 60 min en
+      `in-queue 0%`), et la marche à suivre en cas de dépassement est écrite sur
+      place : attendre `completed` puis `tofu import`, surtout **ne pas**
+      relancer l'apply (il déclencherait un second import d'une heure).
+- [x] ~~**Purge du staging Outscale**~~ → FAIT et **vérifié en réel**
+      (2026-07-27). Le `.raw` de staging (10,9 Gio, un par version) était
+      conservé indéfiniment. `terraform_data.purge_staging` le supprime
+      désormais après enregistrement de l'OMI.
+
+      ⚠️ **Ce n'était pas qu'un `aws s3 rm` à ajouter** : `data.external.oos_object`
+      (presign + `head-object`) est évaluée à CHAQUE plan/refresh alors que ses
+      valeurs ne servent qu'à la création du snapshot. Purger sans la rendre
+      tolérante à l'absence de l'objet aurait **cassé tout `tofu plan`** du root
+      talos-image. La data source dégrade maintenant proprement (url vide,
+      taille 0) et `snapshot_size` rejoint `file_location` dans
+      `ignore_changes` — les deux viennent de cet objet transitoire.
+
+      Vérifié de bout en bout sur le compte réel : `plan` avant purge =
+      *1 to add, 0 to change, 0 to destroy* ; après purge et objet absent =
+      **« No changes »**. Les artefacts durables (snapshot `snap-3d4773e8`, OMI
+      `ami-16d2bedd`) sont intacts, et le `.raw` est reconstructible à
+      l'identique depuis l'Image Factory (schematic ID déterministe).
+- [x] ~~**DETTE — state talos-image Outscale désynchronisé**~~ → entrée PÉRIMÉE,
+      vérifiée le 2026-07-27 : `tofu state list` montre le snapshot ET l'OMI, aux
+      IDs exacts présents sur le compte (`snap-3d4773e8`, `ami-16d2bedd`). La
+      réconciliation a eu lieu au rebuild du 2026-07-26 ; les IDs cités dans
+      l'ancienne entrée (`ami-6711ec55`, `snap-6bc67b02`) n'existent plus.
+
+      ⚠️ **Piège de diagnostic** : le tfstate est **chiffré côté client**. Le
+      télécharger et le lire en JSON montre `resources: []` — ce qui ressemble à
+      un état vide et m'a d'abord fait conclure à tort. Toujours passer par
+      `tofu state list` avec `TF_VAR_encryption_passphrase`.
 - [x] **Cilium des enfants désaligné du socle parent** (2026-07-26) : les
       `values` d'`apps/clusters/edge-*.yaml` laissaient `cni.exclusive` au défaut
       du chart (`true`) et `socketLB.hostNamespaceOnly=false`. Cilium réécrivait
