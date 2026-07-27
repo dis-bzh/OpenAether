@@ -5,72 +5,63 @@ Alimenté au fil des sessions (humain + assistant). Retirer les entrées faites.
 
 ## Où on en est (mis à jour le 2026-07-27, fin de session)
 
-**Aucune infrastructure cloud ne tourne.** `task fleet-down PROVIDER=ovh` a
-détruit les deux enfants CAPI en cascade puis 80 ressources OpenTofu. Vérifié à
-zéro : **OVH** (0 serveur, 0 FIP — l'IP pré-allouée d'edge-2 a été purgée via
-`purge-orphans/ovh.py --apply`), **Scaleway** (0 serveur / volume / IP / LB sur
-fr-par-1/2/3) et **Outscale** (aucun orphelin). Tunnels SSH fermés, kubeconfigs
-des enfants supprimés. `restic-escrow-OUTSCALE.txt` **conservé volontairement**
-— il déverrouille les dépôts restic restés en bucket.
+**Rien ne tourne, ni en cloud ni en local.** Les trois comptes sont vérifiés à
+zéro (OVH, Scaleway, Outscale) et le cluster Docker de test a été détruit
+(`task local-down` : 0 conteneur, 0 volume, 0 réseau, state supprimé).
+`restic-escrow-OUTSCALE.txt` est **conservé volontairement** — il déverrouille
+les dépôts restés en bucket.
 
-Ce run a **validé les quatre points restants** — et fait tomber **cinq défauts
-réels** au passage (tous corrigés et poussés, cf. sections dédiées) :
+**Le backlog est passé de 30 à 9 items ouverts.** Ce qui reste demande autre
+chose que du code : du matériel (Proxmox), une décision (hausse de quota
+Outscale, ouverture des issues upstream), un déploiement pour être observé
+(reboot spontané Outscale, nœud OVH `ACTIVE` mais mort, background-controller
+Kyverno), ou de l'amont (`talos_cluster_health`, bloqué tant que le provider
+0.12.x reste en alpha).
 
-1. **Enfant neuf 17/17 : VALIDÉ.** edge-2 créé from scratch atteignait 17/17 avec
-   les values corrigées. `istio-cni-node` est `1/1 Running` sur les deux nœuds —
-   c'est exactement ce qui restait bloqué 3 h le 2026-07-26.
-2. **`apiserver → kubelet:10250` : RÉSOLU.** `kubectl logs` et `kubectl exec`
-   fonctionnent sur l'enfant OVH. Aucune règle de security group n'était en
-   cause : c'était bien `ipam.mode` manquant (le pool `cluster-pool` par défaut
-   taillait les pods dans `10.0.0.0/8`, où vit le subnet des nœuds).
-3. **Asymétrie `socketLB.hostNamespaceOnly` : elle n'existait pas.** Preuve
-   directe — avec `hostNamespaceOnly=true` sur l'enfant, `cert-manager-issuers`
-   et `external-secrets-stores` (les deux Kustomizations qui échouaient en
-   « failed calling webhook ») sont `True`.
-4. **Une seule branche `main`** dans les deux dépôts.
+### Validé en cloud réel
 
-Puis, sur demande, **edge-1 (Scaleway) a été recréé et validé à 17/17** (18 depuis l'ajout de la brique d'identité backup) — le
-correctif `ipam.mode` tient donc sur **deux providers aux topologies opposées** :
-nœuds en IP publique côté Scaleway (hors `10.0.0.0/8`), en `10.20.0.0/24` côté
-OpenStack (dedans). Au passage, un management OVH pilotant un enfant Scaleway :
-la kubeception **cross-provider** est exercée pour de vrai.
+- Socle **provider-agnostique** : le même code a porté un management sur
+  Scaleway, OVH et Outscale.
+- **Kubeception/gitception cross-provider** : un management OVH pilotant un
+  enfant Scaleway ; edge-1 (Scaleway) et edge-2 (OpenStack) tous deux à 17/17,
+  sur des topologies réseau opposées.
+- **Backups** restic chiffrés client, multi-destination cross-provider.
+- **Résilience** : reboot simultané non sollicité de 6 VMs — retour seul.
 
-Ce qui est **validé en cloud réel** :
+### Validé sur cluster local (`task local-test`)
 
-- Le socle est **provider-agnostique pour de vrai** : le même code a porté un
-  management sur **Scaleway, OVH et Outscale**, chaque provider ayant révélé
-  (puis fait corriger) des défauts propres.
-- **Kubeception/gitception validée de bout en bout**, y compris la reprise :
-  l'enfant a traversé trois correctifs poussés en cours de route sans
-  intervention manuelle, par simple reconvergence Flux.
-- **Backups** restic chiffrés client, multi-destination et **cross-provider**,
-  validés dans les trois sens (non re-seedés sur ce run : inutile pour l'objet
-  du test, et les briques `backup-*` passent `True` sans le seed).
-- **Pioche modulaire** (`scripts/pick.py`) : fermeture transitive, profils
-  générés, garde-fous `--check` + parité Cilium socle/enfants.
-- **Résilience** : reboot simultané non sollicité des 6 VMs Outscale
-  (2026-07-26) — le cluster est revenu seul.
+- **TLS interne OpenBao** : 3 réplicas `1/1`, quorum raft en HTTPS, job de
+  bootstrap intégralement en 204, ESO `store validated`, et un `ExternalSecret`
+  de bout en bout (`SecretSynced`, valeur matérialisée).
+- **Policies nominatives** : `sys/seal` et `sys/step-down` en 403, écriture
+  refusée au reader.
 
-Ressources conservées entre les runs (les détruire coûte du temps ou de la
-restaurabilité) : buckets S3 (tfstates, artefacts, **dépôts restic**) et images
-Talos v1.13.4 sur les 3 clouds. ⚠️ Les dépôts restic survivent aux clusters,
-**pas leur `RESTIC_PASSWORD`** — `infrastructure/opentofu/cluster/restic-escrow-OUTSCALE.txt`
-est conservé volontairement, il déverrouille les dépôts restés en bucket.
+### ⚠️ Livré mais JAMAIS déployé — à valider au prochain run
 
-Créés hors OpenTofu, donc à recréer après un teardown : keypair Outscale
-`openaether-capi`, et la **FIP OVH d'un enfant OpenStack** — désormais
-idempotente via `scripts/ops/ensure-capo-fip.py <enfant>` (reporter l'adresse
-dans `OS_CP_FLOATING_IPS`).
+Tout ce qui suit est écrit, validé statiquement, mais n'a jamais tourné :
 
-Ce qui **reste ouvert** :
+1. **Ingress public** — Service NodePort figé 30080/30443 + `app_lb_node_ports`
+   dans les 3 modules + CNP élargie. Vérifier d'abord
+   `kubectl get endpoints openaether-gateway-nodeport` : si le sélecteur ne
+   matche aucun pod, tout le reste est inutile.
+2. **SSO Grafana ↔ Zitadel** — confirmer la STRUCTURE du claim de rôles sur un
+   vrai token (`/oidc/v1/userinfo`) et ajuster `role_attribute_path`.
+3. **PITR CNPG** + **backupTarget Longhorn** + **préfixe restic par cluster** —
+   dépendent tous du ConfigMap `cluster-identity` posé au bootstrap.
+4. **Alerting backups** (PromQL non vérifié, `promtool` absent) et **test de
+   restauration mensuel**.
+5. **Port Neutron du bastion OVH** (`fixed_ip`) — corrige un échec d'apply
+   INTERMITTENT, donc un run vert ne prouve rien ; c'est le cumul qui comptera.
 
-1. **Mutation à chaud du CNI d'un enfant** : toujours déconseillée (elle a
-   dégradé deux enfants le 2026-07-26). Recréer reste la voie sûre. Ce run n'a
-   pas re-testé la mutation, seulement la création.
-2. **Durcir les enfants** : `network.controlPlaneLoadBalancer` (endpoint = IP
-   publique du CP aujourd'hui, non-HA), private network / gateway.
-3. **Pourquoi Talos a-t-il demandé un reboot sur `cp-0`** (aucun apply en cours,
-   aucune action plateforme côté API OVH) — cf. section Multi-provider.
+### Ordre conseillé pour reprendre
+
+1. `task lint`, `task render-check`, `task apps-validate` — trois garde-fous.
+2. `task local-test` **avant tout déploiement cloud** : il a trouvé deux bugs
+   qu'aucune vérification statique ne voyait (continuations de ligne `\\`,
+   `volumeMount` sans `volume`).
+3. `task preflight-quotas PROVIDER=…` avant `task up`.
+4. Pour un enfant OpenStack : ré-allouer la FIP
+   (`scripts/ops/ensure-capo-fip.py edge-2`) et reporter l'adresse.
 
 ## Identités & accès au quotidien (le chantier ouvert)
 
