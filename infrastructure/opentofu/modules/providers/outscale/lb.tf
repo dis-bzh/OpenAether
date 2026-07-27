@@ -2,7 +2,7 @@
 # Outscale — Load Balancers
 # Two separate LBs matching the provider contract:
 #   k8s: port 6443 → control planes
-#   app: ports 80/443 → workers
+#   app: 80/443 en public → NodePorts du Gateway sur les workers
 # Outscale LBs return a DNS name (not IP).
 # ==============================================================================
 
@@ -59,14 +59,15 @@ resource "outscale_load_balancer" "app" {
   load_balancer_type = "internet-facing"
 
   listeners {
-    backend_port           = 80
+    # backend_port = NodePort figé du Gateway ; load_balancer_port reste public.
+    backend_port           = var.app_lb_node_ports.http
     backend_protocol       = "TCP"
     load_balancer_port     = 80
     load_balancer_protocol = "TCP"
   }
 
   listeners {
-    backend_port           = 443
+    backend_port           = var.app_lb_node_ports.https
     backend_protocol       = "TCP"
     load_balancer_port     = 443
     load_balancer_protocol = "TCP"

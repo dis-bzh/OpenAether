@@ -4,7 +4,7 @@
 #   - 6443/TCP: Kubernetes API via K8s LB (permanent)
 #   - 50000/TCP: Talos API via bastion ONLY. Accessible via SSH tunnels established
 #                through the bastion host. Never exposed via Load Balancers.
-#   - 80/443:   App traffic via App LB
+#   - NodePorts 30080/30443: trafic applicatif depuis l'App LB
 #   - Inter-node: full mesh on private subnets
 # ==============================================================================
 
@@ -67,17 +67,19 @@ resource "scaleway_instance_security_group" "this" {
     protocol = "ANY"
   }
 
-  # HTTP/HTTPS — From App LB
+  # HTTP/HTTPS — depuis l'App LB, sur les NodePorts FIGÉS du Gateway.
+  # (Le LB écoute en 80/443 côté public et forward vers ces ports côté workers ;
+  # ouvrir 80/443 ici ne servirait à rien — rien n'y écoute sur les nœuds.)
   inbound_rule {
     action   = "accept"
-    port     = 80
+    port     = var.app_lb_node_ports.http
     ip_range = "${scaleway_lb_ip.app.ip_address}/32"
     protocol = "TCP"
   }
 
   inbound_rule {
     action   = "accept"
-    port     = 443
+    port     = var.app_lb_node_ports.https
     ip_range = "${scaleway_lb_ip.app.ip_address}/32"
     protocol = "TCP"
   }

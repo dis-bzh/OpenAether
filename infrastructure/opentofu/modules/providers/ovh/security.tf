@@ -36,13 +36,15 @@ resource "openstack_networking_secgroup_rule_v2" "talos_api" {
   security_group_id = openstack_networking_secgroup_v2.this.id
 }
 
-# HTTP/HTTPS — from private subnet (App LB health checks)
+# HTTP/HTTPS — depuis le subnet privé (App LB + ses health checks), sur les
+# NodePorts FIGÉS du Gateway. Ouvrir 80/443 sur les nœuds serait inutile : c'est
+# le Gateway Istio qui écoute, derrière un NodePort.
 resource "openstack_networking_secgroup_rule_v2" "http" {
   direction         = "ingress"
   ethertype         = "IPv4"
   protocol          = "tcp"
-  port_range_min    = 80
-  port_range_max    = 80
+  port_range_min    = var.app_lb_node_ports.http
+  port_range_max    = var.app_lb_node_ports.http
   remote_ip_prefix  = "10.0.0.0/24"
   security_group_id = openstack_networking_secgroup_v2.this.id
 }
@@ -51,8 +53,8 @@ resource "openstack_networking_secgroup_rule_v2" "https" {
   direction         = "ingress"
   ethertype         = "IPv4"
   protocol          = "tcp"
-  port_range_min    = 443
-  port_range_max    = 443
+  port_range_min    = var.app_lb_node_ports.https
+  port_range_max    = var.app_lb_node_ports.https
   remote_ip_prefix  = "10.0.0.0/24"
   security_group_id = openstack_networking_secgroup_v2.this.id
 }
