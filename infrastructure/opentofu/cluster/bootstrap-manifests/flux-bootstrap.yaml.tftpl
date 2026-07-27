@@ -7,6 +7,7 @@
 #   ${git_branch}     — ex: main
 #   ${cluster_role}   — ex: management (→ apps/flux/management)
 #   ${cluster_id}     — ex: openaether-dev-ovh (identité UNIQUE du cluster)
+#   ${backup_target_url} — ex: s3://s3-openaether-ovh-backups-dev@eu-west-par/
 #   ${namespace}      — ex: flux-system
 ---
 # Identité du cluster, consommée par `postBuild.substituteFrom` des briques qui
@@ -28,6 +29,13 @@ metadata:
     openaether.io/managed: "true"
 data:
   CLUSTER_NAME: ${cluster_id}
+  # Destination des backups de VOLUMES (Longhorn), au format attendu :
+  # s3://<bucket>@<region>/. Le bucket préexiste et ses credentials vivent dans
+  # OpenBao ; seul l'emplacement (non secret) transite ici, parce que
+  # `backup-target` est une CHAÎNE côté Longhorn et ne peut pas être alimentée
+  # par un Secret. ⚠️ Doit correspondre au bucket seedé dans
+  # `secret/backup/s3-primary`.
+  BACKUP_TARGET_URL: ${backup_target_url}
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: GitRepository

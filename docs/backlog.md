@@ -338,8 +338,28 @@ Ce qui **reste ouvert** :
       **À valider au prochain déploiement** (non exerçable sans cluster).
 - [ ] **PITR CNPG** : activer `barmanObjectStore` en overlay cloud (RPO actuel
       = dump quotidien, 24 h).
-- [ ] **Longhorn `backupTarget`** par environnement (Setting non câblé ; volumes
-      LUKS → backups chiffrés par construction).
+- [x] ~~**Longhorn `backupTarget`**~~ → CÂBLÉ (2026-07-27). Les volumes n'avaient
+      **aucune** destination de sauvegarde : `backupTarget: ""` renvoyait à un
+      « overlay cloud » qui n'a jamais existé. Désormais :
+      - `apps/base/storage/backup-target/` : `ExternalSecret`
+        `longhorn-backup-credentials` (les 3 clés qu'attend Longhorn —
+        `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINTS` — depuis
+        `secret/backup/s3-primary`, la même destination que les dépôts restic) +
+        deux `Setting` CR (`backup-target`, `backup-target-credential-secret`) ;
+      - l'URL vient du ConfigMap `cluster-identity`, OpenTofu l'assemblant au
+        format `s3://<bucket>@<region>/` (`backup.tf`, `local.backup_data_bucket`).
+        Assemblée côté tofu parce que la substitution Flux ne sait pas concaténer
+        conditionnellement.
+      - Kustomization `21c` **séparée** de `storage` : elle porte le
+        `substituteFrom`, et la substitution s'applique à tout le rendu — fusionnée,
+        elle viderait `$VOL_DIR` dans `install.yaml`. Même piège que les backups.
+      - Setting CR et non `defaultSettings` du chart : ce dernier n'est lu qu'au
+        premier déploiement, les CR survivent aux upgrades.
+      Forme du CRD **vérifiée** contre Longhorn v1.9.2 (`longhorn.io/v1beta2`,
+      `value` à la racine). Défaut vide si le cluster ne publie pas l'URL — les
+      enfants CAPI, qui ne piochent pas `storage`, gardent le comportement actuel.
+      Les volumes étant LUKS, les backups sont chiffrés par construction.
+      **À valider au prochain déploiement.**
 - [ ] **etcd-snapshot planifié** : cron côté opérateur (la task existe, rien ne
       la déclenche périodiquement).
 
