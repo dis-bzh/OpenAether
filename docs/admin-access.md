@@ -100,6 +100,30 @@ task preflight-quotas PROVIDER=outscale -- --add-vms 7 --add-cores 14 --add-ram-
 Il sort en erreur si la topologie demandée dépasse — c'est exactement le
 scénario qui a fait perdre deux déploiements.
 
+## 3ter. Planifier le snapshot etcd (opérateur)
+
+Le snapshot etcd est un **raccourci de RTO** : le contenu du cluster est
+reconstruit par Flux, mais quelques objets ne vivent QUE dans etcd (Secrets
+écrits par des Jobs, bindings de PVC…). `task etcd-snapshot` le fait à la
+demande ; rien ne le déclenchait périodiquement.
+
+```bash
+# 03:40 chaque jour — chemin ABSOLU obligatoire, la sortie part par mail
+40 3 * * * /chemin/vers/OpenAether-infra/scripts/ops/etcd-snapshot-cron.sh ovh ~/.ssh/id_ed25519-ovh-openaether-dev >> /var/log/openaether-etcd-snapshot.log 2>&1
+```
+
+Le wrapper existe parce que la task seule n'est pas utilisable en cron :
+- cron démarre avec un `PATH` minimal, or les outils sont éparpillés
+  (`task`/`talosctl` dans `/usr/local/bin`, `tofu`/`aws` dans `/snap/bin`) ;
+- les credentials viennent de `.env.sh`, que cron n'hérite pas ;
+- **`task etcd-snapshot` ouvre les tunnels SSH et ne les referme pas** — en
+  cron ils s'accumuleraient ; le wrapper les ferme même en cas d'échec ;
+- un verrou `flock` évite qu'un snapshot lent croise le suivant.
+
+Il tourne sur la machine qui détient le dépôt ET les credentials. Un échec sort
+en code non nul avec un message horodaté — de quoi être vu par cron ou un
+superviseur.
+
 ## 4. Accès admin aux UIs (interface restreinte)
 
 Exposition : gateway sur IP **privée VPC** (pool LB-IPAM) + SG bastion limité à
