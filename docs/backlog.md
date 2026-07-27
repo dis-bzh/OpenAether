@@ -374,8 +374,19 @@ Ce qui **reste ouvert** :
       enfants CAPI, qui ne piochent pas `storage`, gardent le comportement actuel.
       Les volumes étant LUKS, les backups sont chiffrés par construction.
       **À valider au prochain déploiement.**
-- [ ] **etcd-snapshot planifié** : cron côté opérateur (la task existe, rien ne
-      la déclenche périodiquement).
+- [x] ~~**etcd-snapshot planifié**~~ → FAIT (2026-07-27) :
+      `scripts/ops/etcd-snapshot-cron.sh <provider> [clé]`, ligne de crontab
+      documentée dans `docs/admin-access.md` § 3ter.
+      La task seule n'était pas utilisable en cron, pour quatre raisons — toutes
+      traitées par le wrapper : `PATH` minimal de cron alors que les outils sont
+      éparpillés (`/usr/local/bin` et `/snap/bin`) ; credentials absents de
+      l'environnement de cron ; **`task etcd-snapshot` ouvre les tunnels SSH et
+      ne les referme jamais** (voulu en interactif, mais ils s'accumuleraient en
+      cron) ; et aucun garde-fou contre le recouvrement de deux exécutions.
+      Vérifié en réel avec `PATH=/usr/bin:/bin` : le wrapper retrouve ses outils,
+      source l'environnement, atteint le backend distant, puis échoue proprement
+      sur l'absence d'infrastructure — trap déclenché, code non nul, message
+      horodaté.
 
 ## Observabilité / diagnostic
 
