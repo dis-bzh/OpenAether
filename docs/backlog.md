@@ -583,17 +583,18 @@ Ce qui **reste ouvert** :
       sont-ils produits ? Si non, chercher côté crash/RBAC/ressources, pas côté
       manifests.
 
-- [ ] **Kyverno installé depuis une URL GitHub distante** (constaté 2026-07-27) :
-      `apps/base/kyverno/kustomization.yaml` liste
-      `https://github.com/kyverno/kyverno/releases/download/v1.12.1/install.yaml`
-      comme ressource. Conséquences : la réconciliation Flux dépend de la
-      disponibilité de GitHub, le rendu n'est pas reproductible hors ligne, et
-      rien ne vérifie l'intégrité de l'artefact téléchargé (pas de somme de
-      contrôle). La version est au moins épinglée (v1.12.1, choisie pour un fix
-      upstream documenté sur place). À arbitrer : vendorer l'install.yaml dans le
-      dépôt (comme `flux-install.yaml` et `cilium.yaml`, qui sont committés) ou
-      passer par un HelmRelease avec un HelmRepository — cohérent avec le reste
-      du socle, et soumis au même garde-fou de rendu.
+- [x] ~~**Kyverno installé depuis une URL GitHub distante**~~ → VENDORÉ
+      (2026-07-27) : `apps/base/kyverno/kyverno-1.12.1.yaml` (3,1 Mo), avec URL
+      d'origine et **sha256** en commentaire, plus la marche à suivre pour monter
+      de version. La réconciliation Flux ne dépend plus de la disponibilité de
+      GitHub, le rendu est reproductible hors ligne, et le contenu est figé (pas
+      seulement la version).
+      Aligné sur le précédent du dépôt : `cnpg-1.23.1.yaml` était déjà vendoré
+      pour cette raison (« évite fetch remote (DNS/IPv6) »), comme `cilium.yaml`
+      et `flux-install.yaml` côté infra.
+      **Rendu vérifié IDENTIQUE à l'octet près** avant et après bascule
+      (3 179 903 octets). Balayage fait : plus AUCUNE base distante dans les deux
+      dépôts.
 
 ## Reproductibilité des artefacts générés
 
