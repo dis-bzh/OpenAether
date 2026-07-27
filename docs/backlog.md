@@ -217,6 +217,19 @@ Ce qui **reste ouvert** (par ordre d'importance pour reprendre) :
 
 ## Multi-provider / infra
 
+- [x] ~~**OVH : port du bastion sans `fixed_ip` → apply intermittent**~~ → corrigé
+      (2026-07-27). `openstack_networking_port_v2.bastion` ne déclarait que
+      `network_id`, ce qui ne crée **aucune dépendance vers le subnet** :
+      OpenTofu pouvait créer le port avant lui et Neutron le laissait sans IPv4.
+      L'apply cassait alors bien plus loin, sur deux messages qui ne désignent
+      pas la cause : « Port <id> requires a FixedIP in order to be used » (boot
+      du bastion) et « Cannot add floating IP to port <id> that has no fixed
+      IPv4 addresses ». **C'est une course** : plusieurs déploiements OVH sont
+      passés sans. Les ports des control planes et le VIP déclaraient déjà leur
+      `fixed_ip` — le bastion était le seul en écart. **Leçon générale** : sur
+      Neutron, un port dont on attend une IP doit toujours porter un bloc
+      `fixed_ip { subnet_id = … }`, autant pour l'ordre que pour l'allocation.
+
 - [ ] **Quota RAM Outscale : un management HA sature le compte** (2026-07-26).
       `memory_limit` = **40 Go**, or un management HA (3 CP + 3 workers en
       tinav5.c2r7p2 = 7 Go + bastion 2 Go) en consomme **44** — dépassement

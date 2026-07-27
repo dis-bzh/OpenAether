@@ -79,6 +79,20 @@ resource "openstack_networking_port_v2" "bastion" {
   network_id         = openstack_networking_network_v2.private.id
   admin_state_up     = true
   security_group_ids = [openstack_networking_secgroup_v2.bastion.id]
+
+  # ⚠️ NE PAS retirer ce bloc. `network_id` seul ne crée AUCUNE dépendance vers
+  # le subnet : OpenTofu peut créer le port avant lui, et Neutron le laisse
+  # alors sans adresse IPv4. L'apply échoue plus loin, sur deux erreurs qui ne
+  # désignent pas la cause :
+  #   « Port <id> requires a FixedIP in order to be used »        (boot du bastion)
+  #   « Cannot add floating IP to port <id> that has no fixed
+  #     IPv4 addresses »                                          (association FIP)
+  # Le bloc force l'ordre ET garantit l'allocation. C'est une course, donc un
+  # échec INTERMITTENT : plusieurs déploiements OVH sont passés sans (constaté
+  # le 2026-07-27). Les ports des control planes et le VIP le déclarent déjà.
+  fixed_ip {
+    subnet_id = openstack_networking_subnet_v2.private.id
+  }
 }
 
 resource "openstack_compute_instance_v2" "bastion" {
