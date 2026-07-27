@@ -382,6 +382,10 @@ locals {
     git_branch   = "main"
     cluster_role = var.cluster_role
     cluster_id   = local.cluster_id
+    # Destination des backups de volumes Longhorn. URL complète assemblée ICI :
+    # côté manifest, `value:` est une simple chaîne et la substitution Flux ne
+    # sait pas concaténer conditionnellement (pas de `${x:+y}`).
+    backup_target_url = "s3://${local.backup_data_bucket}@${var.s3_primary_region}/"
   })
 }
 
