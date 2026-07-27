@@ -281,10 +281,30 @@ Ce qui **reste ouvert** :
       backups. Les dépôts EXISTANTS (sans préfixe) restent en place : ils ne
       seront plus alimentés, à archiver ou supprimer sciemment.
 
-- [ ] **Alerting échec backups** : VMRule sur `kube_job_status_failed`
-      (namespaces foundation-*) — aujourd'hui un CronJob qui échoue est silencieux.
-- [ ] **Test de restauration périodique** : job mensuel `restic restore` vers
-      volume jetable (les `restic check` ne lisent que les métadonnées).
+- [x] ~~**Alerting échec backups**~~ → FAIT (2026-07-27) :
+      `apps/base/observability/vm-customresources/vmrule-backup.yaml`, 3 règles.
+      `BackupJobFailed` (Job en échec non repris, 15 min de grâce),
+      **`BackupCronJobStale`** (aucun Job créé depuis > 26 h — le cas le plus
+      dangereux, puisqu'il n'y a alors AUCUN échec à voir) et
+      `BackupCronJobSuspended` (> 6 h, avertissement : suspendre est souvent
+      volontaire, réactiver s'oublie).
+      Placé dans `vm-customresources/` et pas dans `observability/` : le kind
+      `VMRule` n'existe qu'après l'installation des CRDs par l'opérateur — même
+      piège chicken-egg que VMCluster/VMAgent.
+      ⚠️ Le PromQL n'a pas pu être vérifié par `promtool` (absent de la machine) :
+      à confirmer au prochain déploiement.
+- [x] ~~**Test de restauration périodique**~~ → FAIT (2026-07-27) : CronJob
+      mensuel `restore-test-cronjob.yaml` dans CHACUNE des deux briques backup.
+      Sur les 2 destinations : `restic check --read-data-subset=5%` (relit et
+      DÉCHIFFRE réellement une fraction des données — ce que `restic check` seul
+      ne fait pas) puis `restic restore latest` vers un `emptyDir` jetable, avec
+      **assertion que le résultat n'est pas vide** : un restore « réussi » mais
+      vide est un dépôt inexploitable.
+      Les pods portent le label `app: <cronjob>` des CronJobs de sauvegarde —
+      c'est lui que sélectionne la CiliumNetworkPolicy qui ouvre l'egress S3 ;
+      sans ce label, aucun egress. Leurs Jobs matchent `BackupJobFailed`, donc
+      un test raté alerte comme un backup raté.
+      **À valider au prochain déploiement** (non exerçable sans cluster).
 - [ ] **PITR CNPG** : activer `barmanObjectStore` en overlay cloud (RPO actuel
       = dump quotidien, 24 h).
 - [ ] **Longhorn `backupTarget`** par environnement (Setting non câblé ; volumes
