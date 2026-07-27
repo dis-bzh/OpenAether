@@ -3,59 +3,68 @@
 Tout ce qui a été identifié comme **mieux que l'existant**, avec le pourquoi.
 Alimenté au fil des sessions (humain + assistant). Retirer les entrées faites.
 
-## Où on en est (mis à jour le 2026-07-26)
+## Où on en est (mis à jour le 2026-07-27)
 
-**Aucune infrastructure cloud ne tourne** — la flotte a été détruite en fin de
-session (`task fleet-down PROVIDER=outscale` : 2 enfants CAPI en cascade puis
-67 ressources OpenTofu). Vérifié à zéro sur les **trois** comptes : Outscale
-(VMs, volumes, LB, IP, Nets), Scaleway (fr-par-1/2) et OVH — une FIP orpheline
-y a été purgée (`scripts/ops/purge-orphans/ovh.py --apply`). Tout repart de zéro
-via `task up`.
+**Une flotte OVH TOURNE** (à détruire en fin de session avec
+`task fleet-down PROVIDER=ovh`) : management HA **32/32 Kustomizations, 6 nœuds
+Ready**, plus un enfant CAPI **edge-2 (OpenStack) à 17/17, 2 nœuds Ready**.
+edge-1 (Scaleway) est temporairement désactivé dans
+`apps/clusters/kustomization.yaml` — le run visait edge-2, seul à exercer à la
+fois « enfant neuf 17/17 » et le symptôme `kubelet:10250`. Le réactiver quand
+on veut re-tester Scaleway.
 
-Conservé volontairement (le détruire coûte du temps ou de la restaurabilité) :
-buckets S3 (tfstates, artefacts, **dépôts restic**) et images Talos v1.13.4 sur
-les 3 clouds (~1 h de rebuild sur Outscale). À recréer au prochain run car créés
-hors OpenTofu : keypair Outscale `openaether-capi`, FIP OVH pré-créée (certSAN).
-⚠️ Les dépôts restic survivent aux clusters, **pas leur `RESTIC_PASSWORD`** :
-réutiliser un bucket sans son escrow bloque les backups (« already initialized »).
-Le fichier `infrastructure/opentofu/cluster/restic-escrow-OUTSCALE.txt` a donc
-été **volontairement conservé** — il déverrouille les dépôts restés en bucket.
-Les `kubeconfig` / `talosconfig` / `edge-*.kubeconfig` ont eux été supprimés
-(ils pointaient vers des clusters qui n'existent plus).
+Ce run a **validé les quatre points restants** — et fait tomber **cinq défauts
+réels** au passage (tous corrigés et poussés, cf. sections dédiées) :
+
+1. **Enfant neuf 17/17 : VALIDÉ.** edge-2 créé from scratch atteint 17/17 avec
+   les values corrigées. `istio-cni-node` est `1/1 Running` sur les deux nœuds —
+   c'est exactement ce qui restait bloqué 3 h le 2026-07-26.
+2. **`apiserver → kubelet:10250` : RÉSOLU.** `kubectl logs` et `kubectl exec`
+   fonctionnent sur l'enfant OVH. Aucune règle de security group n'était en
+   cause : c'était bien `ipam.mode` manquant (le pool `cluster-pool` par défaut
+   taillait les pods dans `10.0.0.0/8`, où vit le subnet des nœuds).
+3. **Asymétrie `socketLB.hostNamespaceOnly` : elle n'existait pas.** Preuve
+   directe — avec `hostNamespaceOnly=true` sur l'enfant, `cert-manager-issuers`
+   et `external-secrets-stores` (les deux Kustomizations qui échouaient en
+   « failed calling webhook ») sont `True`.
+4. **Une seule branche `main`** dans les deux dépôts.
 
 Ce qui est **validé en cloud réel** :
 
 - Le socle est **provider-agnostique pour de vrai** : le même code a porté un
-  cluster de management successivement sur **Scaleway, OVH et Outscale**, chaque
-  provider ayant révélé (puis fait corriger) des défauts propres. Dernier run :
-  management Outscale HA, **DAG 32/32**, 6 nœuds Ready.
-- **Backups** restic chiffrés client, multi-destination et **cross-provider**
-  (primary Outscale → replica Scaleway), validés dans les trois sens.
-- **Pioche modulaire** (`scripts/pick.py`) : fermeture transitive des `dependsOn`,
-  profils générés, garde-fou anti-drift (`--check`, `task apps-validate`).
-- **Kubeception/gitception** : le management provisionne des enfants Talos via
-  CAPI puis y injecte Cilium+Flux à distance ; les enfants réconcilient leur
-  propre profil. Fonctionnel de bout en bout sur Scaleway et OVH.
-- **Résilience** : reboot simultané non sollicité des 6 VMs Outscale (événement
-  plateforme) — le cluster est revenu seul, sans intervention.
+  management sur **Scaleway, OVH et Outscale**, chaque provider ayant révélé
+  (puis fait corriger) des défauts propres.
+- **Kubeception/gitception validée de bout en bout**, y compris la reprise :
+  l'enfant a traversé trois correctifs poussés en cours de route sans
+  intervention manuelle, par simple reconvergence Flux.
+- **Backups** restic chiffrés client, multi-destination et **cross-provider**,
+  validés dans les trois sens (non re-seedés sur ce run : inutile pour l'objet
+  du test, et les briques `backup-*` passent `True` sans le seed).
+- **Pioche modulaire** (`scripts/pick.py`) : fermeture transitive, profils
+  générés, garde-fous `--check` + parité Cilium socle/enfants.
+- **Résilience** : reboot simultané non sollicité des 6 VMs Outscale
+  (2026-07-26) — le cluster est revenu seul.
 
-Ce qui **reste ouvert** (par ordre d'importance pour reprendre) :
+Ressources conservées entre les runs (les détruire coûte du temps ou de la
+restaurabilité) : buckets S3 (tfstates, artefacts, **dépôts restic**) et images
+Talos v1.13.4 sur les 3 clouds. ⚠️ Les dépôts restic survivent aux clusters,
+**pas leur `RESTIC_PASSWORD`** — `infrastructure/opentofu/cluster/restic-escrow-OUTSCALE.txt`
+est conservé volontairement, il déverrouille les dépôts restés en bucket.
 
-1. **Les enfants CAPI ne sont pas fiables en mutation.** Le dernier run les a
-   dégradés en changeant leurs values Cilium à chaud (edge-1 11/17, edge-2
-   0/17). Le correctif de fond est en place pour les **prochains** enfants ;
-   il n'a jamais été validé sur un enfant créé from scratch avec ces valeurs.
-   → **Premier chantier : recréer un edge et vérifier qu'il atteint 17/17.**
-   Depuis le 2026-07-27 les enfants portent en plus `ipam.mode=kubernetes`
-   (dérive corrigée, cf. section CAPI) — c'est ce qui doit être validé.
-2. `apiserver → kubelet:10250` injoignable sur l'edge OVH (diagnostic à
-   distance impossible). Hypothèse retenue : conséquence du même `ipam.mode`
-   manquant — à retester tel quel sur un edge-2 neuf.
-3. ~~Divergence `socketLB.hostNamespaceOnly` parent/enfant~~ → réglé le
-   2026-07-27 : il n'y avait pas d'asymétrie, le flag ne concerne que les netns
-   non-root. Enfants réalignés sur le socle (`true`) + garde-fou de parité.
-4. ~~Les deux branches Git à garder synchro~~ → réglé le 2026-07-27 : plus que
-   `main` dans les deux dépôts, `CHILD_BRANCH` retiré des `apps/clusters/`.
+Créés hors OpenTofu, donc à recréer après un teardown : keypair Outscale
+`openaether-capi`, et la **FIP OVH d'un enfant OpenStack** — désormais
+idempotente via `scripts/ops/ensure-capo-fip.py <enfant>` (reporter l'adresse
+dans `OS_CP_FLOATING_IPS`).
+
+Ce qui **reste ouvert** :
+
+1. **Mutation à chaud du CNI d'un enfant** : toujours déconseillée (elle a
+   dégradé deux enfants le 2026-07-26). Recréer reste la voie sûre. Ce run n'a
+   pas re-testé la mutation, seulement la création.
+2. **edge-1 (Scaleway) à réactiver** et re-valider à 17/17 — le correctif
+   `ipam.mode` vaut pour lui aussi, mais n'y a pas été exercé.
+3. **Durcir les enfants** : `network.controlPlaneLoadBalancer` (endpoint = IP
+   publique du CP aujourd'hui, non-HA), private network / gateway.
 
 ## Identités & accès au quotidien (le chantier ouvert)
 
@@ -135,7 +144,30 @@ Ce qui **reste ouvert** (par ordre d'importance pour reprendre) :
       edge-1 (Scaleway, nœuds en IP publique, **hors** du /8) tenait à 11/17,
       edge-2 (OpenStack, nœuds **dans** le /8) était à 0/17 avec le datapath
       inter-nœuds mort. Piste sérieuse aussi pour le `kubelet:10250` ci-dessous.
-      **À confirmer sur un enfant neuf.**
+      **CONFIRMÉ sur edge-2 neuf le 2026-07-27** : `ipam=kubernetes`, nœuds en
+      `10.20.0.x`, pods réellement en `10.244.x`, `kubectl logs`/`exec`
+      fonctionnels, 17/17.
+- [x] ~~**HelmRepository `cilium` enfermée dans edge-1.yaml**~~ → corrigé
+      (2026-07-27). La source de chart est PARTAGÉE par tous les enfants mais
+      était déclarée dans le fichier de l'un d'eux : désactiver edge-1 dans
+      `kustomization.yaml` privait edge-2 de son CNI (« HelmRepository "cilium"
+      not found », nœuds NotReady indéfiniment). Sortie dans
+      `apps/clusters/helmrepository-cilium.yaml`. **Leçon** : une ressource
+      partagée par N enfants n'a rien à faire dans le fichier de l'un d'eux —
+      le couplage reste invisible tant que le premier enfant est activé.
+- [x] ~~**AuthorizationPolicies `foundation-storage` non décomposables**~~ →
+      corrigé (2026-07-27). `apps/base/istio/authz` est appliqué dès qu'Istio est
+      pioché, mais contenait deux policies visant `foundation-storage` —
+      namespace créé par la brique `storage`. Tout profil « istio sans storage »
+      (le profil `workload` des enfants !) bloquait sur « namespaces
+      "foundation-storage" not found » : edge-2 est resté à 16/17. Scindées dans
+      la brique compagnon `istio-authorizationpolicies-storage`
+      (`dependsOn: [istio-authorizationpolicies, storage]`).
+      **Règle générale à retenir** : une policy qui protège une brique
+      optionnelle doit suivre le sort de cette brique, sinon elle casse
+      l'invariant de décomposabilité du DAG. `pick.py --validate` ne peut pas
+      l'attraper : il valide les `dependsOn`, pas les références de namespace
+      à l'intérieur des manifests.
 - [ ] **⚠️ Changer les `values` Cilium d'un enfant EN VIE est risqué** (vécu
       2026-07-26). Le HelmRelease `<edge>-cilium` du management pousse un upgrade
       → rollout du DaemonSet CNI sur un cluster à 2 nœuds sans marge : sur edge-2
@@ -214,6 +246,24 @@ Ce qui **reste ouvert** (par ordre d'importance pour reprendre) :
       LUKS → backups chiffrés par construction).
 - [ ] **etcd-snapshot planifié** : cron côté opérateur (la task existe, rien ne
       la déclenche périodiquement).
+
+## Observabilité / diagnostic
+
+- [x] ~~**`cilium-dbg status` « Cluster health » structurellement faux**~~ →
+      corrigé (2026-07-27) par `apps/base/platform/network-policies/allow-cilium-health.yaml`.
+      `default-deny-all-ingress` porte `endpointSelector: {}` : il couvrait donc
+      aussi les endpoints spéciaux `cilium-health` (un par nœud), dont les sondes
+      ICMP + TCP 4240 étaient droppées. Tous les clusters OpenAether affichaient
+      donc **1/N reachable en permanence**, chaque nœud ne voyant que le sien.
+      **Ce n'était pas cosmétique** : ce faux signal a fait conclure le
+      2026-07-26 que le datapath inter-nœuds d'edge-2 était « définitivement
+      cassé » et a motivé sa mise au rebut. Vérifié le 2026-07-27 : le management
+      (32/32, 6 nœuds Ready) affichait le même 1/6 pendant que le pod-à-pod
+      inter-nœuds fonctionnait (DNS résolu depuis un worker vers les CoreDNS du
+      control plane). Après correctif : management **6/6**, edge-2 **2/2**.
+      **Leçon de méthode** : avant de conclure au datapath cassé sur ce signal,
+      le comparer à un cluster sain — et le confirmer par un test de trafic réel
+      (DNS cross-nœud, `kubectl exec`), pas par la sonde seule.
 
 ## Multi-provider / infra
 
