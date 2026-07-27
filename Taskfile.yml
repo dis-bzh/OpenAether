@@ -1,5 +1,16 @@
 version: "3"
 
+# Racines OpenTofu réelles du dépôt. ⚠️ NE PAS revenir à un
+# `-recursive infrastructure/opentofu` : il embarquerait les dossiers de travail
+# locaux non suivis (ex. `_v2/`), qui faisaient échouer `task lint`.
+# Ajouter ici toute nouvelle racine.
+vars:
+  TF_ROOTS: >-
+    infrastructure/opentofu/cluster
+    infrastructure/opentofu/modules
+    infrastructure/opentofu/talos-image
+    infrastructure/opentofu-local
+
 tasks:
   default:
     desc: Show available tasks
@@ -14,14 +25,14 @@ tasks:
   lint:
     desc: Lint and format code (OpenTofu, YAML)
     cmds:
-      - tofu fmt -check -recursive infrastructure/opentofu
+      - tofu fmt -check -recursive {{.TF_ROOTS}}
       - yamllint -c infrastructure/.yamllint infrastructure/
       - tflint --chdir=infrastructure/opentofu --recursive
 
   fmt:
     desc: Format OpenTofu code
     cmds:
-      - tofu fmt -recursive infrastructure/opentofu
+      - tofu fmt -recursive {{.TF_ROOTS}}
 
   validate:
     desc: "Validate an OpenTofu root. Usage: task validate [ROOT=cluster|talos-image]"
