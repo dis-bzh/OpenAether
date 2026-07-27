@@ -487,7 +487,7 @@ data "talos_cluster_health" "this" {
 
 # ==============================================================================
 # Kubeconfig
-# Retrieved after bootstrap and health check. Uses the first CP node.
+# Retrieved right after bootstrap. Uses the first CP node.
 # ==============================================================================
 
 resource "talos_cluster_kubeconfig" "this" {
@@ -497,9 +497,20 @@ resource "talos_cluster_kubeconfig" "this" {
   node                 = var.control_plane_ips[0]
   endpoint             = local.cp_endpoints[0]
 
-  # Wait for the health check when enabled; otherwise just for the bootstrap.
-  depends_on = [
-    data.talos_cluster_health.this,
-    talos_machine_bootstrap.this,
-  ]
+  # ⚠️ NE DÉPEND VOLONTAIREMENT PAS de `data.talos_cluster_health`.
+  #
+  # Ce data source expire sur des clusters SAINS (défaut générique reproduit sur
+  # OVH et Outscale : 6/6 nœuds Ready, etcd OK, DAG Flux complet). Tant qu'il
+  # gardait le kubeconfig, son expiration faisait échouer l'apply AVANT les
+  # outputs — on perdait kubeconfig ET talosconfig, plus le backup des artefacts,
+  # sur un cluster parfaitement fonctionnel.
+  #
+  # Découplés, les deux restent indépendants : le health check fait toujours
+  # échouer l'apply s'il expire (le signal n'est pas perdu), mais le kubeconfig
+  # est déjà en state — `tofu output -raw kubeconfig` et `task kubeconfig`
+  # fonctionnent, et un simple `task bootstrap-phase2` (idempotent) reprend.
+  #
+  # Le bootstrap reste évidemment un pré-requis : apid ne sert le kubeconfig
+  # qu'une fois etcd amorcé.
+  depends_on = [talos_machine_bootstrap.this]
 }
