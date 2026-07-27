@@ -260,6 +260,22 @@ Ce qui **reste ouvert** :
       ⚠️ Corollaire opérationnel : purger les préfixes d'un cluster détruit,
       ou son password escrowé devient la SEULE façon de relire ses backups.
 
+      **Analyse 2026-07-27 — deux conceptions possibles, à trancher :**
+      (a) *Variable Flux `CLUSTER_NAME`* : propre et réutilisable au-delà des
+      backups, mais il n'existe AUCUNE substitution de nom de cluster
+      aujourd'hui, ni côté parent (`flux-bootstrap.yaml.tftpl` ne passe que
+      `GIT_BRANCH`) ni côté enfant (`child-gitops` idem). Et les substitutions
+      `postBuild` **ne se propagent pas** aux Kustomizations filles : il faudrait
+      un ConfigMap `cluster-identity` en `flux-system` + un `substituteFrom` sur
+      chaque brique qui en a besoin. Touche les deux dépôts, non testable sans
+      déploiement.
+      (b) *Propriété `prefix` dans les secrets OpenBao `backup/*`* : zéro
+      plomberie Flux, une clé de plus dans l'ExternalSecret. **Mais** une
+      propriété absente fait échouer l'ExternalSecret — donc casse les backups
+      de tout cluster déjà seedé sans elle. Exigerait un défaut côté cronjob,
+      ce qui laisse la collision possible par oubli.
+      Le bon moment pour (a) est **quand rien ne tourne**, comme maintenant.
+
 - [ ] **Alerting échec backups** : VMRule sur `kube_job_status_failed`
       (namespaces foundation-*) — aujourd'hui un CronJob qui échoue est silencieux.
 - [ ] **Test de restauration périodique** : job mensuel `restic restore` vers
