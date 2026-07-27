@@ -47,10 +47,13 @@ info() { printf '▶ %s\n' "$*"; }
 ok()   { printf '✓ %s\n' "$*"; }
 warn() { printf '⚠ %s\n' "$*" >&2; }
 
+# ⚠️ Toujours qualifier `clusters.cluster.x-k8s.io` : le kind `Cluster` est aussi
+# celui de CNPG (postgresql.cnpg.io). Sans CRDs CAPI installées, un `kubectl
+# delete cluster <nom>` non qualifié viserait une BASE DE DONNÉES.
 command -v kubectl >/dev/null 2>&1 || { echo "✗ kubectl requis" >&2; exit 1; }
 kubectl cluster-info >/dev/null 2>&1 || { echo "✗ KUBECONFIG ne pointe aucun cluster joignable" >&2; exit 1; }
 
-if ! kubectl get cluster "$CLUSTER" -n "$NS" >/dev/null 2>&1; then
+if ! kubectl get clusters.cluster.x-k8s.io "$CLUSTER" -n "$NS" >/dev/null 2>&1; then
   ok "cluster '$CLUSTER' déjà absent (rien à faire)"
   exit 0
 fi
@@ -67,13 +70,13 @@ fi
 
 # 1. Suppression du Cluster → CAPI cascade (non bloquant : on suit nous-mêmes).
 info "kubectl delete cluster $CLUSTER (cascade CAPI)…"
-kubectl delete cluster "$CLUSTER" -n "$NS" --wait=false >/dev/null 2>&1
+kubectl delete clusters.cluster.x-k8s.io "$CLUSTER" -n "$NS" --wait=false >/dev/null 2>&1
 
 # 2. Attente de la disparition complète.
 info "Attente de la fin de la cascade (timeout ${TIMEOUT}s)…"
 deadline=$(( SECONDS + TIMEOUT ))
 while (( SECONDS < deadline )); do
-  left=$(kubectl get cluster "$CLUSTER" -n "$NS" --no-headers 2>/dev/null | wc -l)
+  left=$(kubectl get clusters.cluster.x-k8s.io "$CLUSTER" -n "$NS" --no-headers 2>/dev/null | wc -l)
   mach=$(kubectl get machines -n "$NS" -l "cluster.x-k8s.io/cluster-name=$CLUSTER" \
            --no-headers 2>/dev/null | wc -l)
   if [ "$left" = 0 ] && [ "$mach" = 0 ]; then
