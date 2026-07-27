@@ -386,6 +386,10 @@ locals {
     # côté manifest, `value:` est une simple chaîne et la substitution Flux ne
     # sait pas concaténer conditionnellement (pas de `${x:+y}`).
     backup_target_url = "s3://${local.backup_data_bucket}@${var.s3_primary_region}/"
+    # CNPG (PITR) attend le bucket et l'endpoint SÉPARÉMENT, dans un autre
+    # format que Longhorn — d'où les trois clés plutôt qu'une.
+    backup_s3_bucket   = local.backup_data_bucket
+    backup_s3_endpoint = var.s3_primary_endpoint
   })
 }
 

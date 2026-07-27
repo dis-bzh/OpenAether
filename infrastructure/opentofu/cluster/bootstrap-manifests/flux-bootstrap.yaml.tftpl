@@ -8,6 +8,7 @@
 #   ${cluster_role}   — ex: management (→ apps/flux/management)
 #   ${cluster_id}     — ex: openaether-dev-ovh (identité UNIQUE du cluster)
 #   ${backup_target_url} — ex: s3://s3-openaether-ovh-backups-dev@eu-west-par/
+#   ${backup_s3_bucket} ${backup_s3_endpoint} — mêmes destination, format CNPG
 #   ${namespace}      — ex: flux-system
 ---
 # Identité du cluster, consommée par `postBuild.substituteFrom` des briques qui
@@ -36,6 +37,10 @@ data:
   # par un Secret. ⚠️ Doit correspondre au bucket seedé dans
   # `secret/backup/s3-primary`.
   BACKUP_TARGET_URL: ${backup_target_url}
+  # Mêmes destination, deux formats : Longhorn veut `s3://bucket@region/`,
+  # CNPG veut le bucket et l'endpoint séparés (barmanObjectStore).
+  BACKUP_S3_BUCKET: ${backup_s3_bucket}
+  BACKUP_S3_ENDPOINT: ${backup_s3_endpoint}
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: GitRepository

@@ -48,6 +48,27 @@ Tant que non seedés : `ExternalSecret backup-restic-env` NotReady, CronJobs à
 l'arrêt (by design). Test : `kubectl create job --from=cronjob/openbao-snapshot
 test -n foundation-vault`. Détails : `OpenAether-apps/apps/base/backup/README.md`.
 
+**`secret/backup/s3-primary` sert trois mécanismes** : dépôts restic, PITR CNPG
+(`barmanObjectStore`) et backups de volumes Longhorn. Une seule destination à
+seeder pour les trois.
+
+**Loki a sa PROPRE destination** — volontairement séparée, pour ne pas lui
+donner un accès en écriture au bucket des sauvegardes :
+
+```bash
+bao kv put secret/observability/loki-s3 \
+  endpoint="https://s3.fr-par.scw.cloud" bucket="s3-openaether-scw-loki-dev" \
+  accessKey=… secretKey=…
+# En local, pour retrouver le comportement d'avant (MinIO interne) :
+bao kv put secret/observability/loki-s3 \
+  endpoint="http://minio.foundation-storage:9000" bucket="loki" \
+  accessKey=… secretKey=…
+```
+
+⚠️ Tant que ce chemin n'est pas seedé, **Loki ne s'installe pas** (son
+HelmRelease consomme ce Secret en `valuesFrom`). C'est voulu : mieux vaut un
+échec visible qu'un Loki qui écrit silencieusement au mauvais endroit.
+
 ## 3bis. Quotas des comptes — à vérifier AVANT de déployer
 
 Les quotas relevés le 2026-07-27 (lecture directe des API) :
