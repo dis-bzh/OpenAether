@@ -280,6 +280,26 @@ Ce qui **reste ouvert** :
       Neutron, un port dont on attend une IP doit toujours porter un bloc
       `fixed_ip { subnet_id = … }`, autant pour l'ordre que pour l'allocation.
 
+- [ ] **OVH : un nœud peut rester `ACTIVE` côté hyperviseur tout en étant mort**
+      (2026-07-27, `openaether-dev-cp-0`). Symptôme : `Kubelet stopped posting
+      node status`, pods statiques en `Terminating`, et l'API **Talos elle-même**
+      qui reset la connexion (`apid` muet) alors que `cp-1`/`cp-2` répondent par
+      les mêmes tunnels. Diagnostic par la **console série Nova**
+      (`os-getConsoleOutput`) : le `init` Talos a appelé `reboot()`
+      (`__se_sys_reboot` → `kernel_restart`) et le noyau s'est **bloqué dans
+      l'arrêt des périphériques** — `device_shutdown` → `vp_reset [virtio_pci]`
+      — avec `rcu: INFO: rcu_preempt self-detected stall on CPU 0` en boucle
+      dans `virtnet_poll`. La VM ne termine jamais son redémarrage.
+      `os-instance-actions` ne liste que le `create` : le reboot vient **de
+      l'intérieur**, ce n'est pas une action plateforme.
+      Reprise : `reboot` type `HARD` via l'API Nova (le reset ACPI ne sert à
+      rien, l'invité est déjà coincé dans son propre reboot).
+      À creuser : **pourquoi Talos a-t-il demandé ce reboot** (aucun apply de
+      config en cours à ce moment) ; hang connu noyau 6.18/virtio au shutdown ?
+      **Méthode à retenir** : quand `talosctl` reset la connexion sur UN nœud et
+      répond sur les autres, passer directement à la console série du provider —
+      c'est le seul canal qui reste quand apid est mort.
+
 - [ ] **Quota RAM Outscale : un management HA sature le compte** (2026-07-26).
       `memory_limit` = **40 Go**, or un management HA (3 CP + 3 workers en
       tinav5.c2r7p2 = 7 Go + bastion 2 Go) en consomme **44** — dépassement
