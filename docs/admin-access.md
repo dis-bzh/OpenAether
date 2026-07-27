@@ -94,8 +94,11 @@ en 2026-07-26 les deux edges en sont sortis dégradés (l'un avec le datapath
 inter-nœuds définitivement cassé, `cilium-dbg status` → `Cluster health 0/2
 reachable`). **Recréer l'enfant** (`task edge-down` puis réactiver son fichier)
 est plus rapide et plus sûr que de réparer. Les valeurs correctes — dont
-`cni.exclusive: false`, obligatoire dès qu'Istio ambient est pioché — sont déjà
-dans `apps/clusters/*.yaml` : un enfant créé aujourd'hui les reçoit au bootstrap.
+`cni.exclusive: false`, obligatoire dès qu'Istio ambient est pioché, et
+`ipam.mode: kubernetes`, sans quoi les CIDR de pods sont taillés dans
+`10.0.0.0/8` où vivent les sous-réseaux de nœuds — sont déjà dans
+`apps/clusters/*.yaml` : un enfant créé aujourd'hui les reçoit au bootstrap.
+`task apps-validate` vérifie cet alignement avant tout déploiement.
 
 Attendu pour un enfant sain avec le profil `workload` : **17/17 Kustomizations**
 (16 du profil + la racine posée par le scaffold).

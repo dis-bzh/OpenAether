@@ -46,9 +46,14 @@ Ce qui **reste ouvert** (par ordre d'importance pour reprendre) :
    0/17). Le correctif de fond est en place pour les **prochains** enfants ;
    il n'a jamais été validé sur un enfant créé from scratch avec ces valeurs.
    → **Premier chantier : recréer un edge et vérifier qu'il atteint 17/17.**
+   Depuis le 2026-07-27 les enfants portent en plus `ipam.mode=kubernetes`
+   (dérive corrigée, cf. section CAPI) — c'est ce qui doit être validé.
 2. `apiserver → kubelet:10250` injoignable sur l'edge OVH (diagnostic à
-   distance impossible) — cf. section CAPI.
-3. Divergence `socketLB.hostNamespaceOnly` parent/enfant, inexpliquée.
+   distance impossible). Hypothèse retenue : conséquence du même `ipam.mode`
+   manquant — à retester tel quel sur un edge-2 neuf.
+3. ~~Divergence `socketLB.hostNamespaceOnly` parent/enfant~~ → réglé le
+   2026-07-27 : il n'y avait pas d'asymétrie, le flag ne concerne que les netns
+   non-root. Enfants réalignés sur le socle (`true`) + garde-fou de parité.
 4. ~~Les deux branches Git à garder synchro~~ → réglé le 2026-07-27 : plus que
    `main` dans les deux dépôts, `CHILD_BRANCH` retiré des `apps/clusters/`.
 
@@ -97,21 +102,40 @@ Ce qui **reste ouvert** (par ordre d'importance pour reprendre) :
       → `istio-cni-node` 0/1 Ready indéfiniment → install Helm expirée → `istio`,
       `ztunnel`, `services-gateway`, `istio-authorizationpolicies` bloqués sur
       les DEUX edges. Corrigé + raison documentée dans les manifests.
-- [ ] **`socketLB.hostNamespaceOnly` : parent=true, enfants=false — à comprendre**
-      (2026-07-26). Sur un enfant, le passer à `true` casse les webhooks :
-      kube-apiserver est host-network et n'atteint plus les ClusterIP de
-      `cert-manager-webhook` / du webhook ESO → dry-run Flux en « failed calling
-      webhook » sur `cert-manager-issuers`, `external-secrets-stores`, et
-      `backup-openbao` bloqué derrière. Le socle parent tourne pourtant avec
-      `true` sans ce symptôme (webhooks OK, mesh OK) — la raison de l'asymétrie
-      n'est pas élucidée (HA 3 CP vs 1 CP ? datapath ?). En attendant : `false`
-      sur les enfants, `true` sur le parent, les deux commentés sur place.
-      ⚠️ Ne pas « harmoniser » sans retester les webhooks des deux côtés.
-- [ ] **Vérifier l'alignement parent/enfant automatiquement** : ces `values` sont
-      recopiées à la main dans chaque `apps/clusters/*.yaml` et redivergeront.
-      Piste : les sortir dans un ConfigMap/patch commun, ou un test qui compare
-      le `cilium-config` rendu parent vs enfant. Reste `nodeSelectorLabels=true`
-      côté parent uniquement (sans usage aujourd'hui, volontairement non propagé).
+- [x] ~~`socketLB.hostNamespaceOnly` : parent=true, enfants=false~~ → l'asymétrie
+      **n'existait pas** (analysé le 2026-07-27). La doc du chart tranche :
+      *« Disable socket lb for non-root ns »* — le flag ne coupe le socket-LB que
+      pour les netns **non-root**. `kube-apiserver` est host-network, donc en
+      netns racine : il garde la traduction ClusterIP dans les deux réglages, et
+      ne peut pas être cassé par ce flag. Le « failed calling webhook » du
+      2026-07-26 a été observé **pendant** le rollout de CNI à chaud qui avait
+      déjà détruit le datapath des enfants — imputation erronée. Les enfants sont
+      repassés à `true`, aligné sur le socle et exigé par Istio ambient.
+      **Vraie cause de fond trouvée au passage : `ipam.mode` manquant** (entrée
+      ci-dessous).
+- [x] ~~Vérifier l'alignement parent/enfant automatiquement~~ → FAIT
+      (2026-07-27) : `scripts/ops/check-cilium-parity.py`, câblé dans
+      `task apps-validate`. Il compare 14 réglages structurants entre le bloc
+      production de `render-bootstrap-manifests.sh` et chaque HelmRelease
+      `*-cilium` des enfants ; une clé **absente** côté enfant est signalée
+      (elle prend le défaut du chart, qui diffère). Les écarts voulus se
+      déclarent dans `EXCEPTIONS` avec leur justification. Vérifié : il détecte
+      bien les deux défauts réels de la veille.
+- [x] ~~**Enfants CAPI : `ipam.mode` manquant** — LA dérive coûteuse~~ → corrigé
+      (2026-07-27). Les trois `apps/clusters/edge-*.yaml` ne posaient pas
+      `ipam.mode`, contrairement au socle parent *et* au fichier d'exemple
+      `example-scaleway.yaml.example` (qui l'avait, preuve de la dérive). Le
+      défaut du chart est `cluster-pool` : Cilium **ignore alors le
+      `clusterNetwork.pods` déclaré par CAPI** (10.244.0.0/16) et taille les CIDR
+      de pods dans `10.0.0.0/8` — le /8 où vivent justement les sous-réseaux de
+      nœuds (OpenStack 10.20.0.0/24, edge-3 10.30.0.0/16, et 10.0.0.0/24 pour
+      OVH/Outscale/Proxmox côté socle). Le parent pose `ipam.mode=kubernetes`
+      pour exactement cette raison : son propre subnet est `10.0.0.0/24`, soit le
+      **premier /24 distribué par le pool**. Explique la corrélation observée :
+      edge-1 (Scaleway, nœuds en IP publique, **hors** du /8) tenait à 11/17,
+      edge-2 (OpenStack, nœuds **dans** le /8) était à 0/17 avec le datapath
+      inter-nœuds mort. Piste sérieuse aussi pour le `kubelet:10250` ci-dessous.
+      **À confirmer sur un enfant neuf.**
 - [ ] **⚠️ Changer les `values` Cilium d'un enfant EN VIE est risqué** (vécu
       2026-07-26). Le HelmRelease `<edge>-cilium` du management pousse un upgrade
       → rollout du DaemonSet CNI sur un cluster à 2 nœuds sans marge : sur edge-2
@@ -125,9 +149,16 @@ Ce qui **reste ouvert** (par ordre d'importance pour reprendre) :
 - [ ] **edge-2/OVH : `apiserver → kubelet:10250` en timeout** — `kubectl
       logs/exec` inutilisables sur ce cluster (i/o timeout), alors que
       `kubelet → apiserver` fonctionne (nœuds `Ready`). Empêche tout diagnostic
-      à distance. À vérifier : règle de security group CAPO entre les subnets des
-      nœuds (le CP et le worker ne sont pas dans le même /24), et `10250` en
-      entrée sur le SG worker. Non lié aux rollouts (jamais testé avant).
+      à distance. **Hypothèse principale (2026-07-27) : conséquence de
+      `ipam.mode` manquant.** En `cluster-pool`, Cilium considère `10.0.0.0/8`
+      comme espace de pods du cluster ; le subnet des nœuds (`10.20.0.0/24`) est
+      DEDANS, donc le trafic host→nœud sur 10250 est traité comme du trafic
+      intra-cluster (pas de masquerade, ipcache/chiffrement WireGuard sur un
+      chemin qui ne devrait pas y passer). Cohérent avec edge-1 (IP publiques,
+      hors du /8) qui n'avait pas le symptôme. **À retester tel quel sur un
+      edge-2 neuf avec `ipam.mode=kubernetes` avant de suspecter les security
+      groups CAPO** (`managedSecurityGroups.allowAllInClusterTraffic: true` est
+      déjà posé, ce qui rend l'hypothèse SG moins probable qu'annoncé).
 - [x] ~~Deux branches à garder synchro~~ → FAIT (2026-07-27) : plus qu'une
       branche, `main`, dans les deux dépôts. Les `CHILD_BRANCH` des
       `apps/clusters/*.yaml` ont été retirés (défaut `${CHILD_BRANCH:=main}`).

@@ -33,7 +33,16 @@ tasks:
       - tofu validate
 
   apps-validate:
-    desc: "Valide le DAG Flux d'OpenAether-apps + l'à-jour des profils générés (pick.py)"
+    desc: "Valide le DAG Flux d'OpenAether-apps, les profils générés (pick.py) et le Cilium des enfants"
+    cmds:
+      # Parité Cilium socle ↔ enfants CAPI : deux formats (--set du script de
+      # rendu vs values: d'un HelmRelease) dans deux dépôts, donc dérive
+      # silencieuse. Elle a coûté deux enfants le 2026-07-26 (ipam.mode perdu).
+      - python3 scripts/ops/check-cilium-parity.py
+      - task: apps-validate-dag
+
+  apps-validate-dag:
+    internal: true
     dir: ../OpenAether-apps
     cmds:
       # --validate : dependsOn inconnus, cycles, spec.path morts, catalogue.
