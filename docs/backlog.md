@@ -3,15 +3,15 @@
 Tout ce qui a été identifié comme **mieux que l'existant**, avec le pourquoi.
 Alimenté au fil des sessions (humain + assistant). Retirer les entrées faites.
 
-## Où on en est (mis à jour le 2026-07-27)
+## Où on en est (mis à jour le 2026-07-27, fin de session)
 
-**Une flotte OVH TOURNE** (à détruire en fin de session avec
-`task fleet-down PROVIDER=ovh`) : management HA **32/32 Kustomizations, 6 nœuds
-Ready**, plus un enfant CAPI **edge-2 (OpenStack) à 17/17, 2 nœuds Ready**.
-edge-1 (Scaleway) est temporairement désactivé dans
-`apps/clusters/kustomization.yaml` — le run visait edge-2, seul à exercer à la
-fois « enfant neuf 17/17 » et le symptôme `kubelet:10250`. Le réactiver quand
-on veut re-tester Scaleway.
+**Aucune infrastructure cloud ne tourne.** `task fleet-down PROVIDER=ovh` a
+détruit les deux enfants CAPI en cascade puis 80 ressources OpenTofu. Vérifié à
+zéro : **OVH** (0 serveur, 0 FIP — l'IP pré-allouée d'edge-2 a été purgée via
+`purge-orphans/ovh.py --apply`), **Scaleway** (0 serveur / volume / IP / LB sur
+fr-par-1/2/3) et **Outscale** (aucun orphelin). Tunnels SSH fermés, kubeconfigs
+des enfants supprimés. `restic-escrow-OUTSCALE.txt` **conservé volontairement**
+— il déverrouille les dépôts restic restés en bucket.
 
 Ce run a **validé les quatre points restants** — et fait tomber **cinq défauts
 réels** au passage (tous corrigés et poussés, cf. sections dédiées) :
@@ -28,6 +28,12 @@ réels** au passage (tous corrigés et poussés, cf. sections dédiées) :
    et `external-secrets-stores` (les deux Kustomizations qui échouaient en
    « failed calling webhook ») sont `True`.
 4. **Une seule branche `main`** dans les deux dépôts.
+
+Puis, sur demande, **edge-1 (Scaleway) a été recréé et validé à 17/17** — le
+correctif `ipam.mode` tient donc sur **deux providers aux topologies opposées** :
+nœuds en IP publique côté Scaleway (hors `10.0.0.0/8`), en `10.20.0.0/24` côté
+OpenStack (dedans). Au passage, un management OVH pilotant un enfant Scaleway :
+la kubeception **cross-provider** est exercée pour de vrai.
 
 Ce qui est **validé en cloud réel** :
 
@@ -61,10 +67,10 @@ Ce qui **reste ouvert** :
 1. **Mutation à chaud du CNI d'un enfant** : toujours déconseillée (elle a
    dégradé deux enfants le 2026-07-26). Recréer reste la voie sûre. Ce run n'a
    pas re-testé la mutation, seulement la création.
-2. **edge-1 (Scaleway) à réactiver** et re-valider à 17/17 — le correctif
-   `ipam.mode` vaut pour lui aussi, mais n'y a pas été exercé.
-3. **Durcir les enfants** : `network.controlPlaneLoadBalancer` (endpoint = IP
+2. **Durcir les enfants** : `network.controlPlaneLoadBalancer` (endpoint = IP
    publique du CP aujourd'hui, non-HA), private network / gateway.
+3. **Pourquoi Talos a-t-il demandé un reboot sur `cp-0`** (aucun apply en cours,
+   aucune action plateforme côté API OVH) — cf. section Multi-provider.
 
 ## Identités & accès au quotidien (le chantier ouvert)
 
@@ -85,6 +91,24 @@ Ce qui **reste ouvert** :
       isolé dans `capi-outscale-system`. Corrigeait AUSSI une 2e collision
       (lease `controller-leader-election-capo` partagé avec CAPO, qui bloquait
       entièrement OpenStack).
+- [x] ~~**Teardown d'un enfant annulé en boucle par Flux**~~ → corrigé
+      (2026-07-27). `edge-down` supprimait le `Cluster`, mais la Kustomization
+      `<cluster>-cluster` le **recréait** avant que la cascade CAPI n'ait
+      démarré : les Machines n'obtenaient jamais de `deletionTimestamp` et le
+      script bouclait jusqu'au timeout **sans rien signaler**, le `kubectl
+      delete` étant redirigé vers `/dev/null`. `edge-down.sh` suspend désormais
+      `<cluster>-cluster` **et** `capi-clusters` avant de supprimer, et sort
+      immédiatement si le delete est refusé. **Leçon** : sous GitOps, toute
+      suppression d'objet réconcilié doit commencer par suspendre sa source —
+      et un `delete` dont on jette la sortie transforme un refus en attente
+      silencieuse.
+- [x] ~~**`kubectl get/delete cluster` ambigu**~~ → corrigé (2026-07-27) : le
+      kind `Cluster` est aussi celui de CNPG (`postgresql.cnpg.io`). Sans CRDs
+      CAPI installées — management partiellement détruit, providers pas encore
+      réconciliés — `kubectl get cluster -A` retourne **les bases de données**
+      (constaté : `grafana-db`, `zitadel-db`). `fleet-down` les aurait alors
+      énumérées comme enfants à détruire, et `edge-down` aurait pu en supprimer
+      une. Tous les appels sont désormais qualifiés `clusters.cluster.x-k8s.io`.
 - [ ] **Issues upstream à ouvrir** (les deux constatées en réel) :
       (a) CAPOSC/CAPS : `webhook-server-cert` et le lease `…-capo` non préfixés
       → collisions silencieuses entre providers dans un même namespace ;
