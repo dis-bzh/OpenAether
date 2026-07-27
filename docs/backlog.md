@@ -339,10 +339,17 @@ Ce qui **reste ouvert** :
       OSC) + backups cross-provider OVH→Scaleway. A révélé 3 défauts du module
       OVH (volumes multiattach, bastion_user, AZ 'any'), tous corrigés.
       RESTE hors Scaleway : rolling-replace live, management Outscale.
-- [ ] **FIP des CP OpenStack créée hors CAPI** : `preAllocatedFloatingIPs` exige
-      de connaître l'IP avant le boot (certSANs) ; aujourd'hui l'IP est créée à
-      la main côté Neutron. Automatiser (tofu ou pré-création scriptée), et
-      documenter qu'un pool supprimé en reclaimPolicy=Delete DÉTRUIT l'IP.
+- [x] ~~**FIP des CP OpenStack créée hors CAPI**~~ → pré-création **scriptée et
+      idempotente** (2026-07-27) : `scripts/ops/ensure-capo-fip.py <enfant>`
+      retrouve la FIP à sa description (`openaether:<cluster>`), n'en alloue une
+      que s'il n'y en a pas, et imprime l'adresse à reporter dans
+      `OS_CP_FLOATING_IPS`. Relançable sans créer de doublon facturé.
+      Reste **volontairement** un report manuel d'une ligne : l'IP doit entrer
+      dans les `certSANs` Talos, donc en git, avant le boot. ⚠️ Le pool utilise
+      `reclaimPolicy: Retain` — le passer à `Delete` ferait **détruire l'IP** à
+      la suppression du pool, et le certSAN en git deviendrait faux.
+      Ne restent à automatiser que si on veut zéro geste : un `tofu` dédié aux
+      ressources « pré-CAPI » d'un enfant.
 - [ ] **`talos_cluster_health` expire sur cluster SAIN — DÉFAUT GÉNÉRIQUE** :
       reproduit à l'identique sur **OVH puis Outscale** (3 CP + 3 workers, tous
       Ready, etcd HEALTH OK sur les 3 CP, DAG Flux complet). Ce n'est donc ni un

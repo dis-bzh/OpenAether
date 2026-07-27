@@ -12,10 +12,13 @@
 #   (constaté en réel sur Scaleway, 2 fois).
 #
 #   Ici on fait l'inverse, dans le bon ordre :
-#     1. `kubectl delete cluster <nom>` → CAPI cascade proprement (control plane,
+#     1. on SUSPEND les Kustomizations Flux qui gèrent le `Cluster` — sans ça
+#        Flux le recrée aussitôt supprimé et la cascade ne démarre jamais
+#        (vécu le 2026-07-27 : boucle jusqu'au timeout, machines intactes) ;
+#     2. `kubectl delete cluster <nom>` → CAPI cascade proprement (control plane,
 #        MachineDeployment, Machines, objets infra) pendant que tout est encore là ;
-#     2. on attend la disparition complète ;
-#     3. filet de sécurité : si le provider est resté bloqué au-delà du timeout,
+#     3. on attend la disparition complète ;
+#     4. filet de sécurité : si le provider est resté bloqué au-delà du timeout,
 #        on lève les finalizers des objets infra restants et on SIGNALE les VMs
 #        potentiellement orphelines à vérifier côté console.
 #   Ensuite seulement : retirer le fichier de apps/clusters/kustomization.yaml
@@ -68,11 +71,31 @@ if [ "$ASSUME_YES" -eq 0 ]; then
   [ "$a" = y ] || [ "$a" = Y ] || { echo "abandon"; exit 1; }
 fi
 
-# 1. Suppression du Cluster → CAPI cascade (non bloquant : on suit nous-mêmes).
-info "kubectl delete cluster $CLUSTER (cascade CAPI)…"
-kubectl delete clusters.cluster.x-k8s.io "$CLUSTER" -n "$NS" --wait=false >/dev/null 2>&1
+# 1. SUSPENDRE Flux d'abord — sinon la suppression est annulée en boucle.
+#
+# ⚠️ Piège vécu le 2026-07-27 : la Kustomization `<cluster>-cluster` réapplique
+# l'objet `Cluster` toutes les 10 min. Supprimé, il était RECRÉÉ avant que la
+# cascade CAPI n'ait commencé — les Machines n'obtenaient jamais de
+# deletionTimestamp et ce script bouclait jusqu'au timeout sans rien signaler.
+# On suspend donc la Kustomization qui le gère ET la Kustomization parente
+# (`capi-clusters`), qui recréerait la première.
+for k in "${CLUSTER}-cluster" capi-clusters; do
+  if kubectl get kustomization -n flux-system "$k" >/dev/null 2>&1; then
+    kubectl patch kustomization -n flux-system "$k" --type=merge \
+      -p '{"spec":{"suspend":true}}' >/dev/null 2>&1 && info "Flux suspendu : $k"
+  fi
+done
 
-# 2. Attente de la disparition complète.
+# 2. Suppression du Cluster → CAPI cascade (non bloquant : on suit nous-mêmes).
+#    L'erreur n'est PAS avalée : un delete rejeté (webhook injoignable, RBAC…)
+#    doit se voir tout de suite, pas au bout de 15 min d'attente muette.
+info "kubectl delete cluster $CLUSTER (cascade CAPI)…"
+if ! kubectl delete clusters.cluster.x-k8s.io "$CLUSTER" -n "$NS" --wait=false; then
+  echo "✗ la suppression du Cluster a été REFUSÉE (voir l'erreur ci-dessus)." >&2
+  exit 1
+fi
+
+# 3. Attente de la disparition complète.
 info "Attente de la fin de la cascade (timeout ${TIMEOUT}s)…"
 deadline=$(( SECONDS + TIMEOUT ))
 while (( SECONDS < deadline )); do
@@ -87,7 +110,7 @@ while (( SECONDS < deadline )); do
   sleep 15
 done
 
-# 3. Filet de sécurité — le provider est bloqué (bug connu : cf. docs/backlog.md).
+# 4. Filet de sécurité — le provider est bloqué (bug connu : cf. docs/backlog.md).
 warn "timeout après ${TIMEOUT}s — le provider n'a pas fini la cascade."
 warn "Levée des finalizers sur les objets infra restants (les VMs peuvent survivre !) :"
 for kind in scalewaymachine oscmachine openstackmachine scalewaycluster osccluster openstackcluster; do
@@ -99,7 +122,7 @@ done
 for obj in $(kubectl get machines -n "$NS" -o name 2>/dev/null | grep -- "$CLUSTER" || true); do
   kubectl patch "$obj" -n "$NS" --type merge -p '{"metadata":{"finalizers":null}}' >/dev/null 2>&1
 done
-kubectl patch cluster "$CLUSTER" -n "$NS" --type merge -p '{"metadata":{"finalizers":null}}' >/dev/null 2>&1
+kubectl patch clusters.cluster.x-k8s.io "$CLUSTER" -n "$NS" --type merge -p '{"metadata":{"finalizers":null}}' >/dev/null 2>&1
 
 cat >&2 <<EOT
 
