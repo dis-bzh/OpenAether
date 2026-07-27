@@ -407,10 +407,15 @@ Ce qui **reste ouvert** :
       Piège de diagnostic : l'OscMachine reste en `VmNotReady` avec une IP
       réallouée en boucle et AUCUNE erreur dans le CR — il faut lire les logs
       du manager CAPOSC.
-      À faire : (a) demander une hausse de quota si la flotte complète est
-      voulue sur Outscale ; (b) pré-vol des quotas avant d'instancier un enfant
-      (lecture ReadQuotas + somme des gabarits demandés) ; (c) documenter les
-      quotas par provider dans admin-access.md.
+      (b) et (c) FAITS (2026-07-27) : `task preflight-quotas PROVIDER=…`
+      (`scripts/ops/preflight-quotas.py`, lecture seule) affiche quotas et
+      consommation réels et **simule** une topologie (`--add-vms/--add-cores/
+      --add-ram-gb`), en sortant en erreur si elle dépasse. Vérifié sur les deux
+      comptes : il rejette bien le management HA Outscale (44 Go pour 40) et
+      valide la topologie OVH réellement déployée (9/10 instances). Les quotas
+      des trois providers sont tabulés dans `docs/admin-access.md` § 3bis.
+      Reste (a), décision de l'opérateur : demander une hausse de quota chez
+      Outscale si l'on veut la flotte complète (management HA + enfant).
 
 - [ ] **Reboot simultané de toute la flotte Outscale observé** (2026-07-26,
       14:32→14:34 UTC) : les 6 VMs (3 CP + 3 workers) ont redémarré en 2 min,
@@ -446,22 +451,30 @@ Ce qui **reste ouvert** :
       la suppression du pool, et le certSAN en git deviendrait faux.
       Ne restent à automatiser que si on veut zéro geste : un `tofu` dédié aux
       ressources « pré-CAPI » d'un enfant.
-- [ ] **`talos_cluster_health` expire sur cluster SAIN — DÉFAUT GÉNÉRIQUE** :
+- [~] **`talos_cluster_health` expire sur cluster SAIN — DÉFAUT GÉNÉRIQUE** :
       reproduit à l'identique sur **OVH puis Outscale** (3 CP + 3 workers, tous
-      Ready, etcd HEALTH OK sur les 3 CP, DAG Flux complet). Ce n'est donc ni un
-      problème de durée (15 min) ni un particularisme provider ; la piste SG est
-      écartée (règle inter-node = tout le trafic intra-SG). Non observé sur les
-      management Scaleway (à confirmer : lié au HA 3 CP ? à l'accès via un
-      endpoint unique tunnelé ?). Contournement : `skip_health_check` (exposé au
-      root, activé dans management-{ovh,outscale}.tfvars).
-      PROCHAINE ÉTAPE : bump du provider siderolabs/talos (0.11.0 → 0.12.x) et,
-      si le défaut persiste, ouvrir une issue upstream avec les traces.
-- [ ] ~~timeout trop court en HA multi-AZ~~ (hypothèse invalidée) — sur OVH
-      (3 CP + 3 workers) le data source expire alors que le cluster EST sain
-      (6/6 Ready, etcd OK), ce qui interrompt l'apply AVANT les outputs
-      (kubeconfig/talosconfig) et les backups d'artefacts. Contournement :
-      relancer `task bootstrap-phase2` (idempotent) ou `talosctl kubeconfig`.
-      À corriger : allonger le timeout du data source.
+      Ready, etcd HEALTH OK sur les 3 CP, DAG Flux complet). Ni un problème de
+      durée (15 min) ni un particularisme provider ; la piste SG est écartée
+      (règle inter-node = tout le trafic intra-SG). Non observé sur les
+      management Scaleway. Contournement : `skip_health_check` (activé dans
+      management-{ovh,outscale}.tfvars).
+
+      **Le DÉGÂT est corrigé (2026-07-27)** : `talos_cluster_kubeconfig` ne
+      dépend plus du health check. Il le gardait, si bien qu'une expiration
+      faisait échouer l'apply AVANT les outputs — on perdait kubeconfig ET
+      talosconfig, plus le backup des artefacts, sur un cluster sain. Découplés,
+      le health check fait toujours échouer l'apply (le signal reste), mais le
+      kubeconfig est en state : `task kubeconfig` marche et
+      `task bootstrap-phase2` reprend. Cette entrée fusionne l'ancien doublon
+      « timeout trop court en HA multi-AZ » (même défaut, hypothèse invalidée).
+      Le timeout est par ailleurs déjà paramétrable (`health_check_timeout`,
+      défaut 15 min).
+
+      **Reste ouvert, en amont** : le bump du provider `siderolabs/talos` n'est
+      PAS possible — vérifié le 2026-07-27 auprès du registry, la ligne 0.12.x
+      n'a que des pre-releases (jusqu'à `0.12.0-alpha.5`), 0.11.0 reste la
+      dernière stable. Donc : soit attendre 0.12.0 stable, soit ouvrir l'issue
+      upstream avec les traces des deux reproductions.
 - [ ] **Proxmox** : premier apply réel (SYS-1) + hardening Ansible hôte (absent
       du repo, seulement documenté).
 - [ ] **Ingress public** : trancher CCM (LB managé) vs LB-IPAM — CCM Scaleway

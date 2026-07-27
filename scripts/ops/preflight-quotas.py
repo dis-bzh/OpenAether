@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""Pré-vol des quotas avant de déployer un cluster ou d'instancier un enfant CAPI.
+
+Pourquoi ce script existe
+-------------------------
+Sur Outscale, un management HA (3 CP + 3 workers + bastion) consomme 44 Go de RAM
+pour un `memory_limit` de 40. Le dépassement est TOLÉRÉ à la création, mais toute
+VM supplémentaire est ensuite refusée — et le diagnostic est pénible : l'OscMachine
+reste en `VmNotReady` avec une IP réallouée en boucle et AUCUNE erreur dans le CR,
+il faut aller lire les logs du manager CAPOSC. Deux déploiements y ont été perdus.
+
+Le même piège existe ailleurs : le projet OVH utilisé plafonne à 10 instances,
+soit management (7 avec le bastion) + un seul enfant (2). Il n'y a pas de marge
+pour un second enfant.
+
+Ce script lit les quotas ET la consommation réelle, et peut simuler ce qu'ajoute
+une topologie donnée. Lecture seule.
+
+Usage :
+    source .env.sh
+    python3 scripts/ops/preflight-quotas.py ovh
+    python3 scripts/ops/preflight-quotas.py outscale --add-vms 2 --add-cores 4 --add-ram-gb 16
+
+Scaleway n'est pas couvert : ses quotas n'ont jamais posé problème sur ce compte,
+et je préfère ne pas deviner une API que je ne peux pas vérifier ici.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime
+import hashlib
+import hmac
+import json
+import os
+import sys
+import urllib.request
+
+
+def bar(used, limit):
+    """Barre de remplissage — le dépassement doit sauter aux yeux."""
+    if not limit or limit <= 0:
+        return "?"
+    pct = 100.0 * used / limit
+    mark = "✗" if pct >= 100 else ("⚠" if pct >= 80 else "✓")
+    return f"{mark} {used}/{limit} ({pct:.0f} %)"
+
+
+# ─────────────────────────────────────────────────────────── OVH (OpenStack)
+def ovh(add_vms, add_cores, add_ram_gb):
+    base = os.environ["OS_AUTH_URL"].rstrip("/")
+    url = base + ("/auth/tokens" if base.endswith("/v3") else "/v3/auth/tokens")
+    auth = {"auth": {"identity": {"methods": ["password"], "password": {"user": {
+        "name": os.environ["OS_USERNAME"], "password": os.environ["OS_PASSWORD"],
+        "domain": {"name": os.environ.get("OS_USER_DOMAIN_NAME", "Default")}}}},
+        "scope": {"project": {"id": os.environ["OS_PROJECT_ID"]}}}}
+    req = urllib.request.Request(url, data=json.dumps(auth).encode(),
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        tok, cat = r.headers["X-Subject-Token"], json.load(r)["token"]["catalog"]
+    region = os.environ["OS_REGION_NAME"].lower()
+    nova = next(e["url"] for s in cat if s["type"] == "compute" for e in s["endpoints"]
+                if e["interface"] == "public" and e["region"].lower() == region).rstrip("/")
+    req = urllib.request.Request(nova + "/limits", headers={"X-Auth-Token": tok})
+    lim = json.load(urllib.request.urlopen(req, timeout=60))["limits"]["absolute"]
+
+    rows = [
+        ("instances", lim["totalInstancesUsed"], lim["maxTotalInstances"], add_vms),
+        ("vCPU", lim["totalCoresUsed"], lim["maxTotalCores"], add_cores),
+        ("RAM (Mo)", lim["totalRAMUsed"], lim["maxTotalRAMSize"], add_ram_gb * 1024),
+    ]
+    return rows
+
+
+# ─────────────────────────────────────────────────────────────────── Outscale
+def _osc_call(action, body=None):
+    ak, sk = os.environ["OUTSCALE_ACCESS_KEY_ID"], os.environ["OUTSCALE_SECRET_KEY"]
+    region = os.environ.get("OUTSCALE_REGION", "eu-west-2")
+    region = region[:-1] if region[-1].isalpha() and region[-2].isdigit() else region
+    host = f"api.{region}.outscale.com"
+    body = json.dumps(body or {})
+    now = datetime.datetime.now(datetime.timezone.utc)
+    amzdate, datestamp = now.strftime("%Y%m%dT%H%M%SZ"), now.strftime("%Y%m%d")
+    canonical = (f"POST\n/api/v1/{action}\n\ncontent-type:application/json\n"
+                 f"host:{host}\nx-osc-date:{amzdate}\n\ncontent-type;host;x-osc-date\n"
+                 + hashlib.sha256(body.encode()).hexdigest())
+    scope = f"{datestamp}/{region}/api/osc4_request"
+    to_sign = ("OSC4-HMAC-SHA256\n" + amzdate + "\n" + scope + "\n"
+               + hashlib.sha256(canonical.encode()).hexdigest())
+    k = hmac.new(("OSC4" + sk).encode(), datestamp.encode(), hashlib.sha256).digest()
+    for part in (region, "api", "osc4_request"):
+        k = hmac.new(k, part.encode(), hashlib.sha256).digest()
+    sig = hmac.new(k, to_sign.encode(), hashlib.sha256).hexdigest()
+    req = urllib.request.Request(
+        f"https://{host}/api/v1/{action}", data=body.encode(),
+        headers={"Content-Type": "application/json", "X-Osc-Date": amzdate,
+                 "Authorization": (f"OSC4-HMAC-SHA256 Credential={ak}/{scope}, "
+                                   "SignedHeaders=content-type;host;x-osc-date, "
+                                   f"Signature={sig}")})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return json.load(r)
+
+
+def outscale(add_vms, add_cores, add_ram_gb):
+    quotas = {q["Name"]: q for q in _osc_call("ReadQuotas").get("QuotaTypes", [{}])[0].get("Quotas", [])}
+    wanted = {
+        "vm_limit": ("instances", add_vms),
+        "core_limit": ("vCPU", add_cores),
+        "memory_limit": ("RAM (Go)", add_ram_gb),
+    }
+    rows = []
+    for name, (label, add) in wanted.items():
+        q = quotas.get(name)
+        if not q:
+            continue
+        rows.append((label, q.get("UsedValue", 0), q.get("MaxValue", 0), add))
+    return rows
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("provider", choices=["ovh", "outscale"])
+    ap.add_argument("--add-vms", type=int, default=0, help="VMs que la topologie ajoutera")
+    ap.add_argument("--add-cores", type=int, default=0, help="vCPU ajoutés")
+    ap.add_argument("--add-ram-gb", type=int, default=0, help="RAM ajoutée, en Go")
+    args = ap.parse_args()
+
+    rows = {"ovh": ovh, "outscale": outscale}[args.provider](
+        args.add_vms, args.add_cores, args.add_ram_gb)
+
+    simulating = any(add for *_, add in rows)
+    print(f"=== Quotas {args.provider} ===")
+    over = []
+    for label, used, limit, add in rows:
+        print(f"  {label:14s} {bar(used, limit)}")
+        if simulating and limit:
+            after = used + add
+            verdict = "DÉPASSEMENT" if after > limit else "ok"
+            print(f"  {'':14s}   → après +{add} : {after}/{limit}  {verdict}")
+            if after > limit:
+                over.append(label)
+
+    if over:
+        print(f"\n✗ La topologie demandée dépasse : {', '.join(over)}.")
+        print("  Sur Outscale, le dépassement est TOLÉRÉ à la création puis TOUTE VM")
+        print("  supplémentaire est refusée (CreateVms → 10042 TooManyResources), sans")
+        print("  erreur dans le CR CAPI : l'OscMachine boucle en VmNotReady.")
+        return 1
+    if simulating:
+        print("\n✓ La topologie demandée tient dans les quotas.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -65,6 +65,18 @@ tasks:
       - python3 scripts/pick.py --validate
       - python3 scripts/pick.py --check
 
+  preflight-quotas:
+    desc: >-
+      Vérifie les quotas d'un provider AVANT de déployer (lecture seule). Usage: task preflight-quotas
+      PROVIDER=ovh|outscale [-- --add-vms 2 --add-cores 4 --add-ram-gb 16]
+    vars:
+      PROVIDER: '{{.PROVIDER | default "outscale"}}'
+    cmds:
+      # Un management HA Outscale demande 44 Go pour un memory_limit de 40 : le
+      # dépassement est TOLÉRÉ à la création puis toute VM suivante est refusée,
+      # sans erreur dans le CR CAPI. Deux déploiements y sont passés.
+      - python3 scripts/ops/preflight-quotas.py {{.PROVIDER}} {{.CLI_ARGS}}
+
   security:
     desc: "Run security scans (Trivy, Checkov, Gitleaks)"
     cmds:
