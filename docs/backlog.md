@@ -397,8 +397,16 @@ Ce qui **reste ouvert** :
       qu'Envoy écoute en NodePorts (chemin cassé, cf. mémoire).
 - [ ] **Observability S3 cloud** : Loki pointe encore `minio/root` en cloud
       (overlay jamais câblé) ; au câblage, penser `rules.dns` sur sa CNP toFQDNs.
-- [ ] **`test-local-stack.sh`** : référence `infrastructure/.yamllint` inexistant ;
-      fmt bute sur le scratch `_v2/` (à purger).
+- [x] ~~**`test-local-stack.sh` / fmt**~~ → réglé (2026-07-27). Deux moitiés :
+      `infrastructure/.yamllint` **existe** aujourd'hui (l'entrée était périmée) ;
+      et `tofu fmt -recursive infrastructure/opentofu` embarquait le dossier de
+      travail local `_v2/`, faisant échouer `task lint` sur `_v2/_test.tfvars`.
+      `lint`/`fmt` énumèrent désormais les racines réelles (`cluster`, `modules`,
+      `talos-image`, `opentofu-local`) — **ajouter ici toute nouvelle racine**.
+      `task lint` passe intégralement.
+      Reste, pour l'opérateur : `infrastructure/opentofu/_v2/` est un scratch non
+      suivi (22 juin) — à supprimer s'il ne sert plus. Non touché ici : ce sont
+      des fichiers locaux.
 - [ ] **kyverno background-controller** désactivé (reports cluster absents).
 
 ## Reproductibilité des artefacts générés
