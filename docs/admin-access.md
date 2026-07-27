@@ -48,6 +48,37 @@ Tant que non seedés : `ExternalSecret backup-restic-env` NotReady, CronJobs à
 l'arrêt (by design). Test : `kubectl create job --from=cronjob/openbao-snapshot
 test -n foundation-vault`. Détails : `OpenAether-apps/apps/base/backup/README.md`.
 
+## 3bis. Quotas des comptes — à vérifier AVANT de déployer
+
+Les quotas relevés le 2026-07-27 (lecture directe des API) :
+
+| Provider | Instances | vCPU | RAM |
+|---|---|---|---|
+| **Outscale** | 10 | 20 | **40 Go** |
+| **OVH** (projet utilisé) | **10** | 34 | 420 Go |
+| Scaleway | non contraignant sur ce compte | | |
+
+Ce que ça implique concrètement :
+
+- **Outscale** : un management HA (3 CP + 3 workers + bastion) demande **44 Go**
+  pour un plafond de 40. Le dépassement est **toléré à la création**, puis toute
+  VM supplémentaire est refusée (`CreateVms → 10042 TooManyResources`). Aucun
+  message dans le CR CAPI : l'`OscMachine` boucle en `VmNotReady` avec une IP
+  réallouée sans fin, et il faut lire les logs du manager CAPOSC pour comprendre.
+  → management HA Outscale **et** enfant Outscale sont exclusifs sur ce compte.
+- **OVH** : 10 instances, soit management (7 avec le bastion) + **un seul**
+  enfant (2). Pas de marge pour un second.
+
+Pré-vol, avant tout `task up` ou activation d'un enfant :
+
+```bash
+source .env.sh
+task preflight-quotas PROVIDER=outscale -- --add-vms 7 --add-cores 14 --add-ram-gb 44
+```
+
+Il sort en erreur si la topologie demandée dépasse — c'est exactement le
+scénario qui a fait perdre deux déploiements.
+
 ## 4. Accès admin aux UIs (interface restreinte)
 
 Exposition : gateway sur IP **privée VPC** (pool LB-IPAM) + SG bastion limité à

@@ -68,3 +68,16 @@ output "worker_machine_configs" {
   value       = [for c in data.talos_machine_configuration.worker : c.machine_configuration]
   sensitive   = true
 }
+
+# Rattache `data.talos_cluster_health` au graphe.
+#
+# Il n'est plus référencé par `talos_cluster_kubeconfig` (cf. le commentaire là-bas :
+# il expire sur des clusters SAINS et faisait alors perdre kubeconfig ET
+# talosconfig). Un data source non référencé est tout de même évalué à chaque
+# plan/apply — son expiration fait donc toujours échouer l'apply, le signal est
+# conservé — mais tflint le signale à juste titre comme orphelin. Cet output le
+# rattache explicitement ET rend l'état visible à l'opérateur.
+output "cluster_health" {
+  description = "État de la vérification de santé Talos : 'skipped' (skip_health_check) ou 'verified'."
+  value       = var.skip_health_check ? "skipped" : (length(data.talos_cluster_health.this) > 0 ? "verified" : "n/a")
+}
