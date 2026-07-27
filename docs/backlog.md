@@ -202,19 +202,15 @@ Ce qui **reste ouvert** :
       a mieux encaissé (istio-cni enfin Ready, 11/17). **Préférer recréer
       l'enfant** (CAPI) plutôt que muter son CNI en place ; réserver la mutation
       en place aux clusters HA, et un nœud à la fois.
-- [ ] **edge-2/OVH : `apiserver → kubelet:10250` en timeout** — `kubectl
-      logs/exec` inutilisables sur ce cluster (i/o timeout), alors que
-      `kubelet → apiserver` fonctionne (nœuds `Ready`). Empêche tout diagnostic
-      à distance. **Hypothèse principale (2026-07-27) : conséquence de
-      `ipam.mode` manquant.** En `cluster-pool`, Cilium considère `10.0.0.0/8`
-      comme espace de pods du cluster ; le subnet des nœuds (`10.20.0.0/24`) est
-      DEDANS, donc le trafic host→nœud sur 10250 est traité comme du trafic
-      intra-cluster (pas de masquerade, ipcache/chiffrement WireGuard sur un
-      chemin qui ne devrait pas y passer). Cohérent avec edge-1 (IP publiques,
-      hors du /8) qui n'avait pas le symptôme. **À retester tel quel sur un
-      edge-2 neuf avec `ipam.mode=kubernetes` avant de suspecter les security
-      groups CAPO** (`managedSecurityGroups.allowAllInClusterTraffic: true` est
-      déjà posé, ce qui rend l'hypothèse SG moins probable qu'annoncé).
+- [x] ~~**edge-2/OVH : `apiserver → kubelet:10250` en timeout**~~ → RÉSOLU et
+      vérifié (2026-07-27). Sur un edge-2 recréé avec `ipam.mode=kubernetes`,
+      `kubectl logs` et `kubectl exec` fonctionnent. Les security groups CAPO
+      n'étaient pas en cause : en `cluster-pool`, Cilium tenait `10.0.0.0/8`
+      pour l'espace de pods du cluster, or le subnet des nœuds (`10.20.0.0/24`)
+      est DEDANS. Confirmé par la topologie : edge-1 (Scaleway, nœuds en IP
+      publique, hors du /8) n'a jamais eu le symptôme.
+      **Leçon de méthode** : le symptôme désignait le réseau du provider, la
+      cause était dans les values du CNI. Vérifier l'IPAM avant les SG.
 - [x] ~~Deux branches à garder synchro~~ → FAIT (2026-07-27) : plus qu'une
       branche, `main`, dans les deux dépôts. Les `CHILD_BRANCH` des
       `apps/clusters/*.yaml` ont été retirés (défaut `${CHILD_BRANCH:=main}`).
@@ -225,8 +221,15 @@ Ce qui **reste ouvert** :
 - [ ] **Enfants durcis** : `network.controlPlaneLoadBalancer` (aujourd'hui
       endpoint = IP publique du CP, non-HA) + private network / gateway au lieu
       d'une IPv4 publique par nœud.
-- [ ] **Rate-limit GitHub de l'operator CAPI** : fetch anonyme des releases
-      (60 req/h/IP) — prévoir fetchConfig avec token ou miroir OCI.
+- [~] **Rate-limit GitHub de l'operator CAPI** : mécanisme **vérifié et
+      documenté** (2026-07-27) en tête de
+      `apps/base/cluster-api-providers/core-providers.yaml`, mais **non activé**.
+      L'API a été confrontée au schéma réel de la CRD
+      `operator.cluster.x-k8s.io/v1alpha2` : `configSecret` (token GitHub, slot
+      libre — aucun provider ne l'utilise) et `fetchConfig.oci` (miroir).
+      Non activé volontairement : le token est un secret propre à l'opérateur et
+      **un `configSecret` pointant un Secret absent casse le provider**. Reste à
+      faire, côté opérateur : créer le Secret puis décommenter le bloc.
 - [x] ~~Teardown des edges non idempotent~~ → FAIT : `task edge-down` (cascade
       CAPI dans le bon ordre) + `task fleet-down` (edges PUIS management, rapport
       de ce qui survit). Le prune Flux seul est documenté comme insuffisant.
@@ -238,12 +241,20 @@ Ce qui **reste ouvert** :
       Scripts de purge d'orphelins industrialisés :
       `scripts/ops/purge-orphans/{ovh,outscale}.py` (+ README) — filet de
       dernier recours, dry-run par défaut.
-- [ ] **Moderniser le template Scaleway** : il est en `cluster.x-k8s.io/v1beta1`
-      alors que CAPI v1.13 sert `v1beta2` (refs {apiGroup,kind,name}) — passe
-      aujourd'hui par conversion, à aligner sur le template OpenStack.
-- [ ] **Longhorn/iscsi sur les enfants** : les images Talos OVH/Outscale datent
-      d'un schematic antérieur (sans `util-linux-tools`) — reconstruire avant
-      de piocher `storage` sur un cluster enfant.
+- [x] ~~**Moderniser le template Scaleway**~~ → entrée PÉRIMÉE, vérifiée le
+      2026-07-27 : les **trois** templates sont déjà en `cluster.x-k8s.io/v1beta2`
+      avec des refs `{apiGroup, kind, name}`. Les `v1alpha2`/`v1alpha3` restants
+      sont les CRD **propres à chaque provider** (CAPS v1alpha2, CABPT/CACPPT
+      v1alpha3) — leur version courante, pas de la dette.
+- [x] ~~**Longhorn/iscsi sur les enfants**~~ → entrée PÉRIMÉE, vérifiée le
+      2026-07-27 : `talos-image/schematic.yaml` contient bien `iscsi-tools` ET
+      `util-linux-tools`, et il résout en `53513e54bb39…` — exactement l'ID
+      enregistré pour les images v1.13.4 des trois clouds. Les images publiées
+      embarquent donc les extensions.
+      Méthode de vérification (rejouable) : `curl -X POST
+      https://factory.talos.dev/schematics --data-binary @schematic.yaml` → l'ID
+      est déterministe, même contenu = même ID.
+      Reste non exercé : piocher réellement `storage` sur un enfant.
 
 ## Backups / DR
 
