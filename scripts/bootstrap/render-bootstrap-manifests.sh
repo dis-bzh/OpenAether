@@ -168,11 +168,33 @@ else
   echo "  ✅ Written to bootstrap-manifests/cilium.yaml"
 fi
 
+# helm laisse des espaces en fin de ligne ; le hook pre-commit `trim trailing
+# whitespace` les retire au commit. Sans cette normalisation ICI, chaque rendu
+# salit l'arbre de travail et l'artefact committé ne peut jamais être identique
+# au rendu — ce qui obligeait le contrôle --check à comparer « modulo espaces ».
+sed -i 's/[[:space:]]*$//' "${CILIUM_OUTPUT}"
+
 # ─────────────────────────────────────────────────────
 # 2. Download Flux install manifest
 # ─────────────────────────────────────────────────────
-if [[ "$LOCAL_MODE" == "false" && "${OPENAETHER_SKIP_FLUX:-0}" != "1" ]]; then
+# ⚠️ TÉLÉCHARGEMENT VOLONTAIREMENT OPT-IN (OPENAETHER_REFRESH_FLUX=1).
+#
+# Deux raisons, toutes deux constatées le 2026-07-27 :
+#  1. sans FLUX_VERSION, l'URL est `releases/latest` — un simple
+#     `task render-manifests` BUMPAIT Flux vers la dernière version publiée,
+#     sans que rien ne le demande ni ne le signale ;
+#  2. l'artefact committé n'est PAS un install.yaml amont : il embarque un
+#     contrôleur de plus, `source-watcher` (7 Deployments / 15 CRD au lieu de
+#     6 / 14). Le réécrire avec l'install.yaml standard SUPPRIMERAIT ce
+#     contrôleur du bootstrap.
+# Pour le régénérer sciemment : figer FLUX_VERSION *et* reconstituer le jeu de
+# composants (`flux install --export --components-extra=source-watcher`).
+if [[ "$LOCAL_MODE" == "false" && "${OPENAETHER_SKIP_FLUX:-0}" != "1" \
+      && "${OPENAETHER_REFRESH_FLUX:-0}" == "1" ]]; then
   echo "🔧 Downloading Flux install manifest${FLUX_VERSION:+ (${FLUX_VERSION})}..."
+  if [[ -z "${FLUX_VERSION}" ]]; then
+    echo "  ⚠️  FLUX_VERSION vide → 'latest' : le rendu ne sera pas reproductible." >&2
+  fi
   FLUX_URL="https://github.com/fluxcd/flux2/releases/latest/download/install.yaml"
   if [[ -n "${FLUX_VERSION}" ]]; then
     FLUX_URL="https://github.com/fluxcd/flux2/releases/download/${FLUX_VERSION}/install.yaml"
