@@ -140,11 +140,67 @@ Exposition : gateway sur IP **privée VPC** (pool LB-IPAM) + SG bastion limité 
   → `https://grafana.openaether.local:8443` ; importer la root CA dans le
   navigateur pour la chaîne verte. (Alternative sans remap :
   `sshuttle -r bastion@<IP> 172.16.12.0/22`.)
-- Credentials : Grafana → `bao kv get secret/grafana/admin` ; OpenBao UI →
-  token dédié (`bao token create -policy=… -ttl=8h`, éviter le root au
-  quotidien) ; Zitadel → console d'init.
+- Credentials : Grafana → `bao kv get secret/grafana/admin` ; Zitadel → console
+  d'init.
+- **OpenBao — ne PAS utiliser le root token au quotidien.** Il n'expire pas, ne
+  se révoque pas utilement, et n'apparaît dans aucun audit sous un nom d'humain.
+  Deux policies nominatives sont créées au bootstrap :
+
+  ```bash
+  # accès humain, 8 h, tracé sous un nom
+  bao token create -policy=openaether-admin  -ttl=8h -display-name=prenom
+  bao token create -policy=openaether-reader -ttl=8h -display-name=prenom   # lecture seule
+  ```
+
+  `openaether-admin` couvre l'exploitation courante (secrets, PKI, policies,
+  auth, montages, baux) mais **refuse explicitement** sceller, `step-down`,
+  rekey et rotation de la clé. Ces gestes de dernier recours restent au root
+  token escrowé hors ligne : ils deviennent délibérés, pas routiniers.
 - ⚠️ si ton IP publique change : mettre à jour `admin_ip` dans le tfvars puis
   `task infra` (sinon bastion injoignable — tunnels 0/N).
+
+## 4bis. SSO Grafana via Zitadel (OIDC)
+
+Grafana accepte désormais l'authentification Zitadel **en plus** de son admin
+local. Le formulaire local reste actif volontairement : c'est le filet si le SSO
+est cassé ou pas encore configuré. Ne le désactiver (`disable_login_form`)
+qu'une fois le SSO éprouvé.
+
+À faire côté Zitadel (console), une seule fois :
+
+1. Projet « OpenAether » → **Application** de type **Web**
+2. Méthode d'authentification **Code** (PKCE) + client secret
+3. Redirect URI : `https://grafana.openaether.local/login/generic_oauth`
+   Post-logout : `https://grafana.openaether.local/login`
+4. Pour piloter les rôles : créer un rôle projet `grafana-admin`, l'assigner, et
+   activer « User Info inside ID Token »
+5. Reporter les identifiants :
+
+```bash
+bao kv put secret/grafana/oidc client-id=… client-secret=…
+```
+
+Tant que ce chemin n'est pas seedé, **Grafana démarre quand même** (les
+variables d'environnement OIDC sont `optional`) : seul le bouton Zitadel est
+inopérant. C'est délibéré — un SSO non configuré ne doit pas rendre Grafana
+inaccessible.
+
+⚠️ À vérifier au premier déploiement : la **structure** du claim de rôles. Le
+nom (`urn:zitadel:iam:org:project:roles`) est confirmé par la doc Zitadel, mais
+sa forme dépend de la configuration de l'application :
+
+```bash
+curl -H "Authorization: Bearer <token>" https://zitadel.openaether.local/oidc/v1/userinfo
+```
+
+Ajuster `role_attribute_path` dans `apps/base/observability/grafana.yaml` si
+besoin. `role_attribute_strict: false` fait retomber sur `Viewer` en cas de
+non-correspondance, plutôt que de refuser l'accès.
+
+Le chemin réseau Grafana → Zitadel (`:8080`, échange du code puis
+`/oidc/v1/userinfo`) est ouvert des deux côtés dans les CiliumNetworkPolicy —
+sans quoi la connexion échouerait en « operation not permitted », sans autre
+trace qu'un timeout côté Grafana.
 
 ## 5. Clusters enfants CAPI (si surcouche piochée)
 

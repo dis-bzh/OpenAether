@@ -74,16 +74,89 @@ Ce qui **reste ouvert** :
 
 ## Identités & accès au quotidien (le chantier ouvert)
 
-- [ ] **Tokens OpenBao nominatifs** : policies admin dédiées + `bao token create`
-      (ou auth OIDC), bannir l'usage quotidien du root token. Aujourd'hui :
-      root token dans le Secret `openbao-recovery`.
+- [x] ~~**Tokens OpenBao nominatifs**~~ → FAIT (2026-07-27). Deux policies
+      créées par le Job de bootstrap : `openaether-admin` (exploitation courante)
+      et `openaether-reader` (lecture seule, audit/astreinte). Procédure
+      `bao token create -policy=… -ttl=8h -display-name=<prénom>` documentée dans
+      `docs/admin-access.md` § 4.
+      `openaether-admin` **refuse explicitement** `sys/seal`, `sys/step-down`,
+      `sys/rekey/*` et `sys/rotate` — écrits en `deny` plutôt qu'omis, pour que
+      l'intention soit lisible dans la policy et qu'un élargissement futur de
+      `sys/*` ne les rouvre pas par accident. Ces gestes de dernier recours
+      restent au root token escrowé hors ligne.
+      ⚠️ Piège rencontré : les policies sont écrites en `printf` une-ligne, pas
+      en heredoc — un heredoc s'indente à la colonne 0 et **sort du scalaire YAML**
+      du script du Job. Vérifié : `bash -n` sur le script extrait + rendu HCL des
+      deux policies.
+      Suite naturelle : auth OIDC via Zitadel, pour des identités fédérées plutôt
+      que des tokens créés à la main.
 - [ ] **Wave 3 unsealer** : escrow direct Bitwarden EU des parts Shamir,
       suppression du Secret etcd `openbao-recovery` (TODO déjà tracé dans
       `unsealer.yaml` + CNP egress Bitwarden).
-- [ ] **SSO Grafana ↔ Zitadel (OIDC)** : Zitadel est déployé pour ça ; Grafana
-      est en admin local. Ensuite : OpenBao login OIDC via Zitadel, et Longhorn
-      UI derrière authn (ext-authz Istio ou oauth2-proxy).
-- [ ] **Wave 2 OpenBao TLS interne** (`tls_disable=1` actuellement, TODO tracé).
+- [x] ~~**SSO Grafana ↔ Zitadel (OIDC)**~~ → CÂBLÉ (2026-07-27). `auth.generic_oauth`
+      dans le HelmRelease Grafana, identifiants via ExternalSecret `grafana-oidc`
+      (`secret/grafana/oidc`). Endpoints **vérifiés contre la doc Zitadel** :
+      `/oauth/v2/authorize`, `/oauth/v2/token`, `/oidc/v1/userinfo`,
+      `/oidc/v1/end_session`.
+      Deux garde-fous délibérés : le **formulaire local reste actif** (l'admin
+      local est le filet si le SSO casse), et les variables d'environnement OIDC
+      sont **`optional: true`** — sans ça, un `secret/grafana/oidc` non seedé
+      bloquerait le pod et rendrait Grafana totalement inaccessible, l'inverse du
+      but recherché.
+      ⚠️ Le chemin réseau manquait : la CNP de Grafana n'autorisait **aucun**
+      egress vers Zitadel, alors que l'échange du code et `/oidc/v1/userinfo` sont
+      des appels SERVEUR-à-serveur. Ajouté des deux côtés (egress Grafana,
+      ingress Zitadel), ciblé par namespace + app + port réel.
+      **À confirmer au premier déploiement** : la structure du claim de rôles
+      (`urn:zitadel:iam:org:project:roles`) — le nom est confirmé, sa forme dépend
+      de la configuration de l'application côté Zitadel. `role_attribute_strict:
+      false` fait retomber sur `Viewer` plutôt que de refuser l'accès.
+      Reste ouvert (mêmes briques) : login OIDC d'OpenBao via Zitadel, et UI
+      Longhorn derrière authn.
+- [~] **Wave 2 OpenBao TLS interne** (`tls_disable=1`). **Prérequis livré,
+      bascule VOLONTAIREMENT non faite** (2026-07-27) — et c'est un choix, pas un
+      oubli.
+
+      **Livré** : la dépendance superflue `cert-manager → foundation-vault` est
+      retirée. Elle était fausse (la brique cert-manager n'installe que
+      l'opérateur et un RBAC dans son propre namespace ; ce sont les ISSUERS, une
+      brique à part, qui dépendent d'OpenBao) et elle bloquait tout : cert-manager
+      arrivant APRÈS OpenBao, aucun certificat cert-manager ne pouvait servir son
+      listener. Gain immédiat au passage : OpenBao n'est plus sur le chemin
+      critique d'istio, observability et cluster-api-operator.
+
+      **Pourquoi je n'ai pas basculé** : contrairement au SSO ou aux tokens, ce
+      n'est pas un raccordement mais une modification du **chemin critique de
+      bootstrap**, avec 8 consommateurs à changer EN MÊME TEMPS —
+      `configmap.yaml` (listener + `retry_join` + `leader_api_addr`),
+      `statefulset.yaml`, `unsealer.yaml`, `openbao-init.yaml`,
+      `bootstrap-roles-job.yaml`, le `ClusterSecretStore` d'ESO, le
+      `ClusterIssuer` openbao, et le CronJob de backup. Si un seul est faux, le
+      cluster ne monte pas du tout : ni secrets, ni PKI, ni backups. Le livrer
+      sans l'avoir vu tourner reviendrait à jouer le prochain déploiement à pile
+      ou face.
+
+      **Plan d'exécution, à jouer sur `task local-test` d'abord** (cluster Docker,
+      pas de cloud, cycle court) :
+      1. Certificat serveur via cert-manager, à partir d'un **Issuer selfSigned →
+         CA dédiée**, PAS de la PKI d'OpenBao (sinon OpenBao devrait être debout
+         pour obtenir le certificat qui le rend joignable) ; SANs :
+         `openbao.foundation-vault.svc.cluster.local`, `openbao`,
+         `*.openbao.foundation-vault.svc.cluster.local` (noms par pod du
+         headless), `127.0.0.1`, `localhost`.
+      2. `tls_disable = 0` + `tls_cert_file`/`tls_key_file` ; `retry_join` en
+         `https://` avec `leader_ca_cert_file`.
+      3. Les 8 consommateurs : `https://` + CA de confiance (`BAO_CACERT` pour
+         les scripts, `caProvider` pour le `ClusterSecretStore`, `caBundle` pour
+         le `ClusterIssuer`).
+      4. L'HTTPRoute vers l'UI : la gateway parle alors à un backend TLS →
+         `BackendTLSPolicy`, sinon l'UI casse en silence.
+      5. Vérifier l'ordre de bootstrap complet à froid, pas seulement un cluster
+         déjà monté : c'est là que se cachent les cycles.
+
+      ⚠️ Ne pas tenter de substituer ces valeurs par Flux : la brique vault
+      contient des variables shell (`$POD_FQDN`) que la substitution viderait —
+      même piège que backup, storage et observability.
 
 ## CAPI / multi-cluster
 
