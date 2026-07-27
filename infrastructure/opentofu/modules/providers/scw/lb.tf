@@ -1,5 +1,5 @@
 # ==============================================================================
-# LB App (permanent) — Ports 80/443 pour les applications via Ingress Controller
+# LB App (permanent) — 80/443 en public, NodePorts du Gateway côté workers
 # ==============================================================================
 
 resource "scaleway_lb_ip" "app" {
@@ -21,9 +21,10 @@ resource "scaleway_lb_private_network" "app" {
 }
 
 resource "scaleway_lb_backend" "http" {
-  lb_id                  = scaleway_lb.app.id
-  name                   = "http-backend"
-  forward_port           = 80
+  lb_id = scaleway_lb.app.id
+  name  = "http-backend"
+  # Port sur les workers = NodePort figé du Gateway (l'inbound_port public reste 80).
+  forward_port           = var.app_lb_node_ports.http
   forward_port_algorithm = "roundrobin"
   forward_protocol       = "tcp"
   server_ips             = [for ip in scaleway_ipam_ip.worker : split("/", ip.address)[0]]
@@ -39,7 +40,7 @@ resource "scaleway_lb_frontend" "http" {
 resource "scaleway_lb_backend" "https" {
   lb_id                  = scaleway_lb.app.id
   name                   = "https-backend"
-  forward_port           = 443
+  forward_port           = var.app_lb_node_ports.https
   forward_port_algorithm = "roundrobin"
   forward_protocol       = "tcp"
   server_ips             = [for ip in scaleway_ipam_ip.worker : split("/", ip.address)[0]]

@@ -2,7 +2,7 @@
 # OVH / OpenStack — Load Balancers (Octavia)
 # Two separate LBs matching the provider contract:
 #   k8s: port 6443 → control planes (allowed_cidrs = admin_ip)
-#   app: ports 80/443 → workers (open)
+#   app: 80/443 en public → NodePorts du Gateway sur les workers (open)
 # ==============================================================================
 
 # --- Kubernetes API LB ---
@@ -101,10 +101,11 @@ resource "openstack_lb_pool_v2" "http" {
 }
 
 resource "openstack_lb_member_v2" "http" {
-  count         = var.worker_count
-  pool_id       = openstack_lb_pool_v2.http.id
-  address       = openstack_compute_instance_v2.worker[count.index].access_ip_v4
-  protocol_port = 80
+  count   = var.worker_count
+  pool_id = openstack_lb_pool_v2.http.id
+  address = openstack_compute_instance_v2.worker[count.index].access_ip_v4
+  # NodePort figé du Gateway ; le listener public reste sur 80.
+  protocol_port = var.app_lb_node_ports.http
   subnet_id     = openstack_networking_subnet_v2.private.id
 }
 
@@ -126,7 +127,7 @@ resource "openstack_lb_member_v2" "https" {
   count         = var.worker_count
   pool_id       = openstack_lb_pool_v2.https.id
   address       = openstack_compute_instance_v2.worker[count.index].access_ip_v4
-  protocol_port = 443
+  protocol_port = var.app_lb_node_ports.https
   subnet_id     = openstack_networking_subnet_v2.private.id
 }
 
