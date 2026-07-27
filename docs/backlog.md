@@ -385,11 +385,33 @@ Ce qui **reste ouvert** :
       valeurs que `render-bootstrap-manifests.sh` ne passait pas : régénérer
       cassait Istio ambient en silence. Les `--set` sont désormais dans le script,
       avec la raison. *(corrigé 2026-07-26)*
-- [ ] **Test de non-régression du rendu** : `task render-manifests` devrait
-      diffé le rendu contre l'artefact committé (aujourd'hui il l'écrase). Il
-      reste des écarts cosmétiques (lignes vides, ordre de clés du ConfigMap)
-      entre l'artefact en service et un rendu neuf du chart 1.19.2 — à réduire à
-      zéro avant d'automatiser le diff, sinon le contrôle est inexploitable.
+- [x] ~~**Test de non-régression du rendu**~~ → FAIT (2026-07-27) :
+      `task render-check` (= `render-bootstrap-manifests.sh --check`) rejoue le
+      rendu dans un dossier jetable et compare, sans rien écrire. Il normalise
+      les espaces de fin de ligne des DEUX côtés, sinon il serait rouge en
+      permanence : l'artefact committé passe par le hook pre-commit
+      `trim trailing whitespace`, pas le rendu brut de helm.
+
+      **La cause racine de toute cette classe de bugs a été trouvée au passage :
+      le script écrivait dans un répertoire FANTÔME.** Il vit dans
+      `scripts/bootstrap/` mais calculait sa sortie avec `${SCRIPT_DIR}/../infrastructure/…`
+      soit `scripts/infrastructure/…`, créé à la volée par son propre `mkdir -p`
+      et jamais lu par OpenTofu. `task render-manifests` semblait donc marcher
+      tout en ne régénérant **jamais** les artefacts committés — d'où leur
+      dérive, et d'où le fait que des `--set` aient dû être ajoutés à la main
+      dans les artefacts. Corrigé en `../../`.
+
+      Le contrôle a immédiatement payé : il a attrapé que le mode **local** du
+      générateur oubliait `socketLB.enabled=true`, présent lui dans l'artefact
+      (avec son commentaire d'origine). Régénérer aurait produit
+      `bpf-lb-sock: "false"`, rendant `bpf-lb-sock-hostns-only` inopérant et
+      recassant l'accès des pods hostNetwork aux ClusterIP. Le `--set` a été
+      remis dans le script ; artefacts et générateur sont désormais alignés
+      (vérifié clé par clé sur le ConfigMap : 147 clés identiques, 0 valeur
+      divergente).
+
+      Reste : **épingler `FLUX_VERSION`** — il est vide, donc `latest`, ce qui
+      rend `flux-install.yaml` non reproductible et exclu du contrôle.
 - [x] **Profils `pick.py` périmables en silence** : un profil fige la liste des
       Kustomizations *exclues*, donc toute brique ajoutée au DAG est héritée de
       `../base` sans avoir été pioché (vécu : `orc` bloqué sur les edges).
