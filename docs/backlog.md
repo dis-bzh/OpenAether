@@ -84,10 +84,22 @@ Ce qui **reste ouvert** :
       l'intention soit lisible dans la policy et qu'un élargissement futur de
       `sys/*` ne les rouvre pas par accident. Ces gestes de dernier recours
       restent au root token escrowé hors ligne.
-      ⚠️ Piège rencontré : les policies sont écrites en `printf` une-ligne, pas
-      en heredoc — un heredoc s'indente à la colonne 0 et **sort du scalaire YAML**
-      du script du Job. Vérifié : `bash -n` sur le script extrait + rendu HCL des
-      deux policies.
+      ⚠️ DEUX pièges, dont un que seule l'exécution réelle a révélé :
+      (a) les policies sont écrites en `printf` une-ligne, pas en heredoc — un
+      heredoc s'indente à la colonne 0 et **sort du scalaire YAML** du script ;
+      (b) les continuations de ligne s'écrivaient `\\` au lieu de `\` : bash
+      prenait le backslash pour un argument littéral, l'appel partait **sans
+      token** (« permission denied ») et le JSON de la policy était exécuté comme
+      une commande. **`bash -n` ne peut pas l'attraper** — `\\` + saut de ligne
+      est syntaxiquement valide. Trouvé en déployant pour de vrai.
+
+      **VALIDÉ sur cluster Talos local** (3 CP + 3 workers, `task local-test`) :
+      `policy openaether-admin: HTTP=204`, `policy openaether-reader: HTTP=204`,
+      puis test d'acceptation depuis l'intérieur du cluster —
+      admin : `sys/mounts` 200, écriture secret 200, **`sys/seal` 403**,
+      **`sys/step-down` 403** ; reader : lecture 200, **écriture 403**.
+      (`sys/rekey/init` renvoie 405 : l'opération n'a pas lieu, mais rien ne
+      prouve que ce soit la policy qui la bloque.)
       Suite naturelle : auth OIDC via Zitadel, pour des identités fédérées plutôt
       que des tokens créés à la main.
 - [ ] **Wave 3 unsealer** : escrow direct Bitwarden EU des parts Shamir,
