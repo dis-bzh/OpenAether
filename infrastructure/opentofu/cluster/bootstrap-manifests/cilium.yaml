@@ -7,6 +7,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: cilium
   annotations:
+
 ---
 # Source: cilium/templates/cilium-agent/serviceaccount.yaml
 apiVersion: v1
@@ -14,6 +15,7 @@ kind: ServiceAccount
 metadata:
   name: "cilium"
   namespace: kube-system
+
 ---
 # Source: cilium/templates/cilium-envoy/serviceaccount.yaml
 apiVersion: v1
@@ -21,6 +23,7 @@ kind: ServiceAccount
 metadata:
   name: "cilium-envoy"
   namespace: kube-system
+
 ---
 # Source: cilium/templates/cilium-operator/serviceaccount.yaml
 apiVersion: v1
@@ -28,6 +31,7 @@ kind: ServiceAccount
 metadata:
   name: "cilium-operator"
   namespace: kube-system
+
 ---
 # Source: cilium/templates/cilium-configmap.yaml
 apiVersion: v1
@@ -60,13 +64,11 @@ data:
 
   # If you want to run cilium in debug mode change this value to true
   debug: "false"
-  debug-verbose: ""
   metrics-sampling-interval: "5m"
   # The agent can be put into the following three policy enforcement modes
   # default, always and never.
   # https://docs.cilium.io/en/latest/security/policy/intro/#policy-enforcement-modes
   enable-policy: "default"
-  policy-cidr-match-mode: ""
   # If you want metrics enabled in cilium-operator, set the port for
   # which the Cilium Operator will have their metrics exposed.
   # NOTE that this will open the port on the nodes where Cilium operator pod
@@ -107,6 +109,7 @@ data:
   # Specifies the ratio (0.0-1.0] of total system memory to use for dynamic
   # sizing of the TCP CT, non-TCP CT, NAT and policy BPF maps.
   bpf-map-dynamic-size-ratio: "0.0025"
+  enable-host-legacy-routing: "false"
   # bpf-policy-map-max specifies the maximum number of entries in endpoint
   # policy map (per endpoint)
   bpf-policy-map-max: "16384"
@@ -171,6 +174,7 @@ data:
   enable-tunnel-big-tcp: "false"
   enable-tcx: "true"
   datapath-mode: "veth"
+  enable-bpf-masquerade: "true"
   enable-masquerade-to-route-source: "false"
   enable-wireguard: "true"
   wireguard-persistent-keepalive: "0s"
@@ -189,9 +193,6 @@ data:
   enable-no-service-endpoints-routable: "true"
   bpf-lb-sock: "true"
   bpf-lb-sock-hostns-only: "true"
-  enable-host-legacy-routing: "false"
-  enable-bpf-masquerade: "true"
-  nodeport-addresses: ""
   enable-health-check-nodeport: "true"
   enable-health-check-loadbalancer-ip: "false"
   node-port-bind-protection: "true"
@@ -300,6 +301,7 @@ data:
   # Keep the key name as bootstrap-config.json to avoid breaking changes
   bootstrap-config.json: |
     {"admin":{"address":{"pipe":{"mode":432,"path":"/var/run/cilium/envoy/sockets/admin.sock"}}},"applicationLogConfig":{"logFormat":{"textFormat":"[%Y-%m-%d %T.%e][%t][%l][%n] [%g:%#] %v"}},"bootstrapExtensions":[{"name":"envoy.bootstrap.internal_listener","typedConfig":{"@type":"type.googleapis.com/envoy.extensions.bootstrap.internal_listener.v3.InternalListener"}}],"dynamicResources":{"cdsConfig":{"apiConfigSource":{"apiType":"GRPC","grpcServices":[{"envoyGrpc":{"clusterName":"xds-grpc-cilium"}}],"setNodeOnFirstMessageOnly":true,"transportApiVersion":"V3"},"initialFetchTimeout":"30s","resourceApiVersion":"V3"},"ldsConfig":{"apiConfigSource":{"apiType":"GRPC","grpcServices":[{"envoyGrpc":{"clusterName":"xds-grpc-cilium"}}],"setNodeOnFirstMessageOnly":true,"transportApiVersion":"V3"},"initialFetchTimeout":"30s","resourceApiVersion":"V3"}},"node":{"cluster":"ingress-cluster","id":"host~127.0.0.1~no-id~localdomain"},"overloadManager":{"resourceMonitors":[{"name":"envoy.resource_monitors.global_downstream_max_connections","typedConfig":{"@type":"type.googleapis.com/envoy.extensions.resource_monitors.downstream_connections.v3.DownstreamConnectionsConfig","max_active_downstream_connections":"50000"}}]},"staticResources":{"clusters":[{"circuitBreakers":{"thresholds":[{"maxConnections":1024,"maxRequests":1024,"maxRetries":128}]},"cleanupInterval":"2.500s","connectTimeout":"2s","lbPolicy":"CLUSTER_PROVIDED","name":"ingress-cluster","type":"ORIGINAL_DST","typedExtensionProtocolOptions":{"envoy.extensions.upstreams.http.v3.HttpProtocolOptions":{"@type":"type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions","commonHttpProtocolOptions":{"idleTimeout":"60s","maxConnectionDuration":"0s","maxRequestsPerConnection":0},"useDownstreamProtocolConfig":{}}}},{"circuitBreakers":{"thresholds":[{"maxConnections":1024,"maxRequests":1024,"maxRetries":128}]},"cleanupInterval":"2.500s","connectTimeout":"2s","lbPolicy":"CLUSTER_PROVIDED","name":"egress-cluster-tls","transportSocket":{"name":"cilium.tls_wrapper","typedConfig":{"@type":"type.googleapis.com/cilium.UpstreamTlsWrapperContext"}},"type":"ORIGINAL_DST","typedExtensionProtocolOptions":{"envoy.extensions.upstreams.http.v3.HttpProtocolOptions":{"@type":"type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions","commonHttpProtocolOptions":{"idleTimeout":"60s","maxConnectionDuration":"0s","maxRequestsPerConnection":0},"upstreamHttpProtocolOptions":{},"useDownstreamProtocolConfig":{}}}},{"circuitBreakers":{"thresholds":[{"maxConnections":1024,"maxRequests":1024,"maxRetries":128}]},"cleanupInterval":"2.500s","connectTimeout":"2s","lbPolicy":"CLUSTER_PROVIDED","name":"egress-cluster","type":"ORIGINAL_DST","typedExtensionProtocolOptions":{"envoy.extensions.upstreams.http.v3.HttpProtocolOptions":{"@type":"type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions","commonHttpProtocolOptions":{"idleTimeout":"60s","maxConnectionDuration":"0s","maxRequestsPerConnection":0},"useDownstreamProtocolConfig":{}}}},{"circuitBreakers":{"thresholds":[{"maxConnections":1024,"maxRequests":1024,"maxRetries":128}]},"cleanupInterval":"2.500s","connectTimeout":"2s","lbPolicy":"CLUSTER_PROVIDED","name":"ingress-cluster-tls","transportSocket":{"name":"cilium.tls_wrapper","typedConfig":{"@type":"type.googleapis.com/cilium.UpstreamTlsWrapperContext"}},"type":"ORIGINAL_DST","typedExtensionProtocolOptions":{"envoy.extensions.upstreams.http.v3.HttpProtocolOptions":{"@type":"type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions","commonHttpProtocolOptions":{"idleTimeout":"60s","maxConnectionDuration":"0s","maxRequestsPerConnection":0},"upstreamHttpProtocolOptions":{},"useDownstreamProtocolConfig":{}}}},{"connectTimeout":"2s","loadAssignment":{"clusterName":"xds-grpc-cilium","endpoints":[{"lbEndpoints":[{"endpoint":{"address":{"pipe":{"path":"/var/run/cilium/envoy/sockets/xds.sock"}}}}]}]},"name":"xds-grpc-cilium","type":"STATIC","typedExtensionProtocolOptions":{"envoy.extensions.upstreams.http.v3.HttpProtocolOptions":{"@type":"type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions","explicitHttpConfig":{"http2ProtocolOptions":{}}}}},{"connectTimeout":"2s","loadAssignment":{"clusterName":"/envoy-admin","endpoints":[{"lbEndpoints":[{"endpoint":{"address":{"pipe":{"path":"/var/run/cilium/envoy/sockets/admin.sock"}}}}]}]},"name":"/envoy-admin","type":"STATIC"}],"listeners":[{"address":{"socketAddress":{"address":"0.0.0.0","portValue":9964}},"filterChains":[{"filters":[{"name":"envoy.filters.network.http_connection_manager","typedConfig":{"@type":"type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager","httpFilters":[{"name":"envoy.filters.http.router","typedConfig":{"@type":"type.googleapis.com/envoy.extensions.filters.http.router.v3.Router"}}],"internalAddressConfig":{"cidrRanges":[{"addressPrefix":"10.0.0.0","prefixLen":8},{"addressPrefix":"172.16.0.0","prefixLen":12},{"addressPrefix":"192.168.0.0","prefixLen":16},{"addressPrefix":"127.0.0.1","prefixLen":32}]},"routeConfig":{"virtualHosts":[{"domains":["*"],"name":"prometheus_metrics_route","routes":[{"match":{"prefix":"/metrics"},"name":"prometheus_metrics_route","route":{"cluster":"/envoy-admin","prefixRewrite":"/stats/prometheus"}}]}]},"statPrefix":"envoy-prometheus-metrics-listener","streamIdleTimeout":"300s"}}]}],"name":"envoy-prometheus-metrics-listener"},{"address":{"socketAddress":{"address":"127.0.0.1","portValue":9878}},"filterChains":[{"filters":[{"name":"envoy.filters.network.http_connection_manager","typedConfig":{"@type":"type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager","httpFilters":[{"name":"envoy.filters.http.router","typedConfig":{"@type":"type.googleapis.com/envoy.extensions.filters.http.router.v3.Router"}}],"internalAddressConfig":{"cidrRanges":[{"addressPrefix":"10.0.0.0","prefixLen":8},{"addressPrefix":"172.16.0.0","prefixLen":12},{"addressPrefix":"192.168.0.0","prefixLen":16},{"addressPrefix":"127.0.0.1","prefixLen":32}]},"routeConfig":{"virtual_hosts":[{"domains":["*"],"name":"health","routes":[{"match":{"prefix":"/healthz"},"name":"health","route":{"cluster":"/envoy-admin","prefixRewrite":"/ready"}}]}]},"statPrefix":"envoy-health-listener","streamIdleTimeout":"300s"}}]}],"name":"envoy-health-listener"}]}}
+
 ---
 # Source: cilium/templates/cilium-agent/clusterrole.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -411,6 +413,7 @@ rules:
   - ciliumbgpnodeconfigs/status
   verbs:
   - patch
+
 ---
 # Source: cilium/templates/cilium-operator/clusterrole.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -655,6 +658,7 @@ rules:
   - ciliumendpointslices
   verbs:
   - deletecollection
+
 ---
 # Source: cilium/templates/cilium-agent/clusterrolebinding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -671,6 +675,7 @@ subjects:
 - kind: ServiceAccount
   name: "cilium"
   namespace: kube-system
+
 ---
 # Source: cilium/templates/cilium-operator/clusterrolebinding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -687,6 +692,7 @@ subjects:
 - kind: ServiceAccount
   name: "cilium-operator"
   namespace: kube-system
+
 ---
 # Source: cilium/templates/cilium-agent/role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -723,6 +729,7 @@ rules:
   - get
   - list
   - watch
+
 ---
 # Source: cilium/templates/cilium-operator/role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -765,6 +772,7 @@ rules:
   - get
   - list
   - watch
+
 ---
 # Source: cilium/templates/cilium-agent/rolebinding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -799,6 +807,7 @@ subjects:
 - kind: ServiceAccount
   name: "cilium"
   namespace: kube-system
+
 ---
 # Source: cilium/templates/cilium-operator/rolebinding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -833,6 +842,7 @@ subjects:
 - kind: ServiceAccount
   name: "cilium-operator"
   namespace: kube-system
+
 ---
 # Source: cilium/templates/cilium-envoy/service.yaml
 apiVersion: v1
@@ -858,6 +868,7 @@ spec:
     port: 9964
     protocol: TCP
     targetPort: 9964
+
 ---
 # Source: cilium/templates/cilium-agent/daemonset.yaml
 apiVersion: apps/v1
@@ -1338,6 +1349,8 @@ spec:
         hostPath:
           path: /proc/sys/kernel
           type: Directory
+
+
 ---
 # Source: cilium/templates/cilium-envoy/daemonset.yaml
 apiVersion: apps/v1
@@ -1515,6 +1528,8 @@ spec:
         hostPath:
           path: /sys/fs/bpf
           type: DirectoryOrCreate
+
+
 ---
 # Source: cilium/templates/cilium-operator/deployment.yaml
 apiVersion: apps/v1
