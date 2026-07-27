@@ -477,9 +477,42 @@ Ce qui **reste ouvert** :
       upstream avec les traces des deux reproductions.
 - [ ] **Proxmox** : premier apply réel (SYS-1) + hardening Ansible hôte (absent
       du repo, seulement documenté).
-- [ ] **Ingress public** : trancher CCM (LB managé) vs LB-IPAM — CCM Scaleway
-      présent mais hors DAG ; l'app-lb actuel cible worker:80/443 alors
-      qu'Envoy écoute en NodePorts (chemin cassé, cf. mémoire).
+- [x] ~~**Ingress public** : trancher CCM vs LB-IPAM~~ → TRANCHÉ et raccordé
+      (2026-07-27). **Ce n'étaient pas deux solutions au même problème** : le CCM
+      provisionne un LB cloud à partir d'un `Service type=LoadBalancer` ;
+      LB-IPAM attribue l'IP que porte le Service DANS le cluster. Le pool est
+      privé (172.16.12.240-254), donc LB-IPAM ne produit aucune IP publique, et
+      l'IP publique vient déjà d'un LB créé par **OpenTofu** — pas du CCM.
+
+      **Décision : LB-IPAM dedans, LB public dans OpenTofu, pas de CCM.** Le CCM
+      ferait remonter des annotations spécifiques au provider dans la couche
+      `apps`, qui est justement la couche partagée que l'architecture garde
+      agnostique (les spécificités vivent dans `modules/providers/`) ; et il
+      n'existe pas sur Proxmox, qui est dans le périmètre. En prime, un
+      composant de moins portant des credentials cloud dans le cluster.
+
+      **Raccordement livré** — le chemin public était cassé parce que le LB
+      ciblait `worker:80/443` où rien n'écoute :
+      - `apps/base/services-gateway/service-nodeport.yaml` : Service NodePort
+        dédié, ports **FIGÉS 30080/30443**, sélectionnant les pods du Gateway.
+        Figés parce que le LB est créé en PHASE 1, avant le cluster : il ne peut
+        pas découvrir un nodePort alloué au hasard (30000-32767).
+      - `app_lb_node_ports` dans les 3 modules provider (scw/ovh/outscale) :
+        backends du LB **et règles de security group** repointés dessus. Ouvrir
+        80/443 sur les nœuds n'aurait servi à rien.
+      - CNP `openaether-gateway` élargie aux entités `host`/`remote-node` : en
+        `externalTrafficPolicy: Cluster`, le nœud SNAT le paquet, donc Cilium ne
+        voit plus `world` mais le nœud — sans ça tout l'ingress public est droppé.
+
+      ⚠️ **Contrat inter-dépôts** : les numéros de port sont dupliqués des deux
+      côtés, chaque fichier pointant sur l'autre. Un écart = LB qui pointe dans
+      le vide, sans erreur nulle part.
+
+      Le Service LoadBalancer d'Istio et sa VIP privée sont **inchangés** : le
+      chemin d'administration par tunnel SSH n'est pas touché.
+      **À valider au prochain déploiement** (non exerçable sans cluster).
+      Le CCM redeviendrait le bon choix si Proxmox sortait du périmètre, ou pour
+      des LB publics à la demande par application.
 - [ ] **Observability S3 cloud** : Loki pointe encore `minio/root` en cloud
       (overlay jamais câblé) ; au câblage, penser `rules.dns` sur sa CNP toFQDNs.
 - [x] ~~**`test-local-stack.sh` / fmt**~~ → réglé (2026-07-27). Deux moitiés :

@@ -95,3 +95,28 @@ variable "bastion_vm_type" {
   type        = string
   default     = "tinav5.c2r2p2"
 }
+
+# ==============================================================================
+# NodePorts du Gateway — CONTRAT INTER-DÉPÔTS
+#
+# Le LB applicatif public est créé en PHASE 1, avant que le cluster n'existe :
+# il ne peut donc pas découvrir un nodePort alloué dynamiquement par Kubernetes
+# (plage aléatoire 30000-32767). Les ports sont donc FIGÉS des deux côtés.
+#
+# ⚠️ Ces valeurs DOIVENT correspondre à
+# OpenAether-apps/apps/base/services-gateway/service-nodeport.yaml.
+# Un écart = LB public qui pointe dans le vide, sans erreur nulle part — c'est
+# exactement la panne d'origine (le LB ciblait worker:80/443 alors que le
+# Gateway Istio n'y écoutait pas).
+# ==============================================================================
+variable "app_lb_node_ports" {
+  description = "NodePorts figés du Gateway, cibles du LB applicatif public. Doit correspondre au Service openaether-gateway-nodeport côté apps."
+  type = object({
+    http  = number
+    https = number
+  })
+  default = {
+    http  = 30080
+    https = 30443
+  }
+}
