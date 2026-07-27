@@ -74,7 +74,12 @@ EOT
     exit 1
   fi
 else
-  mapfile -t EDGES < <(kubectl get cluster -A -o jsonpath='{range .items[*]}{.metadata.name} {.metadata.namespace}{"\n"}{end}' 2>/dev/null)
+  # ⚠️ `cluster` tout court est AMBIGU : CNPG expose aussi un kind `Cluster`
+  # (postgresql.cnpg.io). Quand les CRDs CAPI ne sont pas installées — management
+  # partiellement détruit, providers pas encore réconciliés — `kubectl get cluster`
+  # retourne les BASES DE DONNÉES (constaté le 2026-07-27 : grafana-db, zitadel-db)
+  # et ce script lancerait `edge-down` dessus. Toujours qualifier le groupe.
+  mapfile -t EDGES < <(kubectl get clusters.cluster.x-k8s.io -A -o jsonpath='{range .items[*]}{.metadata.name} {.metadata.namespace}{"\n"}{end}' 2>/dev/null)
   if [ "${#EDGES[@]}" -eq 0 ]; then
     ok "aucun cluster enfant"
   else
