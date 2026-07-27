@@ -369,11 +369,19 @@ locals {
 locals {
   cilium_manifest = var.cilium_manifest != null ? var.cilium_manifest : file("${path.module}/bootstrap-manifests/cilium.yaml")
   flux_manifest   = var.flux_manifest != null ? var.flux_manifest : file("${path.module}/bootstrap-manifests/flux-install.yaml")
+  # Identité du cluster, publiée en ConfigMap `cluster-identity` (flux-system) et
+  # consommée par les briques qui doivent se distinguer d'un AUTRE cluster —
+  # aujourd'hui les dépôts restic, qui partagent des buckets cross-provider.
+  # Le provider fait partie de l'identité : `cluster_name`/`environment` seuls
+  # valent "openaether-dev" sur les trois clouds, donc ne distinguent rien.
+  cluster_id = "${var.cluster_name}-${var.environment}-${local.active_provider}"
+
   flux_bootstrap_manifest = var.flux_bootstrap_manifest != null ? var.flux_bootstrap_manifest : templatefile("${path.module}/bootstrap-manifests/flux-bootstrap.yaml.tftpl", {
     namespace    = var.flux_namespace
     git_repo_url = var.git_repo_url
     git_branch   = "main"
     cluster_role = var.cluster_role
+    cluster_id   = local.cluster_id
   })
 }
 
