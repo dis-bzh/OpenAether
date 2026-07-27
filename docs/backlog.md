@@ -492,7 +492,28 @@ Ce qui **reste ouvert** :
       Reste, pour l'opérateur : `infrastructure/opentofu/_v2/` est un scratch non
       suivi (22 juin) — à supprimer s'il ne sert plus. Non touché ici : ce sont
       des fichiers locaux.
-- [ ] **kyverno background-controller** désactivé (reports cluster absents).
+- [ ] **kyverno background-controller** : entrée à REQUALIFIER — vérifié le
+      2026-07-27, **rien ne le désactive côté configuration**. Le rendu de
+      `apps/base/kyverno` produit bien les 4 Deployments (admission, background,
+      cleanup, reports) sans surcharge de `replicas`, et toutes les ClusterPolicy
+      portent `background: true`. L'entrée décrit donc un état d'EXÉCUTION
+      constaté, pas un choix de config.
+      → À reprendre au prochain déploiement : le Deployment
+      `kyverno-background-controller` tourne-t-il, et des `ClusterPolicyReport`
+      sont-ils produits ? Si non, chercher côté crash/RBAC/ressources, pas côté
+      manifests.
+
+- [ ] **Kyverno installé depuis une URL GitHub distante** (constaté 2026-07-27) :
+      `apps/base/kyverno/kustomization.yaml` liste
+      `https://github.com/kyverno/kyverno/releases/download/v1.12.1/install.yaml`
+      comme ressource. Conséquences : la réconciliation Flux dépend de la
+      disponibilité de GitHub, le rendu n'est pas reproductible hors ligne, et
+      rien ne vérifie l'intégrité de l'artefact téléchargé (pas de somme de
+      contrôle). La version est au moins épinglée (v1.12.1, choisie pour un fix
+      upstream documenté sur place). À arbitrer : vendorer l'install.yaml dans le
+      dépôt (comme `flux-install.yaml` et `cilium.yaml`, qui sont committés) ou
+      passer par un HelmRelease avec un HelmRepository — cohérent avec le reste
+      du socle, et soumis au même garde-fou de rendu.
 
 ## Reproductibilité des artefacts générés
 
