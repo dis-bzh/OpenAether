@@ -39,9 +39,15 @@ secret — étape opérateur, cf. `docs/admin-access.md` § 4bis.
 
 ### Ce qui reste à faire au prochain run
 
-1. **Terminer le SSO** : créer l'app Zitadel, seeder `secret/grafana/oidc`,
-   vérifier le claim sur un vrai token et ajuster `role_attribute_path`.
-2. **Durcir la gateway → UI OpenBao** : encore en `insecureSkipVerify`.
+1. **Connexion SSO réelle depuis un navigateur** — tout le reste est fait (app
+   Zitadel créée, secret seedé, identifiants injectés dans Grafana, scopes
+   corrigés). Il ne manque que de se connecter pour confirmer la forme du claim
+   retenue. Si tous les comptes restent `Viewer`, inspecter le token et
+   substituer l'ID de projet dans `role_attribute_path` (procédure dans le
+   fichier).
+2. **Chemin gateway → UI** : non testable tant que l'intermediate PKI n'est pas
+   signé HORS LIGNE (`admin-access.md` § 2) — le listener HTTPS reste `Invalid`.
+   Le code, lui, est durci (`credentialName`, plus d'`insecureSkipVerify`).
 3. **Réactiver edge-1** pour re-valider Scaleway.
 
 ### Note : les répertoires `local-path` en 0755 (PAS un défaut du code)
@@ -90,6 +96,31 @@ Quatre défauts réels, **aucun visible en analyse statique ni en test local** :
       `backup-target` était encore un nom supporté.
       ⚠️ **Leçon** : vérifier qu'un champ existe ne dit pas que la ressource est
       la bonne. Confronter le NOM de la ressource à la version déployée.
+
+## SSO Grafana ↔ Zitadel — mesures réelles (2026-07-28)
+
+Faites contre Zitadel **v4.14** sur le cluster OVH, via l'API (PAT `iam-admin`,
+port-forward — la CNP bloque l'accès direct depuis un pod quelconque).
+
+- ✅ **Les 4 endpoints configurés sont EXACTS**, confirmés par
+  `/.well-known/openid-configuration` : `/oauth/v2/authorize`,
+  `/oauth/v2/token`, `/oidc/v1/userinfo`, `/oidc/v1/end_session`.
+- ❌ **Le scope de rôles manquait — défaut réel.** Avec `openid profile email`
+  seul, `/oidc/v1/userinfo` ne contient **aucun** claim de rôles : tout le monde
+  serait retombé sur `Viewer` en silence, quel que soit le `role_attribute_path`.
+  Corrigé en ajoutant `urn:zitadel:iam:org:projects:roles`.
+- ✅ **Structure du claim confirmée** : la valeur est un OBJET dont les clés sont
+  les rôles — `{"grafana-admin": {"<orgId>": "<domaine>"}}`. `keys()` était donc
+  la bonne approche.
+- ⚠️ **Nom du claim : deux formes.** Mesuré `urn:zitadel:iam:org:project:<projectId>:roles`
+  lorsqu'on demande les rôles de tous les projets. La forme NON préfixée vaut
+  pour le projet auquel appartient le client (le cas de Grafana), mais cela n'a
+  pas pu être reproduit sans un vrai flux navigateur. À trancher à la première
+  connexion.
+- Créé côté Zitadel : projet `OpenAether`, rôle `grafana-admin`, application web
+  `Grafana` (code + PKCE, redirect `…/login/generic_oauth`),
+  `projectRoleAssertion` activé. Identifiants seedés dans `secret/grafana/oidc`,
+  ExternalSecret `SecretSynced`, variables injectées dans le pod Grafana.
 
 ## Backups / DR
 
