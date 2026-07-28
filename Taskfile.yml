@@ -57,7 +57,7 @@ tasks:
       - tofu validate
 
   apps-validate:
-    desc: "Valide le DAG Flux d'OpenAether-apps, les profils générés (pick.py) et le Cilium des enfants"
+    desc: "Validate the OpenAether-apps Flux DAG, the generated pick.py profiles and the children's Cilium"
     cmds:
       # Cilium parity foundation ↔ CAPI children: two formats (the render
       # script's --set vs a HelmRelease's values:) in two repos, hence silent
@@ -353,7 +353,7 @@ tasks:
       - ./scripts/bootstrap/render-bootstrap-manifests.sh
 
   render-check:
-    desc: "Vérifie que les manifests de bootstrap committés correspondent à leur générateur (n'écrit rien)"
+    desc: "Check the committed bootstrap manifests against their generator (writes nothing)"
     cmds:
       # A generated artifact can diverge from its generator SILENTLY. It has
       # happened twice: `--set` flags hand-added into the artifact (including

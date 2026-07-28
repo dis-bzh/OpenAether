@@ -32,13 +32,18 @@ while [ $# -gt 0 ]; do
     --yes | -y) ASSUME_YES=1; shift ;;
     --force-no-edges) FORCE_NO_EDGES=1; shift ;;
     --keep-images) shift ;;   # accepted for symmetry, no effect here
-    *) echo "✗ flag inconnu: $1" >&2; exit 2 ;;
+    *) echo "✗ unknown flag: $1" >&2; exit 2 ;;
   esac
 done
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CLUSTER_DIR="$ROOT/infrastructure/opentofu/cluster"
 export KUBECONFIG="${KUBECONFIG:-$CLUSTER_DIR/kubeconfig}"
+
+# Any step that fails flips this; the script exits non-zero at the end. It used
+# to report success after a management destroy that never started, leaving
+# 7 VMs running and billed (2026-07-28).
+FAILED=0
 
 info() { printf '\n▶ %s\n' "$*"; }
 ok()   { printf '✓ %s\n' "$*"; }
@@ -52,18 +57,18 @@ warn() { printf '⚠ %s\n' "$*" >&2; }
 # when an earlier version of this script settled for a warning. We STOP, unless
 # --force-no-edges is passed (the operator then asserts there is no child, or
 # has already purged them on the provider side).
-info "Étape 1/3 — clusters enfants CAPI"
+info "Step 1/3 — CAPI child clusters"
 if [ ! -r "$KUBECONFIG" ] || ! kubectl cluster-info >/dev/null 2>&1; then
   if [ "$FORCE_NO_EDGES" -eq 1 ]; then
     warn "management unreachable — step skipped (--force-no-edges assumed)."
   else
     cat >&2 <<'EOT'
 
-✗ ARRÊT : le cluster de management est injoignable (kubeconfig absent ou API down).
+✗ STOP: the management cluster is unreachable (no kubeconfig, or API down).
   Cannot verify that no CAPI child cluster remains. Destroying the management
-  management maintenant rendrait leurs VMs ORPHELINES et FACTURÉES.
+  now would leave their VMs ORPHANED and BILLED.
 
-  Que faire :
+  What to do:
     • kubeconfig lost? regenerate it:
         cd infrastructure/opentofu/cluster && tofu output -raw kubeconfig > kubeconfig
         (ou  talosctl -e <tunnel> -n <cp-ip> kubeconfig ./kubeconfig --force)
@@ -88,9 +93,10 @@ else
       name="${e%% *}"; ns="${e##* }"
       if ! "$ROOT/scripts/ops/edge-down.sh" "$name" --namespace "$ns" --timeout 900 \
              $([ "$ASSUME_YES" -eq 1 ] && echo --yes); then
-        warn "edge-down $name a ÉCHOUÉ."
+        warn "edge-down $name FAILED."
         if [ "$FORCE_NO_EDGES" -eq 1 ]; then
           warn "--force-no-edges: continuing anyway (check the VMs on the provider side)."
+          FAILED=1
         else
           cat >&2 <<EOT
 
@@ -106,14 +112,14 @@ EOT
 fi
 
 # ----------------------------------------------------------- 2. le management
-info "Étape 2/3 — cluster de management ($ROLE / $PROVIDER)"
+info "Step 2/3 — management cluster ($ROLE / $PROVIDER)"
 if [ "$ASSUME_YES" -eq 0 ]; then
   read -rp "Destroy the $ROLE-$PROVIDER management? [y/N] " a
-  [ "$a" = y ] || [ "$a" = Y ] || { echo "abandon"; exit 1; }
+  [ "$a" = y ] || [ "$a" = Y ] || { echo "aborted"; exit 1; }
 fi
 ( cd "$ROOT" && TF_CLI_ARGS_destroy=-auto-approve task destroy ROLE="$ROLE" PROVIDER="$PROVIDER" ) \
   && ok "management destroyed" \
-  || warn "the management destroy failed — re-run after fixing (idempotent)"
+  || { warn "the management destroy FAILED — re-run after fixing (idempotent)"; FAILED=1; }
 
 # ------------------------------------------------- 3. ce qui reste (rapport)
 info "Step 3/3 — left to purge MANUALLY (deliberately survives the teardown)"
@@ -130,6 +136,11 @@ cat <<EOT
     propre state (bucket s3-${CN:-<projet>}-${PROVIDER}-talos-image).
   Objects created outside OpenTofu for CAPI (to recreate on the next deployment):
     Outscale keypair 'openaether-capi', pre-created OpenStack FIP (edge-2 certSANs).
-  Local : kubeconfig, talosconfig, edge-*.kubeconfig, restic-escrow-*.txt
+  Local: kubeconfig, talosconfig, edge-*.kubeconfig, restic-escrow-*.txt
 EOT
+if [ "$FAILED" -ne 0 ]; then
+  printf '\n✗ fleet-down INCOMPLETE — see the ⚠ above. Resources may still exist\n'  >&2
+  printf '  and be BILLED. Check the provider, then re-run (idempotent).\n' >&2
+  exit 1
+fi
 ok "fleet-down complete"

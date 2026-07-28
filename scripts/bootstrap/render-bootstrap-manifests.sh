@@ -32,6 +32,14 @@ if [[ "${1:-}" == "--local" ]]; then
   shift
 fi
 
+# Versions — update these when upgrading.
+# FLUX_VERSION MUST stay pinned: `latest` once bumped Flux with nothing asking
+# for it and nothing reporting it. It is also what --check compares the
+# committed flux-install.yaml against, so bump the pin and the artifact together.
+CILIUM_VERSION="${CILIUM_VERSION:-1.19.2}"
+FLUX_VERSION="${FLUX_VERSION:-v2.8.8}"
+FLUX_URL="https://github.com/fluxcd/flux2/releases/download/${FLUX_VERSION}/install.yaml"
+
 # ─────────────────────────────────────────────────────────────
 # --check: anti-drift guardrail
 #
@@ -40,12 +48,12 @@ fi
 # script, so a plain `task render-manifests` broke Istio ambient with nothing
 # reporting it. This mode replays the render into a throwaway dir and compares.
 #
-# Checks ONLY the manifests WE generate (cilium.yaml, cilium-local.yaml).
-# flux-install.yaml is an upstream download: its evolution is a different
-# signal (a new Flux release), not a drift in our configuration.
+# cilium*.yaml are replayed through the generator; flux-install.yaml is a stock
+# upstream asset, so checking it means confirming it is still exactly
+# FLUX_VERSION upstream.
 # ─────────────────────────────────────────────────────────────
 if [[ "${1:-}" == "--check" ]]; then
-  command -v diff >/dev/null 2>&1 || { echo "✗ diff requis" >&2; exit 1; }
+  command -v diff >/dev/null 2>&1 || { echo "✗ diff required" >&2; exit 1; }
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
   echo "🔍 Checking the committed artifacts against the generator…"
@@ -66,6 +74,19 @@ if [[ "${1:-}" == "--check" ]]; then
       echo "  ✓ ${f}"
     fi
   done
+  # Offline is a legitimate case (`task validate` runs without credentials), so
+  # an unreachable upstream warns instead of failing the whole check.
+  if curl -sfL "${FLUX_URL}" -o "${tmp}/flux-install.yaml"; then
+    if diff -q <(norm "${MANIFESTS_DIR}/flux-install.yaml") <(norm "${tmp}/flux-install.yaml") >/dev/null 2>&1; then
+      echo "  ✓ flux-install.yaml (${FLUX_VERSION})"
+    else
+      echo "  ❌ flux-install.yaml is not upstream ${FLUX_VERSION} (excerpt):"
+      diff <(norm "${MANIFESTS_DIR}/flux-install.yaml") <(norm "${tmp}/flux-install.yaml") | head -10 | sed 's/^/      /'
+      drift=1
+    fi
+  else
+    echo "  ⚠ flux-install.yaml NOT checked — ${FLUX_VERSION} unreachable"
+  fi
   if [[ "$drift" -eq 1 ]]; then
     cat >&2 <<'EOT'
 
@@ -81,10 +102,6 @@ EOT
   echo "OK — bootstrap artifacts up to date with the generator."
   exit 0
 fi
-
-# Versions — update these when upgrading
-CILIUM_VERSION="${CILIUM_VERSION:-1.19.2}"
-FLUX_VERSION="${FLUX_VERSION:-}"
 
 mkdir -p "${MANIFESTS_DIR}"
 
@@ -177,28 +194,11 @@ sed -i 's/[[:space:]]*$//' "${CILIUM_OUTPUT}"
 # ─────────────────────────────────────────────────────
 # 2. Download Flux install manifest
 # ─────────────────────────────────────────────────────
-# ⚠️ DOWNLOAD IS DELIBERATELY OPT-IN (OPENAETHER_REFRESH_FLUX=1).
-#
-# Two reasons, both observed on 2026-07-27:
-#  1. without FLUX_VERSION the URL is `releases/latest` — a plain
-#     `task render-manifests` BUMPED Flux to the latest published version,
-#     with nothing asking for it and nothing reporting it;
-#  2. the committed artifact is NOT a stock upstream install.yaml: it carries
-#     one extra controller, `source-watcher` (7 Deployments / 15 CRDs instead
-#     of 6 / 14). Overwriting it with the standard install.yaml would REMOVE
-#     that controller from the bootstrap.
-# To regenerate it knowingly: pin FLUX_VERSION *and* rebuild the component set
-# composants (`flux install --export --components-extra=source-watcher`).
+# ⚠️ Opt-in (OPENAETHER_REFRESH_FLUX=1): re-downloading is an upgrade, not a
+# render. Bump FLUX_VERSION first — otherwise this just rewrites the same file.
 if [[ "$LOCAL_MODE" == "false" && "${OPENAETHER_SKIP_FLUX:-0}" != "1" \
       && "${OPENAETHER_REFRESH_FLUX:-0}" == "1" ]]; then
-  echo "🔧 Downloading Flux install manifest${FLUX_VERSION:+ (${FLUX_VERSION})}..."
-  if [[ -z "${FLUX_VERSION}" ]]; then
-    echo "  ⚠️  FLUX_VERSION vide → 'latest' : le rendu ne sera pas reproductible." >&2
-  fi
-  FLUX_URL="https://github.com/fluxcd/flux2/releases/latest/download/install.yaml"
-  if [[ -n "${FLUX_VERSION}" ]]; then
-    FLUX_URL="https://github.com/fluxcd/flux2/releases/download/${FLUX_VERSION}/install.yaml"
-  fi
+  echo "🔧 Downloading Flux install manifest (${FLUX_VERSION})..."
   curl -sL "${FLUX_URL}" > "${MANIFESTS_DIR}/flux-install.yaml"
   if [ ! -s "${MANIFESTS_DIR}/flux-install.yaml" ] || [ "$(wc -c < "${MANIFESTS_DIR}/flux-install.yaml")" -lt 1000 ]; then
     echo "  ❌ Flux manifest download failed or is too small"
@@ -213,7 +213,7 @@ fi
 echo ""
 echo "📋 Bootstrap manifests rendered:"
 echo "   Cilium: ${CILIUM_VERSION} ($([ "$LOCAL_MODE" == "true" ] && echo "local — simplified" || echo "production — WireGuard"))"
-[[ "$LOCAL_MODE" == "false" ]] && echo "   Flux:   ${FLUX_VERSION:-latest}"
+[[ "$LOCAL_MODE" == "false" ]] && echo "   Flux:   ${FLUX_VERSION}"
 echo ""
 echo "   Files:"
 ls -lh "${MANIFESTS_DIR}"/*.yaml 2>/dev/null || true
