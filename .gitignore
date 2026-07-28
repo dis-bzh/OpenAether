@@ -51,6 +51,9 @@ worker.yaml
 
 # OpenTofu / Terraform
 .terraform/
+# Isolated TF_DATA_DIR for `task validate` — keeps the static check runnable
+# without cloud credentials (see the validate task in Taskfile.yml).
+.terraform-validate/
 .terraform.lock.hcl
 *.tfstate
 *.tfstate.*
