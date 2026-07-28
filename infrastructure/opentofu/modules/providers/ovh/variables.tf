@@ -127,17 +127,17 @@ variable "k8s_lb_mode" {
 }
 
 # ==============================================================================
-# NodePorts du Gateway — CONTRAT INTER-DÉPÔTS
+# Gateway NodePorts — CROSS-REPOSITORY CONTRACT
 #
-# Le LB applicatif public est créé en PHASE 1, avant que le cluster n'existe :
-# il ne peut donc pas découvrir un nodePort alloué dynamiquement par Kubernetes
-# (plage aléatoire 30000-32767). Les ports sont donc FIGÉS des deux côtés.
+# The public application LB is created in PHASE 1, before the cluster exists:
+# it therefore cannot discover a nodePort dynamically allocated by Kubernetes
+# (random 30000-32767 range). The ports are therefore FIXED on both sides.
 #
-# ⚠️ Ces valeurs DOIVENT correspondre à
+# ⚠️ These values MUST match
 # OpenAether-apps/apps/base/services-gateway/service-nodeport.yaml.
-# Un écart = LB public qui pointe dans le vide, sans erreur nulle part — c'est
-# exactement la panne d'origine (le LB ciblait worker:80/443 alors que le
-# Gateway Istio n'y écoutait pas).
+# A mismatch = a public LB pointing at nothing, with no error anywhere — which
+# is exactly the original outage (the LB targeted worker:80/443 while the Istio
+# Gateway was not listening there).
 # ==============================================================================
 variable "app_lb_node_ports" {
   description = "NodePorts figés du Gateway, cibles du LB applicatif public. Doit correspondre au Service openaether-gateway-nodeport côté apps."

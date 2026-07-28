@@ -3,35 +3,35 @@
 # OpenAether — wrapper CRON du snapshot etcd
 #
 # POURQUOI CE WRAPPER
-#   `task etcd-snapshot` marche très bien à la main, mais pas tel quel dans une
-#   crontab. Quatre raisons, toutes vécues comme des classiques du genre :
+#   `task etcd-snapshot` works fine by hand, but not as-is in a crontab.
+#   Four reasons, all of them classics of the genre:
 #
-#   1. **PATH** — cron démarre avec un PATH minimal (souvent /usr/bin:/bin).
-#      Or les outils sont éparpillés : task et talosctl dans /usr/local/bin,
-#      tofu et aws dans /snap/bin. Sans ça : "command not found", et le snapshot
-#      ne tourne jamais alors que la crontab semble correcte.
-#   2. **Credentials** — la task lit des variables d'environnement (S3, provider,
-#      passphrase de chiffrement) que cron n'hérite pas d'un shell interactif.
-#   3. **Tunnels SSH non fermés** — `task etcd-snapshot` OUVRE les tunnels et ne
-#      les referme pas (c'est voulu en usage interactif, on enchaîne souvent).
-#      En cron, ils s'accumuleraient à chaque exécution. Ce wrapper les ferme
-#      systématiquement, y compris en cas d'échec (trap EXIT).
-#   4. **Recouvrement** — un snapshot lent croiserait le suivant. flock l'évite.
+#   1. **PATH** — cron starts with a minimal PATH (often /usr/bin:/bin), while
+#      the tools are scattered: task and talosctl in /usr/local/bin, tofu and
+#      aws in /snap/bin. Without this: "command not found", and the snapshot
+#      never runs even though the crontab looks correct.
+#   2. **Credentials** — the task reads environment variables (S3, provider,
+#      encryption passphrase) that cron does not inherit from a login shell.
+#   3. **Unclosed SSH tunnels** — `task etcd-snapshot` OPENS the tunnels and
+#      never closes them (deliberate interactively, where you chain commands).
+#      Under cron they would pile up on every run. This wrapper always closes
+#      them, including on failure (trap EXIT).
+#   4. **Overlap** — a slow snapshot would meet the next one. flock prevents it.
 #
 # USAGE
-#   ./scripts/ops/etcd-snapshot-cron.sh <provider> [clé-ssh]
+#   ./scripts/ops/etcd-snapshot-cron.sh <provider> [ssh-key]
 #
-#   Exemple de crontab (03:40 chaque jour) — noter le chemin ABSOLU et la
-#   redirection : cron envoie la sortie par mail, ce qui sert d'alerting pauvre.
+#   Crontab example (03:40 daily) — note the ABSOLUTE path and the redirection:
+#   cron mails the output, which acts as a poor man's alerting.
 #     40 3 * * * /home/vde/repos/DIS/OpenAether/OpenAether-infra/scripts/ops/etcd-snapshot-cron.sh ovh ~/.ssh/id_ed25519-ovh-openaether-dev >> /var/log/openaether-etcd-snapshot.log 2>&1
 #
 # VARIABLES
-#   OPENAETHER_ENV_FILE  fichier d'environnement à sourcer (défaut : <repo>/.env.sh)
-#   KEEP                 rétention, en nombre de snapshots (défaut : 30)
+#   OPENAETHER_ENV_FILE  environment file to source (default: <repo>/.env.sh)
+#   KEEP                 retention, as a number of snapshots (default: 30)
 #
-# ⚠️ Ce snapshot est un RACCOURCI de RTO, pas la sauvegarde de référence : le
-# contenu du cluster est reconstruit par Flux. Il couvre ce qui ne vit QUE dans
-# etcd (Secrets écrits par des Jobs, bindings de PVC…).
+# ⚠️ This snapshot is an RTO SHORTCUT, not the reference backup: cluster content
+# is rebuilt by Flux. It covers what lives ONLY in etcd (Secrets written by
+# Jobs, PVC bindings…).
 # ==============================================================================
 set -euo pipefail
 
@@ -63,7 +63,7 @@ for bin in task tofu talosctl aws gpg; do
   command -v "$bin" >/dev/null 2>&1 || { log "✗ outil absent du PATH : $bin"; exit 1; }
 done
 
-# 3. Fermeture des tunnels quoi qu'il arrive.
+# 3. Close the tunnels whatever happens.
 cleanup() {
   local rc=$?
   "$ROOT/scripts/bootstrap/talos-tunnels.sh" close "$ROOT/infrastructure/opentofu/cluster" >/dev/null 2>&1 || true
@@ -72,7 +72,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# 4. Verrou : pas deux exécutions en parallèle.
+# 4. Lock: never two runs in parallel.
 LOCK="/tmp/openaether-etcd-snapshot-${PROVIDER}.lock"
 exec 9>"$LOCK"
 if ! flock -n 9; then

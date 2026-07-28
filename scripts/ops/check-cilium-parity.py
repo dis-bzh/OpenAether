@@ -37,9 +37,9 @@ INFRA = pathlib.Path(__file__).resolve().parents[2]
 RENDER_SH = INFRA / "scripts" / "bootstrap" / "render-bootstrap-manifests.sh"
 CLUSTERS = INFRA.parent / "OpenAether-apps" / "apps" / "clusters"
 
-# Réglages dont un écart parent/enfant casse le datapath ou le mesh. Volontairement
-# court : on ne compare PAS ce qui dépend légitimement du cluster (replicas,
-# k8sServiceHost…), seulement ce qui doit être identique partout.
+# Settings where a parent/child mismatch breaks the datapath or the mesh.
+# Deliberately short: we do NOT compare what legitimately depends on the cluster
+# (replicas, k8sServiceHost…), only what must be identical everywhere.
 CHECKED = [
     "ipam.mode",
     "kubeProxyReplacement",
@@ -57,14 +57,14 @@ CHECKED = [
     "k8sServicePort",
 ]
 
-# Écarts assumés : clé -> raison. Tout autre écart est une régression.
+# Accepted mismatches: key -> reason. Any other mismatch is a regression.
 EXCEPTIONS: dict[str, str] = {}
 
 
 def parse_parent() -> dict[str, str]:
     """Extrait les --set du bloc PRODUCTION (pas le bloc local) du script."""
     text = RENDER_SH.read_text()
-    # Le bloc prod est celui qui suit le `else` du test LOCAL_MODE.
+    # The prod block is the one following the `else` of the LOCAL_MODE test.
     marker = "# Production mode"
     if marker not in text:
         sys.exit(f"❌ bloc production introuvable dans {RENDER_SH}")

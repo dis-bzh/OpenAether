@@ -98,15 +98,15 @@ resource "openstack_blockstorage_volume_v3" "worker_data" {
   for_each = { for disk in local.worker_data_disks : disk.key => disk }
 
   name = "${var.cluster_name}-worker-data-${each.value.worker}-${each.key}"
-  # Type EXPLICITE : le défaut projet OVH est multiattach et casse l'attachement
+  # EXPLICIT type: the OVH project default is multiattach and breaks the attachment
   # (cf. variable worker_data_volume_type).
   volume_type = var.worker_data_volume_type
   region      = var.region
   size        = each.value.size_gb
-  # ⚠️ AZ EXPLICITE, la MÊME que le worker qui le montera : sans ce champ le
-  # volume atterrit dans la pseudo-AZ « any » et OVH le laisse en `error status`
-  # (constaté 2026-07-25, quotas et type hors de cause). Un volume et son
-  # instance doivent de toute façon partager l'AZ pour être attachables.
+  # ⚠️ EXPLICIT AZ, the SAME as the worker that will mount it: without this
+  # field the volume lands in the pseudo-AZ "any" and OVH leaves it in
+  # `error status` (observed 2026-07-25; quotas and type ruled out). A volume
+  # and its instance must share the AZ to be attachable anyway.
   availability_zone = element(var.availability_zones, each.value.worker)
 }
 

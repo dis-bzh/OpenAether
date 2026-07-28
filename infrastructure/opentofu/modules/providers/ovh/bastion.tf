@@ -80,16 +80,16 @@ resource "openstack_networking_port_v2" "bastion" {
   admin_state_up     = true
   security_group_ids = [openstack_networking_secgroup_v2.bastion.id]
 
-  # ⚠️ NE PAS retirer ce bloc. `network_id` seul ne crée AUCUNE dépendance vers
-  # le subnet : OpenTofu peut créer le port avant lui, et Neutron le laisse
-  # alors sans adresse IPv4. L'apply échoue plus loin, sur deux erreurs qui ne
-  # désignent pas la cause :
+  # ⚠️ DO NOT remove this block. `network_id` alone creates NO dependency on
+  # the subnet: OpenTofu may create the port before it, and Neutron then leaves
+  # it without an IPv4 address. The apply fails further along, on two errors
+  # that do not name the cause:
   #   « Port <id> requires a FixedIP in order to be used »        (boot du bastion)
   #   « Cannot add floating IP to port <id> that has no fixed
   #     IPv4 addresses »                                          (association FIP)
-  # Le bloc force l'ordre ET garantit l'allocation. C'est une course, donc un
-  # échec INTERMITTENT : plusieurs déploiements OVH sont passés sans (constaté
-  # le 2026-07-27). Les ports des control planes et le VIP le déclarent déjà.
+  # The block forces the ordering AND guarantees allocation. It is a race, so
+  # an INTERMITTENT failure: several OVH deployments went through without it
+  # (observed 2026-07-27). The control-plane ports and the VIP already declare it.
   fixed_ip {
     subnet_id = openstack_networking_subnet_v2.private.id
   }
@@ -105,12 +105,12 @@ resource "openstack_compute_instance_v2" "bastion" {
   }
 
   user_data = templatefile("${path.module}/../_shared/bastion-cloud-init.yaml.tftpl", {
-    # ⚠️ PAS "ubuntu" : c'est l'utilisateur par défaut de l'image OVH, donc
-    # déjà créé par `users: [default]`. cloud-init ignore alors la seconde
-    # définition et l'utilisateur n'est JAMAIS ajouté au groupe
-    # bastion-admins → sshd le refuse via AllowGroups (constaté en réel :
-    # "Permission denied (publickey)" avec la bonne clé). Un nom dédié,
-    # comme sur Scaleway, évite la collision.
+    # ⚠️ NOT "ubuntu": that is the OVH image's default user, hence already
+    # created by `users: [default]`. cloud-init then ignores the second
+    # definition and the user is NEVER added to the bastion-admins group →
+    # sshd rejects it through AllowGroups (observed for real:
+    # "Permission denied (publickey)" with the right key). A dedicated name,
+    # as on Scaleway, avoids the collision.
     bastion_user      = "bastion"
     ssh_keys          = var.bastion_ssh_keys
     private_cidr      = "10.0.0.0/24"
@@ -131,13 +131,13 @@ resource "openstack_networking_floatingip_associate_v2" "bastion" {
   port_id     = openstack_networking_port_v2.bastion.id
 
   # ⚠️ depends_on OBLIGATOIRE sur l'interface du routeur. Neutron REFUSE
-  # d'associer une floating IP tant que le subnet du port n'a pas de route vers
-  # le réseau externe :
+  # associate a floating IP until the port's subnet has a route to the external
+  # network:
   #   ExternalGatewayForFloatingIPNotFound: External network <id> is not
   #   reachable from subnet <id>
-  # Aucune référence ne lie ces deux ressources, donc OpenTofu les crée en
-  # PARALLÈLE → échec INTERMITTENT selon qui gagne la course. Constaté le
-  # 2026-07-28 sur le bastion ; les deux LB passaient jusque-là par chance, un
-  # load balancer étant plus lent à créer.
+  # No reference links these two resources, so OpenTofu creates them in
+  # PARALLEL → an INTERMITTENT failure depending on who wins the race. Observed
+  # on the bastion on 2026-07-28; both LBs had been getting through by luck, a
+  # load balancer being slower to create.
   depends_on = [openstack_networking_router_interface_v2.private]
 }

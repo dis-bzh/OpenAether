@@ -1,5 +1,5 @@
 # ==============================================================================
-# LB App (permanent) — 80/443 en public, NodePorts du Gateway côté workers
+# App LB (permanent) — public 80/443, the Gateway's NodePorts on the workers
 # ==============================================================================
 
 resource "scaleway_lb_ip" "app" {
@@ -23,7 +23,7 @@ resource "scaleway_lb_private_network" "app" {
 resource "scaleway_lb_backend" "http" {
   lb_id = scaleway_lb.app.id
   name  = "http-backend"
-  # Port sur les workers = NodePort figé du Gateway (l'inbound_port public reste 80).
+  # Worker-side port = the Gateway's fixed NodePort (public inbound_port stays 80).
   forward_port           = var.app_lb_node_ports.http
   forward_port_algorithm = "roundrobin"
   forward_protocol       = "tcp"
@@ -129,5 +129,5 @@ resource "scaleway_lb_frontend" "k8s_api" {
 }
 
 # --- ACLs K8s API LB (admin_ip only + private subnets) ---
-# Les ACLs sont inline dans le frontend pour éviter le conflit
-# entre ressources standalone scaleway_lb_acl et le state du frontend.
+# The ACLs are inline in the frontend to avoid the conflict between standalone
+# scaleway_lb_acl resources and the frontend's state.
