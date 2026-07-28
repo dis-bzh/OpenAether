@@ -103,9 +103,8 @@ resource "outscale_snapshot" "talos" {
   # provider's default timeout (40 min) → the apply fails while the import
   # then succeeds, leaving a snapshot OUTSIDE STATE. If this happens again:
   # DO NOT re-run the apply as-is (it creates a second import) — import the
-  # d'1 h) ; attendre `completed` puis
+  # existing snapshot into state first, then continue:
   #   tofu import module.outscale[0].outscale_snapshot.talos <snap-id>
-  # existing snapshot into state first, then continue.
   timeouts {
     create = "120m"
   }
@@ -134,8 +133,8 @@ resource "outscale_image" "talos" {
     bsu {
       snapshot_id = outscale_snapshot.talos.snapshot_id
       # ⚠️ MUST be ≥ the snapshot size, otherwise CreateImage fails
-      # ("Volume size must be greater than <snap> size") : l'image aws fait
-      # 11 GiB, contre 10 pour l'ancienne nocloud. Marge volontaire.
+      # ("Volume size must be greater than <snap> size"): the aws image is
+      # 11 GiB against 10 for the older nocloud one. Deliberate headroom.
       volume_size           = 16
       volume_type           = "standard"
       delete_on_vm_deletion = true

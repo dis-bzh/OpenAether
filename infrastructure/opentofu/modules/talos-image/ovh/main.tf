@@ -63,7 +63,7 @@ resource "openstack_images_image_v2" "talos" {
   # to result in a plain in-place RENAME of the old image
   # (observed 2026-07-25: the v1.13.4 plan showed "update in-place" and the
   # v1.13.3 image would have been relabelled v1.13.4 without re-uploading the disk).
-  # replace_triggered_by sur terraform_data.build (dont triggers_replace porte
+  # replace_triggered_by on terraform_data.build (whose triggers_replace carries
   # version + schematic_id) forces a real recreation of the Glance image.
   lifecycle {
     ignore_changes       = [local_file_path]

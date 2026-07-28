@@ -49,7 +49,7 @@ info() { printf '\n▶ %s\n' "$*"; }
 ok()   { printf '✓ %s\n' "$*"; }
 warn() { printf '⚠ %s\n' "$*" >&2; }
 
-# ---------------------------------------------------------------- 1. les edges
+# ------------------------------------------------------------------ 1. edges
 #
 # ⚠️ FAIL-SAFE (lesson from 2026-07-26): if the management is unreachable, we
 # CANNOT know whether it was driving child clusters. Destroying the management
@@ -121,7 +121,7 @@ fi
   && ok "management destroyed" \
   || { warn "the management destroy FAILED — re-run after fixing (idempotent)"; FAILED=1; }
 
-# ------------------------------------------------- 3. ce qui reste (rapport)
+# ------------------------------------------------ 3. what is left (report)
 info "Step 3/3 — left to purge MANUALLY (deliberately survives the teardown)"
 CN="$(grep -E '^[[:space:]]*cluster_name' "$CLUSTER_DIR/envs/$ROLE-$PROVIDER.tfvars" 2>/dev/null | sed -E 's/.*"([^"]+)".*/\1/')"
 ENVN="$(grep -E '^[[:space:]]*environment' "$CLUSTER_DIR/envs/$ROLE-$PROVIDER.tfvars" 2>/dev/null | sed -E 's/.*"([^"]+)".*/\1/')"

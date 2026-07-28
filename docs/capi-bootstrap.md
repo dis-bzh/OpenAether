@@ -83,12 +83,14 @@ clusterctl keep different inventories; the operator populates none of
 clusterctl's. Fixed by the `clusterctl-inventory` brick. ⚠️ `--dry-run` does not
 run that check — it passes, only the real move fails.
 
-**Machines never bind to their nodes** (`still provisioning the node`). Talos
-nodes have no `spec.providerID` — no CCM, no kubelet `--provider-id` — so CAPI
-cannot pair Machine and Node. **Affects the whole fleet**, and it is why
-`MachineHealthCheck` cannot work (see `backlog.md`). Workaround: copy each
-Machine's `providerID` onto its Node — resolving through the instance UUID, not
-the name (on the control plane the node does not carry the Machine's name).
+**Machines never bind to their nodes** (`still provisioning the node`) —
+**fixed 2026-07-28**. Talos sets no `spec.providerID`, so CAPI could not pair
+Machine and Node and `MachineHealthCheck` was inert. The cluster templates now
+put the kubelet in `cloud-provider=external` and the children run the Talos CCM
+(`apps/clusters/*.yaml`), which fills the field in CAPS's own format — no
+transformation needed. Verified on Scaleway: Machines `Running`, `nodeRef`
+resolved, MHC 3/3. ⚠️ The two halves ship together: that kubelet flag without
+the CCM leaves every node tainted `uninitialized`.
 
 **Host ports on Windows.** Hyper-V reserves moving blocks above 49152, so
 Docker refuses to publish and the cluster dies 90 s later on "Talos API not

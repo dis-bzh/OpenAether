@@ -2,8 +2,8 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # OpenAether — Cluster Runtime Security Tests
 # ══════════════════════════════════════════════════════════════════════════════
-# Validates that the deployed security controls are EFFECTIVE on the cluster
-# vivant. Ne modifie RIEN — lectures uniquement.
+# Validates that the deployed security controls are EFFECTIVE on a live
+# cluster. Changes NOTHING — reads only.
 #
 # Usage:
 #   ./cluster-security-tests.sh
@@ -324,7 +324,7 @@ fi
 WILDCARD_ROLES=$(kubectl get clusterrole -o json 2>/dev/null | python3 -c "
 import json,sys
 roles=json.load(sys.stdin)['items']
-# Exclure les upstream charts et system
+# Exclude the upstream charts and system roles
 EXCLUDE_PREFIXES=('system:' 'clusternet:' 'cnpg-' 'cloudnative-pg' 'external-secrets-' 'longhorn-' 'istio-' 'cert-manager-' 'kyverno-' 'capi-' 'cluster-api-' 'gateway-api-' 'fluent-' 'kube-state-metrics-' 'loki-' 'alloy-' 'prometheus-' 'node-exporter-' 'victoria-metrics-')
 wildcards=[r for r in roles
   if not any(r['metadata']['name'].startswith(p) for p in EXCLUDE_PREFIXES)

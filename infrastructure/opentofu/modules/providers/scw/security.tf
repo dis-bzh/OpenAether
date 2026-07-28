@@ -4,7 +4,7 @@
 #   - 6443/TCP: Kubernetes API via K8s LB (permanent)
 #   - 50000/TCP: Talos API via bastion ONLY. Accessible via SSH tunnels established
 #                through the bastion host. Never exposed via Load Balancers.
-#   - NodePorts 30080/30443: trafic applicatif depuis l'App LB
+#   - NodePorts 30080/30443: application traffic from the App LB
 #   - Inter-node: full mesh on private subnets
 # ==============================================================================
 

@@ -119,6 +119,7 @@ Deux couches de réglages orthogonales :
 | `CAPI-cross-provider` | management OVH | Scaleway | Gitception **cross-provider dans les deux sens**. | ✅ *(2026-07-28)* |
 | `CAPI-mgmt-pivot` | cluster jetable local | Scaleway | Management **né de CAPI**, qui déploie son propre enfant, puis `clusterctl move` vers lui-même. | ✅ *(mgmt-capi, 2026-07-28 — cf. `capi-bootstrap.fr.md`)* |
 | `CAPI-edge-osc` | management | Outscale | Enfant CAPOSC. | ⬜ *(quota RAM du compte)* |
+| `CAPI-providerid` | local jetable | Scaleway | CCM Talos → `providerID`, `nodeRef` résolu, MachineHealthCheck 3/3. | ✅ *(edge-pid, 2026-07-28)* |
 
 ### Scénarios d'exploitation transverses
 
@@ -134,17 +135,15 @@ Deux couches de réglages orthogonales :
 
 ## C) Priorités (plus forte valeur, non testé, apply réel)
 
-1. **`providerID` sur les nœuds CAPI** — rend `MachineHealthCheck` inopérant sur
-   tous les enfants ; conception et piège dans `backlog.md`.
-2. **Apply réel Proxmox** (`PMX-*`) — jamais exécuté sur un hôte réel.
-3. **HA multi-AZ en cloud** (`SCW-mgmt-ha`, `OSC-mgmt-ha`) — etcd 3 CP réparti
+1. **Apply réel Proxmox** (`PMX-*`) — jamais exécuté sur un hôte réel.
+2. **HA multi-AZ en cloud** (`SCW-mgmt-ha`, `OSC-mgmt-ha`) — etcd 3 CP réparti
    sur plusieurs zones jamais appliqué.
-4. **`OVH-vip`** — le mode vip n'a jamais été appliqué sur OVH (mécanisme
+3. **`OVH-vip`** — le mode vip n'a jamais été appliqué sur OVH (mécanisme
    Neutron `allowed_address_pairs`, distinct de Scaleway).
-5. **Apply réel du rôle workload** (`*-work-*`) — seul le management est exercé.
-6. **`worker_storage` en réel** (`*-storage`) — LUKS2 `UserVolumeConfig` et
+4. **Apply réel du rôle workload** (`*-work-*`) — seul le management est exercé.
+5. **`worker_storage` en réel** (`*-storage`) — LUKS2 `UserVolumeConfig` et
    attachement de volumes jamais appliqués.
-7. **`OP-failover`** — chemin DR non prouvé.
+6. **`OP-failover`** — chemin DR non prouvé.
 
 ## D) Constats — apply réel `SCW-vip` (2026-07-15)
 
