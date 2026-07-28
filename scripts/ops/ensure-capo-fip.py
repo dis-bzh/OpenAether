@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
 """Allocates (or reuses) a CAPO control plane's floating IP — idempotent.
 
-Pourquoi ce script existe
--------------------------
-Un enfant OpenStack a besoin de son IP flottante AVANT le boot : l'IMDS
-OpenStack does not expose it (Neutron-side NAT), so it must appear in the
-`certSANs` de la config Talos, donc dans le git. C'est la seule ressource d'un
-child resource created outside both OpenTofu and CAPI — hence the only one to
-recreate by hand after a teardown, copying the IP into `apps/clusters/<child>.yaml`.
+An OpenStack child needs its floating IP BEFORE boot: the IMDS does not expose
+it (Neutron-side NAT), so it must appear in the Talos `certSANs`, hence in git.
+It is the only child resource created outside both OpenTofu and CAPI — and so
+the only one to recreate by hand after a teardown, and the only one a teardown
+leaves behind and billing.
 
-This script makes the step idempotent: it finds the FIP by its description
-(`openaether:<cluster>`), n'en alloue une que s'il n'y en a pas, et imprime
-the address. Re-running it never creates a billed duplicate.
+Finding the FIP by its description (`openaether:<cluster>`) makes the step
+idempotent: re-running never creates a billed duplicate.
 
-Usage :
+Usage:
     source .env.sh
     python3 scripts/ops/ensure-capo-fip.py edge-2 [--network Ext-Net]
 
@@ -117,7 +114,7 @@ def main() -> int:
         state = "associated" if f.get("port_id") else "free"
         print(f"  ✓ {f['floating_ip_address']} ({state})", file=sys.stderr)
     print(
-        f"\n→ reporter dans OS_CP_FLOATING_IPS de apps/clusters/{args.cluster}.yaml :",
+        f"\n→ copy into OS_CP_FLOATING_IPS of apps/clusters/{args.cluster}.yaml:",
         file=sys.stderr,
     )
     print(",".join(addresses))
