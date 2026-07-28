@@ -23,8 +23,23 @@ manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
       Affects every child. Machines stay `Provisioned`, `nodeRef` never
       resolves, while the nodes are `Ready` — hence unnoticed until now. No CCM,
       no kubelet `--provider-id`. Also blocks `clusterctl move` (workaround in
-      `capi-bootstrap.md`). **Fix: a per-provider CCM, or `provider-id` injected
-      by the Talos bootstrap.** Priority: this was the main argument for CAPI.
+      `capi-bootstrap.md`). Priority: this was the main argument for CAPI.
+
+      Design settled 2026-07-28, **execution needs a live cluster**. Use
+      `talos-cloud-controller-manager`: one brick for every provider, no cloud
+      credentials (it reads Talos `PlatformMetadata`, which is already right
+      because we build one image per platform — `scaleway`/`openstack`/`aws`/
+      `nocloud`). Its `transformations.platformMetadata.ProviderID` is a Go
+      template (`.Zone`, `.InstanceID`, `.UUID`), so we can emit exactly the
+      string the infra provider expects: CAPS wants
+      `scaleway://instance/<zone>/<uuid>`, CAPO wants `openstack:///<uuid>`
+      (already aligned by NOT setting `region`, see the openstack template).
+      ⚠️ **Ship both halves together or not at all**: a CCM only initialises
+      nodes that carry the `uninitialized` taint, which requires kubelet
+      `cloud-provider=external`. That flag without a working CCM leaves every
+      node tainted and the cluster schedules nothing. Validate on one child
+      before touching the management. First step on a live node:
+      `talosctl get PlatformMetadatas -oyaml` to confirm the real values.
 
 - [ ] **Browser SSO login (Grafana ↔ Zitadel).** Everything else is done; only
       the claim form remains to confirm. Needs a live cluster.
@@ -32,10 +47,6 @@ manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
 
 - [ ] **Gateway → UI path.** Untestable until the PKI intermediate is signed
       offline (`admin-access.md` § 2). The code is already hardened.
-
-- [ ] **`fleet-down.sh` must exit non-zero when a step fails.** It printed
-      `✓ fleet-down terminé` while 7 OVH VMs were still running (the management
-      destroy never started, missing `.env.sh`).
 
 - [ ] **OVH: a node can stay `ACTIVE` on the hypervisor while dead.** Talos
       called `reboot()` and the kernel hung in `device_shutdown` / `vp_reset`.
@@ -61,10 +72,6 @@ manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
       so an expiry keeps the signal without losing kubeconfig/talosconfig.
       Workaround: `skip_health_check`. Upstream: the provider's 0.12.x line has
       no stable release; either wait or open the issue with both traces.
-
-- [ ] **Pin `FLUX_VERSION`** in `render-bootstrap-manifests.sh` — empty means
-      `latest`, so `flux-install.yaml` is not reproducible and is excluded from
-      `--check`.
 
 - [ ] **Keep trimming.** Done 2026-07-28: docs 2315 → 1095 lines, and the
       longest comment blocks cut (~230 lines). Still fat: `deployment-test-matrix`
