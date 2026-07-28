@@ -3,21 +3,21 @@
 # OpenAether — teardown COMPLET et idempotent d'une flotte (edges + management)
 #
 # POURQUOI
-#   L'ordre de destruction n'est pas libre : chaque cluster enfant CAPI doit
-#   disparaître AVANT le management, sinon plus personne ne pilote ses VMs et
-#   elles restent facturées. `task destroy` seul ne gère que le management.
-#   Ce script enchaîne, dans le bon ordre et sans intervention :
-#     1. `edge-down` sur chaque cluster enfant encore présent (cascade CAPI) ;
+#   The destruction order is not free: every CAPI child cluster must disappear
+#   BEFORE the management, otherwise nothing drives its VMs any more and they
+#   stay billed. `task destroy` alone only handles the management.
+#   This script chains, in the right order and unattended:
+#     1. `edge-down` on every child cluster still present (CAPI cascade);
 #     2. `tofu destroy` du management ;
-#     3. rapport de ce qui reste à purger à la main (buckets, images, keypairs…),
-#        volontairement NON détruit ici : ces objets survivent aux clusters et
-#        leur suppression est un choix, pas une conséquence.
+#     3. a report of what is left to purge by hand (buckets, images, keypairs…),
+#        deliberately NOT destroyed here: these objects outlive the clusters and
+#        deleting them is a choice, not a consequence.
 #
-# Idempotent : relançable à tout moment ; saute ce qui est déjà absent.
+# Idempotent: re-runnable at any time; skips whatever is already gone.
 #
 # Usage:
 #   fleet-down.sh <provider> [--role management] [--yes] [--keep-images]
-#   Le KUBECONFIG du management est déduit de infrastructure/opentofu/cluster/.
+#   The management KUBECONFIG is derived from infrastructure/opentofu/cluster/.
 # ==============================================================================
 set -uo pipefail
 
@@ -46,12 +46,12 @@ warn() { printf '⚠ %s\n' "$*" >&2; }
 
 # ---------------------------------------------------------------- 1. les edges
 #
-# ⚠️ FAIL-SAFE (leçon du 2026-07-26) : si le management est injoignable, on NE
-# PEUT PAS savoir s'il pilotait des clusters enfants. Détruire le management
-# dans ce cas laisse leurs VMs orphelines et FACTURÉES — c'est exactement ce qui
-# s'est produit quand une version antérieure de ce script se contentait d'un
-# avertissement. On s'ARRÊTE, sauf --force-no-edges (l'opérateur affirme alors
-# qu'il n'y a pas d'enfant, ou les a déjà purgés côté provider).
+# ⚠️ FAIL-SAFE (lesson from 2026-07-26): if the management is unreachable, we
+# CANNOT know whether it was driving child clusters. Destroying the management
+# in that case leaves their VMs orphaned and BILLED — exactly what happened
+# when an earlier version of this script settled for a warning. We STOP, unless
+# --force-no-edges is passed (the operator then asserts there is no child, or
+# has already purged them on the provider side).
 info "Étape 1/3 — clusters enfants CAPI"
 if [ ! -r "$KUBECONFIG" ] || ! kubectl cluster-info >/dev/null 2>&1; then
   if [ "$FORCE_NO_EDGES" -eq 1 ]; then
@@ -74,11 +74,11 @@ EOT
     exit 1
   fi
 else
-  # ⚠️ `cluster` tout court est AMBIGU : CNPG expose aussi un kind `Cluster`
-  # (postgresql.cnpg.io). Quand les CRDs CAPI ne sont pas installées — management
-  # partiellement détruit, providers pas encore réconciliés — `kubectl get cluster`
-  # retourne les BASES DE DONNÉES (constaté le 2026-07-27 : grafana-db, zitadel-db)
-  # et ce script lancerait `edge-down` dessus. Toujours qualifier le groupe.
+  # ⚠️ Bare `cluster` is AMBIGUOUS: CNPG also exposes a `Cluster` kind
+  # (postgresql.cnpg.io). When the CAPI CRDs are not installed — management
+  # partially destroyed, providers not yet reconciled — `kubectl get cluster`
+  # returns the DATABASES (observed 2026-07-27: grafana-db, zitadel-db) and this
+  # script would run `edge-down` against them. Always qualify the API group.
   mapfile -t EDGES < <(kubectl get clusters.cluster.x-k8s.io -A -o jsonpath='{range .items[*]}{.metadata.name} {.metadata.namespace}{"\n"}{end}' 2>/dev/null)
   if [ "${#EDGES[@]}" -eq 0 ]; then
     ok "aucun cluster enfant"

@@ -45,7 +45,7 @@ try:
 except StopIteration:
     lb_ep = None
 
-# 1. serveurs (les VMs bloquent la suppression des ports/réseaux)
+# 1. servers (VMs block the deletion of ports/networks)
 for s in get(comp + '/servers')['servers']:
     delete(comp + f"/servers/{s['id']}", f"server {s['name']}")
 
@@ -58,7 +58,7 @@ if lb_ep:
 for f in get(net + '/v2.0/floatingips')['floatingips']:
     delete(net + f"/v2.0/floatingips/{f['id']}", f"FIP {f['floating_ip_address']}")
 
-# 4. routers (détacher les interfaces d'abord)
+# 4. routers (detach the interfaces first)
 for r in get(net + '/v2.0/routers')['routers']:
     for p in get(net + f"/v2.0/ports?device_id={r['id']}")['ports']:
         if p.get('device_owner', '').startswith('network:router_interface'):
@@ -75,7 +75,7 @@ for r in get(net + '/v2.0/routers')['routers']:
                 print("  [dry-run] détacher interface", p['id'][:8])
     delete(net + f"/v2.0/routers/{r['id']}", f"router {r['name']}")
 
-# 5. réseaux + security groups
+# 5. networks + security groups
 for n in get(net + '/v2.0/networks')['networks']:
     if n.get('project_id') == os.environ['OS_PROJECT_ID']:
         delete(net + f"/v2.0/networks/{n['id']}", f"réseau {n['name']}")

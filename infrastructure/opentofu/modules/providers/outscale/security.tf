@@ -44,8 +44,8 @@ resource "outscale_security_group_rule" "talos_api" {
   }
 }
 
-# HTTP/HTTPS — depuis le subnet du LB, sur les NodePorts FIGÉS du Gateway.
-# Ouvrir 80/443 sur les nœuds serait inutile : rien n'y écoute.
+# HTTP/HTTPS — from the LB subnet, on the Gateway's FIXED NodePorts.
+# Opening 80/443 on the nodes would be pointless: nothing listens there.
 resource "outscale_security_group_rule" "http" {
   flow              = "Inbound"
   security_group_id = outscale_security_group.this.security_group_id

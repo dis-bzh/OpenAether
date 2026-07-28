@@ -369,11 +369,11 @@ locals {
 locals {
   cilium_manifest = var.cilium_manifest != null ? var.cilium_manifest : file("${path.module}/bootstrap-manifests/cilium.yaml")
   flux_manifest   = var.flux_manifest != null ? var.flux_manifest : file("${path.module}/bootstrap-manifests/flux-install.yaml")
-  # Identité du cluster, publiée en ConfigMap `cluster-identity` (flux-system) et
-  # consommée par les briques qui doivent se distinguer d'un AUTRE cluster —
-  # aujourd'hui les dépôts restic, qui partagent des buckets cross-provider.
-  # Le provider fait partie de l'identité : `cluster_name`/`environment` seuls
-  # valent "openaether-dev" sur les trois clouds, donc ne distinguent rien.
+  # Cluster identity, published as the `cluster-identity` ConfigMap (flux-system)
+  # and consumed by the bricks that must distinguish themselves from ANOTHER
+  # cluster — today the restic repositories, which share cross-provider buckets.
+  # The provider is part of the identity: `cluster_name`/`environment` alone
+  # read "openaether-dev" on all three clouds, so they distinguish nothing.
   cluster_id = "${var.cluster_name}-${var.environment}-${local.active_provider}"
 
   flux_bootstrap_manifest = var.flux_bootstrap_manifest != null ? var.flux_bootstrap_manifest : templatefile("${path.module}/bootstrap-manifests/flux-bootstrap.yaml.tftpl", {
@@ -382,12 +382,12 @@ locals {
     git_branch   = "main"
     cluster_role = var.cluster_role
     cluster_id   = local.cluster_id
-    # Destination des backups de volumes Longhorn. URL complète assemblée ICI :
-    # côté manifest, `value:` est une simple chaîne et la substitution Flux ne
-    # sait pas concaténer conditionnellement (pas de `${x:+y}`).
+    # Destination for Longhorn volume backups. The full URL is assembled HERE:
+    # on the manifest side `value:` is a plain string and Flux substitution
+    # cannot concatenate conditionally (no `${x:+y}`).
     backup_target_url = "s3://${local.backup_data_bucket}@${var.s3_primary_region}/"
-    # CNPG (PITR) attend le bucket et l'endpoint SÉPARÉMENT, dans un autre
-    # format que Longhorn — d'où les trois clés plutôt qu'une.
+    # CNPG (PITR) expects the bucket and the endpoint SEPARATELY, in a different
+    # format from Longhorn — hence three keys rather than one.
     backup_s3_bucket   = local.backup_data_bucket
     backup_s3_endpoint = var.s3_primary_endpoint
   })

@@ -5,17 +5,17 @@
 #     -> outscale_snapshot (import via file_location) -> outscale_image (OMI)
 #
 # PLATEFORME `aws` (et non `nocloud`) : Outscale est EC2-compatible et expose
-# une IMDS EC2. La variante aws de Talos la lit, ce qui apporte DEUX choses
-# indispensables à CAPI (CAPOSC livre la machine config en user-data, comme EC2) :
-#   1. ingestion du user-data  -> sans elle les VMs CAPI resteraient en
-#      maintenance mode, jamais configurées ;
-#   2. lecture de public-ipv4  -> l'IP publique (NAT 1:1 côté Outscale, donc
-#      invisible de la NIC) devient une NodeAddress et entre dans les SAN du
-#      certificat apid ; sans elle, CACPPT échouerait en TLS sur <IP>:50000
+# an EC2 IMDS. Talos's aws variant reads it, which brings TWO things that are
+# essential to CAPI (CAPOSC delivers the machine config as user-data, like EC2):
+#   1. user-data ingestion  -> without it CAPI VMs would stay in maintenance
+#      mode, never configured;
+#   2. reading public-ipv4  -> the public IP (1:1 NAT on the Outscale side, so
+#      invisible from the NIC) becomes a NodeAddress and enters the apid
+#      certificate SANs; without it CACPPT would fail TLS on <IP>:50000 and
 #      ("certificate is valid for 10.x, not <IP publique>") et ne pourrait ni
-#      bootstrapper etcd ni récupérer le kubeconfig de l'enfant.
-# Le flux OpenTofu (two-phase apply) reste inchangé : sans user-data, l'image
-# aws démarre elle aussi en maintenance mode et reçoit sa config par l'API Talos.
+#      could neither bootstrap etcd nor fetch the child's kubeconfig.
+# The OpenTofu flow (two-phase apply) is unchanged: without user-data the aws
+# image also boots into maintenance mode and gets its config over the Talos API.
 # ==============================================================================
 
 locals {
@@ -66,11 +66,11 @@ data "external" "oos_object" {
   program = ["bash", "-c", <<-EOT
     set -euo pipefail
     export AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
-    # ⚠️ TOLÈRE L'ABSENCE DE L'OBJET. Cette data source est évaluée à CHAQUE
-    # plan/refresh, alors que ses valeurs ne servent qu'à la CRÉATION du
-    # snapshot. Si elle exigeait l'objet, le `.raw` de staging (~11 Gio, facturé
-    # en permanence) ne pourrait jamais être purgé sans casser tout `tofu plan`.
-    # D'où la purge automatique après enregistrement de l'OMI, plus bas.
+    # ⚠️ TOLERATES A MISSING OBJECT. This data source is evaluated on EVERY
+    # plan/refresh, while its values are only used to CREATE the snapshot. If
+    # it required the object, the staging `.raw` (~11 GiB, billed continuously)
+    # could never be purged without breaking every `tofu plan`.
+    # Hence the automatic purge after the OMI is registered, further down.
     if aws s3api head-object --bucket "${var.bucket_name}" --key "${local.object_key}" \
          --endpoint-url "${var.s3_endpoint}" --region "${var.region}" >/dev/null 2>&1; then
       url="$(aws s3 presign "s3://${var.bucket_name}/${local.object_key}" \
@@ -80,8 +80,8 @@ data "external" "oos_object" {
       gib=1073741824
       size=$(( (bytes + gib - 1) / gib * gib ))
     else
-      # Objet purgé après import : le snapshot existe déjà, ces valeurs sont
-      # ignorées (cf. lifecycle.ignore_changes du snapshot).
+      # Object purged after import: the snapshot already exists, these values
+      # are ignored (see the snapshot's lifecycle.ignore_changes).
       url=""
       size=0
     fi
@@ -98,22 +98,22 @@ resource "outscale_snapshot" "talos" {
   snapshot_size = tonumber(data.external.oos_object.result.size)
   description   = "Talos ${var.talos_version} (${var.arch}) — imported for OMI registration"
 
-  # ⚠️ L'import de snapshot Outscale est LENT et passe par une file d'attente
-  # côté fournisseur : mesuré > 60 min en `in-queue 0%` (2026-07-25), au-delà
-  # du timeout par défaut du provider (40 min) → l'apply échoue alors que
-  # l'import aboutit ensuite, laissant un snapshot HORS STATE. Si ça se
-  # reproduit : NE PAS relancer l'apply tel quel (il recrée un second import
+  # ⚠️ The Outscale snapshot import is SLOW and goes through a provider-side
+  # queue: measured > 60 min at `in-queue 0%` (2026-07-25), beyond the
+  # provider's default timeout (40 min) → the apply fails while the import
+  # then succeeds, leaving a snapshot OUTSIDE STATE. If this happens again:
+  # DO NOT re-run the apply as-is (it creates a second import) — import the
   # d'1 h) ; attendre `completed` puis
   #   tofu import module.outscale[0].outscale_snapshot.talos <snap-id>
-  # avant de continuer.
+  # existing snapshot into state first, then continue.
   timeouts {
     create = "120m"
   }
 
   lifecycle {
-    # `file_location` (URL pré-signée, change à chaque run) ET `snapshot_size`
-    # proviennent tous deux de l'objet de staging, qui est purgé après import :
-    # sans les ignorer, chaque plan verrait une dérive et voudrait recréer un
+    # `file_location` (pre-signed URL, changes every run) AND `snapshot_size`
+    # both come from the staging object, which is purged after the import:
+    # without ignoring them, every plan would see drift and want to recreate a
     # import d'une heure.
     ignore_changes       = [file_location, snapshot_size]
     replace_triggered_by = [terraform_data.build_and_upload]
@@ -133,7 +133,7 @@ resource "outscale_image" "talos" {
     device_name = "/dev/sda1"
     bsu {
       snapshot_id = outscale_snapshot.talos.snapshot_id
-      # ⚠️ DOIT être ≥ à la taille du snapshot, sinon CreateImage échoue
+      # ⚠️ MUST be ≥ the snapshot size, otherwise CreateImage fails
       # ("Volume size must be greater than <snap> size") : l'image aws fait
       # 11 GiB, contre 10 pour l'ancienne nocloud. Marge volontaire.
       volume_size           = 16
@@ -143,18 +143,18 @@ resource "outscale_image" "talos" {
   }
 }
 
-# Purge du `.raw` de staging, une fois l'OMI enregistrée.
+# Purge of the staging `.raw`, once the OMI is registered.
 #
-# POURQUOI : l'objet fait ~11 Gio et était conservé indéfiniment, un par version
-# de Talos — facturé en pure perte. Les artefacts DURABLES sont le snapshot et
-# l'OMI ; le `.raw` n'est qu'un intermédiaire d'import, et il est reconstructible
-# à l'identique depuis l'Image Factory (le schematic ID est déterministe).
+# WHY: the object is ~11 GiB and used to be kept forever, one per Talos version
+# — billed for nothing. The DURABLE artifacts are the snapshot and the OMI;
+# the `.raw` is only an import intermediate, and it can be rebuilt identically
+# from the Image Factory (the schematic ID is deterministic).
 #
-# ⚠️ Cette purge n'est possible QUE parce que `data.external.oos_object` tolère
-# désormais l'absence de l'objet (cf. plus haut). Supprimer le `.raw` sans ce
-# correctif casse tout `tofu plan` du root talos-image.
+# ⚠️ This purge is ONLY possible because `data.external.oos_object` now
+# tolerates a missing object (see above). Deleting the `.raw` without that fix
+# breaks every `tofu plan` of the talos-image root.
 #
-# Déclenché par le même trigger que l'upload : une nouvelle version repasse par
+# Fired by the same trigger as the upload: a new version goes through the
 # download → upload → import → OMI → purge.
 resource "terraform_data" "purge_staging" {
   triggers_replace = {

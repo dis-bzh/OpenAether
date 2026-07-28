@@ -2,7 +2,7 @@
 # Outscale — Load Balancers
 # Two separate LBs matching the provider contract:
 #   k8s: port 6443 → control planes
-#   app: 80/443 en public → NodePorts du Gateway sur les workers
+#   app: public 80/443 → the Gateway's NodePorts on the workers
 # Outscale LBs return a DNS name (not IP).
 # ==============================================================================
 
@@ -28,12 +28,12 @@ resource "outscale_load_balancer" "k8s" {
   }
 }
 
-# ⚠️ Les défauts Outscale du health check sont healthy_threshold = 10 et
-# check_interval = 30 s : après le moindre hoquet, il faut **5 minutes** pour
-# qu'un backend redevienne UP — pendant lesquelles l'API Kubernetes répond
-# `EOF` (le LB accepte la connexion mais n'a aucun backend sain). Observé
-# plusieurs fois sur le management Outscale. `health_check` étant un attribut
-# calculé sur outscale_load_balancer, il se règle via cette ressource dédiée.
+# ⚠️ Outscale's health check defaults are healthy_threshold = 10 and
+# check_interval = 30 s: after the slightest hiccup it takes **5 minutes** for
+# a backend to come back UP — during which the Kubernetes API answers `EOF`
+# (the LB accepts the connection but has no healthy backend). Observed several
+# times on the Outscale management. Since `health_check` is a computed attribute
+# on outscale_load_balancer, it is set through this dedicated resource.
 resource "outscale_load_balancer_attributes" "k8s" {
   load_balancer_name = outscale_load_balancer.k8s.load_balancer_name
 
@@ -59,7 +59,7 @@ resource "outscale_load_balancer" "app" {
   load_balancer_type = "internet-facing"
 
   listeners {
-    # backend_port = NodePort figé du Gateway ; load_balancer_port reste public.
+    # backend_port = the Gateway's fixed NodePort; load_balancer_port stays public.
     backend_port           = var.app_lb_node_ports.http
     backend_protocol       = "TCP"
     load_balancer_port     = 80

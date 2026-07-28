@@ -10,19 +10,19 @@ set -euo pipefail
 # Usage:
 #   ./scripts/bootstrap/render-bootstrap-manifests.sh           # production
 #   ./scripts/bootstrap/render-bootstrap-manifests.sh --local   # local Docker testing
-#   ./scripts/bootstrap/render-bootstrap-manifests.sh --check   # n'écrit RIEN : vérifie que
-#                                                     # les artefacts committés
-#                                                     # correspondent au générateur
+#   ./scripts/bootstrap/render-bootstrap-manifests.sh --check   # writes NOTHING: checks
+#                                                     # that the committed artifacts
+#                                                     # match the generator
 # ─────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Surchargeable pour --check (rendu dans un dossier jetable, puis diff).
-# ⚠️ DEUX niveaux : ce script vit dans scripts/bootstrap/. Avec un seul `..`
-# il écrivait dans scripts/infrastructure/… — un répertoire FANTÔME créé par
-# le `mkdir -p` ci-dessous, jamais lu par OpenTofu. `task render-manifests`
-# semblait donc fonctionner tout en ne régénérant JAMAIS les artefacts
-# committés : c'est l'origine de leur dérive vis-à-vis du générateur
-# (constaté le 2026-07-27).
+# Overridable for --check (render into a throwaway directory, then diff).
+# ⚠️ TWO levels: this script lives in scripts/bootstrap/. With a single `..`
+# it wrote into scripts/infrastructure/… — a PHANTOM directory created by the
+# `mkdir -p` below and never read by OpenTofu. `task render-manifests`
+# therefore appeared to work while NEVER regenerating the committed
+# artifacts: that is the origin of their drift away from the generator
+# (observed 2026-07-27).
 MANIFESTS_DIR="${OPENAETHER_MANIFESTS_DIR:-${SCRIPT_DIR}/../../infrastructure/opentofu/cluster/bootstrap-manifests}"
 
 # Mode: production (default) or local Docker testing
@@ -33,16 +33,16 @@ if [[ "${1:-}" == "--local" ]]; then
 fi
 
 # ─────────────────────────────────────────────────────────────
-# --check : garde-fou anti-dérive
+# --check: anti-drift guardrail
 #
-# Un artefact généré peut diverger de son générateur en SILENCE — c'est arrivé :
-# les cilium*.yaml committés portaient trois `--set` absents de ce script, si
-# bien qu'un simple `task render-manifests` cassait Istio ambient sans que rien
-# ne le signale. Ce mode rejoue le rendu dans un dossier jetable et compare.
+# A generated artifact can diverge from its generator SILENTLY — it happened:
+# the committed cilium*.yaml carried three `--set` flags missing from this
+# script, so a plain `task render-manifests` broke Istio ambient with nothing
+# reporting it. This mode replays the render into a throwaway dir and compares.
 #
-# Ne contrôle QUE les manifests que NOUS générons (cilium.yaml, cilium-local.yaml).
-# flux-install.yaml est un téléchargement amont : son évolution est un autre
-# signal (nouvelle release Flux), pas une dérive de notre configuration.
+# Checks ONLY the manifests WE generate (cilium.yaml, cilium-local.yaml).
+# flux-install.yaml is an upstream download: its evolution is a different
+# signal (a new Flux release), not a drift in our configuration.
 # ─────────────────────────────────────────────────────────────
 if [[ "${1:-}" == "--check" ]]; then
   command -v diff >/dev/null 2>&1 || { echo "✗ diff requis" >&2; exit 1; }
@@ -51,10 +51,10 @@ if [[ "${1:-}" == "--check" ]]; then
   echo "🔍 Vérification des artefacts committés contre le générateur…"
   OPENAETHER_MANIFESTS_DIR="$tmp" OPENAETHER_SKIP_FLUX=1 "$0" >/dev/null
   OPENAETHER_MANIFESTS_DIR="$tmp" OPENAETHER_SKIP_FLUX=1 "$0" --local >/dev/null
-  # Le rendu brut de helm porte des espaces en fin de ligne ; l'artefact committé,
-  # lui, est passé par les hooks pre-commit (`trim trailing whitespace`,
-  # `fix end of files`). Comparer les deux tels quels rendrait le contrôle rouge
-  # en permanence — on normalise donc des DEUX côtés, exactement comme le hook.
+  # helm's raw render carries trailing whitespace; the committed artifact has
+  # been through the pre-commit hooks (`trim trailing whitespace`,
+  # `fix end of files`). Comparing them as-is would keep the check permanently
+  # red — so we normalise BOTH sides, exactly like the hook does.
   norm() { sed -e 's/[[:space:]]*$//' "$1"; }
   drift=0
   for f in cilium.yaml cilium-local.yaml; do
@@ -107,12 +107,12 @@ if [[ "$LOCAL_MODE" == "true" ]]; then
   # - kubeProxyReplacement=false: use iptables (no eBPF kube-proxy replacement)
   # - encryption=false: no WireGuard (simpler for single-node Docker)
   #
-  # ⚠️ socketLB.enabled=true est OBLIGATOIRE ici, bien que kubeProxyReplacement
-  # soit à false. Sans lui le chart émet `bpf-lb-sock: "false"`, ce qui rend
-  # `bpf-lb-sock-hostns-only` INOPÉRANT : les pods hostNetwork (kube-apiserver)
-  # n'atteignent alors plus les ClusterIP et les dry-run Flux expirent sur les
-  # webhooks. Le correctif vivait dans l'artefact committé, pas dans ce script —
-  # régénérer réintroduisait donc le bug (piégé par --check le 2026-07-27).
+  # ⚠️ socketLB.enabled=true is MANDATORY here, even though kubeProxyReplacement
+  # is false. Without it the chart emits `bpf-lb-sock: "false"`, which makes
+  # `bpf-lb-sock-hostns-only` INOPERATIVE: hostNetwork pods (kube-apiserver)
+  # can then no longer reach ClusterIPs and Flux dry-runs time out on the
+  # webhooks. The fix lived in the committed artifact, not in this script —
+  # so regenerating reintroduced the bug (caught by --check on 2026-07-27).
   helm template cilium cilium/cilium \
     --version "${CILIUM_VERSION}" \
     --namespace kube-system \
@@ -135,14 +135,14 @@ if [[ "$LOCAL_MODE" == "true" ]]; then
 else
   # Production mode: full Cilium with WireGuard encryption + kube-proxy replacement
   #
-  # ⚠️ Ces deux réglages sont EXIGÉS par Istio ambient (apps/base/istio) — ne pas
-  # les retirer sans retirer le mesh, sinon istio-cni ne devient jamais Ready :
-  #  - cni.exclusive=false : Cilium réécrit sinon 05-cilium.conflist en boucle et
-  #    en retire le plugin chaîné istio-cni (« conflicting component constantly
-  #    reverting our work ») → /readyz 503 → Helm install timeout → ztunnel,
-  #    services-gateway et istio-authorizationpolicies bloqués en cascade ;
-  #  - socketLB.hostNamespaceOnly=true : sans ça le socket-LB court-circuite la
-  #    redirection ambient pour les process host-network.
+  # ⚠️ Both settings are REQUIRED by Istio ambient (apps/base/istio) — do not
+  # remove them without removing the mesh, or istio-cni never becomes Ready:
+  #  - cni.exclusive=false: otherwise Cilium rewrites 05-cilium.conflist in a
+  #    loop and strips the chained istio-cni plugin ("conflicting component
+  #    constantly reverting our work") → /readyz 503 → Helm install timeout →
+  #    ztunnel, services-gateway and istio-authorizationpolicies stuck in turn;
+  #  - socketLB.hostNamespaceOnly=true: without it the socket-LB short-circuits
+  #    the ambient redirection for host-network processes.
   helm template cilium cilium/cilium \
     --version "${CILIUM_VERSION}" \
     --namespace kube-system \
@@ -168,26 +168,26 @@ else
   echo "  ✅ Written to bootstrap-manifests/cilium.yaml"
 fi
 
-# helm laisse des espaces en fin de ligne ; le hook pre-commit `trim trailing
-# whitespace` les retire au commit. Sans cette normalisation ICI, chaque rendu
-# salit l'arbre de travail et l'artefact committé ne peut jamais être identique
-# au rendu — ce qui obligeait le contrôle --check à comparer « modulo espaces ».
+# helm leaves trailing whitespace; the `trim trailing whitespace` pre-commit
+# hook strips it at commit time. Without normalising HERE, every render dirties
+# the working tree and the committed artifact can never be identical to the
+# render — which forced --check to compare "modulo whitespace".
 sed -i 's/[[:space:]]*$//' "${CILIUM_OUTPUT}"
 
 # ─────────────────────────────────────────────────────
 # 2. Download Flux install manifest
 # ─────────────────────────────────────────────────────
-# ⚠️ TÉLÉCHARGEMENT VOLONTAIREMENT OPT-IN (OPENAETHER_REFRESH_FLUX=1).
+# ⚠️ DOWNLOAD IS DELIBERATELY OPT-IN (OPENAETHER_REFRESH_FLUX=1).
 #
-# Deux raisons, toutes deux constatées le 2026-07-27 :
-#  1. sans FLUX_VERSION, l'URL est `releases/latest` — un simple
-#     `task render-manifests` BUMPAIT Flux vers la dernière version publiée,
-#     sans que rien ne le demande ni ne le signale ;
-#  2. l'artefact committé n'est PAS un install.yaml amont : il embarque un
-#     contrôleur de plus, `source-watcher` (7 Deployments / 15 CRD au lieu de
-#     6 / 14). Le réécrire avec l'install.yaml standard SUPPRIMERAIT ce
-#     contrôleur du bootstrap.
-# Pour le régénérer sciemment : figer FLUX_VERSION *et* reconstituer le jeu de
+# Two reasons, both observed on 2026-07-27:
+#  1. without FLUX_VERSION the URL is `releases/latest` — a plain
+#     `task render-manifests` BUMPED Flux to the latest published version,
+#     with nothing asking for it and nothing reporting it;
+#  2. the committed artifact is NOT a stock upstream install.yaml: it carries
+#     one extra controller, `source-watcher` (7 Deployments / 15 CRDs instead
+#     of 6 / 14). Overwriting it with the standard install.yaml would REMOVE
+#     that controller from the bootstrap.
+# To regenerate it knowingly: pin FLUX_VERSION *and* rebuild the component set
 # composants (`flux install --export --components-extra=source-watcher`).
 if [[ "$LOCAL_MODE" == "false" && "${OPENAETHER_SKIP_FLUX:-0}" != "1" \
       && "${OPENAETHER_REFRESH_FLUX:-0}" == "1" ]]; then

@@ -44,12 +44,12 @@ locals {
   # scripts/backup-state.sh replicates it to the "-backup" store. Management and
   # workload clusters on the same provider/env share this bucket, distinguished by
   # the per-cluster key. Surfaced via the backup_targets output.
-  # Bucket des SAUVEGARDES applicatives (restic, backups de volumes Longhorn).
-  # Même convention que les autres, mais il PRÉEXISTE — l'opérateur le crée et
-  # seede ses credentials dans OpenBao (`secret/backup/s3-primary`). On dérive
-  # ici son nom pour le publier dans le ConfigMap `cluster-identity`, que la
-  # brique Longhorn consomme : la cible de backup est une chaîne, elle ne peut
-  # pas venir d'un Secret. ⚠️ Doit correspondre à ce qui est seedé dans OpenBao.
+  # Bucket for APPLICATION backups (restic, Longhorn volume backups).
+  # Same convention as the others, but it PRE-EXISTS — the operator creates it
+  # and seeds its credentials into OpenBao (`secret/backup/s3-primary`). We
+  # derive its name here to publish it in the `cluster-identity` ConfigMap that
+  # the Longhorn brick consumes: the backup target is a string, it cannot come
+  # from a Secret. ⚠️ Must match what is seeded in OpenBao.
   backup_data_bucket = "${local.backup_bucket_prefix}-backups-${var.environment}"
 
   state_bucket_primary = "${local.backup_bucket_prefix}-tfstate-${var.environment}"
