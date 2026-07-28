@@ -5,14 +5,21 @@ Alimenté au fil des sessions (humain + assistant). Retirer les entrées faites.
 
 ## Où on en est (mis à jour le 2026-07-28)
 
-⚠️ **UNE FLOTTE OVH TOURNE** — laissée volontairement en fin de run pour
-inspection. Management HA **36/36 Kustomizations, 6 nœuds Ready** + enfant CAPI
-**edge-2 (OpenStack) 19/19, 2 nœuds, 0 pod en échec**. Teardown :
-`task fleet-down PROVIDER=ovh -- --yes`, puis purger la FIP pré-allouée
-d'edge-2 (facturée, elle ne part pas seule).
+⚠️ **UNE FLOTTE À 3 CLUSTERS TOURNE, SUR 2 PROVIDERS** — laissée volontairement
+en fin de run pour permettre les tests navigateur (§ « Ce qui reste »).
 
-edge-1 (Scaleway) est **désactivé** dans `apps/clusters/kustomization.yaml` : le
-périmètre du run était OVH seul. Le réactiver demande les secrets Scaleway.
+| Cluster | Provider | Flux | Nœuds | Pods KO | Identité restic |
+|---|---|---|---|---|---|
+| management | OVH | 37/37 | 6/6 | 0 | `openaether-dev-ovh` |
+| edge-1 | **Scaleway** | 19/19 | 2/2 | 0 | `edge-1` |
+| edge-2 | OVH | 19/19 | 2/2 | 0 | `edge-2` |
+
+Un management OVH pilote donc un enfant **Scaleway** : la gitception est validée
+**cross-provider dans les deux sens**, et les 3 préfixes restic sont distincts.
+
+Teardown : `task fleet-down PROVIDER=ovh -- --yes` **et**
+`task fleet-down PROVIDER=scw -- --yes`, puis purger la FIP pré-allouée d'edge-2
+(facturée, elle ne part pas seule). Vérifier ensuite les **3 comptes** à zéro.
 
 ### Ce que ce run a VALIDÉ en cloud réel
 
@@ -48,7 +55,11 @@ secret — étape opérateur, cf. `docs/admin-access.md` § 4bis.
 2. **Chemin gateway → UI** : non testable tant que l'intermediate PKI n'est pas
    signé HORS LIGNE (`admin-access.md` § 2) — le listener HTTPS reste `Invalid`.
    Le code, lui, est durci (`credentialName`, plus d'`insecureSkipVerify`).
-3. **Réactiver edge-1** pour re-valider Scaleway.
+
+Le protocole complet des tests navigateur (prérequis bloquant, tunnel, les 3
+tests) est dans `docs/admin-access.md` § 4ter.
+
+✅ **edge-1 (Scaleway) re-validé** — 19/19 sans intervention, TLS OpenBao inclus.
 
 ### Note : les répertoires `local-path` en 0755 (PAS un défaut du code)
 
