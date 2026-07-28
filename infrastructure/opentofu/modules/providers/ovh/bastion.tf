@@ -129,4 +129,15 @@ resource "openstack_networking_floatingip_v2" "bastion" {
 resource "openstack_networking_floatingip_associate_v2" "bastion" {
   floating_ip = openstack_networking_floatingip_v2.bastion.address
   port_id     = openstack_networking_port_v2.bastion.id
+
+  # ⚠️ depends_on OBLIGATOIRE sur l'interface du routeur. Neutron REFUSE
+  # d'associer une floating IP tant que le subnet du port n'a pas de route vers
+  # le réseau externe :
+  #   ExternalGatewayForFloatingIPNotFound: External network <id> is not
+  #   reachable from subnet <id>
+  # Aucune référence ne lie ces deux ressources, donc OpenTofu les crée en
+  # PARALLÈLE → échec INTERMITTENT selon qui gagne la course. Constaté le
+  # 2026-07-28 sur le bastion ; les deux LB passaient jusque-là par chance, un
+  # load balancer étant plus lent à créer.
+  depends_on = [openstack_networking_router_interface_v2.private]
 }
