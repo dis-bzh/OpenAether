@@ -1,30 +1,19 @@
-# ==============================================================================
-# S3-Compatible Encrypted Backup / Disaster Recovery
+# S3-compatible encrypted backup / disaster recovery.
 #
-# Backs up the operationally-critical access artifacts (talosconfig, kubeconfig)
-# to TWO object stores — PRIMARY (the cluster's own provider) and REPLICA (the
-# "-backup" store; in prod a *different* provider, different creds). The full
-# machine configs are intentionally NOT backed up here: they embed the large
-# inline manifests (Flux ~1.8MB) and are fully derivable from the machine
-# secrets, which already live in the encrypted tfstate (the real DR artifact).
+# Backs up the access artifacts (talosconfig, kubeconfig) to TWO stores: primary
+# (the cluster's provider) and replica (a different provider in prod). Machine
+# configs are deliberately NOT backed up — they embed ~1.8 MB of inline
+# manifests and are derivable from the machine secrets, which already live in
+# the encrypted tfstate (the real DR artifact).
 #
-# Encryption (defence in depth):
-#   - CLIENT-side: gpg --symmetric AES-256 (authenticated: MDC / OCB on gpg >=2.3),
-#     key derived from the SAME passphrase as the tfstate (var.encryption_passphrase),
-#     with hardened S2K. This is what protects the data — the storage provider
-#     never sees plaintext.
-#   - SERVER-side: S3 SSE (AES256) layered on top at upload.
+# Encryption: client-side gpg AES-256 with the SAME passphrase as the tfstate
+# (that is what protects the data), plus S3 SSE on top.
 #
-# The tfstate itself is already client-encrypted by the backend's encryption{}
-# block (AES-GCM + PBKDF2); its replication to the "-backup" store is a separate,
-# post-apply step (scripts/backup-state.sh), because the backend only flushes the
-# new state after the apply finishes — see backup_targets in outputs.tf.
+# ⚠️ Uses the AWS CLI rather than aws_s3_object: that resource hits a
+# "version_id known -> now unknown" plan-consistency bug on non-AWS S3 stores.
 #
-# Done via the AWS CLI (terraform_data + a shell script) rather than the
-# aws_s3_object resource: the latter hits a "version_id known -> now unknown"
-# plan-consistency bug on S3-compatible (non-AWS) stores.
-#
-# Disabled when backup_enabled = false (e.g. local Docker testing).
+# The tfstate's own replication is a separate post-apply step
+# (scripts/ops/backup-state.sh): the backend only flushes it after the apply.
 # ==============================================================================
 
 locals {

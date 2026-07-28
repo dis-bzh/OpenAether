@@ -1,60 +1,27 @@
 #!/usr/bin/env bash
-# ==============================================================================
 # OpenAether — rolling node replacement (zero-downtime ForceNew apply)
 #
-# WHY THIS EXISTS
-#   scaleway_instance_server.{control_plane,worker} (modules/providers/scw/main.tf)
-#   sets `type = var.instance_type`, a ForceNew attribute. Changing instance_type
-#   (or the Talos image) forces ALL node instances to be replaced, and `tofu apply`
-#   does it in PARALLEL → the 3 control planes reboot at once → etcd loses quorum →
-#   API + service outage. Fine in dev, unacceptable in prod.
+# `instance_type` and the Talos image are ForceNew: a plain `tofu apply` replaces
+# every node IN PARALLEL → the 3 control planes reboot at once → etcd loses
+# quorum. This script does one node at a time: cordon+drain → targeted apply →
+# wait for etcd/Longhorn → uncordon.
 #
-#   This script replaces nodes ONE AT A TIME: cordon+drain → targeted apply of just
-#   that node → wait for Talos/etcd/Longhorn to reconverge → uncordon → next. The
-#   rest of the cluster stays up throughout.
+# Two non-obvious points:
+#   * `-replace` on talos_machine_configuration_apply is ESSENTIAL — it never
+#     references the instance ID, so a replaced VM yields no diff and would stay
+#     in maintenance mode, unconfigured.
+#   * The target list EXCLUDES the data-volume resources (they must survive) but
+#     INCLUDES the attach/link ones (they point at the old instance ID).
 #
-# WHAT IT DOES PER NODE (provider-agnostic)
-#   tofu apply
-#     -target=<every module.<mod>[0] resource of THIS node>   # VM, NIC/port, volume attach/link
-#     -replace=module.talos.talos_machine_configuration_apply.<T>[i]
-#   The target list is derived from `tofu state list` (module.<mod>[0].*.<T>[i]),
-#   EXCLUDING the data-volume resources themselves (scaleway_block_volume,
-#   openstack_blockstorage_volume_v3, outscale_volume) which must SURVIVE the
-#   replacement, but INCLUDING the attach/link resources (they reference the old
-#   instance id and must be recreated onto the fresh VM).
-#   The -replace is ESSENTIAL: talos_machine_configuration_apply references only the
-#   stable endpoint/node/config (never the instance ID), so replacing the VM yields
-#   NO diff on it → without -replace the fresh VM stays in maintenance mode, never
-#   configured. -replace forces Talos to re-apply the machine config to the new VM.
+# Order: workers first, then control planes strictly one at a time, gated on
+# etcd back to 3/3. Stops on the first failed gate.
 #
-# PROVIDER STATUS
-#   scaleway : exercised end-to-end on a live management cluster.
-#   ovh/outscale/proxmox : code-complete, NEVER exercised live (test matrix ⬜) —
-#     always start with --dry-run and inspect the printed target list.
-#   proxmox  : worker data disks are defined INLINE on the VM (no separate volume
-#     resource) → replacing a worker WIPES its Longhorn disk; Longhorn rebuilds
-#     from the surviving replicas. Verify volumes are healthy (x2+) first.
+# ⚠️ Exercised live on Scaleway only (see deployment-test-matrix.md). On Proxmox
+# the worker data disk is inline on the VM: replacing a worker WIPES it and
+# Longhorn rebuilds from the surviving replicas — check they are healthy first.
 #
-# SAFETY
-#   * Workers first, then control planes (workers carry the heavy stateful load).
-#   * Control planes strictly 1-at-a-time, gated on etcd returning to 3/3 healthy
-#     (quorum is 2/3 — never replace a 2nd CP before the 1st rejoins).
-#   * cordon+drain before destroy: triggers app-level failover for x1 Longhorn
-#     volumes (CNPG/VMCluster/Loki self-replicate) and lets Longhorn keep x2 volumes
-#     available from the surviving replica.
-#   * Longhorn data SURVIVES: worker data disks are separate scaleway_block_volume
-#     resources (no instance_type dependency) — detached from the old VM, reattached
-#     to the new one. Talos re-discovers + LUKS-decrypts them on boot. Only the
-#     system disk (OS) is lost.
-#   * STOPS on the first failed health gate — no blind cascade.
-#
-# PREREQUISITES (the `task rolling-replace` wrapper handles these)
-#   * `tofu init` done, AWS_* creds in env, run from infrastructure/opentofu/cluster.
-#   * Talos API tunnels open (scripts/bootstrap/talos-tunnels.sh open) — CPs on
-#     localhost 50000+i, workers on 50100+i.
-#   * Local ./talosconfig and ./kubeconfig present (written by `tofu apply`).
-#
-# Usage:
+# Usage: rolling-replace.sh <provider> [--workers-only|--cp-only] [--dry-run] [--yes]
+#   Needs: tofu init, AWS_* creds, open Talos tunnels, ./talosconfig + ./kubeconfig.
 #   rolling-replace.sh <provider> [--workers-only|--cp-only] [--dry-run] [--yes]
 # ==============================================================================
 set -euo pipefail
