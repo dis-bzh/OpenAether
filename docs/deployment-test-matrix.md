@@ -118,6 +118,7 @@ Two orthogonal layers of knobs:
 | `CAPI-cross-provider` | OVH management | Scaleway | Gitception **cross-provider in both directions**. | ✅ *(2026-07-28)* |
 | `CAPI-mgmt-pivot` | local throwaway cluster | Scaleway | Management **born from CAPI**, deploying its own child, then `clusterctl move` onto itself. | ✅ *(mgmt-capi, 2026-07-28 — see `capi-bootstrap.md`)* |
 | `CAPI-edge-osc` | management | Outscale | CAPOSC child. | ⬜ *(account RAM quota)* |
+| `CAPI-providerid` | local throwaway | Scaleway | Talos CCM → `providerID`, `nodeRef` resolved, MachineHealthCheck 3/3. | ✅ *(edge-pid, 2026-07-28)* |
 
 ### Cross-cutting operational scenarios
 
@@ -133,17 +134,15 @@ Two orthogonal layers of knobs:
 
 ## C) Priority (highest-value untested, real apply)
 
-1. **`providerID` on CAPI nodes** — blocks `MachineHealthCheck` on every child;
-   design and foot-gun in `backlog.md`.
-2. **Proxmox real apply** (`PMX-*`) — never run on a real host.
-3. **Cloud HA multi-AZ** (`SCW-mgmt-ha`, `OSC-mgmt-ha`) — 3-CP etcd across zones
+1. **Proxmox real apply** (`PMX-*`) — never run on a real host.
+2. **Cloud HA multi-AZ** (`SCW-mgmt-ha`, `OSC-mgmt-ha`) — 3-CP etcd across zones
    never applied.
-4. **`OVH-vip`** — vip mode never applied on OVH (distinct Neutron
+3. **`OVH-vip`** — vip mode never applied on OVH (distinct Neutron
    `allowed_address_pairs` mechanism).
-5. **Workload role real apply** (`*-work-*`) — only management exercised.
-6. **`worker_storage` real apply** (`*-storage`) — LUKS2 `UserVolumeConfig` and
+4. **Workload role real apply** (`*-work-*`) — only management exercised.
+5. **`worker_storage` real apply** (`*-storage`) — LUKS2 `UserVolumeConfig` and
    block-volume attach never applied.
-7. **`OP-failover`** — DR path unproven.
+6. **`OP-failover`** — DR path unproven.
 
 ## D) Findings — `SCW-vip` real apply (2026-07-15)
 

@@ -8,8 +8,14 @@ code comment or the runbook, referenced by path.
 
 ## Where we stand (2026-07-28)
 
-✅ **Nothing running — 3 accounts verified empty.** OVH, Scaleway, Outscale: no
-instance, no FIP, no LB. S3 buckets and Talos images deliberately kept.
+✅ **Nothing running — accounts verified empty**, including block volumes (see
+below). S3 buckets and Talos images deliberately kept.
+
+**`providerID` is fixed** (2026-07-28, validated on real Scaleway): cluster
+templates put the kubelet in `cloud-provider=external` + enable
+`kubernetesTalosAPIAccess`, and every child runs the Talos CCM. Machines reach
+`Running` with `nodeRef` resolved and MachineHealthCheck reports 3/3 — it had
+never worked before. A node created from scratch converges in ~40 s.
 
 Validated on real cloud this session, then torn down: a 5-cluster fleet across
 2 providers (management OVH + edge-1 SCW + edge-2 OVH, and mgmt-capi SCW born
@@ -18,28 +24,6 @@ cross-provider **in both directions**, and a **CAPI-bootstrapped management
 manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
 
 ## Open
-
-- [ ] **CAPI nodes have no `spec.providerID` → `MachineHealthCheck` is dead.**
-      Affects every child. Machines stay `Provisioned`, `nodeRef` never
-      resolves, while the nodes are `Ready` — hence unnoticed until now. No CCM,
-      no kubelet `--provider-id`. Also blocks `clusterctl move` (workaround in
-      `capi-bootstrap.md`). Priority: this was the main argument for CAPI.
-
-      Design settled 2026-07-28, **execution needs a live cluster**. Use
-      `talos-cloud-controller-manager`: one brick for every provider, no cloud
-      credentials (it reads Talos `PlatformMetadata`, which is already right
-      because we build one image per platform — `scaleway`/`openstack`/`aws`/
-      `nocloud`). Its `transformations.platformMetadata.ProviderID` is a Go
-      template (`.Zone`, `.InstanceID`, `.UUID`), so we can emit exactly the
-      string the infra provider expects: CAPS wants
-      `scaleway://instance/<zone>/<uuid>`, CAPO wants `openstack:///<uuid>`
-      (already aligned by NOT setting `region`, see the openstack template).
-      ⚠️ **Ship both halves together or not at all**: a CCM only initialises
-      nodes that carry the `uninitialized` taint, which requires kubelet
-      `cloud-provider=external`. That flag without a working CCM leaves every
-      node tainted and the cluster schedules nothing. Validate on one child
-      before touching the management. First step on a live node:
-      `talosctl get PlatformMetadatas -oyaml` to confirm the real values.
 
 - [ ] **Browser SSO login (Grafana ↔ Zitadel).** Everything else is done; only
       the claim form remains to confirm. Needs a live cluster.
@@ -58,6 +42,14 @@ manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
       with no error in the CAPI CR. HA management and a child are mutually
       exclusive on this account. `task preflight-quotas` catches it; raising the
       quota is an operator decision.
+
+- [ ] **Confirm the CCM providerID format on OVH and Outscale.** Scaleway is
+      validated (Talos emits CAPS's format natively, MHC 3/3). The templates
+      carry the same patch elsewhere, but the format is unverified: CAPO expects
+      `openstack:///<uuid>` (aligned by NOT setting `region`), CAPOSC is unknown.
+      A mismatch is benign — the CCM still clears the taint, only `nodeRef` stays
+      unresolved. If it mismatches, template `ProviderID` in the CCM's
+      `transformations` (Go template over `.Zone`/`.InstanceID`/`.UUID`).
 
 - [ ] **Proxmox: never applied for real.** Plus Ansible host hardening, which is
       documented but absent from the repo.
@@ -99,5 +91,8 @@ One line each; the detail lives in the referenced file.
   identified its profiles by their French header.
 - **Never conclude from truncated output** — a `| tail` hid the servers that
   `purge-orphans` lists first, making a populated account look clean.
+- **An empty server list is not an empty account** — Scaleway kept 7 orphaned
+  block volumes billing for three days behind a clean-looking instance list.
+  `purge-orphans/scaleway.py` now covers volumes.
 - **A generated artifact drifts silently** — hence `task render-check` and
   `pick.py --check`. Prefer guardrails that compare over ones that assume.

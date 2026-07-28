@@ -1,31 +1,31 @@
-# purge-orphans — filet de sécurité pour ressources cloud orphelines
+# purge-orphans — safety net for orphaned cloud resources
 
-Scripts de **dernier recours**, à n'utiliser que lorsque des ressources d'un
-cluster survivent à son contrôleur : cluster de management détruit avant ses
-enfants CAPI, `edge-down` en échec, ou state OpenTofu perdu. Dans tous les
-autres cas, passer par `task fleet-down` / `task edge-down` / `task destroy`,
-qui suppriment proprement **et** mettent le state à jour.
+**Last resort**, for when a cluster's resources outlive their controller: a
+management destroyed before its CAPI children, a failed `edge-down`, a lost
+OpenTofu state. Every other case goes through `task fleet-down` / `task
+edge-down` / `task destroy`, which delete cleanly **and** update the state.
 
-Ces scripts parlent directement à l'API du provider : ils ignorent le state
-OpenTofu et ne le mettent pas à jour. Ne les lancer que sur un compte dont on
-sait ce qu'il doit rester (ils ciblent TOUT le projet, pas un cluster précis).
+These scripts talk to the provider API directly: they ignore the OpenTofu state
+and do not update it. They target the WHOLE project, not one cluster — only run
+them on an account whose expected contents you know.
 
 ```bash
 source .env.sh
-python3 scripts/ops/purge-orphans/ovh.py              # dry-run : liste les cibles
-python3 scripts/ops/purge-orphans/ovh.py --apply      # supprime
+python3 scripts/ops/purge-orphans/scaleway.py           # dry-run: lists targets
+python3 scripts/ops/purge-orphans/scaleway.py --apply   # deletes
+python3 scripts/ops/purge-orphans/ovh.py --apply
 python3 scripts/ops/purge-orphans/outscale.py --apply
 ```
 
-Ordre de suppression imposé par les dépendances (déjà encodé) :
-serveurs → load balancers → IP publiques → routeurs/route tables →
-internet gateway → security groups → subnets → réseau.
+Deletion order is dictated by dependencies (already encoded): servers → load
+balancers → public IPs → volumes → routers/route tables → internet gateway →
+security groups → subnets → network.
 
-Les 409/`ResourceConflict` sont normaux au premier passage (ports ou NIC pas
-encore libérés) : **relancer** jusqu'à ce que plus rien ne soit supprimé.
-Un réseau récalcitrant garde souvent des ports DHCP résiduels ; les supprimer
-d'abord (le script OVH le fait).
+409 / `ResourceConflict` on the first pass is normal (ports or NICs not released
+yet): **re-run** until nothing more is deleted. A stubborn network usually keeps
+residual DHCP ports; delete those first (the OVH script does).
 
-Scaleway : pas de script — l'API se manipule en deux appels
-(`POST /servers/<id>/action {"action":"terminate"}`, puis `DELETE /lb/v1/.../lbs/<id>?release_ip=true`),
-cf. `docs/backlog.md` pour l'historique de l'incident qui a motivé ces outils.
+⚠️ **Check volumes, not just servers.** A terminated VM can leave its root volume
+behind. Scaleway looked clean on servers/LB/IPs while 7 block volumes had been
+billing for three days. Talos images and their snapshots are deliberately kept
+and never touched by these scripts.

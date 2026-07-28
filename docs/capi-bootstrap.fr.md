@@ -83,12 +83,14 @@ celui de clusterctl. Corrigé par la brique `clusterctl-inventory`. ⚠️ `--dr
 ne fait pas ce contrôle : il passe, seul le move réel échoue.
 
 **Les Machines ne se relient jamais à leurs nœuds** (`still provisioning the
-node`). Les nœuds Talos n'ont pas de `spec.providerID` — ni CCM ni
-`--provider-id` sur le kubelet — donc CAPI ne peut pas apparier Machine et Node.
-**Toute la flotte est concernée**, et c'est pourquoi `MachineHealthCheck` ne peut
-pas fonctionner (cf. `backlog.md`). Contournement : recopier le `providerID` de
-chaque Machine sur son Node, en passant par l'UUID d'instance et non par le nom
-(côté control plane, le nœud ne porte pas le nom de la Machine).
+node`) — **corrigé le 2026-07-28**. Talos ne pose pas de `spec.providerID`, donc
+CAPI ne pouvait pas apparier Machine et Node et `MachineHealthCheck` restait
+inerte. Les templates mettent désormais le kubelet en `cloud-provider=external`
+et les enfants embarquent le CCM Talos (`apps/clusters/*.yaml`), qui renseigne le
+champ au format même de CAPS — sans transformation. Vérifié sur Scaleway :
+Machines `Running`, `nodeRef` résolu, MHC 3/3. ⚠️ Les deux moitiés vont
+ensemble : ce flag kubelet sans le CCM laisse tous les nœuds taintés
+`uninitialized`.
 
 **Ports hôte sous Windows.** Hyper-V réserve des blocs mouvants au-dessus de
 49152 : Docker refuse de publier et le cluster meurt 90 s plus tard sur « Talos

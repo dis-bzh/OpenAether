@@ -24,7 +24,7 @@ KEEP="${KEEP:-30}"
 
 log() { printf '%s  %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"; }
 
-# 1. PATH complet — cf. raison 1 ci-dessus.
+# 1. Full PATH — see reason 1 above.
 export PATH="/usr/local/bin:/snap/bin:$HOME/.local/bin:$PATH"
 
 # 2. Environnement (credentials S3/provider + TF_VAR_encryption_passphrase).
