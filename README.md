@@ -82,33 +82,17 @@ Talos/cluster stack is provider-agnostic. Details:
 ## Repository structure
 
 ```
-OpenAether-infra/
-├── infrastructure/
-│   └── opentofu/
-│       ├── cluster/                 # Cluster root (management + workload)
-│       │   ├── envs/                # Per-cluster config (<role>-<provider>.tfvars)
-│       │   ├── bootstrap-manifests/ # Cilium + Flux injected at bootstrap
-│       │   └── tests/               # OpenTofu unit tests
-│       ├── talos-image/             # Image builder (its own state)
-│       ├── opentofu-local/          # Local Docker root (reuses modules/talos)
-│       └── modules/
-│           ├── talos/               # Secrets, config, bootstrap — provider-agnostic
-│           ├── providers/           # provider-contract.md = the contract
-│           │   ├── scw/ ovh/ outscale/ proxmox/ local/
-│           └── talos-image/         # Per-provider image publishing
-└── scripts/
-    ├── setup.sh
-    ├── bootstrap/                   # Lifecycle (rare)
-    ├── ops/                         # Day-to-day operations
-    │   ├── fleet-down.sh            # Ordered teardown (children then management)
-    │   ├── edge-down.sh             # Delete a CAPI child (suspends Flux first)
-    │   ├── rolling-replace.sh       # Zero-downtime node replacement
-    │   ├── etcd-snapshot.sh         # Encrypted etcd snapshot → both stores
-    │   ├── check-cilium-parity.py   # Guardrail: children aligned with the foundation
-    │   ├── preflight-quotas.py      # Check quotas BEFORE deploying
-    │   ├── ensure-capo-fip.py       # Pre-allocated FIP (OpenStack certSANs)
-    │   └── purge-orphans/           # Safety net (direct provider API)
-    └── internal/                    # Called by the Taskfile
+infrastructure/opentofu/
+  cluster/        # cluster root (management + workload); envs/ = one tfvars per cluster
+  talos-image/    # image builder, its own state
+  opentofu-local/ # local Docker root, reuses modules/talos
+  modules/talos/  # secrets, config, bootstrap — provider-agnostic
+  modules/providers/{scw,ovh,outscale,proxmox,local}/   # provider-contract.md = the contract
+scripts/
+  bootstrap/  # lifecycle (rare)
+  ops/        # day to day: fleet-down, edge-down, rolling-replace, etcd-snapshot,
+              # preflight-quotas, check-cilium-parity, purge-orphans…
+  internal/   # called by the Taskfile
 ```
 
 Kubernetes manifests live in

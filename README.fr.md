@@ -81,33 +81,17 @@ Talos/cluster est provider-agnostique. Détail : `docs/deployment-test-matrix.fr
 ## Structure du dépôt
 
 ```
-OpenAether-infra/
-├── infrastructure/
-│   └── opentofu/
-│       ├── cluster/                 # Racine cluster (management + workload)
-│       │   ├── envs/                # Config par cluster (<rôle>-<provider>.tfvars)
-│       │   ├── bootstrap-manifests/ # Cilium + Flux injectés au bootstrap
-│       │   └── tests/               # Tests unitaires OpenTofu
-│       ├── talos-image/             # Constructeur d'image (un state à part)
-│       ├── opentofu-local/          # Racine locale Docker (réutilise modules/talos)
-│       └── modules/
-│           ├── talos/               # Secrets, config, bootstrap — provider-agnostique
-│           ├── providers/           # provider-contract.md = le contrat
-│           │   ├── scw/ ovh/ outscale/ proxmox/ local/
-│           └── talos-image/         # Publication d'image par provider
-└── scripts/
-    ├── setup.sh
-    ├── bootstrap/                   # Cycle de vie (rare)
-    ├── ops/                         # Exploitation courante
-    │   ├── fleet-down.sh            # Teardown ordonné (enfants puis management)
-    │   ├── edge-down.sh             # Suppression d'un enfant CAPI (suspend Flux)
-    │   ├── rolling-replace.sh       # Remplacement de nœud sans coupure
-    │   ├── etcd-snapshot.sh         # Snapshot etcd chiffré → 2 stores
-    │   ├── check-cilium-parity.py   # Garde-fou : enfants alignés sur le socle
-    │   ├── preflight-quotas.py      # Vérifie les quotas AVANT de déployer
-    │   ├── ensure-capo-fip.py       # FIP pré-allouée (certSANs OpenStack)
-    │   └── purge-orphans/           # Filet de secours (API provider directe)
-    └── internal/                    # Appelés par le Taskfile
+infrastructure/opentofu/
+  cluster/        # racine cluster (management + workload) ; envs/ = un tfvars par cluster
+  talos-image/    # constructeur d'image, state à part
+  opentofu-local/ # racine Docker locale, réutilise modules/talos
+  modules/talos/  # secrets, config, bootstrap — provider-agnostique
+  modules/providers/{scw,ovh,outscale,proxmox,local}/   # provider-contract.md = le contrat
+scripts/
+  bootstrap/  # cycle de vie (rare)
+  ops/        # exploitation : fleet-down, edge-down, rolling-replace, etcd-snapshot,
+              # preflight-quotas, check-cilium-parity, purge-orphans…
+  internal/   # appelés par le Taskfile
 ```
 
 Les manifests Kubernetes vivent dans
