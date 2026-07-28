@@ -2,209 +2,104 @@
 
 🇬🇧 [English version](capi-bootstrap.md)
 
-Procédure **validée de bout en bout le 2026-07-28** sur Scaleway : un cluster
-jetable crée le management, le management crée son propre enfant, puis le
-management récupère ses propres objets CAPI et le cluster jetable est détruit.
-
-C'est un **chemin optionnel**, à côté d'OpenTofu — pas un remplacement. Voir
-`backlog.md` § « Piste architecture » pour l'arbitrage.
+Validé de bout en bout sur Scaleway le 2026-07-28. Chemin **optionnel**, à côté
+d'OpenTofu — pas un remplacement : CAPI crée les machines, OpenTofu garde le
+substrat (sur OVH, ~44 ressources dont 3 instances).
 
 ```
-   local (Talos/Docker)  ──CAPI──▶  mgmt-capi (Scaleway)
-        clusterctl init                  │
-                                         └──CAPI/GitOps──▶  edge-capi
-        ── clusterctl move ──▶  mgmt-capi se gère lui-même
-        task local-down            (le local disparaît)
+local (Talos/Docker) ──CAPI──▶ mgmt-capi ──CAPI/GitOps──▶ edge-capi
+        └── clusterctl move ──▶ mgmt-capi s'autogère, le local est détruit
 ```
 
 ## Prérequis
 
-| Quoi | Vérification |
-|---|---|
-| Moteur Docker joignable | `docker info` — sous Windows, démarrer Docker Desktop **et** activer l'intégration WSL |
-| `clusterctl` à la version du CoreProvider | `clusterctl version` → doit valoir la version de `core-providers.yaml` (v1.13.2) |
-| Image Talos publiée chez le provider | cf. `talos-image/` ; l'image instance Scaleway est **par zone** |
-| Identifiants provider | `.env.sh` |
+Moteur Docker joignable · `clusterctl` à la version du CoreProvider (v1.13.2) ·
+image Talos publiée chez le provider (les images Scaleway sont par zone) ·
+credentials dans `.env.sh`.
 
-## 1. Cluster jetable
+## 1. Cluster jetable + CAPI
 
 ```bash
-task local-up          # 3 CP + 3 workers Talos sur Docker
+task local-up
 export KUBECONFIG=$PWD/infrastructure/opentofu-local/kubeconfig
-```
 
-Vérifier l'**egress** avant d'aller plus loin — sans lui, le contrôleur du
-provider ne créera rien :
-
-```bash
+# Vérifier l'egress d'abord — sans lui le contrôleur du provider ne crée rien.
 kubectl run egress-test --image=curlimages/curl:8.11.1 --restart=Never --command -- \
   curl -s -o /dev/null -w '%{http_code}\n' https://api.scaleway.com/instance/v1/zones
-```
 
-## 2. CAPI sur le cluster jetable
-
-On utilise `clusterctl init`, PAS nos briques : l'opérateur passe par une
-`HelmRelease` (donc egress cluster + cert-manager + Flux) — inutilement lourd
-pour un cluster qu'on va jeter. `clusterctl init` télécharge depuis le poste.
-
-⚠️ **Les versions doivent être identiques à celles de nos briques**, sinon
-`clusterctl move` refusera la cible.
-
-```bash
-clusterctl init --core cluster-api:v1.13.2 \
-                --bootstrap talos:v0.6.12 \
-                --control-plane talos:v0.5.13 \
-                --infrastructure scaleway:v0.2.1
-
+clusterctl init --core cluster-api:v1.13.2 --bootstrap talos:v0.6.12 \
+                --control-plane talos:v0.5.13 --infrastructure scaleway:v0.2.1
 kubectl create namespace capi-clusters
 kubectl -n capi-clusters create secret generic scaleway-capi-credentials \
   --from-literal=SCW_ACCESS_KEY="$SCW_ACCESS_KEY" \
   --from-literal=SCW_SECRET_KEY="$SCW_SECRET_KEY"
 ```
 
-## 3. Créer le management
+`clusterctl init`, pas nos briques : l'opérateur exige une HelmRelease, l'egress
+du cluster et cert-manager — trop lourd pour un cluster qu'on jette.
+⚠️ Les versions doivent être identiques aux nôtres, sinon `clusterctl move`
+refuse la cible.
 
-Le template est le même que pour un enfant : hors Flux, on le rend avec
-`flux envsubst` (qui gère les défauts `${VAR:=…}`, contrairement à `envsubst`).
+## 2. Créer et équiper le management
+
+Même template qu'un enfant. Hors Flux, le rendre avec `flux envsubst` (il gère
+les défauts `${VAR:=…}`, contrairement à `envsubst`).
 
 ```bash
 export CLUSTER_NAME=mgmt-capi CP_REPLICAS=1 WORKER_REPLICAS=1 \
-       K8S_VERSION=v1.35.3 TALOS_VERSION=v1.13 \
-       SCW_IMAGE_NAME=talos-scaleway-amd64-v1.13.4 SCW_ZONE=fr-par-1 \
-       SCW_REGION=fr-par SCW_INSTANCE_TYPE=DEV1-L \
-       SCW_PROJECT_ID="$SCW_DEFAULT_PROJECT_ID"
-
+       K8S_VERSION=v1.35.3 TALOS_VERSION=v1.13 SCW_ZONE=fr-par-1 \
+       SCW_IMAGE_NAME=talos-scaleway-amd64-v1.13.4 SCW_REGION=fr-par \
+       SCW_INSTANCE_TYPE=DEV1-L SCW_PROJECT_ID="$SCW_DEFAULT_PROJECT_ID"
 kubectl kustomize ../OpenAether-apps/apps/base/cluster-api-clusters/templates/cluster-talos-scaleway \
   | flux envsubst | kubectl apply -f -
-```
 
-Récupérer son kubeconfig quand `Cluster` passe `Provisioned` :
-
-```bash
+# une fois Provisioned :
 kubectl -n capi-clusters get secret mgmt-capi-kubeconfig \
   -o jsonpath='{.data.value}' | base64 -d > mgmt-capi.kubeconfig
 ```
 
-## 4. Équiper le management
+Puis faire pour lui ce qu'un parent fait pour un enfant, mais depuis le poste :
+Cilium (helm, values d'enfant), `flux-gotk/gotk-components.yaml`
+(`--server-side`), et `child-gitops` rendu avec `CHILD_PROFILE`, `CHILD_NAME`,
+`CHILD_BRANCH`. Semer ses secrets opérateur et il déploie ses propres enfants.
 
-Exactement ce que le parent fait pour un enfant, mais depuis le poste.
+⚠️ **Deux managements ne doivent jamais lire le même `apps/clusters`** — ils se
+disputeraient les mêmes CR CAPI. Isoler par branche ou par chemin.
 
-```bash
-helm --kubeconfig mgmt-capi.kubeconfig upgrade --install cilium cilium/cilium \
-  --version 1.19.2 -n kube-system -f <values enfant CAPI> --wait
-
-kubectl --kubeconfig mgmt-capi.kubeconfig apply --server-side --force-conflicts \
-  -f ../OpenAether-apps/apps/base/cluster-api-clusters/flux-gotk/gotk-components.yaml
-
-CHILD_NAME=mgmt-capi CHILD_PROFILE=management-capi CHILD_BRANCH=<branche> \
-  kubectl kustomize ../OpenAether-apps/apps/base/cluster-api-clusters/child-gitops \
-  | flux envsubst | kubectl --kubeconfig mgmt-capi.kubeconfig apply -f -
-```
-
-Puis semer ses secrets opérateur (`scaleway-capi-credentials` dans
-`capi-clusters`, les `*-substitutes` dans `flux-system`) et il déploie ses
-propres enfants tout seul.
-
-⚠️ **Deux managements ne doivent jamais lire le même `apps/clusters`** : ils se
-disputeraient les mêmes CR CAPI. Isoler par branche (`CHILD_BRANCH`) ou par
-chemin.
-
-## 5. Le pivot
+## 3. Pivot
 
 ```bash
 export KUBECONFIG=$PWD/infrastructure/opentofu-local/kubeconfig
 clusterctl move --to-kubeconfig=mgmt-capi.kubeconfig -n capi-clusters
 task local-down
-```
-
-Vérifier l'autogestion :
-
-```bash
 KUBECONFIG=mgmt-capi.kubeconfig clusterctl describe cluster mgmt-capi -n capi-clusters
 ```
 
-## Les trois pièges, tous rencontrés en réel
+## Trois pièges, tous rencontrés en réel
 
-### `clusterctl move` refuse la cible équipée par notre opérateur
+**`clusterctl move` refuse une cible équipée par notre opérateur.** L'opérateur
+et clusterctl tiennent des inventaires différents, et l'opérateur ne remplit pas
+celui de clusterctl. Corrigé par la brique `clusterctl-inventory`. ⚠️ `--dry-run`
+ne fait pas ce contrôle : il passe, seul le move réel échoue.
 
-```
-failed to check providers in target cluster: [provider bootstrap-talos not
-found in the target cluster, ...]
-```
+**Les Machines ne se relient jamais à leurs nœuds** (`still provisioning the
+node`). Les nœuds Talos n'ont pas de `spec.providerID` — ni CCM ni
+`--provider-id` sur le kubelet — donc CAPI ne peut pas apparier Machine et Node.
+**Toute la flotte est concernée**, et c'est pourquoi `MachineHealthCheck` ne peut
+pas fonctionner (cf. `backlog.md`). Contournement : recopier le `providerID` de
+chaque Machine sur son Node, en passant par l'UUID d'instance et non par le nom
+(côté control plane, le nœud ne porte pas le nom de la Machine).
 
-`cluster-api-operator` et `clusterctl` tiennent **deux inventaires
-différents** : le premier en `operator.cluster.x-k8s.io`, le second en
-`clusterctl.cluster.x-k8s.io/Provider`. Un cluster équipé par l'opérateur a la
-CRD mais aucune entrée.
-
-**Corrigé dans le dépôt** — brique `clusterctl-inventory`, compagnon
-automatique de `cluster-api-providers`. Ses versions doivent rester alignées
-sur `core-providers.yaml` / `infra-providers.yaml`.
-
-⚠️ **`--dry-run` ne fait PAS cette vérification.** Il passe intégralement ;
-l'échec ne surgit qu'au move réel.
-
-### Les Machines ne se relient pas à leurs nœuds
-
-```
-cannot start the move operation while ... is still provisioning the node
-```
-
-Les nœuds Talos n'ont **pas de `spec.providerID`** : il n'y a ni
-cloud-controller-manager ni `--provider-id` sur le kubelet. CAPI ne peut donc
-pas apparier `Machine` et `Node`, et les Machines restent en `Provisioned`.
-
-**Ce défaut touche toute la flotte**, pas seulement ce test — `edge-1` et
-`edge-2` sont dans le même état. Conséquences au-delà du pivot :
-`MachineHealthCheck` ne peut pas fonctionner, et la suppression d'une Machine
-ne draine pas son nœud.
-
-Contournement immédiat (ce qui a débloqué le pivot) : recopier le
-`providerID` de chaque Machine sur son Node.
-
-```bash
-kubectl -n capi-clusters get machines -o json \
-  | jq -r '.items[] | "\(.metadata.name) \(.spec.providerID)"' \
-  | while read M PID; do
-      # retrouver le nom d'instance depuis l'UUID, puis :
-      kubectl --kubeconfig <enfant> patch node "$NAME" --type=merge \
-        -p "{\"spec\":{\"providerID\":\"$PID\"}}"
-    done
-```
-
-⚠️ Le nom du nœud **ne suit pas** celui de la Machine côté control plane
-(`mgmt-capi-cp-clmwj` → nœud `mgmt-capi-cp-cqqtl`) : passer par l'UUID de
-l'instance, pas par le nom.
-
-Le vrai correctif est un CCM par provider, ou `provider-id` injecté au kubelet.
-Chantier ouvert, cf. `backlog.md`.
-
-### Ports hôte du cluster local sous Windows
-
-```
-ports are not available: exposing port TCP 127.0.0.1:51000 -> 127.0.0.1:0:
-/forwards/expose returned unexpected status: 500
-```
-
-Hyper-V réserve des blocs de 100 ports au-dessus de 49152, et ces blocs bougent
-au redémarrage. **Corrigé** : `talos_api_port_base` (défaut 41000, hors plage
-dynamique). Diagnostiquer une machine avec
-`netsh.exe int ipv4 show excludedportrange protocol=tcp`.
+**Ports hôte sous Windows.** Hyper-V réserve des blocs mouvants au-dessus de
+49152 : Docker refuse de publier et le cluster meurt 90 s plus tard sur « Talos
+API not ready ». Corrigé : `talos_api_port_base` par défaut à 41000. Diagnostic
+avec `netsh.exe int ipv4 show excludedportrange protocol=tcp`.
 
 ## Teardown
 
-L'ordre compte : le management détient les CR de ses enfants.
-
-```bash
-kubectl --kubeconfig mgmt-capi.kubeconfig -n capi-clusters delete cluster edge-capi
-kubectl --kubeconfig mgmt-capi.kubeconfig -n capi-clusters delete cluster mgmt-capi   # se supprime lui-même
-```
-
+Les enfants d'abord (le management détient leurs CR), puis le management.
 ⚠️ Un cluster autogéré **ne peut pas terminer sa propre suppression** : il
-détruit ses workers, puis son control plane, et le contrôleur meurt avec. Il
-reste des ressources chez le provider. Pour un teardown propre, pivoter
-d'abord vers un cluster jetable (`clusterctl move` en sens inverse) — ou
-supprimer les instances côté provider et purger les CR ensuite.
-
-Si une branche de test a servi de source, la supprimer **après** le teardown :
-sinon les clusters restent sur une source introuvable.
+détruit son control plane et le contrôleur meurt avec, laissant des ressources
+chez le provider. Soit pivoter vers un cluster jetable, soit supprimer les
+instances côté provider puis purger les CR. Supprimer une branche de test
+**après** le teardown.

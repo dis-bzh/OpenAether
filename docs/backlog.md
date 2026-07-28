@@ -66,12 +66,10 @@ manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
       `latest`, so `flux-install.yaml` is not reproducible and is excluded from
       `--check`.
 
-- [ ] **Trim the docs and the comments** (this file went 736 → 91). Remaining:
-      `admin-access.md` 358, `README.md` 231, `capi-bootstrap.md` 212 — each
-      doubled by its `.fr.md`. Same for the code: ~2450 comment lines in infra,
-      with the same explanation copied across up to 4 files (Flux substitution,
-      `toServices` DNAT, `remote-node` on Talos). Point at one authoritative
-      place instead of repeating. See `CLAUDE.md` § Concision et refacto.
+- [ ] **Keep trimming.** Done 2026-07-28: docs 2315 → 1095 lines, and the
+      longest comment blocks cut (~230 lines). Still fat: `deployment-test-matrix`
+      (350 lines across both languages) and ~48 comment blocks of 15+ lines.
+      See `CLAUDE.md` § Concision et refacto.
 
 ## Traps worth remembering
 
