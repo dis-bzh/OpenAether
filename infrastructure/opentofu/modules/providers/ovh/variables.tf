@@ -53,8 +53,8 @@ variable "worker_data_volume_type" {
     Available types: high-speed, high-speed-gen2, *-luks variants (Longhorn
     already does its own LUKS with an OpenBao-held key, so plain is enough).
     ⚠️ `high-speed-gen2` a produit des volumes en `error status` sur un 50 GiB
-    en EU-WEST-PAR (2026-07-25) — il a des contraintes de taille/région ;
-    `high-speed` fonctionne. Vérifier le type avant de le changer.
+    in EU-WEST-PAR (2026-07-25) — it has size/region constraints;
+    `high-speed` works. Check the type before changing it.
   EOT
   type        = string
   default     = "high-speed-gen2"
@@ -140,7 +140,7 @@ variable "k8s_lb_mode" {
 # Gateway was not listening there).
 # ==============================================================================
 variable "app_lb_node_ports" {
-  description = "NodePorts figés du Gateway, cibles du LB applicatif public. Doit correspondre au Service openaether-gateway-nodeport côté apps."
+  description = "The Gateway's fixed NodePorts, targets of the public application LB. Must match the openaether-gateway-nodeport Service on the apps side."
   type = object({
     http  = number
     https = number

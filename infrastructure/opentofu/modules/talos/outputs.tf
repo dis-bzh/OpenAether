@@ -78,6 +78,6 @@ output "worker_machine_configs" {
 # tflint rightly flags it as orphaned. This output attaches it explicitly AND
 # makes the state visible to the operator.
 output "cluster_health" {
-  description = "État de la vérification de santé Talos : 'skipped' (skip_health_check) ou 'verified'."
+  description = "State of the Talos health verification: 'skipped' (skip_health_check) or 'verified'."
   value       = var.skip_health_check ? "skipped" : (length(data.talos_cluster_health.this) > 0 ? "verified" : "n/a")
 }
