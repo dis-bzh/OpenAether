@@ -556,6 +556,24 @@ Tout ce qui suit est écrit, validé statiquement, mais n'a jamais tourné :
       répond sur les autres, passer directement à la console série du provider —
       c'est le seul canal qui reste quand apid est mort.
 
+- [x] ~~**OVH : associations de floating IP sans `depends_on` sur le routeur**~~ →
+      corrigé (2026-07-28), trouvé au **premier apply** du run de validation.
+      Neutron REFUSE d'associer une FIP tant que le subnet du port n'a pas de
+      route vers le réseau externe :
+      `ExternalGatewayForFloatingIPNotFound: External network <id> is not
+      reachable from subnet <id>`. Aucune référence ne liait
+      `openstack_networking_floatingip_associate_v2` à
+      `openstack_networking_router_interface_v2` → création en PARALLÈLE, donc
+      **échec intermittent** selon qui gagne la course.
+      **Les TROIS associations** du module étaient concernées (bastion, LB k8s,
+      LB app) ; seul le bastion a perdu la course, les deux LB passant par
+      chance — un load balancer est plus lent à créer. Les trois ont été
+      corrigées, pas seulement celle qui a échoué.
+      **Suite directe du correctif `fixed_ip` de la veille** : celui-ci a
+      supprimé la première course et a ainsi révélé la seconde. Leçon : sur
+      Neutron, une ressource qui dépend d'un chemin réseau doit le déclarer —
+      `network_id` ou un simple `port_id` ne suffisent pas à ordonner.
+
 - [ ] **Quota RAM Outscale : un management HA sature le compte** (2026-07-26).
       `memory_limit` = **40 Go**, or un management HA (3 CP + 3 workers en
       tinav5.c2r7p2 = 7 Go + bastion 2 Go) en consomme **44** — dépassement
