@@ -1,176 +1,174 @@
-# OpenAether-infra — Matrice de test des déploiements
+# OpenAether-infra — Deployment Test Matrix
 
-🇬🇧 [English version](deployment-test-matrix.en.md)
+🇫🇷 [Version française](deployment-test-matrix.fr.md)
 
-> Liste exhaustive et dédoublonnée des cas de déploiement que ce stack peut
-> produire, et de ceux réellement exercés. Dérivée du code
-> (`cluster/variables.tf`, `cluster/main.tf`, les cinq modules provider,
-> `modules/talos/variables.tf`, `provider-contract.md`, `Taskfile.yml`, et les
+> Exhaustive, deduplicated list of the deployment cases this stack can produce,
+> and which have actually been exercised. Derived from the code
+> (`cluster/variables.tf`, `cluster/main.tf`, the five provider modules,
+> `modules/talos/variables.tf`, `provider-contract.md`, `Taskfile.yml`, and the
 > `envs/*.tfvars.example`).
 >
-> Légende : ✅ testé par apply réel · 🧪 testé unitairement seulement
-> (`tofu test`, mocké) · ⬜ non testé
+> Status legend: ✅ apply-tested · 🧪 unit-tested only (`tofu test`, mocked) ·
+> ⬜ untested
 >
-> Dernière revue : **2026-07-28**.
+> Last reviewed: **2026-07-28**.
 
-## Modèle mental
+## Mental model
 
-Un **fichier d'env = un cluster = un provider**. `cluster/main.tf` impose un
-seul provider actif par apply (`check "single_provider_per_cluster"`) ; le
-provider actif est celui dont la clé `node_distribution.<provider>` a
-`control_planes + workers > 0`. Le module provider rend l'infra (LB / réseau /
-bastion) ; puis `modules/talos`, **provider-agnostique**, rend une config Talos
-identique quel que soit le provider. Le Docker local est une **racine séparée**
-(`infrastructure/opentofu-local`), non sélectionnable via `node_distribution`.
+One **env file = one cluster = one provider**. `cluster/main.tf` enforces a
+single active provider per apply (`check "single_provider_per_cluster"`); the
+active provider is whichever `node_distribution.<provider>` key has
+`control_planes + workers > 0`. The provider module renders infra (LB / network
+/ bastion); the **provider-agnostic** `modules/talos` then renders identical
+Talos config regardless of provider. Local Docker is a **separate root**
+(`infrastructure/opentofu-local`), not selectable via `node_distribution`.
 
-Deux couches de réglages orthogonales :
+Two orthogonal layers of knobs:
 
-- **Forme de l'infra** (par provider) : provider, zones/hôtes, `k8s_lb_mode`,
-  bastion, disques workers.
-- **Talos / exploitation** (agnostique) : `cluster_role`, phase
-  `talos_bootstrap`, injection de VIP, `secrets_prevent_destroy`,
-  `auto_tunnels`, `backup_enabled`, raccourcis réservés aux tests.
+- **Infra-shaping** (per provider): provider, zones/hosts, `k8s_lb_mode`,
+  bastion, worker disks.
+- **Talos / operational** (provider-agnostic): `cluster_role`, `talos_bootstrap`
+  phase, VIP injection, `secrets_prevent_destroy`, `auto_tunnels`,
+  `backup_enabled`, test-only skips.
 
 ## A) Dimensions
 
-| Dimension | Chemin de la variable | Valeurs | Défaut | Applicabilité | Notes |
+| Dimension | Variable path | Valid values | Default | Applicability | Notes |
 |---|---|---|---|---|---|
-| Provider | `node_distribution.<clé>` (scaleway/ovh/outscale/proxmox) ; `local` = racine `opentofu-local` séparée | un seul actif | `{}` | — | Exactement un actif par apply. |
-| Rôle du cluster | `cluster_role` | `management`, `workload` | `workload` | tous | Ne pilote que le manifeste d'amorçage Flux. Un « management » reçoit ensuite CAPI et ses dépendances via `OpenAether-apps` (aucun réglage CAPI côté tofu). `failover-*` = rôle management sur un provider non primaire. |
-| Environnement | `environment` | `dev`, `prod` | requis | tous | Nommage / suffixe de bucket seulement — pas un axe de topologie. |
-| Topologie CP (HA) | `node_distribution.<p>.control_planes` ; local `control_plane_count` | 1 = non-HA, 3 = HA | 0 / local 3 | tous | Le quorum etcd exige un nombre impair ≥ 3. CP non-HA taché `NoSchedule`. |
-| Nombre de workers | `node_distribution.<p>.workers` ; local `worker_count` | ≥ 0 (local `0..3`) | 0 / local 3 | tous | 0 worker → workloads sur les CP (non tachés). |
-| Mode LB k8s | `node_distribution.<p>.k8s_lb_mode` | `managed`, `vip` | `managed` | **scw, ovh** seulement ; outscale = managed seul (rejette vip) ; proxmox = toujours VIP ; local = ni l'un ni l'autre | `vip` (EXPÉRIMENTAL) : pas de LB, adresse IPAM privée + VIP Talos Layer2 → **API privée uniquement, via tunnel bastion**. |
-| VIP apiserver | `local.apiserver_vip` → `module.talos.apiserver_vip` ; proxmox `apiserver_vip` (requis) + `apiserver_vip_interface` | IP / null | null (cloud) ; requis (proxmox) | proxmox toujours ; scw/ovh en mode vip | Injecté en `machine.network.interfaces[].vip` + certSANs. Ignoré en mode conteneur. |
-| LB applicatif | (pas de bascule) contrat `app_lb_ip` | inhérent au provider | actif | scw/ovh/outscale créent un LB applicatif (80/443) ; proxmox = DNAT hôte ; local = `127.0.0.1` | Pas un axe de test. |
-| Zones / AZ | scw `.zone`+`.zones` ; ovh/outscale `.availability_zones` ; proxmox `.node_names` (round-robin) | ex. scw `["fr-par-1","fr-par-2","fr-par-3"]` | selon exemple | cloud + proxmox | Mono vs multi-AZ. Proxmox : 1 hôte = non-HA, 3 hôtes = **vraie** HA ; 3 CP sur 1 hôte = fausse HA (à éviter). |
-| Bastion | proxmox `enable_bastion` | `true` (VM) / `false` (hôte-bastion) | `false` | bascule proxmox ; scw/ovh/outscale = toujours une VM dédiée ; local = aucun | Le contrat exige `bastion_ip`. |
-| Stockage workers | `worker_storage.disks[]` + `worker_storage.volumes[]` (LUKS2 `UserVolumeConfig`) | aucun, ou disques+volumes | `{disks=[],volumes=[]}` | scw/ovh/outscale/proxmox ; local forcé à off | `disks` → module provider ; `volumes` → `modules/talos`. |
-| Phase d'amorçage | `talos_bootstrap` | `false` (phase 1 infra), `true` (phase 2 config+etcd+Flux) | `true` | tous | `task infra` → `task bootstrap-phase2`. |
-| auto_tunnels | `auto_tunnels` (+ `ssh_key_path`) | `true`/`false` | `false` | cloud/proxmox | EXPÉRIMENTAL, apply unique ; jamais testé sur machine réelle. |
-| secrets_prevent_destroy | `secrets_prevent_destroy` | `true`/`false` | `true` | tous | `false` réservé au nettoyage de `tofu test`. |
-| skip_port_ready_wait | `skip_port_ready_wait` | `true`/`false` | `false` | tous | `true` réservé à la CI mockée. |
-| backup_enabled | `backup_enabled` | `true`/`false` | `true` | racine | `false` saute le local-exec de backup. |
-| Versions Talos / K8s | `talos_version`, `kubernetes_version` | chaînes | selon exemple | tous | Pilote la résolution du nom d'image. |
-| admin_ip | `admin_ip` (liste) | CIDR | requis | tous | Liste d'autorisation ACL LB / SG / nftables hôte. |
+| Provider | `node_distribution.<key>` (scaleway/ovh/outscale/proxmox); `local` = separate `opentofu-local` root | one active | `{}` | — | Exactly one active per apply. |
+| Cluster role | `cluster_role` | `management`, `workload` | `workload` | all | Only drives the Flux bootstrap manifest. A "management" later gets CAPI + deps via `OpenAether-apps` (no CAPI knob in tofu). `failover-*` = management role on a non-primary provider. |
+| Environment | `environment` | `dev`, `prod` | required | all | Naming / bucket suffix only — not a topology axis. |
+| CP topology (HA) | `node_distribution.<p>.control_planes`; local `control_plane_count` | 1 = non-HA, 3 = HA | 0 / local 3 | all | etcd quorum needs odd ≥3. Non-HA CP tainted `NoSchedule`. |
+| Worker count | `node_distribution.<p>.workers`; local `worker_count` | ≥0 (local `0..3`) | 0 / local 3 | all | 0 workers → workloads on (untainted) CPs. |
+| k8s LB mode | `node_distribution.<p>.k8s_lb_mode` | `managed`, `vip` | `managed` | **scw, ovh** only; outscale = managed-only (rejects vip); proxmox = always VIP; local = neither | `vip` (EXPERIMENTAL): no LB, private IPAM addr + Talos Layer2 VIP → **API private-only via bastion tunnel**. |
+| apiserver VIP | `local.apiserver_vip` → `module.talos.apiserver_vip`; proxmox `apiserver_vip` (required) + `apiserver_vip_interface` | IP / null | null (cloud); required (proxmox) | proxmox always; scw/ovh in vip mode | Injected as `machine.network.interfaces[].vip` + certSANs. Ignored in container mode. |
+| App LB | (no toggle) contract `app_lb_ip` | provider-inherent | on | scw/ovh/outscale create an app LB (80/443); proxmox = host DNAT; local = `127.0.0.1` | Not a test knob. |
+| Zones / AZ | scw `.zone`+`.zones`; ovh/outscale `.availability_zones`; proxmox `.node_names` (round-robin) | e.g. scw `["fr-par-1","fr-par-2","fr-par-3"]` | per example | cloud + proxmox | Single vs multi-AZ. Proxmox: 1 host = non-HA, 3 hosts = **true** HA; 3 CP on 1 host = fake HA (avoid). |
+| Bastion | proxmox `enable_bastion` | `true` (VM) / `false` (host-as-bastion) | `false` | proxmox toggle; scw/ovh/outscale always a dedicated VM; local none | Contract requires `bastion_ip`. |
+| Worker storage | `worker_storage.disks[]` + `worker_storage.volumes[]` (LUKS2 `UserVolumeConfig`) | none, or disks+volumes | `{disks=[],volumes=[]}` | scw/ovh/outscale/proxmox; local forced off | `disks` → provider module; `volumes` → `modules/talos`. |
+| Bootstrap phase | `talos_bootstrap` | `false` (Phase 1 infra), `true` (Phase 2 config+etcd+Flux) | `true` | all | `task infra` → `task bootstrap-phase2`. |
+| auto_tunnels | `auto_tunnels` (+ `ssh_key_path`) | `true`/`false` | `false` | cloud/proxmox | EXPERIMENTAL single-apply; untested on a real host. |
+| secrets_prevent_destroy | `secrets_prevent_destroy` | `true`/`false` | `true` | all | `false` only for `tofu test` cleanup. |
+| skip_port_ready_wait | `skip_port_ready_wait` | `true`/`false` | `false` | all | `true` only for mocked CI. |
+| backup_enabled | `backup_enabled` | `true`/`false` | `true` | root | `false` skips the backup local-exec. |
+| Talos / K8s version | `talos_version`, `kubernetes_version` | version strings | per example | all | Drives image name lookup. |
+| admin_ip | `admin_ip` (list) | CIDRs | required | all | LB ACL / SG / host nftables allow-list. |
 
-## B) Cas de test pertinents
+## B) Meaningful test cases
 
-### Exclus / invalides / redondants — à **ne pas** tester
+### Excluded / invalid / redundant — do **not** test
 
-| Combinaison | Pourquoi |
+| Combo | Why |
 |---|---|
-| ≥ 2 providers avec un compte > 0 dans un même apply | Bloqué par `check "single_provider_per_cluster"`. |
-| `outscale` + `k8s_lb_mode="vip"` | La validation du provider le rejette (LB à nom DNS). |
-| `proxmox` + n'importe quel `k8s_lb_mode` | Ignoré — proxmox utilise toujours la VIP Talos. |
-| `local-docker` + LB / stockage / Flux par manifeste d'amorçage | Pas de LB (IP du cp0) ; volumes forcés off ; Flux installé après boot. |
-| `apiserver_vip` avec `k8s_lb_mode="managed"` en cloud | Résout à null. |
-| 3 CP sur un seul hôte Proxmox | Fausse HA — la vraie HA est multi-hôtes. |
-| local CP ∉ {1,3} ou workers > 3 | Erreur de validation. |
-| `dev` vs `prod` comme topologie | Nommage seulement — à replier dans n'importe quel cas. |
+| ≥2 providers with count>0 in one apply | Blocked by `check "single_provider_per_cluster"`. |
+| `outscale` + `k8s_lb_mode="vip"` | Provider validation rejects it (DNS-name LB). |
+| `proxmox` + any `k8s_lb_mode` | Ignored — proxmox always uses the Talos VIP. |
+| `local-docker` + LB / storage / bootstrap-manifest Flux | No LB (cp0 IP); volumes forced off; Flux installed post-boot. |
+| `apiserver_vip` with cloud `k8s_lb_mode="managed"` | Resolves to null. |
+| 3 CP on a single Proxmox host | Fake HA — real HA is multi-host. |
+| local CP ∉ {1,3} or workers >3 | Validation error. |
+| `dev` vs `prod` as a topology | Naming only — fold into any case. |
 
-### local-docker (racine `opentofu-local`)
+### local-docker (`opentofu-local` root)
 
-| ID | CP/W | Ce qu'il exerce en propre | Statut |
+| ID | CP/W | Uniquely exercises | Status |
 |---|---|---|---|
-| `L-ha` | 3+3 | Vrai quorum etcd à 3 nœuds, workers dédiés ordonnançables, Cilium, livraison par `userdata` — preuve principale de `modules/talos` sans credentials. | ✅ (`task local-up`, 2026-07-28) |
-| `L-smoke` | 1+0 | Smoke test mono-nœud ; repli d'ordonnancement sur CP non taché. | ⬜ |
+| `L-ha` | 3+3 | Real 3-node etcd quorum, dedicated schedulable workers, Cilium, `userdata` delivery — primary credential-free proof of `modules/talos`. | ✅ (`task local-up`, 2026-07-28) |
+| `L-smoke` | 1+0 | Fast single-node smoke; untainted-CP scheduling fallback. | ⬜ |
 
-### Scaleway (provider de référence)
+### Scaleway (reference provider)
 
-| ID | Rôle | CP/W | k8s_lb_mode | Zones | Stockage | Ce qu'il exerce en propre | Statut |
+| ID | Role | CP/W | k8s_lb_mode | Zones | Storage | Uniquely exercises | Status |
 |---|---|---|---|---|---|---|---|
-| `SCW-mgmt-nonha` | mgmt | 1+1 | managed | mono | aucun | Chemin cloud le moins cher ; taint CP non-HA ; ACL du LB managé. | ✅ |
-| `SCW-mgmt-ha` | mgmt | 3+2 | managed | 3 AZ | aucun | etcd sur 3 zones ; distribution multi-AZ. | ⬜ |
-| `SCW-vip` | mgmt | 3+1 | **vip** | multi-AZ | aucun | Supprime le LB ; VIP Talos Layer2 ; API privée via tunnel ; anti-spoofing. | ✅ *(2026-07-15)* |
-| `SCW-work-ha` | workload | 3+3 | managed | 3 AZ | aucun | Chemin d'amorçage Flux du rôle workload. | ⬜ |
-| `SCW-storage` | workload | 3+3 | managed | 3 AZ | **disques+volumes** | Volumes blocs SBS + `UserVolumeConfig` chiffré (LUKS2). | ⬜ |
+| `SCW-mgmt-nonha` | mgmt | 1+1 | managed | single | none | Cheapest cloud path; non-HA CP taint; managed LB ACL. | ✅ |
+| `SCW-mgmt-ha` | mgmt | 3+2 | managed | 3-AZ | none | etcd across 3 zones; multi-AZ distribution. | ⬜ |
+| `SCW-vip` | mgmt | 3+1 | **vip** | multi-AZ | none | Drops the LB; Talos Layer2 VIP; private API via tunnel; anti-spoofing. | ✅ *(2026-07-15)* |
+| `SCW-work-ha` | workload | 3+3 | managed | 3-AZ | none | Workload-role Flux bootstrap path. | ⬜ |
+| `SCW-storage` | workload | 3+3 | managed | 3-AZ | **disks+volumes** | SBS block volumes + encrypted `UserVolumeConfig` (LUKS2). | ⬜ |
 
 ### OVH (OpenStack)
 
-| ID | Rôle | CP/W | k8s_lb_mode | Ce qu'il exerce en propre | Statut |
+| ID | Role | CP/W | k8s_lb_mode | Uniquely exercises | Status |
 |---|---|---|---|---|---|
-| `OVH-mgmt-ha` | mgmt | 3+3 | managed | LB Octavia + floating IP ; ports OpenStack ; bastion Ubuntu ; egress routeur SNAT. | ✅ *(2026-07-27/28, plusieurs cycles)* |
-| `OVH-vip` | mgmt | 3+2 | **vip** | `allowed_address_pairs` sur les ports CP pour l'anti-spoof Neutron (mécanisme distinct de Scaleway). | 🧪 |
-| `OVH-work-ha` | workload | 3+3 | managed | Rôle workload sur OVH. | ⬜ |
-| `OVH-storage` | workload | 3+3 | managed | Attachement de volumes Cinder. | ⬜ |
+| `OVH-mgmt-ha` | mgmt | 3+3 | managed | Octavia LB + floating IP; OpenStack ports; Ubuntu bastion; SNAT router egress. | ✅ *(2026-07-27/28, several cycles)* |
+| `OVH-vip` | mgmt | 3+2 | **vip** | `allowed_address_pairs` on CP ports for Neutron anti-spoof (distinct from Scaleway). | 🧪 |
+| `OVH-work-ha` | workload | 3+3 | managed | Workload role on OVH. | ⬜ |
+| `OVH-storage` | workload | 3+3 | managed | Cinder volume attach. | ⬜ |
 
-### Outscale (managed seul, LB à nom DNS)
+### Outscale (managed-only, DNS-name LB)
 
-| ID | Rôle | CP/W | k8s_lb_mode | Ce qu'il exerce en propre | Statut |
+| ID | Role | CP/W | k8s_lb_mode | Uniquely exercises | Status |
 |---|---|---|---|---|---|
-| `OSC-mgmt-ha` | mgmt | 3+2 | managed | Le LB renvoie un **nom DNS**, pas une IP ; utilisateur SSH outscale. | ✅ |
-| `OSC-work-ha` | workload | 3+3 | managed | Rôle workload ; volumes BSU si couplé au stockage. | ⬜ |
-| `OSC-vip-reject` | — | tout | vip | Test négatif : la validation doit rejeter `vip`. | 🧪 |
+| `OSC-mgmt-ha` | mgmt | 3+2 | managed | LB returns a **DNS name**, not an IP; outscale SSH user. | ✅ |
+| `OSC-work-ha` | workload | 3+3 | managed | Workload role; BSU volumes if paired with storage. | ⬜ |
+| `OSC-vip-reject` | — | any | vip | Negative test: validation must reject `vip`. | 🧪 |
 
-### Proxmox (bare-metal, toujours VIP, hôte-bastion)
+### Proxmox (bare-metal, always-VIP, host-as-bastion)
 
-| ID | Rôle | CP/W | node_names | Bastion | Ce qu'il exerce en propre | Statut |
+| ID | Role | CP/W | node_names | Bastion | Uniquely exercises | Status |
 |---|---|---|---|---|---|---|
-| `PMX-nonha-host` | mgmt | 1+1 | `["pve1"]` | hôte | Mono-hôte non-HA ; VIP Talos ; IP statiques `cidrhost()` ; ni LB ni NAT ni SG. | ⬜ |
-| `PMX-work-nonha` | workload | 1+1 | `["pve1"]` | hôte | Rôle workload on-prem. | ⬜ |
-| `PMX-ha-multihost` | mgmt | 3+n | `["pve1","pve2","pve3"]` | hôte | Vraie HA on-prem : 1 CP par hôte, VIP qui flotte ; bridge L2. | ⬜ |
-| `PMX-vm-bastion` | mgmt | 1+1 | `["pve1"]` | **VM** | Chemin bastion en VM dédiée. | ⬜ |
-| `PMX-storage` | workload | 1+1 | `["pve1"]` | hôte | Disque de données Proxmox + volume chiffré. | ⬜ |
+| `PMX-nonha-host` | mgmt | 1+1 | `["pve1"]` | host | Single-host non-HA; Talos VIP; static `cidrhost()` IPs; no LB/NAT/SG. | ⬜ |
+| `PMX-work-nonha` | workload | 1+1 | `["pve1"]` | host | Workload role on-prem. | ⬜ |
+| `PMX-ha-multihost` | mgmt | 3+n | `["pve1","pve2","pve3"]` | host | True on-prem HA: 1 CP/host, VIP floats; L2 bridge. | ⬜ |
+| `PMX-vm-bastion` | mgmt | 1+1 | `["pve1"]` | **VM** | Dedicated bastion VM path. | ⬜ |
+| `PMX-storage` | workload | 1+1 | `["pve1"]` | host | Extra Proxmox data disk + encrypted volume. | ⬜ |
 
-### Surcouche CAPI — clusters enfants et management amorcé par CAPI
+### CAPI layer — child clusters and CAPI-bootstrapped management
 
-| ID | Amorcé par | Provider | Ce qu'il exerce en propre | Statut |
+| ID | Bootstrapped by | Provider | Uniquely exercises | Status |
 |---|---|---|---|---|
-| `CAPI-edge-scw` | management | Scaleway | Enfant CAPS ; Cilium+Flux injectés à distance ; profil git propre. | ✅ *(edge-1, 2026-07-28)* |
-| `CAPI-edge-ovh` | management | OVH (CAPO) | Enfant CAPO ; réseau/LB/SG créés par CAPO ; FIP pré-allouée pour les certSANs. | ✅ *(edge-2, 2026-07-28)* |
-| `CAPI-cross-provider` | management OVH | Scaleway | Gitception **cross-provider dans les deux sens**. | ✅ *(2026-07-28)* |
-| `CAPI-mgmt-pivot` | cluster jetable local | Scaleway | Management **né de CAPI**, qui déploie son propre enfant, puis `clusterctl move` vers lui-même. | ✅ *(mgmt-capi, 2026-07-28 — cf. `capi-bootstrap.md`)* |
-| `CAPI-edge-osc` | management | Outscale | Enfant CAPOSC. | ⬜ *(quota RAM du compte)* |
+| `CAPI-edge-scw` | management | Scaleway | CAPS child; Cilium+Flux injected remotely; own git profile. | ✅ *(edge-1, 2026-07-28)* |
+| `CAPI-edge-ovh` | management | OVH (CAPO) | CAPO child; network/LB/SG created by CAPO; pre-allocated FIP for certSANs. | ✅ *(edge-2, 2026-07-28)* |
+| `CAPI-cross-provider` | OVH management | Scaleway | Gitception **cross-provider in both directions**. | ✅ *(2026-07-28)* |
+| `CAPI-mgmt-pivot` | local throwaway cluster | Scaleway | Management **born from CAPI**, deploying its own child, then `clusterctl move` onto itself. | ✅ *(mgmt-capi, 2026-07-28 — see `capi-bootstrap.md`)* |
+| `CAPI-edge-osc` | management | Outscale | CAPOSC child. | ⬜ *(account RAM quota)* |
 
-### Scénarios d'exploitation transverses
+### Cross-cutting operational scenarios
 
-| ID | Variables clés | Ce qu'il exerce en propre | Statut |
+| ID | Key vars | Uniquely exercises | Status |
 |---|---|---|---|
-| `OP-twophase` | `talos_bootstrap=false` puis `true` | Découpage documenté `task infra` → `task bootstrap-phase2`. | ✅ |
-| `OP-autotunnels` | `auto_tunnels=true` | EXPÉRIMENTAL, apply unique. | ⬜ |
-| `OP-failover` | `failover-<p>.tfvars`, `task failover` | 2ᵉ management cross-provider ; ré-enregistrement des spokes. | ⬜ |
-| `OP-destroy` | `task fleet-down` / `task destroy` | Chemin de destruction ordonné (enfants puis management). | ✅ |
-| `OP-tftest` | mocké | Suite de tests unitaires (sans credentials). | ✅ (CI) |
-| `OP-backup` | `backup_enabled=true`, `BACKUP_AWS_*` cross-provider | DR : tfstate + kube/talosconfig vers primaire et réplica ; restic chiffré client. | ✅ *(local + cloud réel SCW+OVH)* |
-| `OP-rolling-replace` | `task rolling-replace` | Remplacement d'un nœud sans coupure (evict etcd, 1 nœud à la fois). | ✅ *(Scaleway)* |
+| `OP-twophase` | `talos_bootstrap=false` then `true` | Documented `task infra` → `task bootstrap-phase2` split. | ✅ |
+| `OP-autotunnels` | `auto_tunnels=true` | EXPERIMENTAL single-apply. | ⬜ |
+| `OP-failover` | `failover-<p>.tfvars`, `task failover` | Cross-provider 2nd management; re-register spokes. | ⬜ |
+| `OP-destroy` | `task fleet-down` / `task destroy` | Ordered teardown (children then management). | ✅ |
+| `OP-tftest` | mocked | The unit-test suite (no credentials). | ✅ (CI) |
+| `OP-backup` | `backup_enabled=true`, cross-provider `BACKUP_AWS_*` | DR: tfstate + kube/talosconfig to primary + replica; client-encrypted restic. | ✅ *(local + real cloud SCW+OVH)* |
+| `OP-rolling-replace` | `task rolling-replace` | Zero-downtime node replacement (etcd evict, one node at a time). | ✅ *(Scaleway)* |
 
-## C) Priorités (plus forte valeur, non testé, apply réel)
+## C) Priority (highest-value untested, real apply)
 
-1. **`providerID` sur les nœuds CAPI** — aucun enfant n'a de `spec.providerID`,
-   donc `nodeRef` n'est jamais résolu et `MachineHealthCheck` est inopérant.
-   Bloquant pour l'argumentaire day-2 de CAPI. Cf. `backlog.md`.
-2. **Apply réel Proxmox** (`PMX-*`) — jamais exécuté sur un hôte réel.
-3. **HA multi-AZ en cloud** (`SCW-mgmt-ha`, `OSC-mgmt-ha`) — etcd 3 CP réparti
-   sur plusieurs zones jamais appliqué.
-4. **`OVH-vip`** — le mode vip n'a jamais été appliqué sur OVH (mécanisme
-   Neutron `allowed_address_pairs`, distinct de Scaleway).
-5. **Apply réel du rôle workload** (`*-work-*`) — seul le management est exercé.
-6. **`worker_storage` en réel** (`*-storage`) — LUKS2 `UserVolumeConfig` et
-   attachement de volumes jamais appliqués.
-7. **`OP-failover`** — chemin DR non prouvé.
+1. **`providerID` on CAPI nodes** — no child has `spec.providerID`, so `nodeRef`
+   is never resolved and `MachineHealthCheck` cannot work. Blocking for CAPI's
+   day-2 argument. See `backlog.md`.
+2. **Proxmox real apply** (`PMX-*`) — never run on a real host.
+3. **Cloud HA multi-AZ** (`SCW-mgmt-ha`, `OSC-mgmt-ha`) — 3-CP etcd across zones
+   never applied.
+4. **`OVH-vip`** — vip mode never applied on OVH (distinct Neutron
+   `allowed_address_pairs` mechanism).
+5. **Workload role real apply** (`*-work-*`) — only management exercised.
+6. **`worker_storage` real apply** (`*-storage`) — LUKS2 `UserVolumeConfig` and
+   block-volume attach never applied.
+7. **`OP-failover`** — DR path unproven.
 
-## D) Constats — apply réel `SCW-vip` (2026-07-15)
+## D) Findings — `SCW-vip` real apply (2026-07-15)
 
 3 CP (fr-par-1 + fr-par-2) + 1 worker, `k8s_lb_mode=vip`.
 
-- ✅ **La VIP Layer2 fonctionne sur Scaleway, y compris cross-zone.** Le réseau
-  privé régional relaie l'ARP de la VIP entre zones — c'était la principale
-  inconnue.
-- ✅ **La VIP est dans les SANs du certificat apiserver.**
-- ⚠️ **L'accès opérateur est privé uniquement** : il faut le tunnel bastion 6443.
-- ⚠️ **`data.talos_cluster_health` peut bloquer l'apply en deux phases en mode
-  vip** : la lecture part du poste opérateur et n'atteint pas la VIP privée. etcd
-  et la config sont appliqués avant, donc le state est complet.
+- ✅ **Layer2 VIP works on Scaleway, including cross-zone.** The regional private
+  network relays the VIP's ARP across zones — the main open question going in.
+- ✅ **VIP is in the apiserver cert SANs.**
+- ⚠️ **Operator access is private-only**: `kubectl` needs the bastion 6443 tunnel.
+- ⚠️ **`data.talos_cluster_health` can hang the two-phase apply in vip mode**: the
+  read is issued from the operator's machine and cannot reach the private VIP.
+  etcd/config are applied before it, so the state is complete.
 
-## E) Tenir ce document à jour
+## E) Keeping this current
 
-1. **Ce fichier versionné** est l'artefact vivant : maintenir la colonne
-   **Statut** de chaque cas.
-2. **Générer les lignes « combinaisons livrées » depuis `envs/*.tfvars.example`**
-   pour que la table ne dérive pas ; garder au-dessus la prose écrite à la main.
-3. **Lier le statut aux filtres `tofu test`** pour distinguer explicitement
-   « couvert (unitaire) » de « couvert (apply) ».
-4. **Garde-fou CI** : échouer si un nouveau champ `node_distribution` ou une
-   nouvelle valeur d'énumération apparaît dans `variables.tf` sans ligne
-   correspondante ici.
+1. **This committed doc** is the living artifact; keep the per-case **Status**
+   column up to date.
+2. **Generate the "shipped combos" rows from `envs/*.tfvars.example`** so the
+   table never drifts; keep the hand-written prose above the generated table.
+3. **Bind status to the `tofu test` filters** so "covered (unit)" vs
+   "covered (apply)" is explicit.
+4. **CI drift guard**: fail if a new `node_distribution` field or a new enum
+   value appears in `variables.tf` without a matching row here.

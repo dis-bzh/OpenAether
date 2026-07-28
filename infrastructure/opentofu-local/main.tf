@@ -25,12 +25,12 @@ locals {
   worker_ips       = [for i in range(local.worker_count) : "${local.net_prefix}.${20 + i}"]
   worker_endpoints = [for i in range(local.worker_count) : "127.0.0.1:${var.talos_api_port_base + 10 + i}"]
 
-  # ⚠️ Les manifests vivent sous opentofu/CLUSTER/bootstrap-manifests. Le
-  # chemin sans `cluster/` désignait un répertoire inexistant : le repli
-  # `file(...)` ne pouvait donc JAMAIS aboutir. Le défaut restait invisible
-  # parce que la task local-up passe toujours TF_VAR_cilium_manifest, ce qui
-  # court-circuite la branche — un `tofu apply` lancé à la main ici échouait.
-  # Même famille que le répertoire fantôme de render-bootstrap-manifests.sh.
+  # ⚠️ The manifests live under opentofu/CLUSTER/bootstrap-manifests. The path
+  # without `cluster/` pointed at a directory that does not exist, so the
+  # `file(...)` fallback could NEVER succeed. The defect stayed invisible
+  # because the local-up task always passes TF_VAR_cilium_manifest, which
+  # short-circuits that branch — a hand-run `tofu apply` here would fail.
+  # Same family as the phantom directory in render-bootstrap-manifests.sh.
   manifests_dir = "${path.module}/../opentofu/cluster/bootstrap-manifests"
   cilium_manifest = var.cilium_manifest != null ? var.cilium_manifest : (
     fileexists("${local.manifests_dir}/cilium-local.yaml")

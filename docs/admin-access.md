@@ -1,28 +1,28 @@
-# Jour 1 — initialisation admin après `task up` (management)
+# Day 1 — admin initialisation after `task up` (management)
 
-🇬🇧 [English version](admin-access.en.md)
+🇫🇷 [Version française](admin-access.fr.md)
 
-Parcours **ordonné** des opérations manuelles post-déploiement. Chaque étape
-renvoie au runbook détaillé de sa brique. Validé en conditions réelles
-(Scaleway, 2026-07-25). Convention : `KC=infrastructure/opentofu/cluster/kubeconfig`.
+**Ordered** walkthrough of the manual post-deployment steps. Each one points to
+its brick's detailed runbook. Validated under real conditions (Scaleway,
+2026-07-25). Convention: `KC=infrastructure/opentofu/cluster/kubeconfig`.
 
-## 1. Escrow (IMMÉDIAT — avant toute autre chose)
+## 1. Escrow (IMMEDIATE — before anything else)
 
-Trois secrets à mettre dans Bitwarden EU (puis à effacer des sorties locales) :
+Three secrets to store in Bitwarden EU (then wipe from local output):
 
-| Quoi | Où le lire | Pourquoi |
+| What | Where to read it | Why |
 |---|---|---|
-| Parts Shamir (5/3) + root token | `kubectl --kubeconfig $KC logs -n foundation-vault job/openbao-init` (aussi dans le Secret `openbao-recovery`, clés `root_token`/`unseal_key_*`) | unseal/DR OpenBao — la vérité doit être OFFLINE |
-| Password restic des backups | `kubectl --kubeconfig $KC logs -n foundation-vault job/openbao-vault-bootstrap` (bloc `BEGIN RESTIC PASSWORD`, affiché UNE fois à la génération) | sans lui, les backups sont indéchiffrables le jour où OpenBao est perdu |
-| Passphrase state (`TF_VAR_encryption_passphrase`) | déjà dans ton vault (prérequis du deploy) | tfstate + artifacts gpg + etcd-snapshot |
+| Shamir shares (5/3) + root token | `kubectl --kubeconfig $KC logs -n foundation-vault job/openbao-init` (also in Secret `openbao-recovery`, keys `root_token`/`unseal_key_*`) | OpenBao unseal/DR — the truth must live OFFLINE |
+| restic backup password | `kubectl --kubeconfig $KC logs -n foundation-vault job/openbao-vault-bootstrap` (`BEGIN RESTIC PASSWORD` block, printed ONCE at generation) | without it the backups are undecryptable the day OpenBao is lost |
+| State passphrase (`TF_VAR_encryption_passphrase`) | already in your vault (deploy prerequisite) | tfstate + gpg artifacts + etcd snapshots |
 
-Runbooks : `OpenAether-apps/apps/base/foundation/vault/README.md` (rekey/DR),
+Runbooks: `OpenAether-apps/apps/base/foundation/vault/README.md` (rekey/DR),
 `OpenAether-apps/apps/base/backup/README.md`.
 
-## 2. Signer l'intermediate PKI (débloque le HTTPS)
+## 2. Sign the PKI intermediate (unblocks HTTPS)
 
-Le Job bootstrap affiche le CSR (`BEGIN INTERMEDIATE CSR` dans ses logs).
-Signer OFFLINE avec la root CA (Bitwarden), puis :
+The bootstrap Job prints the CSR (`BEGIN INTERMEDIATE CSR` in its logs). Sign it
+OFFLINE with the root CA (Bitwarden), then:
 
 ```bash
 kubectl --kubeconfig $KC exec -i openbao-0 -n foundation-vault -- \
@@ -30,14 +30,16 @@ kubectl --kubeconfig $KC exec -i openbao-0 -n foundation-vault -- \
   bao write pki/intermediate/set-signed certificate=@- < intermediate-signed.pem
 ```
 
-→ le Certificate `openaether-tls` passe Ready seul (retry cert-manager), le
-listener 443 de la gateway se programme.
-Runbook détaillé : `OpenAether-apps/apps/base/foundation/vault/pki-root-offline-runbook.md`.
+→ the `openaether-tls` Certificate goes Ready on its own (cert-manager retries),
+and the gateway's 443 listener is programmed.
+Detailed runbook:
+`OpenAether-apps/apps/base/foundation/vault/pki-root-offline-runbook.md`.
 
-## 3. Activer les backups (brique backup, compagnon par défaut)
+## 3. Enable backups (backup brick, default companion)
 
-Les buckets doivent PRÉEXISTER (restic ne les crée pas) — un par destination,
-providers différents en prod. Puis seed des destinations dans OpenBao :
+The buckets must **pre-exist** (restic does not create them) — one per
+destination, on different providers in production. Then seed the destinations in
+OpenBao:
 
 ```bash
 bao kv put secret/backup/s3-primary endpoint="https://s3.fr-par.scw.cloud" \
@@ -46,309 +48,311 @@ bao kv put secret/backup/s3-replica endpoint="https://s3.eu-west-par.io.cloud.ov
   bucket="s3-openaether-ovh-backups-dev" access_key=… secret_key=…
 ```
 
-Tant que non seedés : `ExternalSecret backup-restic-env` NotReady, CronJobs à
-l'arrêt (by design). Test : `kubectl create job --from=cronjob/openbao-snapshot
-test -n foundation-vault`. Détails : `OpenAether-apps/apps/base/backup/README.md`.
+Until seeded: `ExternalSecret backup-restic-env` stays NotReady and the CronJobs
+are idle (by design). Test with
+`kubectl create job --from=cronjob/openbao-snapshot test -n foundation-vault`.
+Details: `OpenAether-apps/apps/base/backup/README.md`.
 
-**`secret/backup/s3-primary` sert trois mécanismes** : dépôts restic, PITR CNPG
-(`barmanObjectStore`) et backups de volumes Longhorn. Une seule destination à
-seeder pour les trois.
+**`secret/backup/s3-primary` feeds three mechanisms**: restic repositories, CNPG
+PITR (`barmanObjectStore`) and Longhorn volume backups. One destination to seed
+for all three.
 
-**Loki a sa PROPRE destination** — volontairement séparée, pour ne pas lui
-donner un accès en écriture au bucket des sauvegardes :
+**Loki has its OWN destination** — deliberately separate, so it never gets write
+access to the backup bucket:
 
 ```bash
 bao kv put secret/observability/loki-s3 \
   endpoint="https://s3.fr-par.scw.cloud" bucket="s3-openaether-scw-loki-dev" \
   accessKey=… secretKey=…
-# En local, pour retrouver le comportement d'avant (MinIO interne) :
+# Locally, to reproduce the previous behaviour (internal MinIO):
 bao kv put secret/observability/loki-s3 \
   endpoint="http://minio.foundation-storage:9000" bucket="loki" \
   accessKey=… secretKey=…
 ```
 
-⚠️ Tant que ce chemin n'est pas seedé, **Loki ne s'installe pas** (son
-HelmRelease consomme ce Secret en `valuesFrom`). C'est voulu : mieux vaut un
-échec visible qu'un Loki qui écrit silencieusement au mauvais endroit.
+⚠️ Until that path is seeded, **Loki does not install** (its HelmRelease consumes
+the Secret through `valuesFrom`). That is intentional: a visible failure beats a
+Loki silently writing to the wrong place.
 
-## 3bis. Quotas des comptes — à vérifier AVANT de déployer
+## 3bis. Account quotas — check BEFORE deploying
 
-Les quotas relevés le 2026-07-27 (lecture directe des API) :
+Quotas read directly from the APIs on 2026-07-27:
 
 | Provider | Instances | vCPU | RAM |
 |---|---|---|---|
-| **Outscale** | 10 | 20 | **40 Go** |
-| **OVH** (projet utilisé) | **10** | 34 | 420 Go |
-| Scaleway | non contraignant sur ce compte | | |
+| **Outscale** | 10 | 20 | **40 GB** |
+| **OVH** (project in use) | **10** | 34 | 420 GB |
+| Scaleway | not constraining on this account | | |
 
-Ce que ça implique concrètement :
+What that means in practice:
 
-- **Outscale** : un management HA (3 CP + 3 workers + bastion) demande **44 Go**
-  pour un plafond de 40. Le dépassement est **toléré à la création**, puis toute
-  VM supplémentaire est refusée (`CreateVms → 10042 TooManyResources`). Aucun
-  message dans le CR CAPI : l'`OscMachine` boucle en `VmNotReady` avec une IP
-  réallouée sans fin, et il faut lire les logs du manager CAPOSC pour comprendre.
-  → management HA Outscale **et** enfant Outscale sont exclusifs sur ce compte.
-- **OVH** : 10 instances, soit management (7 avec le bastion) + **un seul**
-  enfant (2). Pas de marge pour un second.
+- **Outscale**: an HA management (3 CP + 3 workers + bastion) needs **44 GB**
+  against a 40 GB ceiling. The overrun is **tolerated at creation**, then any
+  further VM is refused (`CreateVms → 10042 TooManyResources`). Nothing surfaces
+  in the CAPI CR: the `OscMachine` loops in `VmNotReady` with an endlessly
+  reallocated IP, and you have to read the CAPOSC manager logs to understand.
+  → an HA Outscale management **and** an Outscale child are mutually exclusive
+  on this account.
+- **OVH**: 10 instances, i.e. the management (7 with the bastion) plus **one**
+  child (2). No room for a second one.
 
-Pré-vol, avant tout `task up` ou activation d'un enfant :
+Preflight, before any `task up` or child activation:
 
 ```bash
 source .env.sh
 task preflight-quotas PROVIDER=outscale -- --add-vms 7 --add-cores 14 --add-ram-gb 44
 ```
 
-Il sort en erreur si la topologie demandée dépasse — c'est exactement le
-scénario qui a fait perdre deux déploiements.
+It exits non-zero if the requested topology overflows — exactly the scenario
+that cost two deployments.
 
-## 3ter. Planifier le snapshot etcd (opérateur)
+## 3ter. Schedule the etcd snapshot (operator)
 
-Le snapshot etcd est un **raccourci de RTO** : le contenu du cluster est
-reconstruit par Flux, mais quelques objets ne vivent QUE dans etcd (Secrets
-écrits par des Jobs, bindings de PVC…). `task etcd-snapshot` le fait à la
-demande ; rien ne le déclenchait périodiquement.
+The etcd snapshot is an **RTO shortcut**: cluster content is rebuilt by Flux, but
+a few objects live ONLY in etcd (Secrets written by Jobs, PVC bindings…).
+`task etcd-snapshot` does it on demand; nothing triggered it periodically.
 
 ```bash
-# 03:40 chaque jour — chemin ABSOLU obligatoire, la sortie part par mail
-40 3 * * * /chemin/vers/OpenAether-infra/scripts/ops/etcd-snapshot-cron.sh ovh ~/.ssh/id_ed25519-ovh-openaether-dev >> /var/log/openaether-etcd-snapshot.log 2>&1
+# 03:40 daily — an ABSOLUTE path is mandatory; output is mailed by cron
+40 3 * * * /path/to/OpenAether-infra/scripts/ops/etcd-snapshot-cron.sh ovh ~/.ssh/id_ed25519-ovh-openaether-dev >> /var/log/openaether-etcd-snapshot.log 2>&1
 ```
 
-Le wrapper existe parce que la task seule n'est pas utilisable en cron :
-- cron démarre avec un `PATH` minimal, or les outils sont éparpillés
-  (`task`/`talosctl` dans `/usr/local/bin`, `tofu`/`aws` dans `/snap/bin`) ;
-- les credentials viennent de `.env.sh`, que cron n'hérite pas ;
-- **`task etcd-snapshot` ouvre les tunnels SSH et ne les referme pas** — en
-  cron ils s'accumuleraient ; le wrapper les ferme même en cas d'échec ;
-- un verrou `flock` évite qu'un snapshot lent croise le suivant.
+The wrapper exists because the task alone is not cron-usable:
 
-Il tourne sur la machine qui détient le dépôt ET les credentials. Un échec sort
-en code non nul avec un message horodaté — de quoi être vu par cron ou un
-superviseur.
+- cron starts with a minimal `PATH`, and the tools are scattered (`task` and
+  `talosctl` in `/usr/local/bin`, `tofu` and `aws` in `/snap/bin`);
+- credentials come from `.env.sh`, which cron does not inherit;
+- **`task etcd-snapshot` opens SSH tunnels and never closes them** — under cron
+  they would pile up; the wrapper closes them even on failure;
+- a `flock` prevents a slow snapshot from overlapping the next one.
 
-## 4. Accès admin aux UIs (interface restreinte)
+It runs on the machine that holds both the repository and the credentials. A
+failure exits non-zero with a timestamped message — enough for cron or a
+supervisor to notice.
 
-Exposition : gateway sur IP **privée VPC** (pool LB-IPAM) + SG bastion limité à
-`admin_ip` → rien de public. Routes : `vault|grafana|zitadel|longhorn.openaether.local`.
+## 4. Admin access to the UIs (restricted interface)
 
-- **Sans TLS (dépannage)** : `./scripts/ops/local-admin-portforward.sh`
-  (port-forwards loopback-only).
-- **HTTPS (après l'étape 2)** :
+Exposure: the gateway sits on a **private VPC IP** (LB-IPAM pool) with the
+bastion SG restricted to `admin_ip` → nothing public. Routes:
+`vault|grafana|zitadel|longhorn.openaether.local`.
+
+- **Without TLS (troubleshooting)**: `./scripts/ops/local-admin-portforward.sh`
+  (loopback-only port-forwards).
+- **HTTPS (after step 2)**:
   ```bash
-  ssh -i <clé bastion> -L 8443:<IP-gateway>:443 bastion@<IP-bastion> -N
-  # IP gateway : kubectl get gateway -n services-gateway ; bastion : tofu output bastion_ip
-  # /etc/hosts : 127.0.0.1 grafana.openaether.local vault.openaether.local zitadel.openaether.local longhorn.openaether.local
+  ssh -i <bastion key> -L 8443:<gateway IP>:443 bastion@<bastion IP> -N
+  # gateway IP: kubectl get gateway -n services-gateway ; bastion: tofu output bastion_ip
+  # /etc/hosts: 127.0.0.1 grafana.openaether.local vault.openaether.local zitadel.openaether.local longhorn.openaether.local
   ```
-  → `https://grafana.openaether.local:8443` ; importer la root CA dans le
-  navigateur pour la chaîne verte. (Alternative sans remap :
+  → `https://grafana.openaether.local:8443`; import the root CA into the browser
+  for a clean chain. (Alternative without remapping:
   `sshuttle -r bastion@<IP> 172.16.12.0/22`.)
-- Credentials : Grafana → `bao kv get secret/grafana/admin` ; Zitadel → console
-  d'init.
-- **OpenBao — ne PAS utiliser le root token au quotidien.** Il n'expire pas, ne
-  se révoque pas utilement, et n'apparaît dans aucun audit sous un nom d'humain.
-  Deux policies nominatives sont créées au bootstrap :
+- Credentials: Grafana → `bao kv get secret/grafana/admin`; Zitadel → init
+  console.
+- **OpenBao — do NOT use the root token day to day.** It never expires, cannot
+  be usefully revoked, and appears in no audit trail under a human's name. Two
+  named policies are created at bootstrap:
 
   ```bash
-  # accès humain, 8 h, tracé sous un nom
-  bao token create -policy=openaether-admin  -ttl=8h -display-name=prenom
-  bao token create -policy=openaether-reader -ttl=8h -display-name=prenom   # lecture seule
+  # human access, 8 h, traced under a name
+  bao token create -policy=openaether-admin  -ttl=8h -display-name=firstname
+  bao token create -policy=openaether-reader -ttl=8h -display-name=firstname   # read-only
   ```
 
-  `openaether-admin` couvre l'exploitation courante (secrets, PKI, policies,
-  auth, montages, baux) mais **refuse explicitement** sceller, `step-down`,
-  rekey et rotation de la clé. Ces gestes de dernier recours restent au root
-  token escrowé hors ligne : ils deviennent délibérés, pas routiniers.
-- ⚠️ si ton IP publique change : mettre à jour `admin_ip` dans le tfvars puis
-  `task infra` (sinon bastion injoignable — tunnels 0/N).
+  `openaether-admin` covers day-to-day operations (secrets, PKI, policies, auth,
+  mounts, leases) but **explicitly denies** seal, `step-down`, rekey and key
+  rotation. Those last-resort actions stay with the offline-escrowed root token:
+  deliberate, never routine.
+- ⚠️ If your public IP changes: update `admin_ip` in the tfvars then run
+  `task infra` (otherwise the bastion is unreachable — tunnels 0/N).
 
-## 4bis. SSO Grafana via Zitadel (OIDC)
+## 4bis. Grafana SSO via Zitadel (OIDC)
 
-Grafana accepte désormais l'authentification Zitadel **en plus** de son admin
-local. Le formulaire local reste actif volontairement : c'est le filet si le SSO
-est cassé ou pas encore configuré. Ne le désactiver (`disable_login_form`)
-qu'une fois le SSO éprouvé.
+Grafana now accepts Zitadel authentication **in addition to** its local admin.
+The local form stays enabled on purpose: it is the safety net if SSO breaks or
+is not configured yet. Only disable it (`disable_login_form`) once SSO is
+proven.
 
-✅ **Déjà fait sur le cluster OVH du 2026-07-28** (projet `OpenAether`, rôle
-`grafana-admin`, application web `Grafana`, `secret/grafana/oidc` seedé). Les
-étapes ci-dessous valent pour un NOUVEAU cluster.
+✅ **Already done on the OVH cluster of 2026-07-28** (project `OpenAether`, role
+`grafana-admin`, web application `Grafana`, `secret/grafana/oidc` seeded). The
+steps below apply to a NEW cluster.
 
-⚠️ **Le scope des rôles est indispensable** : sans
-`urn:zitadel:iam:org:projects:roles` dans `scopes`, Zitadel n'émet aucun claim
-de rôles et tous les comptes restent `Viewer`. Mesuré en réel. Il est désormais
-dans `apps/base/observability/grafana.yaml`.
+⚠️ **The roles scope is mandatory**: without
+`urn:zitadel:iam:org:projects:roles` in `scopes`, Zitadel emits no role claim at
+all and every account stays `Viewer`. Measured for real. It is now set in
+`apps/base/observability/grafana.yaml`.
 
-À faire côté Zitadel (console ou API), une seule fois :
+To do once on the Zitadel side (console or API):
 
-1. Projet « OpenAether » → **Application** de type **Web**
-2. Méthode d'authentification **Code** (PKCE) + client secret
-3. Redirect URI : `https://grafana.openaether.local/login/generic_oauth`
-   Post-logout : `https://grafana.openaether.local/login`
-4. Pour piloter les rôles : créer un rôle projet `grafana-admin`, l'assigner, et
-   activer « User Info inside ID Token »
-5. Reporter les identifiants :
+1. Project "OpenAether" → **Application** of type **Web**
+2. Authentication method **Code** (PKCE) + client secret
+3. Redirect URI: `https://grafana.openaether.local/login/generic_oauth`
+   Post-logout: `https://grafana.openaether.local/login`
+4. To drive roles: create a project role `grafana-admin`, assign it, and enable
+   "User Info inside ID Token"
+5. Store the credentials:
 
 ```bash
 bao kv put secret/grafana/oidc client-id=… client-secret=…
 ```
 
-Tant que ce chemin n'est pas seedé, **Grafana démarre quand même** (les
-variables d'environnement OIDC sont `optional`) : seul le bouton Zitadel est
-inopérant. C'est délibéré — un SSO non configuré ne doit pas rendre Grafana
-inaccessible.
+Until that path is seeded, **Grafana still starts** (the OIDC environment
+variables are `optional`): only the Zitadel button is inert. This is deliberate
+— an unconfigured SSO must not lock you out of Grafana.
 
-⚠️ À vérifier au premier déploiement : la **structure** du claim de rôles. Le
-nom (`urn:zitadel:iam:org:project:roles`) est confirmé par la doc Zitadel, mais
-sa forme dépend de la configuration de l'application :
+⚠️ To verify on the first deployment: the **structure** of the roles claim. The
+name (`urn:zitadel:iam:org:project:roles`) is confirmed by Zitadel's docs, but
+its exact shape depends on the application configuration:
 
 ```bash
 curl -H "Authorization: Bearer <token>" https://zitadel.openaether.local/oidc/v1/userinfo
 ```
 
-Ajuster `role_attribute_path` dans `apps/base/observability/grafana.yaml` si
-besoin. `role_attribute_strict: false` fait retomber sur `Viewer` en cas de
-non-correspondance, plutôt que de refuser l'accès.
+Adjust `role_attribute_path` in `apps/base/observability/grafana.yaml` if needed.
+`role_attribute_strict: false` falls back to `Viewer` on a mismatch rather than
+denying access.
 
-Le chemin réseau Grafana → Zitadel (`:8080`, échange du code puis
-`/oidc/v1/userinfo`) est ouvert des deux côtés dans les CiliumNetworkPolicy —
-sans quoi la connexion échouerait en « operation not permitted », sans autre
-trace qu'un timeout côté Grafana.
+The Grafana → Zitadel network path (`:8080`, code exchange then
+`/oidc/v1/userinfo`) is open on both sides in the CiliumNetworkPolicies —
+without that, login would fail with "operation not permitted", leaving nothing
+but a timeout on the Grafana side.
 
-## 4ter. Tests NAVIGATEUR — ce qui ne peut pas être validé autrement
+## 4ter. BROWSER tests — what cannot be validated any other way
 
-Tout le reste du socle se vérifie en ligne de commande. Ces trois points-là,
-non : ils exigent un vrai navigateur, parce qu'ils reposent sur des redirections
-et des cookies.
+Everything else in the foundation can be checked from the command line. These
+three cannot: they rely on redirects and cookies.
 
-### Prérequis BLOQUANT — signer l'intermediate PKI
+### BLOCKING prerequisite — sign the PKI intermediate
 
-Rien n'est accessible par la gateway tant que l'étape 2 n'est pas faite : le
-listener HTTPS reste `Programmed=False` et le certificat `openaether-tls`
-échoue sur
+Nothing is reachable through the gateway until step 2 is done: the HTTPS
+listener stays `Programmed=False` and the `openaether-tls` certificate fails
+with
 
 ```
 Vault failed to sign certificate: no default issuer currently configured
 ```
 
-C'est attendu : la PKI d'OpenBao n'a pas d'intermediate signé. Vérifier :
+That is expected: OpenBao's PKI has no signed intermediate. Check with:
 
 ```bash
 kubectl get gateway -n services-gateway openaether-gateway \
   -o jsonpath='{range .status.listeners[*]}{.name}={.conditions[?(@.type=="Programmed")].status}{"\n"}{end}'
 ```
 
-Les deux doivent afficher `True`. Sinon, reprendre l'étape 2.
+Both must read `True`. Otherwise, go back to step 2.
 
-### Ouvrir l'accès
+### Open the access
 
 ```bash
-ssh -i <clé bastion> -L 8443:172.16.12.241:443 bastion@<IP-bastion> -N
-# /etc/hosts :
+ssh -i <bastion key> -L 8443:172.16.12.241:443 bastion@<bastion IP> -N
+# /etc/hosts:
 # 127.0.0.1 grafana.openaether.local zitadel.openaether.local vault.openaether.local longhorn.openaether.local
 ```
 
-Importer la **root CA** dans le navigateur, sinon chaque page lèvera un
-avertissement de certificat qui masquera les vrais symptômes.
+Import the **root CA** into the browser, otherwise every page raises a
+certificate warning that will mask the real symptoms.
 
-### Test 1 — le SSO Grafana (le seul point vraiment ouvert)
+### Test 1 — Grafana SSO (the only genuinely open point)
 
-L'application Zitadel, le rôle `grafana-admin` et le secret sont déjà en place.
-Sur `https://grafana.openaether.local:8443` :
+The Zitadel application, the `grafana-admin` role and the secret are already in
+place. On `https://grafana.openaether.local:8443`:
 
-1. le bouton **« Sign in with Zitadel »** est présent → la config est chargée ;
-2. il redirige vers Zitadel et la connexion aboutit → `client_id`/`client_secret`
-   et l'URI de redirection sont bons ;
-3. **le point à trancher** : le rôle obtenu. Menu *Administration → Users*.
-   - compte porteur de `grafana-admin` en **Admin** → le mapping fonctionne,
-     plus rien à faire ;
-   - tout le monde en **Viewer** → le claim de rôles n'est pas celui attendu.
-     Zitadel émet deux formes de nom selon le contexte ; on a retenu la forme
-     non préfixée. Pour trancher, décoder le token :
+1. the **"Sign in with Zitadel"** button is present → the config is loaded;
+2. it redirects to Zitadel and login succeeds → `client_id`/`client_secret` and
+   the redirect URI are correct;
+3. **the point to settle**: the resulting role. Menu *Administration → Users*.
+   - an account holding `grafana-admin` shows as **Admin** → the mapping works,
+     nothing more to do;
+   - everyone shows as **Viewer** → the roles claim is not the expected one.
+     Zitadel emits two name forms depending on context; we picked the
+     unprefixed one. To settle it, decode the token:
 
      ```bash
-     # depuis la page Grafana, récupérer l'access token (outils dev → réseau)
+     # from the Grafana page, grab the access token (dev tools → network)
      curl -H "Authorization: Bearer <token>" \
        https://zitadel.openaether.local:8443/oidc/v1/userinfo | jq 'keys'
      ```
 
-     Si la clé est `urn:zitadel:iam:org:project:<ID>:roles`, reporter cet ID
-     dans `role_attribute_path` (`apps/base/observability/grafana.yaml`).
-     La STRUCTURE, elle, est confirmée : un objet dont les clés sont les rôles,
-     donc `keys()` reste correct.
+     If the key is `urn:zitadel:iam:org:project:<ID>:roles`, put that ID into
+     `role_attribute_path` (`apps/base/observability/grafana.yaml`). The
+     STRUCTURE itself is confirmed: an object whose keys are the roles, so
+     `keys()` remains correct.
 
-⚠️ Le formulaire de connexion local reste actif : c'est le filet si le SSO
-échoue. Ne le désactiver (`disable_login_form`) qu'une fois ce test passé.
+⚠️ The local login form stays enabled: it is the safety net if SSO fails. Only
+disable it (`disable_login_form`) once this test passes.
 
-### Test 2 — l'UI OpenBao derrière la gateway
+### Test 2 — the OpenBao UI behind the gateway
 
-`https://vault.openaether.local:8443` doit afficher l'écran d'unseal/login.
-C'est ce qui valide le `DestinationRule` en `credentialName` : la gateway parle
-désormais en TLS **vérifié** à OpenBao. Une page blanche ou un 503 avec, côté
-OpenBao, un log `TLS handshake error … client sent an HTTP request to an HTTPS
-server`, signifierait que le DestinationRule n'est pas pris en compte.
+`https://vault.openaether.local:8443` must show the unseal/login screen. This is
+what validates the `DestinationRule` using `credentialName`: the gateway now
+speaks **verified** TLS to OpenBao. A blank page or a 503 with an OpenBao log
+saying `TLS handshake error … client sent an HTTP request to an HTTPS server`
+would mean the DestinationRule is not being applied.
 
-### Test 3 — l'ingress PUBLIC (hors tunnel)
+### Test 3 — PUBLIC ingress (outside the tunnel)
 
-Les deux tests ci-dessus passent par la VIP privée. Pour valider le chemin
-public de bout en bout, viser l'IP du LB applicatif **sans tunnel** :
+Both tests above go through the private VIP. To validate the public path
+end-to-end, target the application LB IP **without a tunnel**:
 
 ```bash
-curl -kv --resolve grafana.openaether.local:443:<IP-app-lb> \
+curl -kv --resolve grafana.openaether.local:443:<app LB IP> \
   https://grafana.openaether.local/login
 ```
 
-Le raccordement LB → nodePorts 30080/30443 est déjà vérifié côté
-infrastructure ; ce test confirme la traversée applicative complète.
+The LB → nodePorts 30080/30443 wiring is already verified on the infrastructure
+side; this test confirms the full application traversal.
 
-## 5. Clusters enfants CAPI (si surcouche piochée)
+## 5. CAPI child clusters (if the layer is picked)
 
-Avant d'activer un fichier dans `apps/clusters/` (cf. son README), poser les
-secrets **hors git** :
+Before enabling a file in `apps/clusters/` (see its README), place the secrets
+**outside git**:
 
 ```bash
 kubectl --kubeconfig $KC create secret generic scaleway-capi-credentials -n capi-clusters \
   --from-literal=SCW_ACCESS_KEY=… --from-literal=SCW_SECRET_KEY=…
-kubectl --kubeconfig $KC create secret generic <enfant>-substitutes -n flux-system \
+kubectl --kubeconfig $KC create secret generic <child>-substitutes -n flux-system \
   --from-literal=SCW_PROJECT_ID=…
 ```
 
-Kubeconfig de l'enfant (généré par CAPI) :
+Child kubeconfig (generated by CAPI):
+
 ```bash
-kubectl --kubeconfig $KC get secret <enfant>-kubeconfig -n capi-clusters \
-  -o jsonpath='{.data.value}' | base64 -d > <enfant>.kubeconfig && chmod 600 <enfant>.kubeconfig
+kubectl --kubeconfig $KC get secret <child>-kubeconfig -n capi-clusters \
+  -o jsonpath='{.data.value}' | base64 -d > <child>.kubeconfig && chmod 600 <child>.kubeconfig
 ```
 
-⚠️ **Ne pas modifier les `values` Cilium d'un enfant déjà vivant.** L'upgrade
-Helm déclenche un rollout du CNI sur un cluster souvent à 2 nœuds, sans marge :
-en 2026-07-26 les deux edges en sont sortis dégradés (l'un avec le datapath
-inter-nœuds définitivement cassé, `cilium-dbg status` → `Cluster health 0/2
-reachable`). **Recréer l'enfant** (`task edge-down` puis réactiver son fichier)
-est plus rapide et plus sûr que de réparer. Les valeurs correctes — dont
-`cni.exclusive: false`, obligatoire dès qu'Istio ambient est pioché, et
-`ipam.mode: kubernetes`, sans quoi les CIDR de pods sont taillés dans
-`10.0.0.0/8` où vivent les sous-réseaux de nœuds — sont déjà dans
-`apps/clusters/*.yaml` : un enfant créé aujourd'hui les reçoit au bootstrap.
-`task apps-validate` vérifie cet alignement avant tout déploiement.
+⚠️ **Never change the Cilium `values` of a live child.** The Helm upgrade rolls
+the CNI on a cluster that often has only 2 nodes and no headroom: on 2026-07-26
+both edges came out degraded (one with its inter-node datapath permanently
+broken, `cilium-dbg status` → `Cluster health 0/2 reachable`). **Recreating the
+child** (`task edge-down` then re-enable its file) is faster and safer than
+repairing it. The correct values — including `cni.exclusive: false`, mandatory
+as soon as Istio ambient is picked, and `ipam.mode: kubernetes`, without which
+pod CIDRs are carved out of `10.0.0.0/8` where the node subnets live — are
+already in `apps/clusters/*.yaml`: a child created today gets them at bootstrap.
+`task apps-validate` checks that alignment before any deployment.
 
-Attendu pour un enfant sain avec le profil `workload` : **19/19 Kustomizations**
-(18 du profil + la racine posée par le scaffold). Ce compte **bouge à chaque
-brique ajoutée au DAG** — il valait 17/17 avant le 2026-07-27, puis 18/18. Ne
-pas le lire comme une régression : le vérifier avec
-`python3 scripts/pick.py vault eso certs gateway` (côté apps), qui annonce le
-nombre de Kustomizations retenues.
+Expected for a healthy child on the `workload` profile: **19/19 Kustomizations**
+(18 from the profile + the root laid down by the scaffold). This count **moves
+every time a brick is added to the DAG** — it was 17/17 before 2026-07-27, then
+18/18. Do not read it as a regression: check it with
+`python3 scripts/pick.py vault eso certs gateway` (apps side), which reports how
+many Kustomizations are retained.
 
-Vérifier l'état d'un enfant :
+Check a child's state:
+
 ```bash
-kubectl --kubeconfig <enfant>.kubeconfig get kustomization -n flux-system
-# si `kubectl logs/exec` timeout alors que les nœuds sont Ready :
-#   apiserver → kubelet:10250 est bloqué (security group) — cf. docs/backlog.md
+kubectl --kubeconfig <child>.kubeconfig get kustomization -n flux-system
+# if `kubectl logs/exec` times out while the nodes are Ready:
+#   apiserver → kubelet:10250 is blocked (security group) — see docs/backlog.md
 ```
 
-## Checklist récapitulative
+## Recap checklist
 
-- [ ] Escrow Shamir + root token (Bitwarden)
-- [ ] Escrow password restic (Bitwarden)
-- [ ] Intermediate signé + `set-signed` (HTTPS opérationnel)
-- [ ] Buckets backup créés + `secret/backup/s3-{primary,replica}` seedés
-- [ ] Premier snapshot testé (job manuel → 2 destinations)
-- [ ] Root CA importée dans le navigateur, tunnel testé
-- [ ] (CAPI) secrets enfants posés, kubeconfig extrait
+- [ ] Shamir shares + root token escrowed (Bitwarden)
+- [ ] restic password escrowed (Bitwarden)
+- [ ] Intermediate signed + `set-signed` (HTTPS working)
+- [ ] Backup buckets created + `secret/backup/s3-{primary,replica}` seeded
+- [ ] First snapshot tested (manual job → both destinations)
+- [ ] Root CA imported into the browser, tunnel tested
+- [ ] (CAPI) child secrets placed, kubeconfig extracted
