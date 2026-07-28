@@ -1,25 +1,15 @@
 #!/usr/bin/env bash
-# ==============================================================================
-# OpenAether — ensure the backup object stores exist (idempotent)
+# OpenAether — ensure the backup object stores exist (idempotent).
 #
-# Creates (if missing) the four buckets a cluster needs. Names are DERIVED from
-# the cluster's tfvars (same convention as cluster/backup.tf):
+# Creates the four buckets a cluster needs, names derived from its tfvars (same
+# convention as cluster/backup.tf): tfstate and artifacts, each with a -backup
+# replica.
 #
-#   state     -> s3-<project>-<provider>-tfstate-<env>   (+ -backup)
-#   artifacts -> s3-<project>-<provider>-<role>-<env>    (+ -backup)
+# Only the STATE PRIMARY must exist before `tofu init` (the S3 backend does not
+# create its own bucket) — that one is FATAL. The other three are used later and
+# may live on another provider, so they are best-effort and never block a deploy.
 #
-# Only the STATE PRIMARY must exist before `tofu init` (the S3 backend won't
-# create its own bucket) — that one is FATAL. The three others (state replica +
-# both artifact buckets) are only used later (post-apply replication / Phase-2
-# gpg backup) and may live on ANOTHER provider, so they are BEST-EFFORT here and
-# never block the deploy.
-#
-# Creds (resolved by lib/common.sh::s3_cred):
-#   primary : <PU>_AWS_* (or native SCW_*/OSC_*)
-#   replica : <PU>_BACKUP_AWS_* -> BACKUP_AWS_* -> primary    (PU = SCW|OVH|OUTSCALE)
-#
-# Usage: ./scripts/ensure-buckets.sh <path/to/cluster.tfvars>
-# ==============================================================================
+# Usage: ensure-buckets.sh <path/to/cluster.tfvars>
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 

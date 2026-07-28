@@ -1,30 +1,20 @@
 #!/usr/bin/env bash
-# ==============================================================================
 # OpenAether — build + publish the Talos image for a provider (decoupled root).
 #
-# The image is built once per Talos version and reused by every cluster/env on
-# that provider. Building an image NEVER touches deployed cluster infra (separate
-# state), so it works whether or not infra is already deployed.
+# Built once per Talos version, reused by every cluster on that provider. Its
+# own state (one bucket per provider) means building never touches deployed
+# cluster infra.
 #
-# Consistent cred rule: working on provider X uses AWS_* = X's S3 keys (for the
-# build state, same as deploying a cluster on X) PLUS X's compute creds:
-#   scaleway -> SCW_* ; ovh -> OS_* ; outscale -> OSC_* ; proxmox -> PROXMOX_VE_*.
-#   Plus TF_VAR_encryption_passphrase.
-#
-# State: s3-openaether-<provider>-talos-image / talos-image.tfstate (its own bucket
-# per provider — building one provider's image never disturbs another's). Proxmox
-# has no native object storage, so its state (like its cluster state) lives on an
-# external S3-compatible store — same PROXMOX_AWS_*/PROXMOX_S3_* convention as the
-# cluster root.
+# Credentials: AWS_* = the provider's S3 keys, plus its compute creds
+# (scaleway SCW_*, ovh OS_*, outscale OSC_*, proxmox PROXMOX_VE_*) and
+# TF_VAR_encryption_passphrase.
 #
 # Usage:
-#   ./scripts/talos-image.sh <scaleway|ovh|outscale|proxmox> [talos_version] [--ensure]
+#   ./scripts/bootstrap/talos-image.sh <provider> [talos_version] [--ensure]
 #   task talos-image PROVIDER=ovh [VERSION=v1.13.4]
 #
-# --ensure: idempotence gate for `task up` — plans first (tofu plan
-#   -detailed-exitcode) and only applies if it detects real changes (exit 2),
-#   skipping the apply entirely when the image is already up to date (exit 0).
-# ==============================================================================
+# --ensure: idempotence gate for `task up` — plans first and only applies on a
+#   real change, so a rerun with the image already published costs nothing.
 set -euo pipefail
 
 ENSURE=false

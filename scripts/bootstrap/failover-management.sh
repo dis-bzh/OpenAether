@@ -1,26 +1,13 @@
 #!/usr/bin/env bash
-# ==============================================================================
-# OpenAether — Failover Management Cluster (cross-provider)
+# OpenAether — failover management cluster (cross-provider).
 #
-# Stands up a SECOND management cluster on a DIFFERENT cloud when your primary
-# management provider is unreachable. (Re-running your own management-<provider>
-# on the same provider is the everyday recovery — this is the cross-provider case.)
+# Stands up a SECOND management on a DIFFERENT cloud when the primary provider
+# is unreachable. Re-running your own management on the same provider is the
+# everyday recovery; this is the cross-provider case. Target RTO ~30 min.
 #
-# Target RTO: ~30 minutes (Phase 3). Will improve to <5 min in Phase 4b.
-#
-# Usage:
-#   ./scripts/failover-management.sh <provider>
-#   task failover PROVIDER=ovh
-#
-# Supported providers: scaleway, ovh, outscale, proxmox (pick one that is NOT your primary)
-#
-# Prerequisites:
-#   - tofu CLI available
-#   - Credentials for fallback provider exported (OS_* for OVH, OSC_* for Outscale,
-#     PROXMOX_VE_* for Proxmox)
-#   - S3 access to backup bucket (primary tfstate, via AWS_ACCESS_KEY_ID/SECRET)
-#   - Talos image pre-uploaded on fallback provider
-# ==============================================================================
+# Usage: failover-management.sh <provider>   |   task failover PROVIDER=ovh
+#   Needs the fallback provider's credentials, S3 access to the primary
+#   tfstate, and its Talos image already published.
 set -euo pipefail
 
 PROVIDER="${1:-${PROVIDER:-}}"

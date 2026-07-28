@@ -1,29 +1,16 @@
 #cloud-config
-# ==============================================================================
-# OpenAether bastion — hardened cloud-init (shared template)
+# OpenAether bastion — hardened cloud-init (shared template).
 #
-# P0 hardening items:
-#   1. sshd: ANSSI/Mozilla-2025 crypto, no password, no root, AllowGroups
-#            bastion-admins, AllowTcpForwarding restricted to cluster ports
-#   2. nftables egress DROP in-VM (the real hard control; SG egress = accept
-#            on all providers)
-#   3. No secrets at rest: tmpfs /tmp, HISTFILE=/dev/null, SSH keys in
-#            /etc/ssh/authorized_keys.d/<user> (not in home dir)
-#   4. Dedicated group bastion-admins, nominative user, no shared/anon account
-#   5. unattended-upgrades (security updates only, auto-reboot 03:00)
-#   6. SSH-CA-ready: empty TrustedUserCAKeys + AuthorizedPrincipalsFile (no-op)
-#            DO NOT set AuthorizedKeysFile none — breaks future SSH-CA compat
+# sshd: hardened crypto, key-only, no root, AllowGroups bastion-admins,
+# forwarding limited to the cluster ports. The real egress control is nftables
+# IN the VM (SG egress is accept on every provider). No secrets at rest: tmpfs
+# /tmp, no HISTFILE, keys in /etc/ssh/authorized_keys.d/.
 #
-# Required template vars:
-#   ssh_keys      = list(string)   SSH authorized public keys
-#   bastion_user  = string          User name (scw="bastion", ovh="ubuntu", osc="outscale")
-#   private_cidr  = string          Private subnet CIDR for nftables (e.g. "10.0.0.0/24")
+# ⚠️ Do NOT set `AuthorizedKeysFile none` — it breaks future SSH-CA support.
 #
-# Optional template vars:
-#   extra_packages    = list(string)   Extra packages to install
-#   extra_write_files = list(object({path=string, permissions=string, content=string}))
-#   extra_runcmd      = list(string)   Runs BEFORE nftables enable (use for route fixes)
-# ==============================================================================
+# Vars: ssh_keys, bastion_user, private_cidr (required);
+#       extra_packages, extra_write_files, extra_runcmd (optional, runcmd runs
+#       BEFORE nftables is enabled).
 
 groups:
   - bastion-admins
