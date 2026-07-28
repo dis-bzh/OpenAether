@@ -35,7 +35,7 @@
 # ==============================================================================
 set -euo pipefail
 
-PROVIDER="${1:?usage: etcd-snapshot-cron.sh <scaleway|ovh|outscale|proxmox> [clé-ssh]}"
+PROVIDER="${1:?usage: etcd-snapshot-cron.sh <scaleway|ovh|outscale|proxmox> [ssh-key]}"
 SSH_KEY="${2:-$HOME/.ssh/id_ed25519}"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -55,7 +55,7 @@ if [ -r "$ENV_FILE" ]; then
   set +a
 else
   log "✗ fichier d'environnement introuvable : $ENV_FILE"
-  log "  (le définir via OPENAETHER_ENV_FILE si le dépôt n'est pas au même endroit)"
+  log "  (set it through OPENAETHER_ENV_FILE if the repo lives elsewhere)"
   exit 1
 fi
 
@@ -67,7 +67,7 @@ done
 cleanup() {
   local rc=$?
   "$ROOT/scripts/bootstrap/talos-tunnels.sh" close "$ROOT/infrastructure/opentofu/cluster" >/dev/null 2>&1 || true
-  if [ "$rc" -eq 0 ]; then log "✓ snapshot etcd terminé ($PROVIDER)"; else log "✗ échec (code $rc) — snapshot etcd $PROVIDER"; fi
+  if [ "$rc" -eq 0 ]; then log "✓ etcd snapshot complete ($PROVIDER)"; else log "✗ failed (code $rc) — etcd snapshot $PROVIDER"; fi
   exit "$rc"
 }
 trap cleanup EXIT
@@ -76,7 +76,7 @@ trap cleanup EXIT
 LOCK="/tmp/openaether-etcd-snapshot-${PROVIDER}.lock"
 exec 9>"$LOCK"
 if ! flock -n 9; then
-  log "⚠ une exécution est déjà en cours ($LOCK) — abandon"
+  log "⚠ a run is already in progress ($LOCK) — aborting"
   exit 0
 fi
 

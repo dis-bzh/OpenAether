@@ -31,7 +31,7 @@ while [ $# -gt 0 ]; do
     --role) ROLE="$2"; shift 2 ;;
     --yes | -y) ASSUME_YES=1; shift ;;
     --force-no-edges) FORCE_NO_EDGES=1; shift ;;
-    --keep-images) shift ;;   # accepté pour la symétrie, sans effet ici
+    --keep-images) shift ;;   # accepted for symmetry, no effect here
     *) echo "✗ flag inconnu: $1" >&2; exit 2 ;;
   esac
 done
@@ -55,21 +55,21 @@ warn() { printf '⚠ %s\n' "$*" >&2; }
 info "Étape 1/3 — clusters enfants CAPI"
 if [ ! -r "$KUBECONFIG" ] || ! kubectl cluster-info >/dev/null 2>&1; then
   if [ "$FORCE_NO_EDGES" -eq 1 ]; then
-    warn "management injoignable — étape sautée (--force-no-edges assumé)."
+    warn "management unreachable — step skipped (--force-no-edges assumed)."
   else
     cat >&2 <<'EOT'
 
 ✗ ARRÊT : le cluster de management est injoignable (kubeconfig absent ou API down).
-  Impossible de vérifier qu'aucun cluster enfant CAPI ne subsiste. Détruire le
+  Cannot verify that no CAPI child cluster remains. Destroying the management
   management maintenant rendrait leurs VMs ORPHELINES et FACTURÉES.
 
   Que faire :
-    • kubeconfig perdu ? le régénérer :
+    • kubeconfig lost? regenerate it:
         cd infrastructure/opentofu/cluster && tofu output -raw kubeconfig > kubeconfig
         (ou  talosctl -e <tunnel> -n <cp-ip> kubeconfig ./kubeconfig --force)
-    • enfants déjà supprimés / jamais créés ? relancer avec --force-no-edges
-    • dans le doute : inventorier côté provider AVANT (chercher le préfixe des
-      clusters enfants dans les VMs, LB, réseaux) — cf. docs/backlog.md
+    • children already deleted / never created? re-run with --force-no-edges
+    • when in doubt: inventory on the provider side FIRST (look for the child
+      clusters' prefix among VMs, LBs, networks) — see docs/backlog.md
 EOT
     exit 1
   fi
@@ -90,13 +90,13 @@ else
              $([ "$ASSUME_YES" -eq 1 ] && echo --yes); then
         warn "edge-down $name a ÉCHOUÉ."
         if [ "$FORCE_NO_EDGES" -eq 1 ]; then
-          warn "--force-no-edges : on continue malgré tout (VMs à vérifier côté provider)."
+          warn "--force-no-edges: continuing anyway (check the VMs on the provider side)."
         else
           cat >&2 <<EOT
 
-✗ ARRÊT avant de toucher au management : '$name' n'a pas été détruit proprement.
-  Détruire le management maintenant laisserait ses VMs orphelines. Purger d'abord
-  côté provider, puis relancer (ce script est idempotent).
+✗ STOPPING before touching the management: '$name' was not cleanly destroyed.
+  Destroying the management now would orphan its VMs. Purge them on the provider
+  side first, then re-run (this script is idempotent).
 EOT
           exit 1
         fi
@@ -108,28 +108,28 @@ fi
 # ----------------------------------------------------------- 2. le management
 info "Étape 2/3 — cluster de management ($ROLE / $PROVIDER)"
 if [ "$ASSUME_YES" -eq 0 ]; then
-  read -rp "Détruire le management $ROLE-$PROVIDER ? [y/N] " a
+  read -rp "Destroy the $ROLE-$PROVIDER management? [y/N] " a
   [ "$a" = y ] || [ "$a" = Y ] || { echo "abandon"; exit 1; }
 fi
 ( cd "$ROOT" && TF_CLI_ARGS_destroy=-auto-approve task destroy ROLE="$ROLE" PROVIDER="$PROVIDER" ) \
-  && ok "management détruit" \
-  || warn "le destroy du management a échoué — relancer après correction (idempotent)"
+  && ok "management destroyed" \
+  || warn "the management destroy failed — re-run after fixing (idempotent)"
 
 # ------------------------------------------------- 3. ce qui reste (rapport)
-info "Étape 3/3 — reste à purger MANUELLEMENT (survit volontairement au teardown)"
+info "Step 3/3 — left to purge MANUALLY (deliberately survives the teardown)"
 CN="$(grep -E '^[[:space:]]*cluster_name' "$CLUSTER_DIR/envs/$ROLE-$PROVIDER.tfvars" 2>/dev/null | sed -E 's/.*"([^"]+)".*/\1/')"
 ENVN="$(grep -E '^[[:space:]]*environment' "$CLUSTER_DIR/envs/$ROLE-$PROVIDER.tfvars" 2>/dev/null | sed -E 's/.*"([^"]+)".*/\1/')"
 cat <<EOT
-  Buckets S3 (state, artefacts, backups) — les détruire supprime aussi la
-  possibilité de restaurer :
+  S3 buckets (state, artifacts, backups) — destroying them also removes any
+  possibility of restoring:
     s3-${CN:-<projet>}-${PROVIDER}-tfstate-${ENVN:-<env>}      (+ -backup)
     s3-${CN:-<projet>}-${PROVIDER}-${ROLE}-${ENVN:-<env>}      (+ -backup)
     s3-${CN:-<projet>}-*-backups-${ENVN:-<env>}                (restic, tous providers)
-  Images Talos (réutilisables — les garder évite un rebuild, ~1 h sur Outscale) :
-    task talos-image PROVIDER=$PROVIDER  ré-applique ; le root talos-image a son
+  Talos images (reusable — keeping them avoids a rebuild, ~1 h on Outscale):
+    task talos-image PROVIDER=$PROVIDER  re-applies; the talos-image root has its
     propre state (bucket s3-${CN:-<projet>}-${PROVIDER}-talos-image).
-  Objets créés hors OpenTofu pour CAPI (à recréer au prochain déploiement) :
-    keypair Outscale 'openaether-capi', FIP OpenStack pré-créée (certSANs edge-2).
+  Objects created outside OpenTofu for CAPI (to recreate on the next deployment):
+    Outscale keypair 'openaether-capi', pre-created OpenStack FIP (edge-2 certSANs).
   Local : kubeconfig, talosconfig, edge-*.kubeconfig, restic-escrow-*.txt
 EOT
-ok "fleet-down terminé"
+ok "fleet-down complete"

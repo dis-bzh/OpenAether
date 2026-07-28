@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
-"""Pré-vol des quotas avant de déployer un cluster ou d'instancier un enfant CAPI.
+"""Quota preflight before deploying a cluster or instantiating a CAPI child.
 
 Pourquoi ce script existe
 -------------------------
 Sur Outscale, un management HA (3 CP + 3 workers + bastion) consomme 44 Go de RAM
-pour un `memory_limit` de 40. Le dépassement est TOLÉRÉ à la création, mais toute
-VM supplémentaire est ensuite refusée — et le diagnostic est pénible : l'OscMachine
-reste en `VmNotReady` avec une IP réallouée en boucle et AUCUNE erreur dans le CR,
-il faut aller lire les logs du manager CAPOSC. Deux déploiements y ont été perdus.
+against a `memory_limit` of 40. The overrun is TOLERATED at creation, but any
+further VM is then refused — and the diagnosis is painful: the OscMachine stays
+in `VmNotReady` with an endlessly reallocated IP and NO error in the CR; you
+have to read the CAPOSC manager's logs. Two deployments were lost to it.
 
-Le même piège existe ailleurs : le projet OVH utilisé plafonne à 10 instances,
+The same trap exists elsewhere: the OVH project in use caps at 10 instances,
 soit management (7 avec le bastion) + un seul enfant (2). Il n'y a pas de marge
 pour un second enfant.
 
-Ce script lit les quotas ET la consommation réelle, et peut simuler ce qu'ajoute
-une topologie donnée. Lecture seule.
+This script reads the quotas AND the real usage, and can simulate what a given
+topology would add. Read-only.
 
 Usage :
     source .env.sh
     python3 scripts/ops/preflight-quotas.py ovh
     python3 scripts/ops/preflight-quotas.py outscale --add-vms 2 --add-cores 4 --add-ram-gb 16
 
-Scaleway n'est pas couvert : ses quotas n'ont jamais posé problème sur ce compte,
-et je préfère ne pas deviner une API que je ne peux pas vérifier ici.
+Scaleway is not covered: its quotas have never been a problem on this account,
+and guessing an API that cannot be verified here would be worse than nothing.
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ import urllib.request
 
 
 def bar(used, limit):
-    """Barre de remplissage — le dépassement doit sauter aux yeux."""
+    """A fill bar — an overrun must be immediately obvious."""
     if not limit or limit <= 0:
         return "?"
     pct = 100.0 * used / limit
@@ -121,8 +121,8 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("provider", choices=["ovh", "outscale"])
     ap.add_argument("--add-vms", type=int, default=0, help="VMs que la topologie ajoutera")
-    ap.add_argument("--add-cores", type=int, default=0, help="vCPU ajoutés")
-    ap.add_argument("--add-ram-gb", type=int, default=0, help="RAM ajoutée, en Go")
+    ap.add_argument("--add-cores", type=int, default=0, help="vCPUs added")
+    ap.add_argument("--add-ram-gb", type=int, default=0, help="RAM added, in GB")
     args = ap.parse_args()
 
     rows = {"ovh": ovh, "outscale": outscale}[args.provider](
@@ -136,18 +136,18 @@ def main():
         if simulating and limit:
             after = used + add
             verdict = "DÉPASSEMENT" if after > limit else "ok"
-            print(f"  {'':14s}   → après +{add} : {after}/{limit}  {verdict}")
+            print(f"  {'':14s}   → after +{add}: {after}/{limit}  {verdict}")
             if after > limit:
                 over.append(label)
 
     if over:
-        print(f"\n✗ La topologie demandée dépasse : {', '.join(over)}.")
-        print("  Sur Outscale, le dépassement est TOLÉRÉ à la création puis TOUTE VM")
-        print("  supplémentaire est refusée (CreateVms → 10042 TooManyResources), sans")
+        print(f"\n✗ The requested topology exceeds: {', '.join(over)}.")
+        print("  On Outscale the overrun is TOLERATED at creation, then ANY further")
+        print("  VM is refused (CreateVms → 10042 TooManyResources), with no")
         print("  erreur dans le CR CAPI : l'OscMachine boucle en VmNotReady.")
         return 1
     if simulating:
-        print("\n✓ La topologie demandée tient dans les quotas.")
+        print("\n✓ The requested topology fits within the quotas.")
     return 0
 
 

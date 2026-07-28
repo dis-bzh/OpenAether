@@ -110,7 +110,7 @@ variable "bastion_vm_type" {
 # Gateway was not listening there).
 # ==============================================================================
 variable "app_lb_node_ports" {
-  description = "NodePorts figés du Gateway, cibles du LB applicatif public. Doit correspondre au Service openaether-gateway-nodeport côté apps."
+  description = "The Gateway's fixed NodePorts, targets of the public application LB. Must match the openaether-gateway-nodeport Service on the apps side."
   type = object({
     http  = number
     https = number

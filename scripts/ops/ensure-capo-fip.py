@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
-"""Alloue (ou réutilise) la floating IP d'un control plane CAPO — idempotent.
+"""Allocates (or reuses) a CAPO control plane's floating IP — idempotent.
 
 Pourquoi ce script existe
 -------------------------
 Un enfant OpenStack a besoin de son IP flottante AVANT le boot : l'IMDS
-OpenStack ne l'expose pas (NAT côté Neutron), donc elle doit figurer dans les
+OpenStack does not expose it (Neutron-side NAT), so it must appear in the
 `certSANs` de la config Talos, donc dans le git. C'est la seule ressource d'un
-enfant créée hors OpenTofu et hors CAPI — et donc la seule à re-créer à la main
-après un teardown, en recopiant l'IP dans `apps/clusters/<enfant>.yaml`.
+child resource created outside both OpenTofu and CAPI — hence the only one to
+recreate by hand after a teardown, copying the IP into `apps/clusters/<child>.yaml`.
 
-Ce script rend l'étape idempotente : il retrouve la FIP à sa description
+This script makes the step idempotent: it finds the FIP by its description
 (`openaether:<cluster>`), n'en alloue une que s'il n'y en a pas, et imprime
-l'adresse. Le relancer ne crée jamais de doublon facturé.
+the address. Re-running it never creates a billed duplicate.
 
 Usage :
     source .env.sh
     python3 scripts/ops/ensure-capo-fip.py edge-2 [--network Ext-Net]
 
-Puis reporter l'IP affichée dans `OS_CP_FLOATING_IPS` du fichier de l'enfant.
-Une FIP par réplique de control plane : passer --count N.
+Then copy the printed IP into `OS_CP_FLOATING_IPS` of the child's file.
+One FIP per control-plane replica: pass --count N.
 """
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ def keystone_token() -> tuple[str, list]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("cluster", help="nom du cluster enfant (ex: edge-2)")
-    parser.add_argument("--network", default="Ext-Net", help="réseau externe (défaut: Ext-Net)")
+    parser.add_argument("--network", default="Ext-Net", help="external network (default: Ext-Net)")
     parser.add_argument("--count", type=int, default=1, help="nombre de FIP (1 par CP)")
     args = parser.parse_args()
 
@@ -90,7 +90,7 @@ def main() -> int:
 
     net = get(f"/v2.0/networks?name={args.network}")["networks"]
     if not net:
-        sys.exit(f"❌ réseau externe '{args.network}' introuvable")
+        sys.exit(f"❌ external network '{args.network}' not found")
     net_id = net[0]["id"]
 
     while len(existing) < args.count:
@@ -102,19 +102,19 @@ def main() -> int:
         )
         with urllib.request.urlopen(req, timeout=60) as resp:
             fip = json.load(resp)["floatingip"]
-        print(f"  + allouée : {fip['floating_ip_address']}", file=sys.stderr)
+        print(f"  + allocated: {fip['floating_ip_address']}", file=sys.stderr)
         existing.append(fip)
 
     if len(existing) > args.count:
         print(
             f"  ⚠ {len(existing)} FIP portent la description '{description}' pour "
-            f"--count {args.count} — les surnuméraires sont facturées, à purger.",
+            f"--count {args.count} — the extras are billed, purge them.",
             file=sys.stderr,
         )
 
     addresses = [f["floating_ip_address"] for f in existing[: args.count]]
     for f in existing[: args.count]:
-        state = "associée" if f.get("port_id") else "libre"
+        state = "associated" if f.get("port_id") else "free"
         print(f"  ✓ {f['floating_ip_address']} ({state})", file=sys.stderr)
     print(
         f"\n→ reporter dans OS_CP_FLOATING_IPS de apps/clusters/{args.cluster}.yaml :",

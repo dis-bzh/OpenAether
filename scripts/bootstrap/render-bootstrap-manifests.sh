@@ -48,7 +48,7 @@ if [[ "${1:-}" == "--check" ]]; then
   command -v diff >/dev/null 2>&1 || { echo "✗ diff requis" >&2; exit 1; }
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
-  echo "🔍 Vérification des artefacts committés contre le générateur…"
+  echo "🔍 Checking the committed artifacts against the generator…"
   OPENAETHER_MANIFESTS_DIR="$tmp" OPENAETHER_SKIP_FLUX=1 "$0" >/dev/null
   OPENAETHER_MANIFESTS_DIR="$tmp" OPENAETHER_SKIP_FLUX=1 "$0" --local >/dev/null
   # helm's raw render carries trailing whitespace; the committed artifact has
@@ -59,7 +59,7 @@ if [[ "${1:-}" == "--check" ]]; then
   drift=0
   for f in cilium.yaml cilium-local.yaml; do
     if ! diff -q <(norm "${MANIFESTS_DIR}/${f}") <(norm "${tmp}/${f}") >/dev/null 2>&1; then
-      echo "  ❌ ${f} diffère du rendu (extrait) :"
+      echo "  ❌ ${f} differs from the render (excerpt):"
       diff <(norm "${MANIFESTS_DIR}/${f}") <(norm "${tmp}/${f}") | head -20 | sed 's/^/      /'
       drift=1
     else
@@ -69,16 +69,16 @@ if [[ "${1:-}" == "--check" ]]; then
   if [[ "$drift" -eq 1 ]]; then
     cat >&2 <<'EOT'
 
-✗ Les artefacts committés ne correspondent plus au générateur.
-  Avant de régénérer, décider QUI a raison :
-    • l'artefact (un `--set` a été ajouté à la main et doit passer dans le script) ;
-    • le script (l'artefact est simplement périmé → régénérer et committer).
-  Régénérer efface l'écart sans le montrer — c'est ainsi qu'Istio ambient a été
-  cassé le 2026-07-26.
+✗ The committed artifacts no longer match the generator.
+  Before regenerating, decide WHICH is right:
+    • the artifact (a `--set` was hand-added and must move into the script);
+    • the script (the artifact is simply stale → regenerate and commit).
+  Regenerating erases the difference without showing it — that is how Istio
+  ambient was broken on 2026-07-26.
 EOT
     exit 1
   fi
-  echo "OK — artefacts de bootstrap à jour vis-à-vis du générateur."
+  echo "OK — bootstrap artifacts up to date with the generator."
   exit 0
 fi
 

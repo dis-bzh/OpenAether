@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Purge les ressources OVH laissées par un cluster CAPI orphelin.
-Cible tout ce qui porte le préfixe donné (défaut: k8s-clusterapi / edge-).
-Usage: purge-orphans-ovh.py [--apply]   (dry-run par défaut)"""
+"""Purges the OVH resources left behind by an orphaned CAPI cluster.
+Targets everything carrying the given prefix (default: k8s-clusterapi / edge-).
+Usage: purge-orphans-ovh.py [--apply]   (dry-run by default)"""
 import os, sys, json, urllib.request
 
 APPLY = '--apply' in sys.argv
@@ -34,9 +34,9 @@ def delete(u, label):
         return
     try:
         urllib.request.urlopen(urllib.request.Request(u, headers=H, method='DELETE'), timeout=90)
-        print("  ✓ supprimé:", label)
+        print("  ✓ deleted:", label)
     except Exception as e:
-        print("  ⚠ échec:", label, str(e)[:80])
+        print("  ⚠ failed:", label, str(e)[:80])
 
 
 net, comp = ep('network'), ep('compute')
@@ -68,19 +68,19 @@ for r in get(net + '/v2.0/routers')['routers']:
                     urllib.request.urlopen(urllib.request.Request(
                         net + f"/v2.0/routers/{r['id']}/remove_router_interface",
                         data=body, headers=H, method='PUT'), timeout=60)
-                    print("  ✓ interface détachée:", p['id'][:8])
+                    print("  ✓ interface detached:", p['id'][:8])
                 except Exception as e:
-                    print("  ⚠ détach:", str(e)[:60])
+                    print("  ⚠ detach:", str(e)[:60])
             else:
-                print("  [dry-run] détacher interface", p['id'][:8])
+                print("  [dry-run] detach interface", p['id'][:8])
     delete(net + f"/v2.0/routers/{r['id']}", f"router {r['name']}")
 
 # 5. networks + security groups
 for n in get(net + '/v2.0/networks')['networks']:
     if n.get('project_id') == os.environ['OS_PROJECT_ID']:
-        delete(net + f"/v2.0/networks/{n['id']}", f"réseau {n['name']}")
+        delete(net + f"/v2.0/networks/{n['id']}", f"network {n['name']}")
 for g in get(net + '/v2.0/security-groups')['security_groups']:
     if g['name'] != 'default' and g.get('project_id') == os.environ['OS_PROJECT_ID']:
         delete(net + f"/v2.0/security-groups/{g['id']}", f"SG {g['name']}")
 
-print("\n(dry-run — relancer avec --apply pour supprimer)" if not APPLY else "\npurge terminée")
+print("\n(dry-run — re-run with --apply to delete)" if not APPLY else "\npurge complete")

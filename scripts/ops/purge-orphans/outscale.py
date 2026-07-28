@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Purge un Net Outscale orphelin (CAPI) : dépendances puis le Net.
-Ordre imposé par Outscale : LBU → NAT → route tables → internet service →
+"""Purges an orphaned Outscale Net (CAPI): dependencies first, then the Net.
+Order imposed by Outscale: LBU → NAT → route tables → internet service →
 security groups → subnets → net. Usage: purge-orphans-osc.py [--apply]"""
 import os, sys, json, hmac, hashlib, datetime, urllib.request
 
@@ -68,4 +68,4 @@ for sn in call('ReadSubnets').get('Subnets', []):
     do('DeleteSubnet', {'SubnetId': sn['SubnetId']}, f"subnet {sn['SubnetId']}")
 for net in call('ReadNets').get('Nets', []):
     do('DeleteNet', {'NetId': net['NetId']}, f"net {net['NetId']} ({net.get('IpRange')})")
-print("\n(dry-run — --apply pour supprimer)" if not APPLY else "\npurge Outscale terminée")
+print("\n(dry-run — --apply to delete)" if not APPLY else "\nOutscale purge complete")
