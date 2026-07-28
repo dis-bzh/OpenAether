@@ -370,11 +370,9 @@ data "talos_machine_configuration" "worker" {
 #   1. terraform_data.talos_port_ready_* — waits until 50000/TCP is open before
 #      starting the provider's retry clock (avoids burning the 15m timeout on a
 #      node that is still booting → flaky bootstrap hangs on slow cloud boot).
+#      ⚠️ Do not drop it: removing it once made cloud bootstrap hang
+#      non-deterministically.
 #   2. timeouts.create = "15m" — headroom for slow cloud boot + CA transition.
-# NOTE: the port-ready guard was briefly dropped (commit 0a7eb52) on the
-# assumption that provider 0.12.0-alpha.2's x509 fix made it unnecessary, but
-# the pin was reverted to the published 0.11.0 (commit dab57cb) while the guard
-# stayed removed → non-deterministic cloud bootstrap hangs. Restored here.
 # In container mode (config_delivery = "userdata") do_apply is false → these
 # resources and the config_apply resources below are all skipped (inert local).
 # ==============================================================================

@@ -73,10 +73,10 @@ manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
       Workaround: `skip_health_check`. Upstream: the provider's 0.12.x line has
       no stable release; either wait or open the issue with both traces.
 
-- [ ] **Keep trimming.** Done 2026-07-28: docs 2315 → 1095 lines, and the
-      longest comment blocks cut (~230 lines). Still fat: `deployment-test-matrix`
-      (350 lines across both languages) and ~48 comment blocks of 15+ lines.
-      See `CLAUDE.md` § Concision et refacto.
+- [ ] **Keep trimming.** Done 2026-07-28: docs 2315 → 987 lines. Remaining: 48
+      comment blocks of 15+ lines (860 lines total) — mostly file headers, which
+      are legitimate; cut them only where they narrate an incident instead of
+      stating the why. See `CLAUDE.md` § Concision et refacto.
 
 ## Traps worth remembering
 
