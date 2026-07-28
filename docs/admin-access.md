@@ -166,7 +166,16 @@ local. Le formulaire local reste actif volontairement : c'est le filet si le SSO
 est cassé ou pas encore configuré. Ne le désactiver (`disable_login_form`)
 qu'une fois le SSO éprouvé.
 
-À faire côté Zitadel (console), une seule fois :
+✅ **Déjà fait sur le cluster OVH du 2026-07-28** (projet `OpenAether`, rôle
+`grafana-admin`, application web `Grafana`, `secret/grafana/oidc` seedé). Les
+étapes ci-dessous valent pour un NOUVEAU cluster.
+
+⚠️ **Le scope des rôles est indispensable** : sans
+`urn:zitadel:iam:org:projects:roles` dans `scopes`, Zitadel n'émet aucun claim
+de rôles et tous les comptes restent `Viewer`. Mesuré en réel. Il est désormais
+dans `apps/base/observability/grafana.yaml`.
+
+À faire côté Zitadel (console ou API), une seule fois :
 
 1. Projet « OpenAether » → **Application** de type **Web**
 2. Méthode d'authentification **Code** (PKCE) + client secret
