@@ -2,7 +2,7 @@
 # OVH / OpenStack — Load Balancers (Octavia)
 # Two separate LBs matching the provider contract:
 #   k8s: port 6443 → control planes (allowed_cidrs = admin_ip)
-#   app: 80/443 en public → NodePorts du Gateway sur les workers (open)
+#   app: public 80/443 → the Gateway's NodePorts on the workers (open)
 # ==============================================================================
 
 # --- Kubernetes API LB ---
@@ -60,15 +60,15 @@ resource "openstack_networking_floatingip_associate_v2" "k8s" {
   floating_ip = openstack_networking_floatingip_v2.k8s[0].address
   port_id     = openstack_lb_loadbalancer_v2.k8s[0].vip_port_id
 
-  # ⚠️ depends_on OBLIGATOIRE sur l'interface du routeur. Neutron REFUSE
-  # d'associer une floating IP tant que le subnet du port n'a pas de route vers
-  # le réseau externe :
+  # ⚠️ depends_on on the router interface is MANDATORY. Neutron REFUSES to
+  # associate a floating IP until the port's subnet has a route to the external
+  # network:
   #   ExternalGatewayForFloatingIPNotFound: External network <id> is not
   #   reachable from subnet <id>
-  # Aucune référence ne lie ces deux ressources, donc OpenTofu les crée en
-  # PARALLÈLE → échec INTERMITTENT selon qui gagne la course. Constaté le
-  # 2026-07-28 sur le bastion ; les deux LB passaient jusque-là par chance, un
-  # load balancer étant plus lent à créer.
+  # No reference links these two resources, so OpenTofu creates them in
+  # PARALLEL → an INTERMITTENT failure depending on who wins the race. Observed
+  # on the bastion on 2026-07-28; both LBs had been getting through by luck, a
+  # load balancer being slower to create.
   depends_on = [openstack_networking_router_interface_v2.private]
 }
 
@@ -115,7 +115,7 @@ resource "openstack_lb_member_v2" "http" {
   count   = var.worker_count
   pool_id = openstack_lb_pool_v2.http.id
   address = openstack_compute_instance_v2.worker[count.index].access_ip_v4
-  # NodePort figé du Gateway ; le listener public reste sur 80.
+  # The Gateway's fixed NodePort; the public listener stays on 80.
   protocol_port = var.app_lb_node_ports.http
   subnet_id     = openstack_networking_subnet_v2.private.id
 }
@@ -150,14 +150,14 @@ resource "openstack_networking_floatingip_associate_v2" "app" {
   floating_ip = openstack_networking_floatingip_v2.app.address
   port_id     = openstack_lb_loadbalancer_v2.app.vip_port_id
 
-  # ⚠️ depends_on OBLIGATOIRE sur l'interface du routeur. Neutron REFUSE
-  # d'associer une floating IP tant que le subnet du port n'a pas de route vers
-  # le réseau externe :
+  # ⚠️ depends_on on the router interface is MANDATORY. Neutron REFUSES to
+  # associate a floating IP until the port's subnet has a route to the external
+  # network:
   #   ExternalGatewayForFloatingIPNotFound: External network <id> is not
   #   reachable from subnet <id>
-  # Aucune référence ne lie ces deux ressources, donc OpenTofu les crée en
-  # PARALLÈLE → échec INTERMITTENT selon qui gagne la course. Constaté le
-  # 2026-07-28 sur le bastion ; les deux LB passaient jusque-là par chance, un
-  # load balancer étant plus lent à créer.
+  # No reference links these two resources, so OpenTofu creates them in
+  # PARALLEL → an INTERMITTENT failure depending on who wins the race. Observed
+  # on the bastion on 2026-07-28; both LBs had been getting through by luck, a
+  # load balancer being slower to create.
   depends_on = [openstack_networking_router_interface_v2.private]
 }

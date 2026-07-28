@@ -1,9 +1,9 @@
 version: "3"
 
-# Racines OpenTofu réelles du dépôt. ⚠️ NE PAS revenir à un
-# `-recursive infrastructure/opentofu` : il embarquerait les dossiers de travail
-# locaux non suivis (ex. `_v2/`), qui faisaient échouer `task lint`.
-# Ajouter ici toute nouvelle racine.
+# The repo's real OpenTofu roots. ⚠️ DO NOT go back to a
+# `-recursive infrastructure/opentofu`: it would sweep in untracked local
+# scratch directories (e.g. `_v2/`), which used to fail `task lint`.
+# Add every new root here.
 vars:
   TF_ROOTS: >-
     infrastructure/opentofu/cluster
@@ -46,9 +46,9 @@ tasks:
   apps-validate:
     desc: "Valide le DAG Flux d'OpenAether-apps, les profils générés (pick.py) et le Cilium des enfants"
     cmds:
-      # Parité Cilium socle ↔ enfants CAPI : deux formats (--set du script de
-      # rendu vs values: d'un HelmRelease) dans deux dépôts, donc dérive
-      # silencieuse. Elle a coûté deux enfants le 2026-07-26 (ipam.mode perdu).
+      # Cilium parity foundation ↔ CAPI children: two formats (the render
+      # script's --set vs a HelmRelease's values:) in two repos, hence silent
+      # drift. It cost two children on 2026-07-26 (ipam.mode lost).
       - python3 scripts/ops/check-cilium-parity.py
       - task: apps-validate-dag
 
@@ -57,11 +57,11 @@ tasks:
     dir: ../OpenAether-apps
     cmds:
       # --validate : dependsOn inconnus, cycles, spec.path morts, catalogue.
-      # --check    : un profil fige la liste des Kustomizations EXCLUES ; ajouter
-      #   une brique au DAG périme donc tous les profils déjà générés. Sans ce
-      #   contrôle la brique est héritée de ../base sans avoir été pioché et
-      #   reste bloquée si ses dépendances, elles, sont exclues (cas vécu : orc
-      #   hérité par les clusters edge, cluster-api-providers étant exclu).
+      # --check    : a profile freezes the list of EXCLUDED Kustomizations, so
+      #   adding a brick to the DAG makes every generated profile stale. Without
+      #   this check the brick is inherited from ../base without being picked and
+      #   stays stuck if its dependencies are excluded (real case: orc inherited
+      #   by the edge clusters while cluster-api-providers was excluded).
       - python3 scripts/pick.py --validate
       - python3 scripts/pick.py --check
 
@@ -72,9 +72,9 @@ tasks:
     vars:
       PROVIDER: '{{.PROVIDER | default "outscale"}}'
     cmds:
-      # Un management HA Outscale demande 44 Go pour un memory_limit de 40 : le
-      # dépassement est TOLÉRÉ à la création puis toute VM suivante est refusée,
-      # sans erreur dans le CR CAPI. Deux déploiements y sont passés.
+      # An HA Outscale management needs 44 GB against a 40 GB memory_limit: the
+      # overrun is TOLERATED at creation, then any further VM is refused, with
+      # no error in the CAPI CR. Two deployments were lost to it.
       - python3 scripts/ops/preflight-quotas.py {{.PROVIDER}} {{.CLI_ARGS}}
 
   security:
@@ -342,11 +342,11 @@ tasks:
   render-check:
     desc: "Vérifie que les manifests de bootstrap committés correspondent à leur générateur (n'écrit rien)"
     cmds:
-      # Un artefact généré peut diverger de son générateur en SILENCE. C'est
-      # arrivé deux fois : des `--set` ajoutés à la main dans l'artefact (dont
-      # socketLB.enabled côté local, sans lequel les webhooks cassent), et un
-      # générateur qui écrivait dans un répertoire fantôme. Ce contrôle rejoue
-      # le rendu dans un dossier jetable et compare.
+      # A generated artifact can diverge from its generator SILENTLY. It has
+      # happened twice: `--set` flags hand-added into the artifact (including
+      # socketLB.enabled on the local side, without which the webhooks break),
+      # and a generator writing into a phantom directory. This check replays the
+      # render into a throwaway directory and compares.
       - ./scripts/bootstrap/render-bootstrap-manifests.sh --check
 
   kubeconfig:

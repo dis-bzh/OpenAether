@@ -67,9 +67,9 @@ resource "scaleway_instance_security_group" "this" {
     protocol = "ANY"
   }
 
-  # HTTP/HTTPS — depuis l'App LB, sur les NodePorts FIGÉS du Gateway.
-  # (Le LB écoute en 80/443 côté public et forward vers ces ports côté workers ;
-  # ouvrir 80/443 ici ne servirait à rien — rien n'y écoute sur les nœuds.)
+  # HTTP/HTTPS — from the App LB, on the Gateway's FIXED NodePorts.
+  # (The LB listens on public 80/443 and forwards to those worker-side ports;
+  # opening 80/443 here would achieve nothing — nothing listens on the nodes.)
   inbound_rule {
     action   = "accept"
     port     = var.app_lb_node_ports.http

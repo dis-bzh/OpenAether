@@ -1,26 +1,26 @@
 # OpenAether — Flux bootstrap manifest (template)
-# Injecté en inline_manifest Talos lors du bootstrap initial.
+# Injected as a Talos inline_manifest during the initial bootstrap.
 # Remplace flux-root-app.yaml.tftpl.
 #
 # Variables OpenTofu :
 #   ${git_repo_url}   — ex: https://github.com/dis-bzh/OpenAether.git
 #   ${git_branch}     — ex: main
 #   ${cluster_role}   — ex: management (→ apps/flux/management)
-#   ${cluster_id}     — ex: openaether-dev-ovh (identité UNIQUE du cluster)
+#   ${cluster_id}     — e.g. openaether-dev-ovh (the cluster's UNIQUE identity)
 #   ${backup_target_url} — ex: s3://s3-openaether-ovh-backups-dev@eu-west-par/
-#   ${backup_s3_bucket} ${backup_s3_endpoint} — mêmes destination, format CNPG
+#   ${backup_s3_bucket} ${backup_s3_endpoint} — same destination, CNPG format
 #   ${namespace}      — ex: flux-system
 ---
-# Identité du cluster, consommée par `postBuild.substituteFrom` des briques qui
-# doivent se distinguer d'un AUTRE cluster. Aujourd'hui : le chemin des dépôts
+# Cluster identity, consumed through `postBuild.substituteFrom` by the bricks
+# that must distinguish themselves from ANOTHER cluster. Today: the restic
 # restic (apps/flux/base/22-backup.yaml), car plusieurs clusters partagent des
-# buckets cross-provider et un dépôt restic n'est lisible qu'avec le
-# RESTIC_PASSWORD du cluster qui l'a créé — deux clusters sur le même chemin se
+# cross-provider buckets, and a restic repository is only readable with the
+# RESTIC_PASSWORD of the cluster that created it — two clusters on the same
 # bloquent mutuellement (« already initialized »).
 #
-# ⚠️ Une brique qui déclare `substituteFrom` ce ConfigMap ÉCHOUE s'il est absent.
-# C'est volontaire : mieux vaut un échec bruyant qu'un chemin de dépôt vide et
-# une collision silencieuse entre clusters.
+# ⚠️ A brick declaring `substituteFrom` on this ConfigMap FAILS if it is absent.
+# That is deliberate: a loud failure beats an empty repository path and a silent
+# collision between clusters.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -30,15 +30,15 @@ metadata:
     openaether.io/managed: "true"
 data:
   CLUSTER_NAME: ${cluster_id}
-  # Destination des backups de VOLUMES (Longhorn), au format attendu :
-  # s3://<bucket>@<region>/. Le bucket préexiste et ses credentials vivent dans
-  # OpenBao ; seul l'emplacement (non secret) transite ici, parce que
-  # `backup-target` est une CHAÎNE côté Longhorn et ne peut pas être alimentée
-  # par un Secret. ⚠️ Doit correspondre au bucket seedé dans
+  # Destination for VOLUME backups (Longhorn), in the expected format:
+  # s3://<bucket>@<region>/. The bucket pre-exists and its credentials live in
+  # OpenBao; only the (non-secret) location travels here, because
+  # `backup-target` is a STRING on the Longhorn side and cannot be fed from a
+  # Secret. ⚠️ Must match the bucket seeded in
   # `secret/backup/s3-primary`.
   BACKUP_TARGET_URL: ${backup_target_url}
-  # Mêmes destination, deux formats : Longhorn veut `s3://bucket@region/`,
-  # CNPG veut le bucket et l'endpoint séparés (barmanObjectStore).
+  # Same destination, two formats: Longhorn wants `s3://bucket@region/`,
+  # CNPG wants the bucket and endpoint separately (barmanObjectStore).
   BACKUP_S3_BUCKET: ${backup_s3_bucket}
   BACKUP_S3_ENDPOINT: ${backup_s3_endpoint}
 ---
@@ -69,9 +69,9 @@ spec:
   path: ./apps/flux/${cluster_role}
   prune: true
   wait: false
-  # Injecte la branche dans les objets du layer flux (dont le GitRepository
-  # auto-réappliqué — piège gitception : sans ça, une branche de test se fait
-  # écraser par le `main` en dur au premier reconcile).
+  # Injects the branch into the flux layer objects (including the
+  # self-reapplied GitRepository — gitception trap: without it a test branch
+  # gets overwritten by the hard-coded `main` on the first reconcile).
   postBuild:
     substitute:
       GIT_BRANCH: ${git_branch}

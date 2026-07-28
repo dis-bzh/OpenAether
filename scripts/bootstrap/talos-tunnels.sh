@@ -162,10 +162,10 @@ open_one() { # localport nodeip
   echo $! >>"$PIDFILE"
 }
 
-# Le bastion vient souvent d'être créé : son cloud-init installe des paquets et
-# ne recharge sshd (AuthorizedKeysFile + AllowGroups) qu'à la fin. Tenter les
-# tunnels avant ça donne "Permission denied (publickey)" et 0/N tunnels — vu sur
-# les trois providers. On attend donc que le bastion accepte la clé.
+# The bastion has often just been created: its cloud-init installs packages and
+# only reloads sshd (AuthorizedKeysFile + AllowGroups) at the end. Attempting
+# the tunnels before that gives "Permission denied (publickey)" and 0/N tunnels
+# — seen on all three providers. So we wait for the bastion to accept the key.
 echo "▶ Waiting for bastion ${BUSER}@${BASTION} to accept SSH (cloud-init)…"
 BASTION_WAIT="${BASTION_WAIT:-300}"
 __deadline=$(( SECONDS + BASTION_WAIT ))
