@@ -15,17 +15,23 @@ locals {
   net_prefix       = "10.5.0"
   cp_count         = var.control_plane_count
   cp_ips           = [for i in range(local.cp_count) : "${local.net_prefix}.${10 + i}"]
-  cp_endpoints     = [for i in range(local.cp_count) : "127.0.0.1:${51000 + i}"]
+  cp_endpoints     = [for i in range(local.cp_count) : "127.0.0.1:${var.talos_api_port_base + i}"]
   cluster_endpoint = "https://${local.cp_ips[0]}:6443" # cp0 is the API endpoint (no LB locally)
 
   # Workers share the same deterministic scheme: IPs at .20+ (worker_ip_base) and
-  # host port mappings at 50010+i (talos_api_port_base + 10 + i), matching
+  # host port mappings at talos_api_port_base + 10 + i, matching
   # modules/providers/local. Dedicated workers stay untainted (schedulable).
   worker_count     = var.worker_count
   worker_ips       = [for i in range(local.worker_count) : "${local.net_prefix}.${20 + i}"]
-  worker_endpoints = [for i in range(local.worker_count) : "127.0.0.1:${51010 + i}"]
+  worker_endpoints = [for i in range(local.worker_count) : "127.0.0.1:${var.talos_api_port_base + 10 + i}"]
 
-  manifests_dir = "${path.module}/../opentofu/bootstrap-manifests"
+  # ⚠️ Les manifests vivent sous opentofu/CLUSTER/bootstrap-manifests. Le
+  # chemin sans `cluster/` désignait un répertoire inexistant : le repli
+  # `file(...)` ne pouvait donc JAMAIS aboutir. Le défaut restait invisible
+  # parce que la task local-up passe toujours TF_VAR_cilium_manifest, ce qui
+  # court-circuite la branche — un `tofu apply` lancé à la main ici échouait.
+  # Même famille que le répertoire fantôme de render-bootstrap-manifests.sh.
+  manifests_dir = "${path.module}/../opentofu/cluster/bootstrap-manifests"
   cilium_manifest = var.cilium_manifest != null ? var.cilium_manifest : (
     fileexists("${local.manifests_dir}/cilium-local.yaml")
     ? file("${local.manifests_dir}/cilium-local.yaml")
@@ -87,7 +93,7 @@ module "local" {
   network_cidr        = "${local.net_prefix}.0/24"
   cp_ip_base          = 10
   worker_ip_base      = 20
-  talos_api_port_base = 51000
+  talos_api_port_base = var.talos_api_port_base
   k8s_api_port        = 6443
 
   # Generated configs from modules/talos (one per node — identical, node-agnostic)
