@@ -98,21 +98,30 @@ full browser-test protocol (blocking prerequisite, tunnel, the 3 tests) is in
       profile. Generator and detector are now aligned in English and the guard
       was re-tested against a deliberately stale profile. **Lesson**: before
       translating a string, check that no code compares it.
-- [ ] **`apps/base/platform/ccm/scaleway` does not build — dead code.** Its
-      `kustomization.yaml` lists a `helmrepository.yaml` that does not exist, so
-      `kubectl kustomize` fails on it. Nothing references it: the brick is absent
-      from the Flux DAG and from `bricks.yaml`, and the CCM was explicitly ruled
-      out (see "Public ingress" below). It is the only one of the repo's 48
-      kustomizations that fails to build. Either delete it, or restore the
-      missing file and document why it is kept. Found 2026-07-28 while sweeping
-      every kustomization.
-- [ ] **`task validate` fails outside an S3 context.** `tofu init -backend=false`
-      on the `cluster` root still demands AWS credentials ("No valid credential
-      sources found"), when `-backend=false` is precisely meant to avoid that.
-      The repo's credentials are prefixed (`SCW_AWS_*`, `OVH_AWS_*`) and resolved
-      by `scripts/internal/`, which this task does not call. Net effect: a static
-      check meant to run without cloud does not run. Observed 2026-07-28;
-      `opentofu-local` validates fine.
+- [x] ~~**`apps/base/platform/ccm/scaleway` does not build — dead code**~~ →
+      REMOVED (2026-07-28). Its `kustomization.yaml` listed a
+      `helmrepository.yaml` that did not exist, so it was the only one of the
+      repo's 48 kustomizations that failed to build. Nothing referenced it: it
+      was absent from the Flux DAG and from `bricks.yaml`, and its README still
+      described the CCM as "to be wired the day we switch" — stale, since the
+      2026-07-27 decision ruled the CCM out (see "Public ingress" below).
+      Deleted rather than repaired: keeping a never-deployed HelmRelease for a
+      rejected design guarantees silent rot (chart version, API drift). The
+      decision and its reversal conditions stay documented below; `git log --
+      apps/base/platform/ccm` restores the brick if the CCM is ever revisited.
+      Sweep now reports **47/47**.
+- [x] ~~**`task validate` fails outside an S3 context**~~ → FIXED (2026-07-28).
+      The cause was not the credentials but the **backend cache**: as soon as a
+      root has been through a `task infra` / `task destroy`, its
+      `.terraform/terraform.tfstate` records the configured S3 backend, and
+      OpenTofu tries to reach it *even with `-backend=false`* — failing with
+      "No valid credential sources found", a message that names neither the
+      cache nor the cause. Since that cache is the normal state of a working
+      tree, a check meant to run offline **never ran**.
+      Fix: the task now sets `TF_DATA_DIR=.terraform-validate`, an isolated data
+      dir that holds no backend config while still caching the providers between
+      runs. Verified on both roots with every AWS variable unset AND the real
+      `.terraform` present; the working tree's backend cache is untouched.
 - [ ] **`fleet-down.sh` must exit non-zero when a step fails.** Today it
       concludes `✓ fleet-down terminé` even when the management destroy never
       started — the `⚠` is buried in the output and a hurried operator believes
@@ -622,7 +631,9 @@ To be handled before promising anything about self-healing.
       **Validated on the 2026-07-28 run** (EndpointSlice → real pod, LB pools
       targeting 30080/30443).
       A CCM would become the right choice again if Proxmox left the scope, or for
-      on-demand public LBs per application.
+      on-demand public LBs per application. The unused `platform/ccm/scaleway`
+      brick was deleted on 2026-07-28 (it did not even build); restore it from
+      git history if that day comes.
 - [x] ~~**Cloud S3 for observability**~~ → WIRED (2026-07-27). Loki was reading
       `minio/root`: in the cloud its logs landed on the internal MinIO, hence on
       Longhorn volumes — which defeats the point of object storage. Now

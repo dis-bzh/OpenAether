@@ -39,6 +39,19 @@ tasks:
     vars:
       ROOT: '{{.ROOT | default "cluster"}}'
     dir: "infrastructure/opentofu/{{.ROOT}}"
+    # ⚠️ TF_DATA_DIR is what makes this check runnable WITHOUT cloud credentials.
+    # `-backend=false` alone is not enough: as soon as a root has been through a
+    # `task infra` / `task destroy`, its `.terraform/terraform.tfstate` records
+    # the configured S3 backend, and OpenTofu tries to reach it even when the
+    # backend is disabled — failing with a message that names neither the cache
+    # nor the cause:
+    #   No valid credential sources found
+    #   failed to refresh cached credentials, no EC2 IMDS role found
+    # Since that cache is the normal state of a working tree, a check meant to
+    # run offline never ran (observed 2026-07-28). A dedicated data dir isolates
+    # it from the backend cache while still caching the providers between runs.
+    env:
+      TF_DATA_DIR: .terraform-validate
     cmds:
       - tofu init -backend=false
       - tofu validate
