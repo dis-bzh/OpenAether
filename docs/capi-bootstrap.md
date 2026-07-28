@@ -1,5 +1,7 @@
 # Amorcer un cluster de management par CAPI (pivot depuis le local)
 
+🇬🇧 [English version](capi-bootstrap.en.md)
+
 Procédure **validée de bout en bout le 2026-07-28** sur Scaleway : un cluster
 jetable crée le management, le management crée son propre enfant, puis le
 management récupère ses propres objets CAPI et le cluster jetable est détruit.

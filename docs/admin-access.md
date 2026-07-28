@@ -1,5 +1,7 @@
 # Jour 1 — initialisation admin après `task up` (management)
 
+🇬🇧 [English version](admin-access.en.md)
+
 Parcours **ordonné** des opérations manuelles post-déploiement. Chaque étape
 renvoie au runbook détaillé de sa brique. Validé en conditions réelles
 (Scaleway, 2026-07-25). Convention : `KC=infrastructure/opentofu/cluster/kubeconfig`.
@@ -327,11 +329,12 @@ est plus rapide et plus sûr que de réparer. Les valeurs correctes — dont
 `apps/clusters/*.yaml` : un enfant créé aujourd'hui les reçoit au bootstrap.
 `task apps-validate` vérifie cet alignement avant tout déploiement.
 
-Attendu pour un enfant sain avec le profil `workload` : **18/18 Kustomizations**
-(17 du profil + la racine posée par le scaffold). Le compte a changé le
-2026-07-27 : `backup-openbao-identity` s'est ajouté (ConfigMap `CLUSTER_NAME`
-qui préfixe les dépôts restic). Les runs antérieurs à cette date affichaient
-17/17 — ce n'est pas une régression.
+Attendu pour un enfant sain avec le profil `workload` : **19/19 Kustomizations**
+(18 du profil + la racine posée par le scaffold). Ce compte **bouge à chaque
+brique ajoutée au DAG** — il valait 17/17 avant le 2026-07-27, puis 18/18. Ne
+pas le lire comme une régression : le vérifier avec
+`python3 scripts/pick.py vault eso certs gateway` (côté apps), qui annonce le
+nombre de Kustomizations retenues.
 
 Vérifier l'état d'un enfant :
 ```bash

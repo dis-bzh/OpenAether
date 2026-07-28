@@ -5,14 +5,18 @@
 > on-prem (Proxmox) ou cloud (Scaleway/OVH/Outscale) — avec pour seul socle figé
 > **CNI (Cilium) + Flux**. Tout le reste se pioche dans `OpenAether-apps`.
 
+🇬🇧 [English version](README.en.md)
+
 ## Version
 
-**v0.4.0+** — Socle Talos modulaire multi-provider (recentrage : voir `CLAUDE.md`
-et `CHANGELOG.md [Unreleased]`). Management validé end-to-end sur Scaleway, OVH
-et Outscale ; local Docker validé (3 CP + workers) ; Proxmox code-complet
-(jamais appliqué sur matériel réel). Backups tfstate/artifacts chiffrés client,
-double store. Le multi-cloud actif-actif est abandonné ; le hub/spoke CAPI est
-une **surcouche optionnelle** (cf. `OpenAether-apps/apps/clusters/`).
+**v0.4.0+** — socle Talos modulaire multi-provider (cf. `CLAUDE.md` et
+`CHANGELOG.md [Unreleased]`).
+
+Management validé de bout en bout sur **Scaleway, OVH et Outscale** ; local
+Docker validé (3 CP + 3 workers) ; Proxmox code-complet mais **jamais appliqué
+sur matériel réel**. Backups tfstate/artefacts chiffrés côté client, double
+store. Le multi-cloud actif-actif est abandonné ; le hub/spoke CAPI est une
+**surcouche optionnelle**.
 
 ## Architecture
 
@@ -20,208 +24,206 @@ une **surcouche optionnelle** (cf. `OpenAether-apps/apps/clusters/`).
 Un cluster Talos autonome (socle figé : Cilium + Flux)
   └── pioche modulaire dans OpenAether-apps (scripts/pick.py) :
       OpenBao, ESO, cert-manager/PKI, Istio ambient, gateway, CNPG,
-      Longhorn, observability, Zitadel, Kyverno, backups restic…
+      Longhorn, observabilité, Zitadel, Kyverno, backups restic…
 
 Surcouche OPTIONNELLE — cluster de management (CAPI pioché) :
   Management (hub) ──CAPI+Talos──▶ clusters clients (kubeception)
-                    ──Flux kubeConfig──▶ Cilium+Flux injectés,
+                    ──Flux kubeConfig──▶ Cilium+Flux injectés à distance,
                     puis chaque enfant réconcilie SON profil git (gitception)
 ```
 
-**Design principle:** The management cluster is NOT in the client data path. If the management cluster is temporarily unavailable, client workloads continue running unaffected (each child runs its own Flux).
+**Principe de conception** : le cluster de management n'est **pas** sur le
+chemin de données des clients. S'il devient indisponible, les workloads
+continuent de tourner — chaque enfant a son propre Flux.
 
-## Layer Status
+## Deux façons d'amorcer le premier cluster
 
-| Layer | Technology | Status |
-|-------|------------|--------|
+| Voie | Quand | Ce qu'elle crée |
+|---|---|---|
+| **OpenTofu** (défaut) | Tous les cas courants | Tout le substrat : réseau, routeur, security groups, LB, bastion, volumes, buckets S3 — puis Talos |
+| **CAPI** (optionnel) | On veut un management décrit comme les autres clusters, et l'outillage day-2 de CAPI | Un cluster jetable crée le management, qui devient ensuite autogéré (`clusterctl move`) |
+
+La voie CAPI **ne remplace pas** OpenTofu : sur OVH, OpenTofu crée ~44
+ressources dont 3 seulement sont des instances. Procédure complète et pièges :
+**[docs/capi-bootstrap.md](docs/capi-bootstrap.md)**.
+
+## Statut des couches
+
+| Couche | Technologie | Statut |
+|--------|-------------|--------|
 | **IaC** | OpenTofu 1.12.x | ✅ |
-| **OS** | Talos Linux v1.13.3 (Immutable) | ✅ |
+| **OS** | Talos Linux v1.13.x (immuable) | ✅ |
 | **CNI** | Cilium 1.19.2 (WireGuard) | ✅ |
-| **GitOps** | Flux v3.3.2 (hub/spoke) | ✅ |
-| **Gateway / Mesh** | Istio 1.24.2 (ambient mesh + Gateway API) | 🚧 Phase 2 |
-| **Identity** | Zitadel 10.0.2 (v4.14) + CloudNativePG | 🚧 Phase 2 |
-| **Secrets** | OpenBao 2.2.0 (Vault fork) | 🚧 Phase 2 |
-| **Observability** | VictoriaMetrics v1.102.0, Grafana 11.2.0 | 🚧 Phase 2 |
-| **Autoscaling** | KEDA v2.15.1 | 🚧 Phase 2 |
-| **Policy** | Kyverno v1.12.0 | 🚧 Phase 2 |
+| **GitOps** | Flux v2.4.0 (hub/spoke) | ✅ |
+| **Secrets** | OpenBao 2.5.4 (fork Vault) | ✅ validé en cloud réel |
+| **PKI** | cert-manager v1.15.3 | ✅ |
+| **Gateway / Mesh** | Istio 1.24.2 (ambient + Gateway API) | ✅ |
+| **Base de données** | CloudNativePG 1.23.1 | ✅ |
+| **Stockage** | Longhorn 1.9.2 | ✅ |
+| **Identité** | Zitadel 10.0.2 | ✅ déployé — SSO Grafana à confirmer au navigateur |
+| **Observabilité** | VictoriaMetrics operator 0.65.1, Loki 6.25.0, Grafana 8.6.4, Alloy 0.11.0 | ✅ |
+| **Policy** | Kyverno v1.12.1 | ✅ |
+| **Cluster API** | CAPI v1.13.2, CABPT v0.6.12, CACPPT v0.5.13, CAPS v0.2.1, CAPO v0.14.4, CAPOSC v1.5.0 | ✅ surcouche optionnelle |
 
-## Provider Support
+## Providers
 
 Même contrat pour tous (`modules/providers/provider-contract.md`) — le stack
-Talos/cluster est provider-agnostique. Statut détaillé : `docs/deployment-test-matrix.md`.
+Talos/cluster est provider-agnostique. Détail : `docs/deployment-test-matrix.md`.
 
-| Provider | Status | Region / cible | Notes |
+| Provider | Statut | Région / cible | Notes |
 |----------|--------|----------------|-------|
-| **Scaleway** | ✅ Management validated | fr-par (3 AZs) | Implémentation de référence ; rolling-replace exercé live |
-| **OVH** | ✅ Management validated | EU-WEST-PAR (OpenStack) | Octavia LB, floating IPs, router SNAT egress, private network |
-| **Outscale / Numspot** | ✅ Management validated | eu-west-2 | LB, NAT-service egress, public/private subnets, VPC |
-| **Proxmox (on-prem)** | 🧪 Code-complet, unit-testé — **jamais appliqué en réel** | PVE single/multi-host | VIP Talos (pas de LB managé), NAT/DNAT nftables hôte, prérequis manuels (cf. `modules/providers/proxmox/README.md`) |
-| **Local (Docker)** | ✅ Validé (`task local-test`) | WSL2/Docker | 3 CP + workers, quorum etcd, Cilium+Flux — preuve creds-free de `modules/talos` |
+| **Scaleway** | ✅ management validé | fr-par (3 AZ) | Implémentation de référence ; rolling-replace exercé en réel |
+| **OVH** | ✅ management validé | EU-WEST-PAR (OpenStack) | LB Octavia, floating IPs, routeur SNAT, réseau privé |
+| **Outscale / Numspot** | ✅ management validé | eu-west-2 | LB, NAT-service, sous-réseaux public/privé, VPC |
+| **Proxmox (on-prem)** | 🧪 code-complet, testé unitairement — **jamais appliqué en réel** | PVE mono/multi-hôte | VIP Talos (pas de LB managé), NAT/DNAT nftables, prérequis manuels |
+| **Local (Docker)** | ✅ validé (`task local-up`) | WSL2 / Docker | 3 CP + 3 workers, quorum etcd, Cilium — preuve sans credentials de `modules/talos` |
 
-## Repository Structure
+## Structure du dépôt
 
 ```
 OpenAether-infra/
 ├── infrastructure/
-│   └── opentofu/                    # All Infrastructure as Code
-│       ├── cluster/                 # Cluster root (management + workload)
-│       │   ├── main.tf, backup.tf, backend.tf, variables.tf, outputs.tf
-│       │   ├── envs/                # Per-cluster config (<kind>-<provider>)
-│       │   │   ├── management-{scaleway,ovh,outscale,proxmox}.tfvars(.example)
-│       │   │   ├── workload-{scaleway,ovh,outscale}.tfvars(.example)
-│       │   │   └── failover-{scaleway,ovh,outscale}.tfvars(.example)
-│       │   └── tests/               # OpenTofu unit tests (incl. proxmox)
-│       ├── talos-image/             # Image builder root (one-off per version)
-│       │   ├── main.tf, backend.tf, variables.tf
-│       │   └── schematic.yaml       # Image Factory schematic
-│       ├── opentofu-local/          # Local Docker root (reuses modules/talos)
-│       └── modules/                 # Shared modules (both roots)
-│           ├── talos/               # Cluster secrets, config, bootstrap
-│           ├── providers/           # provider-contract.md = the contract
-│           │   ├── scw/             # Scaleway (reference implementation)
-│           │   ├── ovh/             # OVH / OpenStack
-│           │   ├── outscale/        # Outscale / Numspot
-│           │   ├── proxmox/         # Proxmox VE (on-prem, VIP Talos, no managed LB)
-│           │   └── local/           # Docker containers (WSL2-aware)
-│           └── talos-image/
-│               ├── scaleway/        # qcow2 → snapshot → instance image
-│               ├── ovh/             # local qcow2 → Glance
-│               ├── outscale/        # raw → OOS → snapshot → OMI
-│               └── proxmox/         # nocloud image on the PVE host
+│   └── opentofu/
+│       ├── cluster/                 # Racine cluster (management + workload)
+│       │   ├── envs/                # Config par cluster (<rôle>-<provider>.tfvars)
+│       │   ├── bootstrap-manifests/ # Cilium + Flux injectés au bootstrap
+│       │   └── tests/               # Tests unitaires OpenTofu
+│       ├── talos-image/             # Constructeur d'image (un state à part)
+│       ├── opentofu-local/          # Racine locale Docker (réutilise modules/talos)
+│       └── modules/
+│           ├── talos/               # Secrets, config, bootstrap — provider-agnostique
+│           ├── providers/           # provider-contract.md = le contrat
+│           │   ├── scw/ ovh/ outscale/ proxmox/ local/
+│           └── talos-image/         # Publication d'image par provider
 └── scripts/
     ├── setup.sh
-    ├── lib/common.sh                # Shared helpers (tfvars parsing, S3 creds)
-    ├── bootstrap/                   # Cluster lifecycle (run once or rarely)
-    │   ├── render-bootstrap-manifests.sh
-    │   ├── talos-image.sh
-    │   ├── talos-tunnels.sh
-    │   ├── register-spoke.sh        # Register spoke cluster in Flux hub
-    │   └── failover-management.sh   # Stand up management on another cloud (~30 min)
-    ├── ops/                         # Ongoing operations
-    │   ├── backup-state.sh          # Replicate the encrypted tfstate to the -backup store
-    │   ├── backup-artifacts.sh      # gpg-encrypt + upload kube/talosconfig (local-exec)
-    │   ├── etcd-snapshot.sh         # Encrypted etcd snapshot → both stores (task etcd-snapshot)
-    │   ├── rolling-replace.sh       # Zero-downtime node replacement (provider-agnostic targets)
-    │   ├── bastion-harden-check.sh
-    │   └── local-admin-portforward.sh
-    ├── dev/                         # Local testing (no cloud)
-    │   ├── test-talos-local.sh      # Full 3-CP + 2-worker local cluster test
-    │   └── test-local-stack.sh      # Static checks (tofu fmt/validate + kustomize)
-    └── internal/                    # Called by Taskfile / other scripts, not directly
-        ├── resolve-s3-cred.sh
-        ├── tf-backend.sh            # Derive the S3 backend config from cluster tfvars
-        └── ensure-buckets.sh        # Create the per-cluster backup buckets (idempotent)
+    ├── bootstrap/                   # Cycle de vie (rare)
+    ├── ops/                         # Exploitation courante
+    │   ├── fleet-down.sh            # Teardown ordonné (enfants puis management)
+    │   ├── edge-down.sh             # Suppression d'un enfant CAPI (suspend Flux)
+    │   ├── rolling-replace.sh       # Remplacement de nœud sans coupure
+    │   ├── etcd-snapshot.sh         # Snapshot etcd chiffré → 2 stores
+    │   ├── check-cilium-parity.py   # Garde-fou : enfants alignés sur le socle
+    │   ├── preflight-quotas.py      # Vérifie les quotas AVANT de déployer
+    │   ├── ensure-capo-fip.py       # FIP pré-allouée (certSANs OpenStack)
+    │   └── purge-orphans/           # Filet de secours (API provider directe)
+    └── internal/                    # Appelés par le Taskfile
 ```
 
-Kubernetes manifests live in the companion repo [dis-bzh/OpenAether-apps](https://github.com/dis-bzh/OpenAether-apps), reconciled by Flux from the management cluster.
+Les manifests Kubernetes vivent dans
+[dis-bzh/OpenAether-apps](https://github.com/dis-bzh/OpenAether-apps).
 
-## Quick Start
+## Démarrage rapide
 
-### Prerequisites
+### Prérequis
 
 ```bash
-./scripts/setup.sh                  # installs tofu, talosctl, kubectl, task, helm, yamllint…
+./scripts/setup.sh          # tofu, talosctl, kubectl, task, helm, yamllint…
 
-# For CLOUD deploys only — load your credentials (see .env.example for the full,
-# documented list of variables). Local Docker testing needs none of this.
-cp .env.example .env.sh             # then edit it with your provider creds
-source .env.sh                      # .env.sh is git-ignored
+# Pour le CLOUD uniquement — le test local n'a besoin d'aucun credential.
+cp .env.example .env.sh     # puis l'éditer
+source .env.sh              # git-ignoré ; contient aussi TF_VAR_encryption_passphrase
 ```
 
-### Local cluster (Docker — no cloud, no credentials)
+⚠️ **Toujours `source .env.sh` avant un `task` qui touche au cloud.** Sans lui,
+`tofu` réclame `var.encryption_passphrase` en interactif et la commande échoue —
+y compris un teardown, qui peut alors sembler réussi sans rien détruire.
 
-Brings up a real **3 control plane + 2 worker** Talos cluster in Docker — etcd
-quorum, Cilium, Flux, and the GitOps `ApplicationSet → Application` chain — on
-the **same production `modules/talos/`** used in the cloud. Best first step.
+### Cluster local (Docker — sans cloud ni credentials)
+
+Monte un vrai cluster Talos **3 control planes + 3 workers** dans Docker, sur le
+**même `modules/talos/` qu'en production**. C'est le meilleur premier pas.
 
 ```bash
-task local-test                     # full deploy + verify (3 CP + 2 workers)
-task local-status                   # etcd members + nodes + Flux
-task local-flux                   # Flux UI → http://localhost:9090
-task local-down                     # tear down (containers + volumes + state)
+task local-up        # déploiement complet
+task local-status    # membres etcd + nœuds + Flux
+task local-down      # destruction (conteneurs + volumes + state)
 ```
 
-See [infrastructure/opentofu-local/README.md](infrastructure/opentofu-local/README.md) for details.
+⚠️ **Sous Windows/WSL2** : Hyper-V réserve des blocs de ports au-dessus de
+49152, et ces blocs bougent au redémarrage. La base des ports hôte est donc
+paramétrable (`talos_api_port_base`, défaut 41000). Diagnostiquer avec
+`netsh.exe int ipv4 show excludedportrange protocol=tcp`.
 
-### Deploy the Management Cluster (cloud)
+### Cluster de management (cloud)
 
 ```bash
-source .env.sh                      # provider creds + TF_VAR_encryption_passphrase
+source .env.sh
 
-# Configure your cluster (copy the template, then edit). Real envs/*.tfvars are
-# git-ignored; only the *.tfvars.example are versioned.
 cp infrastructure/opentofu/cluster/envs/management-scaleway.tfvars.example \
    infrastructure/opentofu/cluster/envs/management-scaleway.tfvars
-# Edit: admin_ip, bastion_ssh_keys, image_name/image_id, s3_primary_*/s3_replica_*
+# Éditer : admin_ip, bastion_ssh_keys, image_name/image_id, s3_primary_*/s3_replica_*
 
-# Phase 0 — build the Talos image once per version (separate state, reused by all clusters)
-task talos-image PROVIDER=scaleway
-
-# Phase 1 — ensures the backup buckets, derives + inits the backend, provisions the
-# infra, replicates the state. PROVIDER defaults to scaleway (also ovh, outscale, proxmox).
+task preflight-quotas PROVIDER=ovh          # vérifier les quotas d'abord
+task talos-image PROVIDER=scaleway          # une fois par version d'image
 task infra ROLE=management PROVIDER=scaleway
-
-# Phase 2 — opens the SSH tunnels (from state), bootstraps Talos + Flux, and pushes
-# the client-side-encrypted backups (kube/talosconfig + state replica).
 task bootstrap-phase2 ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
 ```
 
-**Après le déploiement** : suivre le parcours jour-1 (`docs/admin-access.md`) —
-escrow Shamir/root/restic, signature offline de l'intermediate PKI (HTTPS),
-seed des destinations backup, accès admin aux UIs, secrets CAPI enfants.
+**Après le déploiement** : suivre le parcours jour-1
+([docs/admin-access.md](docs/admin-access.md)) — escrow Shamir/root/restic,
+signature offline de l'intermediate PKI, seed des destinations de backup, accès
+admin aux UIs, secrets CAPI des enfants.
 
-### 🚧 Deploy a Workload Cluster
+### Teardown
 
-```bash
-cp infrastructure/opentofu/cluster/envs/workload-ovh.tfvars.example \
-   infrastructure/opentofu/cluster/envs/workload-ovh.tfvars   # then edit (image_id, admin_ip…)
-
-task infra ROLE=workload PROVIDER=ovh
-task bootstrap-phase2 ROLE=workload PROVIDER=ovh KEY=~/.ssh/yourkey
-task register-spoke CLUSTER=openaether-ovh-prod PROVIDER=ovh   # register in the Flux hub
-```
-
-### 🚧 Cross-provider failover — second management on another cloud
+L'ordre compte : le management détient les CR de ses enfants.
 
 ```bash
-# If your primary management provider is unavailable, stand one up elsewhere:
-task failover PROVIDER=ovh
-# RTO: ~30 minutes. Client workloads are unaffected during recovery.
+source .env.sh
+task edge-down CLUSTER=edge-1 -- --yes      # chaque enfant CAPI d'abord
+task fleet-down PROVIDER=ovh -- --yes       # puis le management
+python3 scripts/ops/purge-orphans/ovh.py    # dry-run : vérifier qu'il ne reste rien
 ```
 
-### Static checks (no cloud, no Docker)
+⚠️ Les floating IPs pré-allouées hors OpenTofu ne partent pas seules, et un
+cluster **autogéré** ne peut pas terminer sa propre suppression
+(cf. `docs/capi-bootstrap.md`).
+
+### Contrôles statiques (sans cloud ni Docker)
 
 ```bash
-./scripts/dev/test-local-stack.sh        # tofu fmt/validate/test + kustomize + talosctl + yamllint
-./scripts/dev/test-local-stack.sh --fast # skip talosctl gen
+task validate            # tofu fmt/validate/test
+task apps-validate       # intégrité du DAG Flux + profils pick.py à jour
+task security            # contrôles de durcissement
 ```
 
-## Security
+## Documentation
 
-| Control | Implementation |
-|---------|----------------|
-| No public IPs on cluster nodes | VPC-only, bastion SSH tunnel |
-| Bastion SSH | Dedicated unprivileged user, key-only (root login & passwords disabled) |
-| State encryption | Client-side AES-GCM + PBKDF2 (OpenTofu `encryption{}`) before S3 |
-| Artifact backup encryption | Client-side gpg AES-256 (authenticated) + S3 SSE on top |
-| Backup replication / DR | State + artifacts mirrored to a `-backup` store (prod: a different provider, separate creds) |
-| Kubernetes API access | LB ACL restricted to `admin_ip` |
-| Talos API access | SSH tunnel only (port 50000, never on LB) |
-| Inter-node encryption | Cilium WireGuard |
-| Secrets management | OpenBao (Vault fork, open source) |
+| Fichier | Contenu |
+|---|---|
+| [docs/admin-access.md](docs/admin-access.md) | Parcours jour-1 : escrow, PKI offline, accès UIs, tests navigateur |
+| [docs/capi-bootstrap.md](docs/capi-bootstrap.md) | Amorcer un management par CAPI et le rendre autogéré |
+| [docs/deployment-test-matrix.md](docs/deployment-test-matrix.md) | Ce qui est validé, où, et comment |
+| [docs/backlog.md](docs/backlog.md) | **Source de vérité** : état courant, dette, améliorations |
+
+## Sécurité
+
+| Contrôle | Mise en œuvre |
+|----------|---------------|
+| Aucune IP publique sur les nœuds | VPC seul, tunnel SSH via bastion |
+| SSH bastion | Utilisateur dédié non privilégié, clé uniquement (root et mots de passe désactivés) |
+| Chiffrement du state | AES-GCM + PBKDF2 côté client (`encryption{}`) avant S3 |
+| Chiffrement des artefacts | gpg AES-256 authentifié côté client, + SSE S3 par-dessus |
+| Réplication / DR | State et artefacts miroités vers un store `-backup` (prod : autre provider, credentials séparés) |
+| Accès API Kubernetes | ACL du LB restreinte à `admin_ip` |
+| Accès API Talos | Tunnel SSH uniquement (port 50000, jamais sur le LB) |
+| Chiffrement inter-nœuds | Cilium WireGuard |
+| Gestion des secrets | OpenBao (fork Vault, open source) |
 
 ## Roadmap
 
-| Phase | Deliverable | Status |
-|-------|-------------|--------|
-| **3** | OVH + Outscale active, Flux hub/spoke, cross-provider failover | ✅ Done |
-| **4** | DNS failover (ExternalDNS + k8GB), OpenBao auto-unseal | ⏳ Planned |
-| **4b** | Warm standby management on OVH (<5 min RTO) | ⏳ Planned |
-| **5** | Service catalogue (Kratix / Backstage) | ⏳ Planned |
-| **6** | Active-active management (Cilium ClusterMesh) | ⏳ Planned |
+| Phase | Livrable | Statut |
+|-------|----------|--------|
+| **3** | OVH + Outscale actifs, hub/spoke Flux, failover cross-provider | ✅ fait |
+| **3b** | Management amorcé par CAPI + pivot autogéré | ✅ fait |
+| **4** | `providerID` sur les nœuds CAPI (CCM ou kubelet) → MachineHealthCheck | ⏳ prioritaire |
+| **4b** | Failover DNS (ExternalDNS + k8GB), auto-unseal OpenBao | ⏳ prévu |
+| **5** | Catalogue de services (Kratix / Backstage) | ⏳ prévu |
 
-## License
+## Licence
 
-**OpenAether** is licensed under the [GNU Affero General Public License v3.0 (AGPLv3)](LICENSE).
+**OpenAether** est distribué sous
+[GNU Affero General Public License v3.0 (AGPLv3)](LICENSE).
 
-Source: **https://github.com/dis-bzh/OpenAether-infra**
+Source : **https://github.com/dis-bzh/OpenAether-infra**

@@ -5,29 +5,47 @@ Alimenté au fil des sessions (humain + assistant). Retirer les entrées faites.
 
 ## Où on en est (mis à jour le 2026-07-28)
 
-⚠️ **UNE FLOTTE À 5 CLUSTERS TOURNE, SUR 2 PROVIDERS** — 9 instances OVH
-(quota 10) + 6 Scaleway.
+✅ **RIEN NE TOURNE — les 3 comptes sont vérifiés à zéro** (2026-07-28, fin de
+session). OVH : 0 instance, 0 FIP, 0 réseau privé. Scaleway : 0 instance, 0 IP,
+0 LB, 0 volume. Outscale : purge-orphans ne trouve rien. Aucun conteneur Talos
+local. Branche de test `capi-mgmt-test` supprimée, son correctif utile
+(brique `clusterctl-inventory`) repris sur `main`.
 
-| Cluster | Provider | Amorcé par | Flux | Nœuds | Identité restic |
-|---|---|---|---|---|---|
-| management | OVH | OpenTofu | 37/37 | 6/6 | `openaether-dev-ovh` |
-| edge-1 | Scaleway | management | 19/19 | 2/2 | `edge-1` |
-| edge-2 | OVH | management | 19/19 | 2/2 | `edge-2` |
-| **mgmt-capi** | Scaleway | **CAPI (cluster jetable)** | 12/12 | 2/2 | `mgmt-capi` |
-| **edge-capi** | Scaleway | **mgmt-capi** | 19/19 | 2/2 | `edge-capi` |
+Sont conservés volontairement : buckets S3 (state, artefacts, backups restic) et
+images Talos — les détruire coûterait la restauration et un rebuild (~1 h sur
+Outscale).
+
+### Ce que la session du 2026-07-28 a validé en cloud réel
+
+Une flotte de **5 clusters sur 2 providers** a tourné puis été démontée :
+
+| Cluster | Provider | Amorcé par | Flux | Nœuds |
+|---|---|---|---|---|
+| management | OVH | OpenTofu | 37/37 | 6/6 |
+| edge-1 | Scaleway | management | 19/19 | 2/2 |
+| edge-2 | OVH | management | 19/19 | 2/2 |
+| mgmt-capi | Scaleway | **CAPI (cluster jetable)** | 14/14 | 2/2 |
+| edge-capi | Scaleway | **mgmt-capi** | 19/19 | 2/2 |
 
 Deux acquis distincts :
+
 - un management OVH pilote un enfant **Scaleway** → gitception validée
   cross-provider **dans les deux sens** ;
-- un management **né de CAPI** pilote son propre enfant et **se gère lui-même**
-  après destruction du cluster jetable → cf. `capi-bootstrap.md`.
+- un management **né de CAPI** déploie son propre enfant puis **se gère
+  lui-même** après destruction du cluster jetable → cf. `capi-bootstrap.md`.
 
-Teardown : `task fleet-down PROVIDER=ovh -- --yes` **et**
-`task fleet-down PROVIDER=scw -- --yes`, puis purger la FIP pré-allouée d'edge-2
-(facturée, elle ne part pas seule). Pour mgmt-capi/edge-capi, suivre l'ordre de
-`capi-bootstrap.md` § Teardown — **un cluster autogéré ne peut pas terminer sa
-propre suppression**. Vérifier ensuite les **3 comptes** à zéro, puis supprimer
-la branche `capi-mgmt-test` (jamais avant : les clusters y lisent leur source).
+### Deux pièges de teardown, payés cash ce jour
+
+1. **`task fleet-down` sans `source .env.sh` échoue en affichant « terminé ».**
+   `tofu` réclame `var.encryption_passphrase` en interactif, le destroy ne
+   démarre jamais, mais le script conclut `✓ fleet-down terminé` après un
+   `⚠ le destroy du management a échoué` noyé dans la sortie. **Les 7 VM OVH
+   étaient toujours là.** À durcir : `fleet-down.sh` devrait sortir en code non
+   nul si une étape échoue.
+2. **Ne jamais conclure « le compte est vide » sur une sortie tronquée.**
+   `purge-orphans/ovh.py` liste les serveurs **en premier** ; un `| tail -12`
+   les coupe et laisse croire à un compte propre. Vérifier avec la sortie
+   entière, ou par un appel API explicite.
 
 ### Ce que ce run a VALIDÉ en cloud réel
 
@@ -64,10 +82,19 @@ secret — étape opérateur, cf. `docs/admin-access.md` § 4bis.
    signé HORS LIGNE (`admin-access.md` § 2) — le listener HTTPS reste `Invalid`.
    Le code, lui, est durci (`credentialName`, plus d'`insecureSkipVerify`).
 
-Le protocole complet des tests navigateur (prérequis bloquant, tunnel, les 3
-tests) est dans `docs/admin-access.md` § 4ter.
+3. **`providerID` sur les nœuds CAPI** — voir la section dédiée plus bas. C'est
+   désormais le point le plus structurant : sans lui, `MachineHealthCheck` ne
+   peut pas fonctionner.
 
-✅ **edge-1 (Scaleway) re-validé** — 19/19 sans intervention, TLS OpenBao inclus.
+Ces deux premiers points exigent un cluster vivant : les rejouer au prochain
+déploiement. Le protocole complet des tests navigateur (prérequis bloquant,
+tunnel, les 3 tests) est dans `docs/admin-access.md` § 4ter.
+
+- [ ] **`fleet-down.sh` doit sortir en code non nul si une étape échoue.**
+      Aujourd'hui il conclut `✓ fleet-down terminé` même quand le destroy du
+      management n'a pas démarré — le `⚠` est noyé dans la sortie et un
+      opérateur pressé croit son compte vide. Constaté le 2026-07-28 avec
+      7 VM OVH toujours actives après un « succès ».
 
 ### Note : les répertoires `local-path` en 0755 (PAS un défaut du code)
 
