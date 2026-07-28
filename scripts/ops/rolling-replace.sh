@@ -22,7 +22,6 @@
 #
 # Usage: rolling-replace.sh <provider> [--workers-only|--cp-only] [--dry-run] [--yes]
 #   Needs: tofu init, AWS_* creds, open Talos tunnels, ./talosconfig + ./kubeconfig.
-#   rolling-replace.sh <provider> [--workers-only|--cp-only] [--dry-run] [--yes]
 # ==============================================================================
 set -euo pipefail
 
