@@ -2,16 +2,12 @@
 
 🇫🇷 [Version française](deployment-test-matrix.fr.md)
 
-> Exhaustive, deduplicated list of the deployment cases this stack can produce,
-> and which have actually been exercised. Derived from the code
-> (`cluster/variables.tf`, `cluster/main.tf`, the five provider modules,
-> `modules/talos/variables.tf`, `provider-contract.md`, `Taskfile.yml`, and the
-> `envs/*.tfvars.example`).
+> Every deployment case this stack can produce, and which have been exercised.
+> Derived from `cluster/variables.tf`, the provider modules and
+> `provider-contract.md`. Keep the **Status** column current — that is the point
+> of the file.
 >
-> Status legend: ✅ apply-tested · 🧪 unit-tested only (`tofu test`, mocked) ·
-> ⬜ untested
->
-> Last reviewed: **2026-07-28**.
+> ✅ apply-tested · 🧪 unit-tested only (mocked) · ⬜ untested. Reviewed 2026-07-28.
 
 ## Mental model
 
@@ -137,9 +133,8 @@ Two orthogonal layers of knobs:
 
 ## C) Priority (highest-value untested, real apply)
 
-1. **`providerID` on CAPI nodes** — no child has `spec.providerID`, so `nodeRef`
-   is never resolved and `MachineHealthCheck` cannot work. Blocking for CAPI's
-   day-2 argument. See `backlog.md`.
+1. **`providerID` on CAPI nodes** — blocks `MachineHealthCheck` on every child;
+   design and foot-gun in `backlog.md`.
 2. **Proxmox real apply** (`PMX-*`) — never run on a real host.
 3. **Cloud HA multi-AZ** (`SCW-mgmt-ha`, `OSC-mgmt-ha`) — 3-CP etcd across zones
    never applied.
@@ -154,21 +149,9 @@ Two orthogonal layers of knobs:
 
 3 CP (fr-par-1 + fr-par-2) + 1 worker, `k8s_lb_mode=vip`.
 
-- ✅ **Layer2 VIP works on Scaleway, including cross-zone.** The regional private
-  network relays the VIP's ARP across zones — the main open question going in.
-- ✅ **VIP is in the apiserver cert SANs.**
-- ⚠️ **Operator access is private-only**: `kubectl` needs the bastion 6443 tunnel.
-- ⚠️ **`data.talos_cluster_health` can hang the two-phase apply in vip mode**: the
-  read is issued from the operator's machine and cannot reach the private VIP.
-  etcd/config are applied before it, so the state is complete.
-
-## E) Keeping this current
-
-1. **This committed doc** is the living artifact; keep the per-case **Status**
-   column up to date.
-2. **Generate the "shipped combos" rows from `envs/*.tfvars.example`** so the
-   table never drifts; keep the hand-written prose above the generated table.
-3. **Bind status to the `tofu test` filters** so "covered (unit)" vs
-   "covered (apply)" is explicit.
-4. **CI drift guard**: fail if a new `node_distribution` field or a new enum
-   value appears in `variables.tf` without a matching row here.
+- ✅ Layer2 VIP works cross-zone: the regional private network relays its ARP —
+  the main open question going in. VIP is in the apiserver cert SANs.
+- ⚠️ Operator access becomes private-only (`kubectl` needs the bastion tunnel),
+  and `data.talos_cluster_health` can hang the apply — it is read from the
+  operator's machine, which cannot reach a private VIP. etcd/config land first,
+  so the state stays complete.

@@ -2,16 +2,13 @@
 
 🇬🇧 [English version](deployment-test-matrix.md)
 
-> Liste exhaustive et dédoublonnée des cas de déploiement que ce stack peut
-> produire, et de ceux réellement exercés. Dérivée du code
-> (`cluster/variables.tf`, `cluster/main.tf`, les cinq modules provider,
-> `modules/talos/variables.tf`, `provider-contract.md`, `Taskfile.yml`, et les
-> `envs/*.tfvars.example`).
+> Tous les cas de déploiement que ce stack peut produire, et ceux réellement
+> exercés. Dérivée de `cluster/variables.tf`, des modules provider et de
+> `provider-contract.md`. Tenir la colonne **Statut** à jour — c'est l'intérêt
+> du fichier.
 >
-> Légende : ✅ testé par apply réel · 🧪 testé unitairement seulement
-> (`tofu test`, mocké) · ⬜ non testé
->
-> Dernière revue : **2026-07-28**.
+> ✅ testé par apply réel · 🧪 testé unitairement (mocké) · ⬜ non testé.
+> Revue 2026-07-28.
 
 ## Modèle mental
 
@@ -137,9 +134,8 @@ Deux couches de réglages orthogonales :
 
 ## C) Priorités (plus forte valeur, non testé, apply réel)
 
-1. **`providerID` sur les nœuds CAPI** — aucun enfant n'a de `spec.providerID`,
-   donc `nodeRef` n'est jamais résolu et `MachineHealthCheck` est inopérant.
-   Bloquant pour l'argumentaire day-2 de CAPI. Cf. `backlog.md`.
+1. **`providerID` sur les nœuds CAPI** — rend `MachineHealthCheck` inopérant sur
+   tous les enfants ; conception et piège dans `backlog.md`.
 2. **Apply réel Proxmox** (`PMX-*`) — jamais exécuté sur un hôte réel.
 3. **HA multi-AZ en cloud** (`SCW-mgmt-ha`, `OSC-mgmt-ha`) — etcd 3 CP réparti
    sur plusieurs zones jamais appliqué.
@@ -154,23 +150,9 @@ Deux couches de réglages orthogonales :
 
 3 CP (fr-par-1 + fr-par-2) + 1 worker, `k8s_lb_mode=vip`.
 
-- ✅ **La VIP Layer2 fonctionne sur Scaleway, y compris cross-zone.** Le réseau
-  privé régional relaie l'ARP de la VIP entre zones — c'était la principale
-  inconnue.
-- ✅ **La VIP est dans les SANs du certificat apiserver.**
-- ⚠️ **L'accès opérateur est privé uniquement** : il faut le tunnel bastion 6443.
-- ⚠️ **`data.talos_cluster_health` peut bloquer l'apply en deux phases en mode
-  vip** : la lecture part du poste opérateur et n'atteint pas la VIP privée. etcd
-  et la config sont appliqués avant, donc le state est complet.
-
-## E) Tenir ce document à jour
-
-1. **Ce fichier versionné** est l'artefact vivant : maintenir la colonne
-   **Statut** de chaque cas.
-2. **Générer les lignes « combinaisons livrées » depuis `envs/*.tfvars.example`**
-   pour que la table ne dérive pas ; garder au-dessus la prose écrite à la main.
-3. **Lier le statut aux filtres `tofu test`** pour distinguer explicitement
-   « couvert (unitaire) » de « couvert (apply) ».
-4. **Garde-fou CI** : échouer si un nouveau champ `node_distribution` ou une
-   nouvelle valeur d'énumération apparaît dans `variables.tf` sans ligne
-   correspondante ici.
+- ✅ La VIP Layer2 fonctionne cross-zone : le réseau privé régional relaie son
+  ARP — c'était la principale inconnue. La VIP est dans les SANs de l'apiserver.
+- ⚠️ L'accès opérateur devient privé uniquement (`kubectl` via le tunnel
+  bastion), et `data.talos_cluster_health` peut bloquer l'apply : il est lu
+  depuis le poste opérateur, qui ne joint pas une VIP privée. etcd et la config
+  sont appliqués avant, donc le state reste complet.
