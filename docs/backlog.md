@@ -5,21 +5,29 @@ Alimenté au fil des sessions (humain + assistant). Retirer les entrées faites.
 
 ## Où on en est (mis à jour le 2026-07-28)
 
-⚠️ **UNE FLOTTE À 3 CLUSTERS TOURNE, SUR 2 PROVIDERS** — laissée volontairement
-en fin de run pour permettre les tests navigateur (§ « Ce qui reste »).
+⚠️ **UNE FLOTTE À 5 CLUSTERS TOURNE, SUR 2 PROVIDERS** — 9 instances OVH
+(quota 10) + 6 Scaleway.
 
-| Cluster | Provider | Flux | Nœuds | Pods KO | Identité restic |
+| Cluster | Provider | Amorcé par | Flux | Nœuds | Identité restic |
 |---|---|---|---|---|---|
-| management | OVH | 37/37 | 6/6 | 0 | `openaether-dev-ovh` |
-| edge-1 | **Scaleway** | 19/19 | 2/2 | 0 | `edge-1` |
-| edge-2 | OVH | 19/19 | 2/2 | 0 | `edge-2` |
+| management | OVH | OpenTofu | 37/37 | 6/6 | `openaether-dev-ovh` |
+| edge-1 | Scaleway | management | 19/19 | 2/2 | `edge-1` |
+| edge-2 | OVH | management | 19/19 | 2/2 | `edge-2` |
+| **mgmt-capi** | Scaleway | **CAPI (cluster jetable)** | 12/12 | 2/2 | `mgmt-capi` |
+| **edge-capi** | Scaleway | **mgmt-capi** | 19/19 | 2/2 | `edge-capi` |
 
-Un management OVH pilote donc un enfant **Scaleway** : la gitception est validée
-**cross-provider dans les deux sens**, et les 3 préfixes restic sont distincts.
+Deux acquis distincts :
+- un management OVH pilote un enfant **Scaleway** → gitception validée
+  cross-provider **dans les deux sens** ;
+- un management **né de CAPI** pilote son propre enfant et **se gère lui-même**
+  après destruction du cluster jetable → cf. `capi-bootstrap.md`.
 
 Teardown : `task fleet-down PROVIDER=ovh -- --yes` **et**
 `task fleet-down PROVIDER=scw -- --yes`, puis purger la FIP pré-allouée d'edge-2
-(facturée, elle ne part pas seule). Vérifier ensuite les **3 comptes** à zéro.
+(facturée, elle ne part pas seule). Pour mgmt-capi/edge-capi, suivre l'ordre de
+`capi-bootstrap.md` § Teardown — **un cluster autogéré ne peut pas terminer sa
+propre suppression**. Vérifier ensuite les **3 comptes** à zéro, puis supprimer
+la branche `capi-mgmt-test` (jamais avant : les clusters y lisent leur source).
 
 ### Ce que ce run a VALIDÉ en cloud réel
 
@@ -320,10 +328,73 @@ un second cluster est créé, soit `prune` supprime ce que le `move` vient de po
 - Couverture : il manquerait **CAPMOX** (Proxmox) et **CAPD** (local). Nos 5
   providers OpenTofu resteraient de toute façon la référence.
 
+### ✅ VALIDÉ DE BOUT EN BOUT le 2026-07-28 (Scaleway)
+
+Chaîne complète exercée : cluster jetable → `mgmt-capi` → `edge-capi` →
+`clusterctl move` → `task local-down`. `clusterctl describe`, lancé depuis
+mgmt-capi lui-même, affiche son arbre entier en `Ready`. Procédure et pièges :
+**`capi-bootstrap.md`**.
+
+Le point dur anticipé — `pivot × Flux` — **ne s'est pas produit**, pour une
+raison qui mérite d'être retenue : les objets pivotés n'appartiennent à AUCUN
+inventaire Flux (ils ne sont pas dans git), donc `prune` ne les voit pas. Le
+cluster reste sain à 12/12. Le vrai risque n'apparaîtra que le jour où l'on
+voudra décrire le management dans git : `prune: true` sur une Kustomization
+qui contiendrait son propre `Cluster` **détruirait le cluster** si le fichier
+disparaissait.
+
+Deux vrais obstacles, eux, ont été rencontrés (voir plus bas) : l'inventaire
+clusterctl absent — **corrigé** — et l'absence de `providerID` sur les nœuds —
+**ouvert, et il touche toute la flotte**.
+
 ### Recommandation
 
-Oui, **en chemin optionnel**, d'abord sur OVH/Scaleway (providers déjà prouvés),
-Proxmox ensuite — et **conditionné à la résolution de `pivot × Flux`**.
+Oui, **en chemin optionnel**, d'abord sur OVH/Scaleway (providers prouvés),
+Proxmox ensuite.
+
+## ⛔ Nœuds CAPI sans `providerID` — MachineHealthCheck inopérant (2026-07-28)
+
+**Toute la flotte CAPI est concernée** : `edge-1`, `edge-2`, `mgmt-capi`,
+`edge-capi`. Leurs `Machine` restent en phase `Provisioned` avec
+`status.nodeRef` **absent**, alors que les nœuds sont `Ready` et que les
+workloads tournent — d'où l'invisibilité du défaut jusqu'ici.
+
+Cause : les nœuds Talos n'ont **pas de `spec.providerID`**. Il n'y a ni
+cloud-controller-manager ni `--provider-id` sur le kubelet (vérifié via
+`/proxy/configz` : `providerID` vide, aucun taint `uninitialized`, aucun label
+de topologie). CAPI ne peut donc pas apparier `Machine` ↔ `Node`.
+
+Ce que ça coûte, au-delà du pivot :
+- **`MachineHealthCheck` ne peut pas fonctionner** — or c'était l'argument
+  numéro un en faveur de CAPI pour le day-2 (remplacement automatique d'un
+  nœud mort). À ce jour, ce bénéfice **n'existe pas** chez nous ;
+- supprimer une `Machine` ne cordonne ni ne draine son nœud ;
+- `clusterctl move` est refusé (« still provisioning the node »).
+
+Contournement validé : recopier le `providerID` de la Machine sur le Node
+(cf. `capi-bootstrap.md`). ⚠️ Passer par l'**UUID d'instance**, pas par le nom :
+côté control plane le nœud ne porte pas le nom de la Machine
+(`mgmt-capi-cp-clmwj` → nœud `mgmt-capi-cp-cqqtl`).
+
+Vrai correctif, à trancher :
+1. **CCM par provider** (Scaleway CCM, OpenStack CCM…) — la voie standard,
+   mais une brique de plus par provider, et des credentials à gérer ;
+2. **`provider-id` injecté au kubelet** par le bootstrap Talos — plus léger,
+   mais la valeur est par machine : à voir si CABPT sait l'interpoler.
+
+À traiter avant de promettre quoi que ce soit sur l'auto-réparation.
+
+- [x] ~~**`clusterctl move` refuse un management équipé par notre opérateur**~~
+      → corrigé (2026-07-28), brique `clusterctl-inventory`.
+      `cluster-api-operator` et `clusterctl` tiennent deux inventaires
+      distincts : le premier en `operator.cluster.x-k8s.io`, le second en
+      `clusterctl.cluster.x-k8s.io/Provider`, que seul `clusterctl init` crée.
+      Un cluster équipé par l'opérateur a la CRD mais zéro entrée →
+      « provider bootstrap-talos not found in the target cluster », alors que
+      tous les contrôleurs tournent. **`--dry-run` ne fait PAS cette
+      vérification** : il passe intégralement, l'échec ne surgit qu'au move
+      réel. Les versions de la brique doivent rester alignées sur
+      `core-providers.yaml` / `infra-providers.yaml`.
 
 ## Multi-provider / infra
 
