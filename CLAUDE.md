@@ -54,15 +54,13 @@ la source.
 - Code (`.tf`, `.yaml`, `.py`, `.sh`) : commentaires en anglais.
 - Échange avec l'utilisateur : en français.
 
-### Deux exceptions, à résorber
+⚠️ Le dépôt est **entièrement en anglais depuis le 2026-07-28** (code, docs,
+messages CLI). Toute régression est un défaut : écrire directement en anglais.
 
-- **`docs/backlog.md` est encore en français** (693 lignes). Journal de travail
-  interne, réécrit à chaque session — à traduire en une passe dédiée, pas au
-  fil de l'eau.
-- **Fond de commentaires en français dans le code** : ~210 fichiers, ≥1600
-  lignes. Les convertir **au fil des modifications**, jamais en masse : ils
-  encodent des pièges durement acquis (course Neutron, substitution Flux,
-  `ipam.mode`…) qu'une traduction automatique abîmerait.
+**Piège vécu lors de cette bascule** : `pick.py` identifiait ses profils générés
+par la chaîne littérale française de leur en-tête. La traduire a rendu `--check`
+aveugle **en silence** (il annonçait « 0 profil » au lieu de 1). Avant de
+traduire une chaîne, vérifier qu'aucun code ne la compare.
 
 ## Backlog
 

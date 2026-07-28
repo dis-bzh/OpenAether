@@ -90,10 +90,14 @@ The first two require a live cluster: replay them at the next deployment. The
 full browser-test protocol (blocking prerequisite, tunnel, the 3 tests) is in
 `docs/admin-access.md` § 4ter.
 
-- [ ] **Convert the legacy French code comments** — ~207 files, ≥1600 accented
-      lines (the real total is higher; comments without accents are not
-      counted). **Do not bulk-translate**: these comments encode hard-won traps;
-      convert them as each file is otherwise modified.
+- [x] ~~**Convert the legacy French code comments**~~ → DONE (2026-07-28). Both
+      repositories are now French-free: comments, Python docstrings, CLI
+      messages, OpenTofu descriptions and shell output. ⚠️ One regression caught
+      on the way: `pick.py` identified its generated profiles by the literal
+      French header string, so translating it made `--check` silently skip every
+      profile. Generator and detector are now aligned in English and the guard
+      was re-tested against a deliberately stale profile. **Lesson**: before
+      translating a string, check that no code compares it.
 - [ ] **`apps/base/platform/ccm/scaleway` does not build — dead code.** Its
       `kustomization.yaml` lists a `helmrepository.yaml` that does not exist, so
       `kubectl kustomize` fails on it. Nothing references it: the brick is absent
