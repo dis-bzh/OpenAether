@@ -1,34 +1,20 @@
 #!/usr/bin/env bash
-# ==============================================================================
 # OpenAether — encrypted etcd snapshot → TWO object stores (client-side crypto)
 #
-# GitOps makes the cluster content reconstructible by design (Flux re-applies
-# everything) — this snapshot is an RTO shortcut and a safety net for the few
-# objects that live only in etcd (Secrets written by Jobs, ESO targets, PVC
-# bindings…). Complements, does not replace, the in-cluster backups
-# (OpenAether-apps/apps/base/backup: OpenBao raft + CNPG dumps via restic).
+# An RTO shortcut, not a replacement for the in-cluster backups: Flux rebuilds
+# cluster content, this covers what lives only in etcd (Secrets written by Jobs,
+# PVC bindings…).
 #
-# WHAT IT DOES
-#   1. `talosctl etcd snapshot` from the first healthy control plane, through
-#      the SSH tunnels (CP i → localhost:50000+i, cf. talos-tunnels.sh).
-#   2. CLIENT-side encrypt with gpg (symmetric AES-256, authenticated, hardened
-#      S2K) using the SAME passphrase as the tfstate (TF_VAR_encryption_passphrase)
-#      — identical model to backup-artifacts.sh.
-#   3. Upload to the PRIMARY and REPLICA artifact buckets (backup_targets
-#      output), S3 SSE layered on top, under backups/etcd/.
-#   4. Retention: keep the most recent $KEEP snapshots per bucket (default 30).
+# talosctl snapshot through the SSH tunnels → gpg AES-256 with the SAME
+# passphrase as the tfstate → primary + replica artifact buckets, keeping the
+# last $KEEP.
 #
-# PREREQUISITES
-#   * run from infrastructure/opentofu/cluster (`task etcd-snapshot` does this),
-#     tofu init done, tunnels open, ./talosconfig present.
-#   * TF_VAR_encryption_passphrase in env; provider creds for primary + replica
-#     resolved by ../lib/common.sh::s3_cred (cross-provider <PU>_BACKUP_AWS_*).
-#
-# RESTORE (disaster only — wipes current etcd; prefer GitOps reconvergence):
+# Restore (disaster only — wipes current etcd; prefer GitOps reconvergence):
 #   gpg -d etcd-<ts>.snap.gpg > etcd.snap
 #   talosctl -e <cp> -n <cp-ip> bootstrap --recover-from=etcd.snap
 #
 # Usage: etcd-snapshot.sh   (env: KEEP=30, TALOSCONFIG=./talosconfig)
+#   Run from infrastructure/opentofu/cluster with tunnels open.
 # ==============================================================================
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"

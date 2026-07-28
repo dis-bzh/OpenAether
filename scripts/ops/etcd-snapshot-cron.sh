@@ -1,38 +1,18 @@
 #!/usr/bin/env bash
-# ==============================================================================
-# OpenAether — wrapper CRON du snapshot etcd
+# OpenAether — cron wrapper for the etcd snapshot
 #
-# POURQUOI CE WRAPPER
-#   `task etcd-snapshot` works fine by hand, but not as-is in a crontab.
-#   Four reasons, all of them classics of the genre:
+# `task etcd-snapshot` works by hand but not under cron: minimal PATH (tools are
+# split between /usr/local/bin and /snap/bin), no inherited credentials, and it
+# opens SSH tunnels without closing them (fine interactively, they would pile up
+# under cron). This wrapper fixes the three, plus a flock against overlap.
 #
-#   1. **PATH** — cron starts with a minimal PATH (often /usr/bin:/bin), while
-#      the tools are scattered: task and talosctl in /usr/local/bin, tofu and
-#      aws in /snap/bin. Without this: "command not found", and the snapshot
-#      never runs even though the crontab looks correct.
-#   2. **Credentials** — the task reads environment variables (S3, provider,
-#      encryption passphrase) that cron does not inherit from a login shell.
-#   3. **Unclosed SSH tunnels** — `task etcd-snapshot` OPENS the tunnels and
-#      never closes them (deliberate interactively, where you chain commands).
-#      Under cron they would pile up on every run. This wrapper always closes
-#      them, including on failure (trap EXIT).
-#   4. **Overlap** — a slow snapshot would meet the next one. flock prevents it.
+# Usage: etcd-snapshot-cron.sh <provider> [ssh-key]
+#   Crontab needs an ABSOLUTE path; cron mails the output = poor man's alerting.
+#     40 3 * * * <repo>/scripts/ops/etcd-snapshot-cron.sh ovh ~/.ssh/<key> >> <log> 2>&1
+#   Env: OPENAETHER_ENV_FILE (default <repo>/.env.sh), KEEP (default 30).
 #
-# USAGE
-#   ./scripts/ops/etcd-snapshot-cron.sh <provider> [ssh-key]
-#
-#   Crontab example (03:40 daily) — note the ABSOLUTE path and the redirection:
-#   cron mails the output, which acts as a poor man's alerting.
-#     40 3 * * * /home/vde/repos/DIS/OpenAether/OpenAether-infra/scripts/ops/etcd-snapshot-cron.sh ovh ~/.ssh/id_ed25519-ovh-openaether-dev >> /var/log/openaether-etcd-snapshot.log 2>&1
-#
-# VARIABLES
-#   OPENAETHER_ENV_FILE  environment file to source (default: <repo>/.env.sh)
-#   KEEP                 retention, as a number of snapshots (default: 30)
-#
-# ⚠️ This snapshot is an RTO SHORTCUT, not the reference backup: cluster content
-# is rebuilt by Flux. It covers what lives ONLY in etcd (Secrets written by
-# Jobs, PVC bindings…).
-# ==============================================================================
+# ⚠️ RTO shortcut, not the reference backup: Flux rebuilds cluster content. This
+# covers what lives ONLY in etcd (Secrets written by Jobs, PVC bindings…).
 set -euo pipefail
 
 PROVIDER="${1:?usage: etcd-snapshot-cron.sh <scaleway|ovh|outscale|proxmox> [ssh-key]}"

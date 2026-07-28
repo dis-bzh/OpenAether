@@ -1,32 +1,18 @@
 #!/usr/bin/env bash
-# ==============================================================================
 # OpenAether — Talos API SSH tunnels (Phase 2 bootstrap)
 #
-# Opens one SSH tunnel per node to its Talos API (50000/TCP) THROUGH the bastion,
-# reading the node IPs from the current tofu state. Control planes map to
-# localhost 50000+i, workers to 50100+i — matching control_plane_endpoints /
-# worker_endpoints in the talos module (cloud cluster).
-#
-# Local Docker cluster uses 52000+ to avoid port conflicts.
-#
-# Talos nodes have no SSH, so the bastion relays the TCP (ssh -L ...:node:50000).
-# Tunnels are detached (nohup) so they survive the task and the `tofu apply` that
-# follows; their PIDs are tracked for clean teardown.
+# Talos nodes have no SSH, so the bastion relays the TCP to their API (50000).
+# One tunnel per node, IPs read from the tofu state: control planes on
+# localhost 50000+i, workers on 50100+i (local Docker uses 52000+ to avoid
+# clashes). Detached so they survive the `tofu apply` that follows; PIDs tracked
+# for a clean teardown.
 #
 # Usage:
-#   SSH_KEY=~/.ssh/mykey ./scripts/talos-tunnels.sh open [tofu_dir]
-#   ./scripts/talos-tunnels.sh close [tofu_dir]
+#   SSH_KEY=~/.ssh/mykey ./scripts/talos-tunnels.sh open|close [tofu_dir]
 #
-#   ./scripts/talos-tunnels.sh open-direct --bastion <ip> --user <user> \
-#       --cps <ip1,ip2,...> [--workers <ip1,ip2,...>] [--key <path>]
-#     EXPERIMENTAL — for the opt-in single-apply path (cluster/main.tf's
-#     terraform_data.talos_tunnels, var.auto_tunnels). Takes IPs as arguments
-#     instead of reading `tofu output` (there is no state to read yet: this
-#     runs as a local-exec provisioner between the provider module and
-#     modules/talos in the SAME apply). Not exercised against a real host —
-#     validate before enabling auto_tunnels=true anywhere real.
-# ==============================================================================
-set -euo pipefail
+#   open-direct --bastion <ip> --user <user> --cps <ip,…> [--workers <ip,…>]
+#     EXPERIMENTAL, for the single-apply path (var.auto_tunnels): takes IPs as
+#     arguments because there is no state to read yet. Never exercised for real.
 
 ACTION="${1:-open}"
 KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"

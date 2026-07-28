@@ -1,35 +1,19 @@
 #!/usr/bin/env bash
-# ==============================================================================
 # OpenAether — CLEAN decommission of a CAPI child cluster (idempotent)
 #
-# POURQUOI CE SCRIPT
-#   Removing the file from the kustomization and letting Flux `prune` IS NOT
-#   ENOUGH: Flux deletes every object at once, in no order. CAPI needs the
-#   `Cluster` to go FIRST so the cascade works (ownerReferences); if its
-#   <Infra>Cluster is pruned before the machines, the provider loses the cloud
-#   client it needs to destroy them and loops on "<Infra>Cluster is not
-#   available yet" — machines stuck on finalizers, orphaned VMs BILLED
-#   (observed for real on Scaleway, twice).
+# Letting Flux `prune` the file is NOT enough: it deletes everything at once and
+# CAPI needs the `Cluster` to go first. If the <Infra>Cluster is pruned before
+# the machines, the provider loses the cloud client that destroys them and loops
+# on "<Infra>Cluster is not available yet" — orphaned VMs, BILLED (hit twice).
 #
-#   Here we do the opposite, in the right order:
-#     1. SUSPEND the Flux Kustomizations that manage the `Cluster` — without
-#        this Flux recreates it as soon as it is deleted and the cascade never
-#        starts (hit on 2026-07-27: loops to timeout, machines untouched);
-#     2. `kubectl delete cluster <nom>` → CAPI cascade proprement (control plane,
-#        MachineDeployment, Machines, infra objects) while everything is still there;
-#     3. wait for everything to disappear;
-#     4. safety net: if the provider stayed stuck past the timeout, lift the
-#        finalizers of the remaining infra objects and REPORT the potentially
-#        orphaned VMs to check in the provider console.
-#   Only then: remove the file from apps/clusters/kustomization.yaml
-#   (the Flux prune will have nothing left to delete → no-op).
-#
-# Idempotent: re-runnable, does nothing if the cluster does not exist.
+# So, in order: suspend the Flux Kustomizations that manage the `Cluster` (they
+# would recreate it before the cascade starts), delete the `Cluster`, wait, and
+# as a last resort lift the finalizers and REPORT the VMs to check by hand.
+# Only then remove the file from apps/clusters/kustomization.yaml.
 #
 # Usage:
 #   edge-down.sh <cluster> [--namespace capi-clusters] [--timeout 900] [--yes]
 #   KUBECONFIG must point at the MANAGEMENT cluster.
-# ==============================================================================
 set -uo pipefail
 
 CLUSTER="${1:?usage: edge-down.sh <cluster> [--namespace ns] [--timeout s] [--yes]}"
