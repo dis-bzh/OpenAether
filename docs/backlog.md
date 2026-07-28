@@ -391,6 +391,41 @@ Tout ce qui suit est écrit, validé statiquement, mais n'a jamais tourné :
       est déterministe, même contenu = même ID.
       Reste non exercé : piocher réellement `storage` sur un enfant.
 
+## Défauts trouvés par le run cloud du 2026-07-28
+
+Quatre défauts réels, **aucun visible en analyse statique ni en test local** :
+
+- [x] ~~**Associations de floating IP OVH sans `depends_on` routeur**~~ — Neutron
+      refuse l'association tant que le subnet n'a pas de route externe. Course →
+      échec **intermittent**. Les TROIS associations étaient concernées ; seul le
+      bastion a perdu la course. Suite directe du correctif `fixed_ip` de la
+      veille : supprimer la première course a révélé la seconde.
+- [x] ~~**Brique OpenBao non conforme aux policies Kyverno du projet**~~ —
+      `seccompProfile` au niveau du pod et non PAR CONTENEUR, et image
+      `alpine/k8s` sans préfixe de registre. **Ces violations existaient depuis
+      toujours** mais ne se déclenchaient jamais : OpenBao était créé AVANT que
+      Kyverno n'applique. Le retard introduit par `foundation-vault dependsOn
+      cert-manager` (prérequis du TLS) l'a fait passer sous contrôle d'admission.
+      ⚠️ **Leçon** : l'ordre du DAG peut masquer une non-conformité réelle. Un
+      composant qui « passe » n'est pas forcément conforme — il est peut-être
+      juste arrivé avant le contrôle.
+- [x] ~~**CA du TLS OpenBao au mauvais namespace**~~ — le `kustomization.yaml` de
+      la brique vault porte `namespace: foundation-vault`, et le transformateur
+      de Kustomize écrase le namespace de CHAQUE ressource. La CA atterrissait
+      donc hors de `cert-manager`, seul endroit où un `ClusterIssuer` sait lire
+      un `caBundleSecretRef`. Sortie dans `apps/base/foundation/vault-ca`.
+      ⚠️ **Leçon de méthode** : non vu en local parce que le test y appliquait
+      `tls.yaml` **directement** (`kubectl apply -f`), ce qui court-circuite la
+      surcharge. **Valider un fichier n'est pas valider la brique** — en local,
+      appliquer le DOSSIER (`kubectl apply -k`), jamais un fichier isolé.
+- [x] ~~**Longhorn `backup-target` : API supprimée**~~ — Longhorn ≥ 1.6 a sorti
+      la destination de sauvegarde des `Setting` pour une CRD `BackupTarget`
+      dédiée ; le webhook rejette l'ancien nom (« setting backup-target is not
+      supported »). J'avais vérifié le SCHÉMA du CRD `Setting` sans vérifier que
+      `backup-target` était encore un nom supporté.
+      ⚠️ **Leçon** : vérifier qu'un champ existe ne dit pas que la ressource est
+      la bonne. Confronter le NOM de la ressource à la version déployée.
+
 ## Backups / DR
 
 - [x] ~~**Un dépôt restic par cluster (préfixe)**~~ → FAIT (2026-07-27),
