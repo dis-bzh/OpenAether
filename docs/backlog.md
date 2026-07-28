@@ -1,711 +1,713 @@
-# Backlog — améliorations identifiées (source de vérité)
+# Backlog — identified improvements (source of truth)
 
-Tout ce qui a été identifié comme **mieux que l'existant**, avec le pourquoi.
-Alimenté au fil des sessions (humain + assistant). Retirer les entrées faites.
+Everything identified as **better than what exists today**, with the reasoning.
+Fed session after session (human + assistant). Remove entries once done.
 
-## Où on en est (mis à jour le 2026-07-28)
+English only, on purpose: this file is rewritten every session and two language
+copies would drift within a week. See `CLAUDE.md` § Langue.
 
-✅ **RIEN NE TOURNE — les 3 comptes sont vérifiés à zéro** (2026-07-28, fin de
-session). OVH : 0 instance, 0 FIP, 0 réseau privé. Scaleway : 0 instance, 0 IP,
-0 LB, 0 volume. Outscale : purge-orphans ne trouve rien. Aucun conteneur Talos
-local. Branche de test `capi-mgmt-test` supprimée, son correctif utile
-(brique `clusterctl-inventory`) repris sur `main`.
+## Where we stand (updated 2026-07-28)
 
-Sont conservés volontairement : buckets S3 (state, artefacts, backups restic) et
-images Talos — les détruire coûterait la restauration et un rebuild (~1 h sur
-Outscale).
+✅ **NOTHING IS RUNNING — all 3 accounts verified empty** (2026-07-28, end of
+session). OVH: 0 instances, 0 FIPs, 0 private networks. Scaleway: 0 instances,
+0 IPs, 0 LBs, 0 volumes. Outscale: purge-orphans finds nothing. No local Talos
+container. Test branch `capi-mgmt-test` deleted, its useful fix (the
+`clusterctl-inventory` brick) carried over to `main`.
 
-### Ce que la session du 2026-07-28 a validé en cloud réel
+Deliberately kept: the S3 buckets (state, artifacts, restic backups) and the
+Talos images — destroying them would cost the ability to restore, plus a rebuild
+(~1 h on Outscale).
 
-Une flotte de **5 clusters sur 2 providers** a tourné puis été démontée :
+### What the 2026-07-28 session validated on real cloud
 
-| Cluster | Provider | Amorcé par | Flux | Nœuds |
+A **5-cluster fleet across 2 providers** ran and was then torn down:
+
+| Cluster | Provider | Bootstrapped by | Flux | Nodes |
 |---|---|---|---|---|
 | management | OVH | OpenTofu | 37/37 | 6/6 |
 | edge-1 | Scaleway | management | 19/19 | 2/2 |
 | edge-2 | OVH | management | 19/19 | 2/2 |
-| mgmt-capi | Scaleway | **CAPI (cluster jetable)** | 14/14 | 2/2 |
+| mgmt-capi | Scaleway | **CAPI (throwaway cluster)** | 14/14 | 2/2 |
 | edge-capi | Scaleway | **mgmt-capi** | 19/19 | 2/2 |
 
-Deux acquis distincts :
+Two distinct achievements:
 
-- un management OVH pilote un enfant **Scaleway** → gitception validée
-  cross-provider **dans les deux sens** ;
-- un management **né de CAPI** déploie son propre enfant puis **se gère
-  lui-même** après destruction du cluster jetable → cf. `capi-bootstrap.md`.
+- an OVH management drives a **Scaleway** child → gitception validated
+  cross-provider **in both directions**;
+- a management **born from CAPI** deploys its own child, then **manages itself**
+  once the throwaway cluster is destroyed → see `capi-bootstrap.md`.
 
-### Deux pièges de teardown, payés cash ce jour
+### Two teardown traps, paid for in cash today
 
-1. **`task fleet-down` sans `source .env.sh` échoue en affichant « terminé ».**
-   `tofu` réclame `var.encryption_passphrase` en interactif, le destroy ne
-   démarre jamais, mais le script conclut `✓ fleet-down terminé` après un
-   `⚠ le destroy du management a échoué` noyé dans la sortie. **Les 7 VM OVH
-   étaient toujours là.** À durcir : `fleet-down.sh` devrait sortir en code non
-   nul si une étape échoue.
-2. **Ne jamais conclure « le compte est vide » sur une sortie tronquée.**
-   `purge-orphans/ovh.py` liste les serveurs **en premier** ; un `| tail -12`
-   les coupe et laisse croire à un compte propre. Vérifier avec la sortie
-   entière, ou par un appel API explicite.
+1. **`task fleet-down` without `source .env.sh` fails while printing
+   "finished".** `tofu` prompts interactively for `var.encryption_passphrase`,
+   the destroy never starts, yet the script concludes with
+   `✓ fleet-down terminé` after a `⚠ le destroy du management a échoué` buried
+   in the output. **All 7 OVH VMs were still there.** To harden:
+   `fleet-down.sh` should exit non-zero when a step fails.
+2. **Never conclude "the account is empty" from truncated output.**
+   `purge-orphans/ovh.py` lists servers **first**; a `| tail -12` cuts them off
+   and makes a populated account look clean. Check the full output, or make an
+   explicit API call.
 
-### Ce que ce run a VALIDÉ en cloud réel
+### What the previous run VALIDATED on real cloud
 
-Les 5 chantiers livrés la veille sans jamais avoir tourné :
+The 5 workstreams delivered the day before without ever having run:
 
-| Chantier | Preuve |
+| Workstream | Evidence |
 |---|---|
-| Port Neutron du bastion (`fixed_ip`) | 6/6 tunnels SSH |
-| **Ingress public** | EndpointSlice → pod réel ; nodePorts **30080/30443** ; pools LB OVH ciblant ces ports |
-| PITR CNPG | `s3://…/cnpg/{grafana,zitadel}-db` substitué depuis `cluster-identity` |
-| Préfixe restic par cluster | parent `openaether-dev-ovh` **vs** enfant `edge-2` — collision résolue |
-| `backupTarget` Longhorn | URL substituée (après correctif d'API, cf. plus bas) |
-| Alerting backups | 3 règles acceptées par l'opérateur VM → **le PromQL est valide** |
-| TLS interne OpenBao | 3/3 descellés, quorum raft HTTPS, ESO `store validated`, 6 policies en 204 — **et idem sur l'ENFANT**, via gitception |
+| Bastion Neutron port (`fixed_ip`) | 6/6 SSH tunnels |
+| **Public ingress** | EndpointSlice → real pod; nodePorts **30080/30443**; OVH LB pools targeting those ports |
+| CNPG PITR | `s3://…/cnpg/{grafana,zitadel}-db` substituted from `cluster-identity` |
+| Per-cluster restic prefix | parent `openaether-dev-ovh` **vs** child `edge-2` — collision resolved |
+| Longhorn `backupTarget` | URL substituted (after the API fix, see below) |
+| Backup alerting | 3 rules accepted by the VM operator → **the PromQL is valid** |
+| OpenBao internal TLS | 3/3 unsealed, HTTPS raft quorum, ESO `store validated`, 6 policies returning 204 — **and the same on the CHILD**, via gitception |
 
-⚠️ **SSO Grafana ↔ Zitadel : PARTIELLEMENT validé.** Ce qui est prouvé : config
-`auth.generic_oauth` chargée avec les bons endpoints, chemin réseau ouvert des
-DEUX côtés (CNP egress Grafana → ingress Zitadel, port 8080), et surtout
-**Grafana démarre alors que `secret/grafana/oidc` n'est pas seedé** — le
-garde-fou `optional: true` remplit son rôle, l'accès n'est pas verrouillé.
-**NON validé** : le flux de connexion réel et la STRUCTURE du claim de rôles.
-Cela demande de créer l'application côté Zitadel (console) puis de seeder le
-secret — étape opérateur, cf. `docs/admin-access.md` § 4bis.
+⚠️ **Grafana ↔ Zitadel SSO: PARTIALLY validated.** What is proven: the
+`auth.generic_oauth` config loads with the right endpoints, the network path is
+open on BOTH sides (Grafana egress CNP → Zitadel ingress, port 8080), and above
+all **Grafana starts even though `secret/grafana/oidc` is not seeded** — the
+`optional: true` guardrail does its job and access is not locked out.
+**NOT validated**: the real login flow and the STRUCTURE of the roles claim.
+That requires creating the application on the Zitadel side (console) then
+seeding the secret — an operator step, see `docs/admin-access.md` § 4bis.
 
-### Ce qui reste à faire au prochain run
+### What is left for the next run
 
-1. **Connexion SSO réelle depuis un navigateur** — tout le reste est fait (app
-   Zitadel créée, secret seedé, identifiants injectés dans Grafana, scopes
-   corrigés). Il ne manque que de se connecter pour confirmer la forme du claim
-   retenue. Si tous les comptes restent `Viewer`, inspecter le token et
-   substituer l'ID de projet dans `role_attribute_path` (procédure dans le
-   fichier).
-2. **Chemin gateway → UI** : non testable tant que l'intermediate PKI n'est pas
-   signé HORS LIGNE (`admin-access.md` § 2) — le listener HTTPS reste `Invalid`.
-   Le code, lui, est durci (`credentialName`, plus d'`insecureSkipVerify`).
+1. **A real browser SSO login** — everything else is done (Zitadel app created,
+   secret seeded, credentials injected into Grafana, scopes fixed). All that is
+   missing is logging in to confirm the claim form we picked. If every account
+   stays `Viewer`, inspect the token and substitute the project ID into
+   `role_attribute_path` (procedure in the file).
+2. **Gateway → UI path**: not testable until the PKI intermediate is signed
+   OFFLINE (`admin-access.md` § 2) — the HTTPS listener stays `Invalid`. The
+   code itself is hardened (`credentialName`, no more `insecureSkipVerify`).
+3. **`providerID` on CAPI nodes** — see the dedicated section below. This is now
+   the most structural item: without it, `MachineHealthCheck` cannot work.
 
-3. **`providerID` sur les nœuds CAPI** — voir la section dédiée plus bas. C'est
-   désormais le point le plus structurant : sans lui, `MachineHealthCheck` ne
-   peut pas fonctionner.
+The first two require a live cluster: replay them at the next deployment. The
+full browser-test protocol (blocking prerequisite, tunnel, the 3 tests) is in
+`docs/admin-access.md` § 4ter.
 
-Ces deux premiers points exigent un cluster vivant : les rejouer au prochain
-déploiement. Le protocole complet des tests navigateur (prérequis bloquant,
-tunnel, les 3 tests) est dans `docs/admin-access.md` § 4ter.
+- [ ] **Convert the legacy French code comments** — ~207 files, ≥1600 accented
+      lines (the real total is higher; comments without accents are not
+      counted). **Do not bulk-translate**: these comments encode hard-won traps;
+      convert them as each file is otherwise modified.
+- [ ] **`task validate` fails outside an S3 context.** `tofu init -backend=false`
+      on the `cluster` root still demands AWS credentials ("No valid credential
+      sources found"), when `-backend=false` is precisely meant to avoid that.
+      The repo's credentials are prefixed (`SCW_AWS_*`, `OVH_AWS_*`) and resolved
+      by `scripts/internal/`, which this task does not call. Net effect: a static
+      check meant to run without cloud does not run. Observed 2026-07-28;
+      `opentofu-local` validates fine.
+- [ ] **`fleet-down.sh` must exit non-zero when a step fails.** Today it
+      concludes `✓ fleet-down terminé` even when the management destroy never
+      started — the `⚠` is buried in the output and a hurried operator believes
+      the account is empty. Observed 2026-07-28 with 7 OVH VMs still running
+      after a "success".
 
-- [ ] **Passer ce backlog en anglais** (693 lignes). L'anglais est devenu la
-      langue par défaut du dépôt (cf. `CLAUDE.md` § Langue) : README et docs
-      sont bilingues (`.md` anglais canonique, `.fr.md` français), ce fichier
-      est la dernière doc restée en français. À faire en une passe dédiée ;
-      **sans doublon français** ensuite, il change à chaque session et deux
-      copies dériveraient.
-- [ ] **Convertir le fond de commentaires français du code** — ~210 fichiers,
-      ≥1600 lignes accentuées (le vrai total est plus haut, les commentaires
-      sans accent ne sont pas comptés). **Ne pas traduire en masse** : ces
-      commentaires encodent des pièges durement acquis ; les convertir au fil
-      des modifications de chaque fichier.
-- [ ] **`task validate` échoue hors contexte S3.** `tofu init -backend=false`
-      sur le root `cluster` réclame quand même des credentials AWS
-      (« No valid credential sources found »), alors que `-backend=false` est
-      précisément censé s'en passer. Les credentials du dépôt sont préfixés
-      (`SCW_AWS_*`, `OVH_AWS_*`) et résolus par `scripts/internal/`, que cette
-      task n'appelle pas. Résultat : un contrôle statique censé tourner sans
-      cloud ne tourne pas. Constaté le 2026-07-28 ; `opentofu-local` valide, lui.
-- [ ] **`fleet-down.sh` doit sortir en code non nul si une étape échoue.**
-      Aujourd'hui il conclut `✓ fleet-down terminé` même quand le destroy du
-      management n'a pas démarré — le `⚠` est noyé dans la sortie et un
-      opérateur pressé croit son compte vide. Constaté le 2026-07-28 avec
-      7 VM OVH toujours actives après un « succès ».
+### Note: `local-path` directories at 0755 (NOT a code defect)
 
-### Note : les répertoires `local-path` en 0755 (PAS un défaut du code)
+CNPG's `initdb` failed with `Permission denied`: their PVC directory had been
+created `0755` instead of the `0777` the provisioner's `setup` script applies.
+OpenBao's, created later, was correct — and the deployed script was intact
+(`$VOL_DIR` not blanked, which incidentally **confirms the Flux substitution
+isolation**). Likely cause: the provisioner Deployment rolled **6 times** during
+the deployment, driven by successive fix pushes, and a volume request landed
+during a transition. Re-provisioning was enough. To re-check on a run without
+intermediate pushes before turning it into a debt entry.
 
-Les `initdb` de CNPG ont échoué en `Permission denied` : le répertoire de leur
-PVC avait été créé en `0755` au lieu du `0777` que pose le script `setup` du
-provisioner. Celui d'OpenBao, créé plus tard, était correct — et le script
-déployé était intact (`$VOL_DIR` non vidé, ce qui **valide au passage
-l'isolement de la substitution Flux**). Cause probable : le Deployment du
-provisioner a roulé **6 fois** pendant le déploiement, sous l'effet des pushes
-successifs de correctifs, et une demande de volume est tombée pendant une
-transition. Re-provisionner a suffi. À re-vérifier sur un run sans push
-intermédiaire avant d'en faire une entrée de dette.
+## Defects found by the 2026-07-28 cloud run
 
-## Défauts trouvés par le run cloud du 2026-07-28
+Four real defects, **none visible in static analysis nor in local testing**:
 
-Quatre défauts réels, **aucun visible en analyse statique ni en test local** :
+- [x] ~~**OVH floating IP associations without a router `depends_on`**~~ —
+      Neutron refuses the association until the subnet has an external route.
+      Race → **intermittent** failure. All THREE associations were affected;
+      only the bastion lost the race. A direct consequence of the previous day's
+      `fixed_ip` fix: removing the first race revealed the second.
+- [x] ~~**OpenBao brick violating the project's own Kyverno policies**~~ —
+      `seccompProfile` at pod level instead of PER CONTAINER, and an
+      `alpine/k8s` image without a registry prefix. **These violations had
+      always existed** but never fired: OpenBao was created BEFORE Kyverno
+      enforced. The delay introduced by `foundation-vault dependsOn
+      cert-manager` (a TLS prerequisite) pushed it under admission control.
+      ⚠️ **Lesson**: DAG ordering can mask a real non-compliance. A component
+      that "passes" is not necessarily compliant — it may simply have arrived
+      before the check.
+- [x] ~~**OpenBao TLS CA in the wrong namespace**~~ — the vault brick's
+      `kustomization.yaml` carries `namespace: foundation-vault`, and the
+      Kustomize transformer overrides the namespace of EVERY resource. The CA
+      therefore landed outside `cert-manager`, the only place a `ClusterIssuer`
+      can read a `caBundleSecretRef`. Moved out into
+      `apps/base/foundation/vault-ca`.
+      ⚠️ **Method lesson**: missed locally because the test applied `tls.yaml`
+      **directly** (`kubectl apply -f`), which bypasses the override.
+      **Validating a file is not validating the brick** — locally, apply the
+      DIRECTORY (`kubectl apply -k`), never an isolated file.
+- [x] ~~**Longhorn `backup-target`: API removed**~~ — Longhorn ≥ 1.6 moved the
+      backup destination out of `Setting` into a dedicated `BackupTarget` CRD;
+      the webhook rejects the old name ("setting backup-target is not
+      supported"). I had checked the `Setting` CRD SCHEMA without checking that
+      `backup-target` was still a supported name.
+      ⚠️ **Lesson**: confirming a field exists does not say the resource is the
+      right one. Check the resource NAME against the deployed version.
 
-- [x] ~~**Associations de floating IP OVH sans `depends_on` routeur**~~ — Neutron
-      refuse l'association tant que le subnet n'a pas de route externe. Course →
-      échec **intermittent**. Les TROIS associations étaient concernées ; seul le
-      bastion a perdu la course. Suite directe du correctif `fixed_ip` de la
-      veille : supprimer la première course a révélé la seconde.
-- [x] ~~**Brique OpenBao non conforme aux policies Kyverno du projet**~~ —
-      `seccompProfile` au niveau du pod et non PAR CONTENEUR, et image
-      `alpine/k8s` sans préfixe de registre. **Ces violations existaient depuis
-      toujours** mais ne se déclenchaient jamais : OpenBao était créé AVANT que
-      Kyverno n'applique. Le retard introduit par `foundation-vault dependsOn
-      cert-manager` (prérequis du TLS) l'a fait passer sous contrôle d'admission.
-      ⚠️ **Leçon** : l'ordre du DAG peut masquer une non-conformité réelle. Un
-      composant qui « passe » n'est pas forcément conforme — il est peut-être
-      juste arrivé avant le contrôle.
-- [x] ~~**CA du TLS OpenBao au mauvais namespace**~~ — le `kustomization.yaml` de
-      la brique vault porte `namespace: foundation-vault`, et le transformateur
-      de Kustomize écrase le namespace de CHAQUE ressource. La CA atterrissait
-      donc hors de `cert-manager`, seul endroit où un `ClusterIssuer` sait lire
-      un `caBundleSecretRef`. Sortie dans `apps/base/foundation/vault-ca`.
-      ⚠️ **Leçon de méthode** : non vu en local parce que le test y appliquait
-      `tls.yaml` **directement** (`kubectl apply -f`), ce qui court-circuite la
-      surcharge. **Valider un fichier n'est pas valider la brique** — en local,
-      appliquer le DOSSIER (`kubectl apply -k`), jamais un fichier isolé.
-- [x] ~~**Longhorn `backup-target` : API supprimée**~~ — Longhorn ≥ 1.6 a sorti
-      la destination de sauvegarde des `Setting` pour une CRD `BackupTarget`
-      dédiée ; le webhook rejette l'ancien nom (« setting backup-target is not
-      supported »). J'avais vérifié le SCHÉMA du CRD `Setting` sans vérifier que
-      `backup-target` était encore un nom supporté.
-      ⚠️ **Leçon** : vérifier qu'un champ existe ne dit pas que la ressource est
-      la bonne. Confronter le NOM de la ressource à la version déployée.
+## Grafana ↔ Zitadel SSO — real measurements (2026-07-28)
 
-## SSO Grafana ↔ Zitadel — mesures réelles (2026-07-28)
+Taken against Zitadel **v4.14** on the OVH cluster, through the API (`iam-admin`
+PAT, port-forward — the CNP blocks direct access from an arbitrary pod).
 
-Faites contre Zitadel **v4.14** sur le cluster OVH, via l'API (PAT `iam-admin`,
-port-forward — la CNP bloque l'accès direct depuis un pod quelconque).
-
-- ✅ **Les 4 endpoints configurés sont EXACTS**, confirmés par
-  `/.well-known/openid-configuration` : `/oauth/v2/authorize`,
-  `/oauth/v2/token`, `/oidc/v1/userinfo`, `/oidc/v1/end_session`.
-- ❌ **Le scope de rôles manquait — défaut réel.** Avec `openid profile email`
-  seul, `/oidc/v1/userinfo` ne contient **aucun** claim de rôles : tout le monde
-  serait retombé sur `Viewer` en silence, quel que soit le `role_attribute_path`.
-  Corrigé en ajoutant `urn:zitadel:iam:org:projects:roles`.
-- ✅ **Structure du claim confirmée** : la valeur est un OBJET dont les clés sont
-  les rôles — `{"grafana-admin": {"<orgId>": "<domaine>"}}`. `keys()` était donc
-  la bonne approche.
-- ⚠️ **Nom du claim : deux formes.** Mesuré `urn:zitadel:iam:org:project:<projectId>:roles`
-  lorsqu'on demande les rôles de tous les projets. La forme NON préfixée vaut
-  pour le projet auquel appartient le client (le cas de Grafana), mais cela n'a
-  pas pu être reproduit sans un vrai flux navigateur. À trancher à la première
-  connexion.
-- Créé côté Zitadel : projet `OpenAether`, rôle `grafana-admin`, application web
-  `Grafana` (code + PKCE, redirect `…/login/generic_oauth`),
-  `projectRoleAssertion` activé. Identifiants seedés dans `secret/grafana/oidc`,
-  ExternalSecret `SecretSynced`, variables injectées dans le pod Grafana.
+- ✅ **The 4 configured endpoints are EXACT**, confirmed by
+  `/.well-known/openid-configuration`: `/oauth/v2/authorize`, `/oauth/v2/token`,
+  `/oidc/v1/userinfo`, `/oidc/v1/end_session`.
+- ❌ **The roles scope was missing — a real defect.** With `openid profile email`
+  alone, `/oidc/v1/userinfo` contains **no** role claim at all: everyone would
+  have silently fallen back to `Viewer`, whatever `role_attribute_path` said.
+  Fixed by adding `urn:zitadel:iam:org:projects:roles`.
+- ✅ **Claim structure confirmed**: the value is an OBJECT whose keys are the
+  roles — `{"grafana-admin": {"<orgId>": "<domain>"}}`. `keys()` was therefore
+  the right approach.
+- ⚠️ **Claim name: two forms.** Measured
+  `urn:zitadel:iam:org:project:<projectId>:roles` when asking for the roles of
+  every project. The UNPREFIXED form applies to the project the client belongs
+  to (Grafana's case), but that could not be reproduced without a real browser
+  flow. To settle on the first login.
+- Created on the Zitadel side: project `OpenAether`, role `grafana-admin`, web
+  application `Grafana` (code + PKCE, redirect `…/login/generic_oauth`),
+  `projectRoleAssertion` enabled. Credentials seeded into `secret/grafana/oidc`,
+  ExternalSecret `SecretSynced`, variables injected into the Grafana pod.
 
 ## Backups / DR
 
-- [x] ~~**Un dépôt restic par cluster (préfixe)**~~ → FAIT (2026-07-27),
-      conception (a) retenue. Le chemin des dépôts devient
+- [x] ~~**One restic repository per cluster (prefix)**~~ → DONE (2026-07-27),
+      design (a) chosen. The repository path becomes
       `s3:<endpoint>/<bucket>/<CLUSTER_NAME>/{openbao,cnpg}`.
 
-      Chaîne complète :
-      - **parent** : `flux-bootstrap.yaml.tftpl` pose un ConfigMap
-        `cluster-identity` (ns flux-system) avec
-        `CLUSTER_NAME = <cluster>-<env>-<provider>` (le provider EN FAIT PARTIE :
-        `openaether-dev` seul est identique sur les trois clouds, donc ne
-        distingue rien) ;
-      - **enfants** : `child-gitops` pose le même ConfigMap, valeur `${CHILD_NAME}`
-        substituée par le management depuis `apps/clusters/edge-*.yaml` (le nom
-        CAPI est déjà unique dans la flotte) ;
-      - **briques `backup-*-identity`** (22a) recopient l'identité dans
-        `foundation-vault` / `foundation-databases` ; les CronJobs la lisent via
-        `envFrom.configMapRef`, au runtime.
+      Full chain:
+      - **parent**: `flux-bootstrap.yaml.tftpl` lays down a `cluster-identity`
+        ConfigMap (ns flux-system) with
+        `CLUSTER_NAME = <cluster>-<env>-<provider>` (the provider IS part of it:
+        `openaether-dev` alone is identical on all three clouds, so it
+        distinguishes nothing);
+      - **children**: `child-gitops` lays down the same ConfigMap, its
+        `${CHILD_NAME}` value substituted by the management from
+        `apps/clusters/edge-*.yaml` (the CAPI name is already unique across the
+        fleet);
+      - **`backup-*-identity` bricks** (22a) copy the identity into
+        `foundation-vault` / `foundation-databases`; the CronJobs read it at
+        runtime through `envFrom.configMapRef`.
 
-      ⚠️ **Piège majeur évité** : mettre `postBuild.substituteFrom` directement
-      sur les briques `backup-*` aurait vidé TOUTES les variables shell nues de
-      leurs CronJobs (`$PRIMARY_ENDPOINT`, `$LEADER`, `$init_err`…) — la
-      substitution Flux s'applique à l'intégralité du rendu d'une Kustomization.
-      D'où deux Kustomizations dédiées qui ne rendent qu'un ConfigMap. **Ne
-      jamais fusionner ces ressources dans `apps/base/backup/*`.**
+      ⚠️ **Major trap avoided**: putting `postBuild.substituteFrom` directly on
+      the `backup-*` bricks would have blanked EVERY bare shell variable in
+      their CronJobs (`$PRIMARY_ENDPOINT`, `$LEADER`, `$init_err`…) — Flux
+      substitution applies to the entire render of a Kustomization. Hence two
+      dedicated Kustomizations that render nothing but a ConfigMap. **Never
+      merge these resources into `apps/base/backup/*`.**
 
-      Le CronJob refuse de tourner si `CLUSTER_NAME` est vide, avec un message
-      qui pointe la cause — plutôt qu'un `set -u` sec.
+      The CronJob refuses to run if `CLUSTER_NAME` is empty, with a message that
+      points at the cause rather than a bare `set -u`.
 
-      **À valider au prochain déploiement** (non exerçable sans cluster) :
-      substitution effective, et enfant à **18/18** (17 du profil + racine).
-      ⚠️ Corollaire opérationnel inchangé : purger les préfixes d'un cluster
-      détruit, ou son password escrowé devient la SEULE façon de relire ses
-      backups. Les dépôts EXISTANTS (sans préfixe) restent en place : ils ne
-      seront plus alimentés, à archiver ou supprimer sciemment.
+      **Validated on the 2026-07-28 run**: parent `openaether-dev-ovh` vs child
+      `edge-2`, then three distinct identities across the fleet.
+      ⚠️ Operational corollary, unchanged: purge the prefixes of a destroyed
+      cluster, or its escrowed password becomes the ONLY way to read its backups
+      again. EXISTING (unprefixed) repositories stay in place: they will no
+      longer be fed, and should be archived or deleted knowingly.
 
-- [x] ~~**Alerting échec backups**~~ → FAIT (2026-07-27) :
-      `apps/base/observability/vm-customresources/vmrule-backup.yaml`, 3 règles.
-      `BackupJobFailed` (Job en échec non repris, 15 min de grâce),
-      **`BackupCronJobStale`** (aucun Job créé depuis > 26 h — le cas le plus
-      dangereux, puisqu'il n'y a alors AUCUN échec à voir) et
-      `BackupCronJobSuspended` (> 6 h, avertissement : suspendre est souvent
-      volontaire, réactiver s'oublie).
-      Placé dans `vm-customresources/` et pas dans `observability/` : le kind
-      `VMRule` n'existe qu'après l'installation des CRDs par l'opérateur — même
-      piège chicken-egg que VMCluster/VMAgent.
-      ⚠️ Le PromQL n'a pas pu être vérifié par `promtool` (absent de la machine) :
-      à confirmer au prochain déploiement.
-- [x] ~~**Test de restauration périodique**~~ → FAIT (2026-07-27) : CronJob
-      mensuel `restore-test-cronjob.yaml` dans CHACUNE des deux briques backup.
-      Sur les 2 destinations : `restic check --read-data-subset=5%` (relit et
-      DÉCHIFFRE réellement une fraction des données — ce que `restic check` seul
-      ne fait pas) puis `restic restore latest` vers un `emptyDir` jetable, avec
-      **assertion que le résultat n'est pas vide** : un restore « réussi » mais
-      vide est un dépôt inexploitable.
-      Les pods portent le label `app: <cronjob>` des CronJobs de sauvegarde —
-      c'est lui que sélectionne la CiliumNetworkPolicy qui ouvre l'egress S3 ;
-      sans ce label, aucun egress. Leurs Jobs matchent `BackupJobFailed`, donc
-      un test raté alerte comme un backup raté.
-      **À valider au prochain déploiement** (non exerçable sans cluster).
-- [x] ~~**PITR CNPG**~~ → ACTIVÉ (2026-07-27) sur les deux bases (zitadel-db,
-      grafana-db). `barmanObjectStore` archive les WAL en continu : le RPO passe
-      de **24 h** (le seul filet était le `pg_dump` quotidien) à quelques minutes.
-      - destination `s3://${BACKUP_S3_BUCKET}/cnpg/<base>`, substituée depuis
-        `cluster-identity` ; credentials via ExternalSecret `cnpg-backup-s3`
-        (même destination `backup/s3-primary` que restic et Longhorn) ;
-      - **`ScheduledBackup` quotidiens ajoutés** : sans backup de base, les WAL
-        archivés sont inexploitables — c'est le couple qui fait le PITR ;
-      - rétention 30 j, compression gzip des WAL et des données.
-      ⚠️ Le `schedule` de CNPG porte un champ SECONDES en tête (6 champs, format
-      robfig/cron) — vérifié dans le CRD vendoré. À 5 champs, l'heure serait lue
-      comme des minutes.
-      La substitution est sûre sur cette brique : le manifeste vendoré de
-      l'opérateur contient des `$(VAR_NAME)`, mais **vérifié — les 13 occurrences
-      sont toutes dans des `description` de CRD**, aucune dans un conteneur.
-      **À valider au prochain déploiement.**
-- [x] ~~**Longhorn `backupTarget`**~~ → CÂBLÉ (2026-07-27). Les volumes n'avaient
-      **aucune** destination de sauvegarde : `backupTarget: ""` renvoyait à un
-      « overlay cloud » qui n'a jamais existé. Désormais :
-      - `apps/base/storage/backup-target/` : `ExternalSecret`
-        `longhorn-backup-credentials` (les 3 clés qu'attend Longhorn —
-        `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINTS` — depuis
-        `secret/backup/s3-primary`, la même destination que les dépôts restic) +
-        deux `Setting` CR (`backup-target`, `backup-target-credential-secret`) ;
-      - l'URL vient du ConfigMap `cluster-identity`, OpenTofu l'assemblant au
-        format `s3://<bucket>@<region>/` (`backup.tf`, `local.backup_data_bucket`).
-        Assemblée côté tofu parce que la substitution Flux ne sait pas concaténer
-        conditionnellement.
-      - Kustomization `21c` **séparée** de `storage` : elle porte le
-        `substituteFrom`, et la substitution s'applique à tout le rendu — fusionnée,
-        elle viderait `$VOL_DIR` dans `install.yaml`. Même piège que les backups.
-      - Setting CR et non `defaultSettings` du chart : ce dernier n'est lu qu'au
-        premier déploiement, les CR survivent aux upgrades.
-      Forme du CRD **vérifiée** contre Longhorn v1.9.2 (`longhorn.io/v1beta2`,
-      `value` à la racine). Défaut vide si le cluster ne publie pas l'URL — les
-      enfants CAPI, qui ne piochent pas `storage`, gardent le comportement actuel.
-      Les volumes étant LUKS, les backups sont chiffrés par construction.
-      **À valider au prochain déploiement.**
-- [x] ~~**etcd-snapshot planifié**~~ → FAIT (2026-07-27) :
-      `scripts/ops/etcd-snapshot-cron.sh <provider> [clé]`, ligne de crontab
-      documentée dans `docs/admin-access.md` § 3ter.
-      La task seule n'était pas utilisable en cron, pour quatre raisons — toutes
-      traitées par le wrapper : `PATH` minimal de cron alors que les outils sont
-      éparpillés (`/usr/local/bin` et `/snap/bin`) ; credentials absents de
-      l'environnement de cron ; **`task etcd-snapshot` ouvre les tunnels SSH et
-      ne les referme jamais** (voulu en interactif, mais ils s'accumuleraient en
-      cron) ; et aucun garde-fou contre le recouvrement de deux exécutions.
-      Vérifié en réel avec `PATH=/usr/bin:/bin` : le wrapper retrouve ses outils,
-      source l'environnement, atteint le backend distant, puis échoue proprement
-      sur l'absence d'infrastructure — trap déclenché, code non nul, message
-      horodaté.
+- [x] ~~**Backup failure alerting**~~ → DONE (2026-07-27):
+      `apps/base/observability/vm-customresources/vmrule-backup.yaml`, 3 rules.
+      `BackupJobFailed` (failed Job not retried, 15 min grace),
+      **`BackupCronJobStale`** (no Job created for > 26 h — the most dangerous
+      case, since there is then NO failure to look at) and
+      `BackupCronJobSuspended` (> 6 h, warning: suspending is often deliberate,
+      re-enabling gets forgotten).
+      Placed in `vm-customresources/` rather than `observability/`: the `VMRule`
+      kind only exists after the operator installs the CRDs — the same
+      chicken-and-egg trap as VMCluster/VMAgent.
+      The PromQL was accepted by the VM operator on the 2026-07-28 run, so it
+      parses; the rules have not yet fired on a real failure.
+- [x] ~~**Periodic restore test**~~ → DONE (2026-07-27): monthly
+      `restore-test-cronjob.yaml` CronJob in BOTH backup bricks.
+      Against both destinations: `restic check --read-data-subset=5%` (actually
+      re-reads and DECRYPTS a fraction of the data — which `restic check` alone
+      does not) then `restic restore latest` into a throwaway `emptyDir`, with
+      **an assertion that the result is not empty**: a "successful" but empty
+      restore means an unusable repository.
+      The pods carry the `app: <cronjob>` label of the backup CronJobs — that is
+      what the CiliumNetworkPolicy opening S3 egress selects; without the label,
+      no egress. Their Jobs match `BackupJobFailed`, so a failed test alerts like
+      a failed backup.
+      **To validate at the next deployment** (not exercisable without a cluster).
+- [x] ~~**CNPG PITR**~~ → ENABLED (2026-07-27) on both databases (zitadel-db,
+      grafana-db). `barmanObjectStore` archives WAL continuously: the RPO drops
+      from **24 h** (the only net was the daily `pg_dump`) to a few minutes.
+      - destination `s3://${BACKUP_S3_BUCKET}/cnpg/<db>`, substituted from
+        `cluster-identity`; credentials through the `cnpg-backup-s3`
+        ExternalSecret (the same `backup/s3-primary` destination as restic and
+        Longhorn);
+      - **daily `ScheduledBackup` added**: without a base backup, archived WAL
+        are unusable — the pair is what makes PITR;
+      - 30-day retention, gzip compression for WAL and data.
+      ⚠️ CNPG's `schedule` carries a leading SECONDS field (6 fields,
+      robfig/cron format) — verified in the vendored CRD. With 5 fields, the
+      hour would be read as minutes.
+      Substitution is safe on this brick: the operator's vendored manifest
+      contains `$(VAR_NAME)` occurrences, but **verified — all 13 are inside CRD
+      `description` fields**, none in a container.
+      Substitution confirmed on the 2026-07-28 run.
+- [x] ~~**Longhorn `backupTarget`**~~ → WIRED (2026-07-27). Volumes had **no**
+      backup destination at all: `backupTarget: ""` referred to a "cloud
+      overlay" that never existed. Now:
+      - `apps/base/storage/backup-target/`: `ExternalSecret`
+        `longhorn-backup-credentials` (the 3 keys Longhorn expects —
+        `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINTS` — from
+        `secret/backup/s3-primary`, the same destination as the restic
+        repositories) + a `BackupTarget` CR;
+      - the URL comes from the `cluster-identity` ConfigMap, OpenTofu assembling
+        it as `s3://<bucket>@<region>/` (`backup.tf`,
+        `local.backup_data_bucket`). Assembled on the tofu side because Flux
+        substitution cannot concatenate conditionally.
+      - Kustomization `21c` is **separate** from `storage`: it carries the
+        `substituteFrom`, and substitution applies to the whole render — merged,
+        it would blank `$VOL_DIR` in `install.yaml`. Same trap as the backups.
+      - A CR rather than the chart's `defaultSettings`: the latter is only read
+        on first deployment, CRs survive upgrades.
+      ⚠️ **API corrected on 2026-07-28**: Longhorn ≥ 1.6 uses a dedicated
+      `BackupTarget` CRD (`longhorn.io/v1beta2`), not a `Setting` named
+      `backup-target` — the webhook rejects the old name.
+      Empty default if the cluster does not publish the URL — CAPI children,
+      which do not pick `storage`, keep the current behaviour. Since the volumes
+      are LUKS, the backups are encrypted by construction.
+- [x] ~~**Scheduled etcd snapshot**~~ → DONE (2026-07-27):
+      `scripts/ops/etcd-snapshot-cron.sh <provider> [key]`, crontab line
+      documented in `docs/admin-access.md` § 3ter.
+      The task alone was not cron-usable, for four reasons — all handled by the
+      wrapper: cron's minimal `PATH` while the tools are scattered
+      (`/usr/local/bin` and `/snap/bin`); credentials absent from cron's
+      environment; **`task etcd-snapshot` opens SSH tunnels and never closes
+      them** (fine interactively, but they would pile up under cron); and no
+      guard against two overlapping runs.
+      Verified for real with `PATH=/usr/bin:/bin`: the wrapper finds its tools,
+      sources the environment, reaches the remote backend, then fails cleanly on
+      the missing infrastructure — trap fired, non-zero exit, timestamped
+      message.
 
-## Observabilité / diagnostic
+## Observability / diagnostics
 
-- [x] ~~**`cilium-dbg status` « Cluster health » structurellement faux**~~ →
-      corrigé (2026-07-27) par `apps/base/platform/network-policies/allow-cilium-health.yaml`.
-      `default-deny-all-ingress` porte `endpointSelector: {}` : il couvrait donc
-      aussi les endpoints spéciaux `cilium-health` (un par nœud), dont les sondes
-      ICMP + TCP 4240 étaient droppées. Tous les clusters OpenAether affichaient
-      donc **1/N reachable en permanence**, chaque nœud ne voyant que le sien.
-      **Ce n'était pas cosmétique** : ce faux signal a fait conclure le
-      2026-07-26 que le datapath inter-nœuds d'edge-2 était « définitivement
-      cassé » et a motivé sa mise au rebut. Vérifié le 2026-07-27 : le management
-      (32/32, 6 nœuds Ready) affichait le même 1/6 pendant que le pod-à-pod
-      inter-nœuds fonctionnait (DNS résolu depuis un worker vers les CoreDNS du
-      control plane). Après correctif : management **6/6**, edge-2 **2/2**.
-      **Leçon de méthode** : avant de conclure au datapath cassé sur ce signal,
-      le comparer à un cluster sain — et le confirmer par un test de trafic réel
-      (DNS cross-nœud, `kubectl exec`), pas par la sonde seule.
+- [x] ~~**`cilium-dbg status` "Cluster health" structurally wrong**~~ → fixed
+      (2026-07-27) by
+      `apps/base/platform/network-policies/allow-cilium-health.yaml`.
+      `default-deny-all-ingress` carries `endpointSelector: {}`, so it also
+      covered the special `cilium-health` endpoints (one per node), whose ICMP +
+      TCP 4240 probes were dropped. Every OpenAether cluster therefore reported
+      **1/N reachable permanently**, each node seeing only its own.
+      **This was not cosmetic**: on 2026-07-26 that false signal led to the
+      conclusion that edge-2's inter-node datapath was "permanently broken" and
+      motivated scrapping it. Verified on 2026-07-27: the management (32/32,
+      6 nodes Ready) reported the same 1/6 while inter-node pod-to-pod worked
+      (DNS resolved from a worker to the control-plane CoreDNS). After the fix:
+      management **6/6**, edge-2 **2/2**.
+      **Method lesson**: before concluding the datapath is broken from this
+      signal, compare it against a healthy cluster — and confirm with a real
+      traffic test (cross-node DNS, `kubectl exec`), never the probe alone.
 
-## Piste architecture — amorcer le cluster de management via CAPI (2026-07-28)
+## Architecture track — bootstrapping the management cluster via CAPI (2026-07-28)
 
-Idée issue de [cet article](https://blog.filador.ch/posts/a-la-decouverte-de-cluster-api-le-cluster-de-management/)
-(Proxmox + CAPMOX + CABPT/CACPPT) : ajouter, **à côté** du chemin OpenTofu, la
-possibilité de créer le premier cluster par CAPI puis de le rendre autogéré.
+Idea from [this article](https://blog.filador.ch/posts/a-la-decouverte-de-cluster-api-le-cluster-de-management/)
+(Proxmox + CAPMOX + CABPT/CACPPT): add, **alongside** the OpenTofu path, the
+ability to create the first cluster with CAPI and then make it self-managed.
 
-**On est déjà à 80 %** : `cluster-api-operator` + CABPT v0.6.12 + CACPPT v0.5.13
-+ CAPS/CAPO/CAPOSC sont installés et **prouvés en réel** (edge-1 Scaleway,
-edge-2 OpenStack). Le pattern de description d'un cluster existe (`apps/clusters/`).
+**We were already 80 % there**: `cluster-api-operator` + CABPT v0.6.12 + CACPPT
+v0.5.13 + CAPS/CAPO/CAPOSC are installed and **proven for real** (edge-1
+Scaleway, edge-2 OpenStack). The cluster-description pattern already exists
+(`apps/clusters/`).
 
-### Le vrai périmètre : CAPI ne remplace pas OpenTofu
+### The real scope: CAPI does not replace OpenTofu
 
-Sur OVH, OpenTofu crée **~44 ressources dont seulement 3 instances de calcul**.
-Le reste — réseau, routeur, 14 règles de SG, LB + FIP, bastion, volume, et les
-buckets S3 de `cluster/backup.tf` — n'a pas d'équivalent CAPI. Le découpage
-honnête est donc :
+On OVH, OpenTofu creates **~44 resources of which only 3 are compute
+instances**. The rest — network, router, 14 SG rules, LB + FIP, bastion, volume,
+and the S3 buckets from `cluster/backup.tf` — has no CAPI equivalent. The honest
+split is therefore:
 
-> **OpenTofu = le substrat. CAPI = les machines.**
+> **OpenTofu = the substrate. CAPI = the machines.**
 
-Ce qui veut dire qu'on **n'enlève rien** : on ajoute un troisième chemin. À
-peser contre « le plus simple possible ».
+Which means we **remove nothing**: we add a third path. To weigh against "as
+simple as possible".
 
-### Pas besoin de `kind`
+### No need for `kind`
 
-L'article amorce sur `kind`. Nous avons déjà `task local-up` (Talos local) **et**
-les briques CAPI piochables. Le cluster éphémère peut donc être le nôtre —
-aucune dépendance nouvelle, sur un chemin déjà testé :
+The article bootstraps on `kind`. We already have `task local-up` (local Talos)
+**and** the pickable CAPI bricks. The ephemeral cluster can therefore be our own
+— no new dependency, on an already-tested path:
 
-`task local-up` → pioche `cluster-api-providers` → décrire le management dans
+`task local-up` → pick `cluster-api-providers` → describe the management in
 `apps/clusters/` → pivot → `task local-down`.
 
-### Le point dur n'est pas le pivot, c'est **pivot × Flux**
+### The hard part is not the pivot, it is **pivot × Flux**
 
-`clusterctl move` suppose que les CR ne vivent QUE dans le cluster. Chez nous
-Flux les rend depuis git. La bascule doit être ordonnée :
-`Cluster` en pause → `move` (il transporte UID, `status`, `ownerReferences`,
-c'est-à-dire le lien Machine ↔ instance réelle) → le Flux de la cible **adopte**
-par SSA (mêmes GVK/nom/ns ⇒ patch, pas recréation). Dans le mauvais ordre : soit
-un second cluster est créé, soit `prune` supprime ce que le `move` vient de poser.
-**C'est là que ça casserait — à traiter avant d'écrire la moindre ligne.**
+`clusterctl move` assumes the CRs live ONLY in the cluster. Here Flux renders
+them from git. The handover must be ordered: `Cluster` paused → `move` (it
+carries the UID, `status` and `ownerReferences`, i.e. the Machine ↔ real
+instance link) → the target's Flux **adopts** by SSA (same GVK/name/ns ⇒ patch,
+not recreation). In the wrong order: either a second cluster is created, or
+`prune` deletes what the `move` just laid down.
+**That is where it would break — to be handled before writing a single line.**
 
-### Ce que ça achèterait vraiment (c'est du day-2, pas du day-1)
+### What it would actually buy (day-2, not day-1)
 
-- **`MachineHealthCheck`** : un nœud mort est remplacé tout seul. OpenTofu ne
-  sait pas faire.
-- **Upgrades Talos** par rollout CACPPT au lieu de notre `rolling-replace`
-  maison (ForceNew, 1 nœud à la fois, evict etcd — délicat, cf. mémoire).
-- Scaler = changer un nombre dans git.
-- Un seul vocabulaire : le management décrit comme les edges.
+- **`MachineHealthCheck`**: a dead node is replaced on its own. OpenTofu cannot
+  do that.
+- **Talos upgrades** through a CACPPT rollout instead of our home-grown
+  `rolling-replace` (ForceNew, one node at a time, etcd evict — delicate).
+- Scaling = changing a number in git.
+- One vocabulary: the management described like the edges.
 
-### Ce que ça coûterait
+### What it would cost
 
-- Un cluster autogéré **ne peut pas se réparer lui-même**. Il faut un chemin de
-  secours documenté (re-lever le local, pivoter en sens inverse).
-- Couverture : il manquerait **CAPMOX** (Proxmox) et **CAPD** (local). Nos 5
-  providers OpenTofu resteraient de toute façon la référence.
+- A self-managed cluster **cannot repair itself**. A documented rescue path is
+  needed (bring the local cluster back up, pivot in reverse).
+- Coverage: **CAPMOX** (Proxmox) and **CAPD** (local) would be missing. Our 5
+  OpenTofu providers would remain the reference regardless.
 
-### ✅ VALIDÉ DE BOUT EN BOUT le 2026-07-28 (Scaleway)
+### ✅ VALIDATED END TO END on 2026-07-28 (Scaleway)
 
-Chaîne complète exercée : cluster jetable → `mgmt-capi` → `edge-capi` →
-`clusterctl move` → `task local-down`. `clusterctl describe`, lancé depuis
-mgmt-capi lui-même, affiche son arbre entier en `Ready`. Procédure et pièges :
+Full chain exercised: throwaway cluster → `mgmt-capi` → `edge-capi` →
+`clusterctl move` → `task local-down`. `clusterctl describe`, run from
+mgmt-capi itself, shows its entire tree `Ready`. Procedure and pitfalls:
 **`capi-bootstrap.md`**.
 
-Le point dur anticipé — `pivot × Flux` — **ne s'est pas produit**, pour une
-raison qui mérite d'être retenue : les objets pivotés n'appartiennent à AUCUN
-inventaire Flux (ils ne sont pas dans git), donc `prune` ne les voit pas. Le
-cluster reste sain à 12/12. Le vrai risque n'apparaîtra que le jour où l'on
-voudra décrire le management dans git : `prune: true` sur une Kustomization
-qui contiendrait son propre `Cluster` **détruirait le cluster** si le fichier
-disparaissait.
+The anticipated hard part — `pivot × Flux` — **did not happen**, for a reason
+worth remembering: the pivoted objects belong to NO Flux inventory (they are not
+in git), so `prune` never sees them. The cluster stayed healthy at 14/14. The
+real risk only appears the day we want to describe the management in git:
+`prune: true` on a Kustomization containing its own `Cluster` **would destroy
+the cluster** if the file disappeared.
 
-Deux vrais obstacles, eux, ont été rencontrés (voir plus bas) : l'inventaire
-clusterctl absent — **corrigé** — et l'absence de `providerID` sur les nœuds —
-**ouvert, et il touche toute la flotte**.
+Two genuine obstacles were hit instead (see below): the missing clusterctl
+inventory — **fixed** — and the absent `providerID` on nodes — **open, and it
+affects the whole fleet**.
 
-### Recommandation
+### Recommendation
 
-Oui, **en chemin optionnel**, d'abord sur OVH/Scaleway (providers prouvés),
-Proxmox ensuite.
+Yes, **as an optional path**, first on OVH/Scaleway (proven providers), Proxmox
+afterwards.
 
-## ⛔ Nœuds CAPI sans `providerID` — MachineHealthCheck inopérant (2026-07-28)
+## ⛔ CAPI nodes without `providerID` — MachineHealthCheck inoperative (2026-07-28)
 
-**Toute la flotte CAPI est concernée** : `edge-1`, `edge-2`, `mgmt-capi`,
-`edge-capi`. Leurs `Machine` restent en phase `Provisioned` avec
-`status.nodeRef` **absent**, alors que les nœuds sont `Ready` et que les
-workloads tournent — d'où l'invisibilité du défaut jusqu'ici.
+**The whole CAPI fleet is affected**: `edge-1`, `edge-2`, `mgmt-capi`,
+`edge-capi`. Their `Machine` objects stay in phase `Provisioned` with
+`status.nodeRef` **absent**, while the nodes are `Ready` and workloads run —
+hence the defect going unnoticed until now.
 
-Cause : les nœuds Talos n'ont **pas de `spec.providerID`**. Il n'y a ni
-cloud-controller-manager ni `--provider-id` sur le kubelet (vérifié via
-`/proxy/configz` : `providerID` vide, aucun taint `uninitialized`, aucun label
-de topologie). CAPI ne peut donc pas apparier `Machine` ↔ `Node`.
+Cause: Talos nodes have **no `spec.providerID`**. There is neither a
+cloud-controller-manager nor `--provider-id` on the kubelet (verified through
+`/proxy/configz`: empty `providerID`, no `uninitialized` taint, no topology
+label). CAPI therefore cannot pair `Machine` ↔ `Node`.
 
-Ce que ça coûte, au-delà du pivot :
-- **`MachineHealthCheck` ne peut pas fonctionner** — or c'était l'argument
-  numéro un en faveur de CAPI pour le day-2 (remplacement automatique d'un
-  nœud mort). À ce jour, ce bénéfice **n'existe pas** chez nous ;
-- supprimer une `Machine` ne cordonne ni ne draine son nœud ;
-- `clusterctl move` est refusé (« still provisioning the node »).
+What it costs, beyond the pivot:
 
-Contournement validé : recopier le `providerID` de la Machine sur le Node
-(cf. `capi-bootstrap.md`). ⚠️ Passer par l'**UUID d'instance**, pas par le nom :
-côté control plane le nœud ne porte pas le nom de la Machine
-(`mgmt-capi-cp-clmwj` → nœud `mgmt-capi-cp-cqqtl`).
+- **`MachineHealthCheck` cannot work** — and that was argument number one in
+  favour of CAPI for day-2 (automatic replacement of a dead node). As of today,
+  that benefit **does not exist** here;
+- deleting a `Machine` neither cordons nor drains its node;
+- `clusterctl move` is refused ("still provisioning the node").
 
-Vrai correctif, à trancher :
-1. **CCM par provider** (Scaleway CCM, OpenStack CCM…) — la voie standard,
-   mais une brique de plus par provider, et des credentials à gérer ;
-2. **`provider-id` injecté au kubelet** par le bootstrap Talos — plus léger,
-   mais la valeur est par machine : à voir si CABPT sait l'interpoler.
+Validated workaround: copy the Machine's `providerID` onto the Node (see
+`capi-bootstrap.md`). ⚠️ Go through the **instance UUID**, not the name: on the
+control plane the node does not carry the Machine's name
+(`mgmt-capi-cp-clmwj` → node `mgmt-capi-cp-cqqtl`).
 
-À traiter avant de promettre quoi que ce soit sur l'auto-réparation.
+Real fix, to be decided:
 
-- [x] ~~**`clusterctl move` refuse un management équipé par notre opérateur**~~
-      → corrigé (2026-07-28), brique `clusterctl-inventory`.
-      `cluster-api-operator` et `clusterctl` tiennent deux inventaires
-      distincts : le premier en `operator.cluster.x-k8s.io`, le second en
-      `clusterctl.cluster.x-k8s.io/Provider`, que seul `clusterctl init` crée.
-      Un cluster équipé par l'opérateur a la CRD mais zéro entrée →
-      « provider bootstrap-talos not found in the target cluster », alors que
-      tous les contrôleurs tournent. **`--dry-run` ne fait PAS cette
-      vérification** : il passe intégralement, l'échec ne surgit qu'au move
-      réel. Les versions de la brique doivent rester alignées sur
-      `core-providers.yaml` / `infra-providers.yaml`.
+1. **A CCM per provider** (Scaleway CCM, OpenStack CCM…) — the standard route,
+   but one more brick per provider, and credentials to manage;
+2. **`provider-id` injected into the kubelet** by the Talos bootstrap — lighter,
+   but the value is per machine: check whether CABPT can interpolate it.
+
+To be handled before promising anything about self-healing.
+
+- [x] ~~**`clusterctl move` refuses a management equipped by our operator**~~ →
+      fixed (2026-07-28), the `clusterctl-inventory` brick.
+      `cluster-api-operator` and `clusterctl` keep two distinct inventories: the
+      former under `operator.cluster.x-k8s.io`, the latter under
+      `clusterctl.cluster.x-k8s.io/Provider`, which only `clusterctl init`
+      creates. A cluster equipped by the operator has the CRD but zero entries →
+      "provider bootstrap-talos not found in the target cluster", while every
+      controller is running. **`--dry-run` does NOT perform this check**: it
+      passes completely, and the failure only surfaces on the real move. The
+      brick's versions must stay aligned with `core-providers.yaml` /
+      `infra-providers.yaml`.
 
 ## Multi-provider / infra
 
-- [x] ~~**OVH : port du bastion sans `fixed_ip` → apply intermittent**~~ → corrigé
-      (2026-07-27). `openstack_networking_port_v2.bastion` ne déclarait que
-      `network_id`, ce qui ne crée **aucune dépendance vers le subnet** :
-      OpenTofu pouvait créer le port avant lui et Neutron le laissait sans IPv4.
-      L'apply cassait alors bien plus loin, sur deux messages qui ne désignent
-      pas la cause : « Port <id> requires a FixedIP in order to be used » (boot
-      du bastion) et « Cannot add floating IP to port <id> that has no fixed
-      IPv4 addresses ». **C'est une course** : plusieurs déploiements OVH sont
-      passés sans. Les ports des control planes et le VIP déclaraient déjà leur
-      `fixed_ip` — le bastion était le seul en écart. **Leçon générale** : sur
-      Neutron, un port dont on attend une IP doit toujours porter un bloc
-      `fixed_ip { subnet_id = … }`, autant pour l'ordre que pour l'allocation.
+- [x] ~~**OVH: bastion port without `fixed_ip` → intermittent apply**~~ → fixed
+      (2026-07-27). `openstack_networking_port_v2.bastion` declared only
+      `network_id`, which creates **no dependency on the subnet**: OpenTofu could
+      create the port first and Neutron would leave it without an IPv4. The apply
+      then broke much further along, on two messages that do not name the cause:
+      "Port <id> requires a FixedIP in order to be used" (bastion boot) and
+      "Cannot add floating IP to port <id> that has no fixed IPv4 addresses".
+      **It is a race**: several OVH deployments went through without it. The
+      control-plane ports and the VIP already declared their `fixed_ip` — the
+      bastion was the only outlier. **General lesson**: on Neutron, a port you
+      expect an IP from must always carry a `fixed_ip { subnet_id = … }` block,
+      as much for ordering as for allocation.
 
-- [ ] **OVH : un nœud peut rester `ACTIVE` côté hyperviseur tout en étant mort**
-      (2026-07-27, `openaether-dev-cp-0`). Symptôme : `Kubelet stopped posting
-      node status`, pods statiques en `Terminating`, et l'API **Talos elle-même**
-      qui reset la connexion (`apid` muet) alors que `cp-1`/`cp-2` répondent par
-      les mêmes tunnels. Diagnostic par la **console série Nova**
-      (`os-getConsoleOutput`) : le `init` Talos a appelé `reboot()`
-      (`__se_sys_reboot` → `kernel_restart`) et le noyau s'est **bloqué dans
-      l'arrêt des périphériques** — `device_shutdown` → `vp_reset [virtio_pci]`
-      — avec `rcu: INFO: rcu_preempt self-detected stall on CPU 0` en boucle
-      dans `virtnet_poll`. La VM ne termine jamais son redémarrage.
-      `os-instance-actions` ne liste que le `create` : le reboot vient **de
-      l'intérieur**, ce n'est pas une action plateforme.
-      Reprise : `reboot` type `HARD` via l'API Nova (le reset ACPI ne sert à
-      rien, l'invité est déjà coincé dans son propre reboot).
-      À creuser : **pourquoi Talos a-t-il demandé ce reboot** (aucun apply de
-      config en cours à ce moment) ; hang connu noyau 6.18/virtio au shutdown ?
-      **Méthode à retenir** : quand `talosctl` reset la connexion sur UN nœud et
-      répond sur les autres, passer directement à la console série du provider —
-      c'est le seul canal qui reste quand apid est mort.
+- [ ] **OVH: a node can stay `ACTIVE` on the hypervisor while being dead**
+      (2026-07-27, `openaether-dev-cp-0`). Symptom: `Kubelet stopped posting node
+      status`, static pods `Terminating`, and the **Talos API itself** resetting
+      the connection (`apid` silent) while `cp-1`/`cp-2` answer through the same
+      tunnels. Diagnosis through the **Nova serial console**
+      (`os-getConsoleOutput`): Talos `init` called `reboot()` (`__se_sys_reboot`
+      → `kernel_restart`) and the kernel **hung shutting devices down** —
+      `device_shutdown` → `vp_reset [virtio_pci]` — with
+      `rcu: INFO: rcu_preempt self-detected stall on CPU 0` looping in
+      `virtnet_poll`. The VM never completes its reboot.
+      `os-instance-actions` lists only the `create`: the reboot came **from
+      inside**, it is not a platform action.
+      Recovery: a `HARD` type `reboot` through the Nova API (the ACPI reset is
+      useless, the guest is already stuck in its own reboot).
+      To dig into: **why did Talos request that reboot** (no config apply was in
+      flight at the time); is this a known 6.18 kernel / virtio shutdown hang?
+      **Method to remember**: when `talosctl` resets the connection on ONE node
+      and answers on the others, go straight to the provider's serial console —
+      it is the only channel left once apid is dead.
 
-- [x] ~~**OVH : associations de floating IP sans `depends_on` sur le routeur**~~ →
-      corrigé (2026-07-28), trouvé au **premier apply** du run de validation.
-      Neutron REFUSE d'associer une FIP tant que le subnet du port n'a pas de
-      route vers le réseau externe :
+- [x] ~~**OVH: floating IP associations without `depends_on` on the router**~~ →
+      fixed (2026-07-28), found on the **first apply** of the validation run.
+      Neutron REFUSES to associate a FIP until the port's subnet has a route to
+      the external network:
       `ExternalGatewayForFloatingIPNotFound: External network <id> is not
-      reachable from subnet <id>`. Aucune référence ne liait
-      `openstack_networking_floatingip_associate_v2` à
-      `openstack_networking_router_interface_v2` → création en PARALLÈLE, donc
-      **échec intermittent** selon qui gagne la course.
-      **Les TROIS associations** du module étaient concernées (bastion, LB k8s,
-      LB app) ; seul le bastion a perdu la course, les deux LB passant par
-      chance — un load balancer est plus lent à créer. Les trois ont été
-      corrigées, pas seulement celle qui a échoué.
-      **Suite directe du correctif `fixed_ip` de la veille** : celui-ci a
-      supprimé la première course et a ainsi révélé la seconde. Leçon : sur
-      Neutron, une ressource qui dépend d'un chemin réseau doit le déclarer —
-      `network_id` ou un simple `port_id` ne suffisent pas à ordonner.
+      reachable from subnet <id>`. No reference linked
+      `openstack_networking_floatingip_associate_v2` to
+      `openstack_networking_router_interface_v2` → created in PARALLEL, hence an
+      **intermittent failure** depending on who wins the race.
+      **All THREE associations** in the module were affected (bastion, k8s LB,
+      app LB); only the bastion lost the race, both LBs getting through by luck —
+      a load balancer is slower to create. All three were fixed, not just the one
+      that failed.
+      **A direct consequence of the previous day's `fixed_ip` fix**: it removed
+      the first race and thereby revealed the second. Lesson: on Neutron, a
+      resource that depends on a network path must declare it — `network_id` or a
+      bare `port_id` are not enough to order the graph.
 
-- [ ] **Quota RAM Outscale : un management HA sature le compte** (2026-07-26).
-      `memory_limit` = **40 Go**, or un management HA (3 CP + 3 workers en
-      tinav5.c2r7p2 = 7 Go + bastion 2 Go) en consomme **44** — dépassement
-      toléré à la création, mais TOUTE VM supplémentaire est ensuite refusée :
-      `CreateVms → 10042 TooManyResources (QuotaExceeded)`, quel que soit le
-      gabarit. Conséquence : sur ce compte, management Outscale HA **et**
-      cluster enfant local sont exclusifs (edge-3 désactivé).
-      Autres quotas serrés : `core_limit` 20 (14 utilisés), `vm_limit` 10 (7).
-      Piège de diagnostic : l'OscMachine reste en `VmNotReady` avec une IP
-      réallouée en boucle et AUCUNE erreur dans le CR — il faut lire les logs
-      du manager CAPOSC.
-      (b) et (c) FAITS (2026-07-27) : `task preflight-quotas PROVIDER=…`
-      (`scripts/ops/preflight-quotas.py`, lecture seule) affiche quotas et
-      consommation réels et **simule** une topologie (`--add-vms/--add-cores/
-      --add-ram-gb`), en sortant en erreur si elle dépasse. Vérifié sur les deux
-      comptes : il rejette bien le management HA Outscale (44 Go pour 40) et
-      valide la topologie OVH réellement déployée (9/10 instances). Les quotas
-      des trois providers sont tabulés dans `docs/admin-access.md` § 3bis.
-      Reste (a), décision de l'opérateur : demander une hausse de quota chez
-      Outscale si l'on veut la flotte complète (management HA + enfant).
+- [ ] **Outscale RAM quota: an HA management saturates the account** (2026-07-26).
+      `memory_limit` = **40 GB**, while an HA management (3 CP + 3 workers on
+      tinav5.c2r7p2 = 7 GB + a 2 GB bastion) consumes **44** — the overrun is
+      tolerated at creation, but ANY further VM is then refused:
+      `CreateVms → 10042 TooManyResources (QuotaExceeded)`, whatever the size.
+      Consequence: on this account, an HA Outscale management **and** a local
+      child cluster are mutually exclusive (edge-3 disabled).
+      Other tight quotas: `core_limit` 20 (14 used), `vm_limit` 10 (7).
+      Diagnostic trap: the OscMachine stays `VmNotReady` with an endlessly
+      reallocated IP and NO error in the CR — you have to read the CAPOSC
+      manager's logs.
+      (b) and (c) DONE (2026-07-27): `task preflight-quotas PROVIDER=…`
+      (`scripts/ops/preflight-quotas.py`, read-only) shows real quotas and usage
+      and **simulates** a topology (`--add-vms/--add-cores/--add-ram-gb`),
+      exiting non-zero if it overflows. Verified on both accounts: it correctly
+      rejects the HA Outscale management (44 GB for 40) and validates the OVH
+      topology actually deployed (9/10 instances). All three providers' quotas
+      are tabulated in `docs/admin-access.md` § 3bis.
+      Remaining (a), an operator decision: request a quota increase from Outscale
+      if we want the full fleet (HA management + child).
 
-- [ ] **Reboot simultané de toute la flotte Outscale observé** (2026-07-26,
-      14:32→14:34 UTC) : les 6 VMs (3 CP + 3 workers) ont redémarré en 2 min,
-      sans action de notre part (aucun apply en cours, objets Node conservés,
-      `initialize sequence` Talos = boot froid). Événement plateforme, pas un
-      défaut du socle — et le cluster est revenu **seul** (etcd a retrouvé son
-      quorum, DAG remonté à 29/32 sans intervention), ce qui valide au passage la
-      résilience. Deux enseignements : (a) l'API a été injoignable ~3 min et le
-      healthcheck LB 2×10 s corrigé plus tôt a bien borné la coupure ; (b) un
-      health check Flux de 15 min (`storage`/Longhorn) expire si le reboot tombe
-      pendant sa fenêtre — il repart au reconcile suivant, mais le message
-      « health check failed » est alors un faux positif à ne pas sur-interpréter.
-      À faire : ne pas conclure à un bug applicatif sans vérifier d'abord
-      `talosctl logs machined | head` (heure de boot) sur plusieurs nœuds.
+- [ ] **Simultaneous reboot of the whole Outscale fleet observed** (2026-07-26,
+      14:32→14:34 UTC): all 6 VMs (3 CP + 3 workers) restarted within 2 min, with
+      no action from us (no apply in flight, Node objects preserved, Talos
+      `initialize sequence` = cold boot). A platform event, not a foundation
+      defect — and the cluster came back **on its own** (etcd regained quorum,
+      DAG back to 29/32 without intervention), which incidentally validates the
+      resilience. Two takeaways: (a) the API was unreachable ~3 min and the
+      2×10 s LB health check fixed earlier did bound the outage; (b) a 15-minute
+      Flux health check (`storage`/Longhorn) expires if the reboot lands inside
+      its window — it recovers on the next reconcile, but the "health check
+      failed" message is then a false positive not to over-read.
+      To do: never conclude an application bug without first checking
+      `talosctl logs machined | head` (boot time) on several nodes.
 
-- [x] ~~Images Talos OVH : renommage in-place~~ → FAIT : `replace_triggered_by`
-      sur `terraform_data.build` (OVH) et `build_and_upload` (Outscale), +
-      `timeouts { create = "120m" }` sur le snapshot Outscale (import > 60 min).
-- [x] ~~E2e enfants CAPI OVH + Outscale~~ → FAIT (2026-07-25).
-- [x] ~~Management complet hors Scaleway~~ → FAIT (2026-07-26) : management HA
-      3 CP + 3 workers sur **OVH**, DAG 30/30, pilotant les 3 edges (SCW, OVH,
-      OSC) + backups cross-provider OVH→Scaleway. A révélé 3 défauts du module
-      OVH (volumes multiattach, bastion_user, AZ 'any'), tous corrigés.
-      RESTE hors Scaleway : rolling-replace live, management Outscale.
-- [x] ~~**FIP des CP OpenStack créée hors CAPI**~~ → pré-création **scriptée et
-      idempotente** (2026-07-27) : `scripts/ops/ensure-capo-fip.py <enfant>`
-      retrouve la FIP à sa description (`openaether:<cluster>`), n'en alloue une
-      que s'il n'y en a pas, et imprime l'adresse à reporter dans
-      `OS_CP_FLOATING_IPS`. Relançable sans créer de doublon facturé.
-      Reste **volontairement** un report manuel d'une ligne : l'IP doit entrer
-      dans les `certSANs` Talos, donc en git, avant le boot. ⚠️ Le pool utilise
-      `reclaimPolicy: Retain` — le passer à `Delete` ferait **détruire l'IP** à
-      la suppression du pool, et le certSAN en git deviendrait faux.
-      Ne restent à automatiser que si on veut zéro geste : un `tofu` dédié aux
-      ressources « pré-CAPI » d'un enfant.
-- [~] **`talos_cluster_health` expire sur cluster SAIN — DÉFAUT GÉNÉRIQUE** :
-      reproduit à l'identique sur **OVH puis Outscale** (3 CP + 3 workers, tous
-      Ready, etcd HEALTH OK sur les 3 CP, DAG Flux complet). Ni un problème de
-      durée (15 min) ni un particularisme provider ; la piste SG est écartée
-      (règle inter-node = tout le trafic intra-SG). Non observé sur les
-      management Scaleway. Contournement : `skip_health_check` (activé dans
+- [x] ~~OVH Talos images: in-place rename~~ → DONE: `replace_triggered_by` on
+      `terraform_data.build` (OVH) and `build_and_upload` (Outscale), plus
+      `timeouts { create = "120m" }` on the Outscale snapshot (import > 60 min).
+- [x] ~~E2e CAPI children on OVH + Outscale~~ → DONE (2026-07-25).
+- [x] ~~Full management outside Scaleway~~ → DONE (2026-07-26): HA management,
+      3 CP + 3 workers on **OVH**, DAG 30/30, driving the 3 edges (SCW, OVH,
+      OSC) + cross-provider backups OVH→Scaleway. Revealed 3 defects in the OVH
+      module (multiattach volumes, bastion_user, AZ 'any'), all fixed.
+      STILL outside Scaleway: live rolling-replace, Outscale management.
+- [x] ~~**OpenStack CP FIP created outside CAPI**~~ → pre-creation **scripted and
+      idempotent** (2026-07-27): `scripts/ops/ensure-capo-fip.py <child>` finds
+      the FIP by its description (`openaether:<cluster>`), only allocates one if
+      none exists, and prints the address to carry into `OS_CP_FLOATING_IPS`.
+      Re-runnable without creating a billed duplicate.
+      A one-line manual carry-over remains **on purpose**: the IP must go into
+      the Talos `certSANs`, hence into git, before boot. ⚠️ The pool uses
+      `reclaimPolicy: Retain` — switching it to `Delete` would **destroy the IP**
+      when the pool is removed, and the certSAN in git would become wrong.
+      Only worth automating further if we want zero manual steps: a dedicated
+      `tofu` root for a child's "pre-CAPI" resources.
+- [~] **`talos_cluster_health` times out on a HEALTHY cluster — GENERIC DEFECT**:
+      reproduced identically on **OVH then Outscale** (3 CP + 3 workers, all
+      Ready, etcd HEALTH OK on all 3 CPs, complete Flux DAG). Neither a duration
+      problem (15 min) nor a provider quirk; the SG hypothesis is ruled out
+      (inter-node rule = all intra-SG traffic). Not observed on Scaleway
+      managements. Workaround: `skip_health_check` (enabled in
       management-{ovh,outscale}.tfvars).
 
-      **Le DÉGÂT est corrigé (2026-07-27)** : `talos_cluster_kubeconfig` ne
-      dépend plus du health check. Il le gardait, si bien qu'une expiration
-      faisait échouer l'apply AVANT les outputs — on perdait kubeconfig ET
-      talosconfig, plus le backup des artefacts, sur un cluster sain. Découplés,
-      le health check fait toujours échouer l'apply (le signal reste), mais le
-      kubeconfig est en state : `task kubeconfig` marche et
-      `task bootstrap-phase2` reprend. Cette entrée fusionne l'ancien doublon
-      « timeout trop court en HA multi-AZ » (même défaut, hypothèse invalidée).
-      Le timeout est par ailleurs déjà paramétrable (`health_check_timeout`,
-      défaut 15 min).
+      **The DAMAGE is fixed (2026-07-27)**: `talos_cluster_kubeconfig` no longer
+      depends on the health check. It used to, so an expiry failed the apply
+      BEFORE the outputs — losing both kubeconfig AND talosconfig, plus the
+      artifact backup, on a healthy cluster. Decoupled, the health check still
+      fails the apply (the signal remains) but the kubeconfig is in state:
+      `task kubeconfig` works and `task bootstrap-phase2` resumes. This entry
+      merges the former duplicate "timeout too short in multi-AZ HA" (same
+      defect, hypothesis invalidated). The timeout is also already configurable
+      (`health_check_timeout`, default 15 min).
 
-      **Reste ouvert, en amont** : le bump du provider `siderolabs/talos` n'est
-      PAS possible — vérifié le 2026-07-27 auprès du registry, la ligne 0.12.x
-      n'a que des pre-releases (jusqu'à `0.12.0-alpha.5`), 0.11.0 reste la
-      dernière stable. Donc : soit attendre 0.12.0 stable, soit ouvrir l'issue
-      upstream avec les traces des deux reproductions.
-- [ ] **Proxmox** : premier apply réel (SYS-1) + hardening Ansible hôte (absent
-      du repo, seulement documenté).
-- [x] ~~**Ingress public** : trancher CCM vs LB-IPAM~~ → TRANCHÉ et raccordé
-      (2026-07-27). **Ce n'étaient pas deux solutions au même problème** : le CCM
-      provisionne un LB cloud à partir d'un `Service type=LoadBalancer` ;
-      LB-IPAM attribue l'IP que porte le Service DANS le cluster. Le pool est
-      privé (172.16.12.240-254), donc LB-IPAM ne produit aucune IP publique, et
-      l'IP publique vient déjà d'un LB créé par **OpenTofu** — pas du CCM.
+      **Still open, upstream**: bumping the `siderolabs/talos` provider is NOT
+      possible — checked against the registry on 2026-07-27, the 0.12.x line only
+      has pre-releases (up to `0.12.0-alpha.5`), 0.11.0 remains the last stable.
+      So: either wait for a stable 0.12.0, or open the upstream issue with the
+      traces from both reproductions.
+- [ ] **Proxmox**: first real apply (SYS-1) + Ansible host hardening (absent from
+      the repo, only documented).
+- [x] ~~**Public ingress: decide CCM vs LB-IPAM**~~ → DECIDED and wired
+      (2026-07-27). **They were not two solutions to the same problem**: a CCM
+      provisions a cloud LB from a `Service type=LoadBalancer`; LB-IPAM assigns
+      the IP the Service carries INSIDE the cluster. The pool is private
+      (172.16.12.240-254), so LB-IPAM produces no public IP, and the public IP
+      already comes from an LB created by **OpenTofu** — not by a CCM.
 
-      **Décision : LB-IPAM dedans, LB public dans OpenTofu, pas de CCM.** Le CCM
-      ferait remonter des annotations spécifiques au provider dans la couche
-      `apps`, qui est justement la couche partagée que l'architecture garde
-      agnostique (les spécificités vivent dans `modules/providers/`) ; et il
-      n'existe pas sur Proxmox, qui est dans le périmètre. En prime, un
-      composant de moins portant des credentials cloud dans le cluster.
+      **Decision: LB-IPAM inside, public LB in OpenTofu, no CCM.** A CCM would
+      push provider-specific annotations up into the `apps` layer, which is
+      precisely the shared layer the architecture keeps agnostic (specifics live
+      in `modules/providers/`); and it does not exist on Proxmox, which is in
+      scope. As a bonus, one fewer component holding cloud credentials inside
+      the cluster.
 
-      **Raccordement livré** — le chemin public était cassé parce que le LB
-      ciblait `worker:80/443` où rien n'écoute :
-      - `apps/base/services-gateway/service-nodeport.yaml` : Service NodePort
-        dédié, ports **FIGÉS 30080/30443**, sélectionnant les pods du Gateway.
-        Figés parce que le LB est créé en PHASE 1, avant le cluster : il ne peut
-        pas découvrir un nodePort alloué au hasard (30000-32767).
-      - `app_lb_node_ports` dans les 3 modules provider (scw/ovh/outscale) :
-        backends du LB **et règles de security group** repointés dessus. Ouvrir
-        80/443 sur les nœuds n'aurait servi à rien.
-      - CNP `openaether-gateway` élargie aux entités `host`/`remote-node` : en
-        `externalTrafficPolicy: Cluster`, le nœud SNAT le paquet, donc Cilium ne
-        voit plus `world` mais le nœud — sans ça tout l'ingress public est droppé.
+      **Wiring delivered** — the public path was broken because the LB targeted
+      `worker:80/443` where nothing listens:
+      - `apps/base/services-gateway/service-nodeport.yaml`: a dedicated NodePort
+        Service, ports **FIXED at 30080/30443**, selecting the Gateway pods.
+        Fixed because the LB is created in PHASE 1, before the cluster: it cannot
+        discover a randomly allocated nodePort (30000-32767).
+      - `app_lb_node_ports` in all 3 provider modules (scw/ovh/outscale): LB
+        backends **and security group rules** repointed at them. Opening 80/443
+        on the nodes would have achieved nothing.
+      - The `openaether-gateway` CNP widened to the `host`/`remote-node`
+        entities: with `externalTrafficPolicy: Cluster` the node SNATs the
+        packet, so Cilium no longer sees `world` but the node — without this all
+        public ingress is dropped.
 
-      ⚠️ **Contrat inter-dépôts** : les numéros de port sont dupliqués des deux
-      côtés, chaque fichier pointant sur l'autre. Un écart = LB qui pointe dans
-      le vide, sans erreur nulle part.
+      ⚠️ **Cross-repo contract**: the port numbers are duplicated on both sides,
+      each file pointing at the other. A mismatch = an LB pointing at nothing,
+      with no error anywhere.
 
-      Le Service LoadBalancer d'Istio et sa VIP privée sont **inchangés** : le
-      chemin d'administration par tunnel SSH n'est pas touché.
-      **À valider au prochain déploiement** (non exerçable sans cluster).
-      Le CCM redeviendrait le bon choix si Proxmox sortait du périmètre, ou pour
-      des LB publics à la demande par application.
-- [x] ~~**Observability S3 cloud**~~ → CÂBLÉ (2026-07-27). Loki lisait
-      `minio/root` : en cloud ses logs atterrissaient sur le MinIO interne, donc
-      sur des volumes Longhorn — ce qui annule l'intérêt d'un stockage objet.
-      Désormais **credentials ET emplacement** (endpoint + bucket) transitent par
-      le Secret `loki-s3-credentials`, injectés en `valuesFrom` : passer du MinIO
-      interne au S3 du provider ne demande **aucun changement de code**, seulement
-      un reseed d'`observability/loki-s3`.
-      Destination volontairement **distincte de `backup/s3-primary`** : réutiliser
-      celle-ci donnerait à Loki un accès en écriture au bucket des sauvegardes —
-      un Loki compromis pourrait les effacer.
-      Pas de substitution Flux sur cette brique : les dashboards Grafana
-      contiennent des `${datasource}` qui seraient vidés.
-      ⚠️ Reste à faire au câblage cloud réel : `rules.dns` sur la CNP `toFQDNs`
-      de Loki (le proxy DNS Cilium, sans quoi les toFQDNs ne matchent jamais).
-      **À valider au prochain déploiement.**
-- [x] ~~**`test-local-stack.sh` / fmt**~~ → réglé (2026-07-27). Deux moitiés :
-      `infrastructure/.yamllint` **existe** aujourd'hui (l'entrée était périmée) ;
-      et `tofu fmt -recursive infrastructure/opentofu` embarquait le dossier de
-      travail local `_v2/`, faisant échouer `task lint` sur `_v2/_test.tfvars`.
-      `lint`/`fmt` énumèrent désormais les racines réelles (`cluster`, `modules`,
-      `talos-image`, `opentofu-local`) — **ajouter ici toute nouvelle racine**.
-      `task lint` passe intégralement.
-      Reste, pour l'opérateur : `infrastructure/opentofu/_v2/` est un scratch non
-      suivi (22 juin) — à supprimer s'il ne sert plus. Non touché ici : ce sont
-      des fichiers locaux.
-- [ ] **kyverno background-controller** : entrée à REQUALIFIER — vérifié le
-      2026-07-27, **rien ne le désactive côté configuration**. Le rendu de
-      `apps/base/kyverno` produit bien les 4 Deployments (admission, background,
-      cleanup, reports) sans surcharge de `replicas`, et toutes les ClusterPolicy
-      portent `background: true`. L'entrée décrit donc un état d'EXÉCUTION
-      constaté, pas un choix de config.
-      → À reprendre au prochain déploiement : le Deployment
-      `kyverno-background-controller` tourne-t-il, et des `ClusterPolicyReport`
-      sont-ils produits ? Si non, chercher côté crash/RBAC/ressources, pas côté
-      manifests.
+      Istio's LoadBalancer Service and its private VIP are **unchanged**: the SSH
+      tunnel administration path is untouched.
+      **Validated on the 2026-07-28 run** (EndpointSlice → real pod, LB pools
+      targeting 30080/30443).
+      A CCM would become the right choice again if Proxmox left the scope, or for
+      on-demand public LBs per application.
+- [x] ~~**Cloud S3 for observability**~~ → WIRED (2026-07-27). Loki was reading
+      `minio/root`: in the cloud its logs landed on the internal MinIO, hence on
+      Longhorn volumes — which defeats the point of object storage. Now
+      **credentials AND location** (endpoint + bucket) travel through the
+      `loki-s3-credentials` Secret, injected via `valuesFrom`: moving from the
+      internal MinIO to the provider's S3 requires **no code change**, only a
+      reseed of `observability/loki-s3`.
+      The destination is deliberately **distinct from `backup/s3-primary`**:
+      reusing it would give Loki write access to the backup bucket — a
+      compromised Loki could erase them.
+      No Flux substitution on this brick: the Grafana dashboards contain
+      `${datasource}` placeholders that would be blanked.
+      ⚠️ Still to do when wiring real cloud: `rules.dns` on Loki's `toFQDNs` CNP
+      (the Cilium DNS proxy, without which toFQDNs never match).
+- [x] ~~**`test-local-stack.sh` / fmt**~~ → settled (2026-07-27). Two halves:
+      `infrastructure/.yamllint` **does exist** today (the entry was stale); and
+      `tofu fmt -recursive infrastructure/opentofu` swept in the local scratch
+      directory `_v2/`, failing `task lint` on `_v2/_test.tfvars`.
+      `lint`/`fmt` now enumerate the real roots (`cluster`, `modules`,
+      `talos-image`, `opentofu-local`) — **add any new root here**.
+      `task lint` passes fully.
+      Left for the operator: `infrastructure/opentofu/_v2/` is an untracked
+      scratch directory (22 June) — to delete if unused. Untouched here: those
+      are local files.
+- [ ] **kyverno background-controller**: entry to REQUALIFY — checked on
+      2026-07-27, **nothing disables it on the configuration side**. Rendering
+      `apps/base/kyverno` does produce the 4 Deployments (admission, background,
+      cleanup, reports) with no `replicas` override, and every ClusterPolicy
+      carries `background: true`. The entry therefore describes an observed
+      RUNTIME state, not a config choice.
+      → To revisit at the next deployment: is the `kyverno-background-controller`
+      Deployment running, and are `ClusterPolicyReport`s produced? If not, look
+      at crashes/RBAC/resources, not at the manifests.
 
-- [x] ~~**Kyverno installé depuis une URL GitHub distante**~~ → VENDORÉ
-      (2026-07-27) : `apps/base/kyverno/kyverno-1.12.1.yaml` (3,1 Mo), avec URL
-      d'origine et **sha256** en commentaire, plus la marche à suivre pour monter
-      de version. La réconciliation Flux ne dépend plus de la disponibilité de
-      GitHub, le rendu est reproductible hors ligne, et le contenu est figé (pas
-      seulement la version).
-      Aligné sur le précédent du dépôt : `cnpg-1.23.1.yaml` était déjà vendoré
-      pour cette raison (« évite fetch remote (DNS/IPv6) »), comme `cilium.yaml`
-      et `flux-install.yaml` côté infra.
-      **Rendu vérifié IDENTIQUE à l'octet près** avant et après bascule
-      (3 179 903 octets). Balayage fait : plus AUCUNE base distante dans les deux
-      dépôts.
+- [x] ~~**Kyverno installed from a remote GitHub URL**~~ → VENDORED (2026-07-27):
+      `apps/base/kyverno/kyverno-1.12.1.yaml` (3.1 MB), with the source URL and
+      **sha256** in a comment, plus the upgrade procedure. Flux reconciliation no
+      longer depends on GitHub's availability, the render is reproducible
+      offline, and the content is pinned (not just the version).
+      Aligned with the repo's precedent: `cnpg-1.23.1.yaml` was already vendored
+      for that reason ("avoids a remote fetch (DNS/IPv6)"), as are `cilium.yaml`
+      and `flux-install.yaml` on the infra side.
+      **Render verified IDENTICAL byte for byte** before and after the switch
+      (3,179,903 bytes). Sweep done: NO remote base left in either repository.
 
-## Reproductibilité des artefacts générés
+## Reproducibility of generated artifacts
 
-- [x] **`bootstrap-manifests/cilium*.yaml` avaient divergé de leur générateur** —
-      les deux artefacts portaient `cni-exclusive=false`, `bpf-lb-sock-hostns-only=true`
-      et `nodeSelectorLabels=true` (édités à la main lors d'un debug ambient),
-      valeurs que `render-bootstrap-manifests.sh` ne passait pas : régénérer
-      cassait Istio ambient en silence. Les `--set` sont désormais dans le script,
-      avec la raison. *(corrigé 2026-07-26)*
-- [x] ~~**Test de non-régression du rendu**~~ → FAIT (2026-07-27) :
-      `task render-check` (= `render-bootstrap-manifests.sh --check`) rejoue le
-      rendu dans un dossier jetable et compare, sans rien écrire. Il normalise
-      les espaces de fin de ligne des DEUX côtés, sinon il serait rouge en
-      permanence : l'artefact committé passe par le hook pre-commit
-      `trim trailing whitespace`, pas le rendu brut de helm.
+- [x] **`bootstrap-manifests/cilium*.yaml` had drifted from their generator** —
+      both artifacts carried `cni-exclusive=false`, `bpf-lb-sock-hostns-only=true`
+      and `nodeSelectorLabels=true` (hand-edited during an ambient debug), values
+      that `render-bootstrap-manifests.sh` did not pass: regenerating silently
+      broke Istio ambient. The `--set` flags are now in the script, with the
+      reason. *(fixed 2026-07-26)*
+- [x] ~~**Render non-regression test**~~ → DONE (2026-07-27): `task render-check`
+      (= `render-bootstrap-manifests.sh --check`) replays the render into a
+      throwaway directory and compares, writing nothing. It normalises trailing
+      whitespace on BOTH sides, otherwise it would be permanently red: the
+      committed artifact goes through the `trim trailing whitespace` pre-commit
+      hook, helm's raw render does not.
 
-      **La cause racine de toute cette classe de bugs a été trouvée au passage :
-      le script écrivait dans un répertoire FANTÔME.** Il vit dans
-      `scripts/bootstrap/` mais calculait sa sortie avec `${SCRIPT_DIR}/../infrastructure/…`
-      soit `scripts/infrastructure/…`, créé à la volée par son propre `mkdir -p`
-      et jamais lu par OpenTofu. `task render-manifests` semblait donc marcher
-      tout en ne régénérant **jamais** les artefacts committés — d'où leur
-      dérive, et d'où le fait que des `--set` aient dû être ajoutés à la main
-      dans les artefacts. Corrigé en `../../`.
+      **The root cause of this whole bug class was found along the way: the
+      script was writing into a PHANTOM directory.** It lives in
+      `scripts/bootstrap/` but computed its output as
+      `${SCRIPT_DIR}/../infrastructure/…`, i.e. `scripts/infrastructure/…`,
+      created on the fly by its own `mkdir -p` and never read by OpenTofu.
+      `task render-manifests` therefore appeared to work while **never**
+      regenerating the committed artifacts — hence their drift, and hence the
+      fact that `--set` flags had to be added by hand into the artifacts. Fixed
+      to `../../`.
 
-      Le contrôle a immédiatement payé : il a attrapé que le mode **local** du
-      générateur oubliait `socketLB.enabled=true`, présent lui dans l'artefact
-      (avec son commentaire d'origine). Régénérer aurait produit
-      `bpf-lb-sock: "false"`, rendant `bpf-lb-sock-hostns-only` inopérant et
-      recassant l'accès des pods hostNetwork aux ClusterIP. Le `--set` a été
-      remis dans le script ; artefacts et générateur sont désormais alignés
-      (vérifié clé par clé sur le ConfigMap : 147 clés identiques, 0 valeur
-      divergente).
+      The check paid off immediately: it caught that the generator's **local**
+      mode was missing `socketLB.enabled=true`, which was present in the artifact
+      (with its original comment). Regenerating would have produced
+      `bpf-lb-sock: "false"`, making `bpf-lb-sock-hostns-only` inoperative and
+      re-breaking hostNetwork pods' access to ClusterIPs. The `--set` was put
+      back into the script; artifacts and generator are now aligned (verified key
+      by key on the ConfigMap: 147 identical keys, 0 diverging value).
 
-      Reste : **épingler `FLUX_VERSION`** — il est vide, donc `latest`, ce qui
-      rend `flux-install.yaml` non reproductible et exclu du contrôle.
-- [x] **Profils `pick.py` périmables en silence** : un profil fige la liste des
-      Kustomizations *exclues*, donc toute brique ajoutée au DAG est héritée de
-      `../base` sans avoir été pioché (vécu : `orc` bloqué sur les edges).
-      `pick.py --check` + `task apps-validate` détectent le drift. *(2026-07-26)*
+      Remaining: **pin `FLUX_VERSION`** — it is empty, hence `latest`, which
+      makes `flux-install.yaml` non-reproducible and excluded from the check.
+- [x] **`pick.py` profiles can go stale silently**: a profile freezes the list of
+      *excluded* Kustomizations, so any brick added to the DAG is inherited from
+      `../base` without having been picked (experienced: `orc` stuck on the
+      edges). `pick.py --check` + `task apps-validate` detect the drift.
+      *(2026-07-26)*
 
-## Dette de process
+## Process debt
 
-- [x] ~~Merge `feat/pioche-backup-gitception` → main~~ → FAIT (2026-07-27) :
-      une seule branche `main` dans les deux dépôts, `git_branch="main"` côté
-      `cluster/main.tf`, plus aucun `CHILD_BRANCH` dans `apps/clusters/`.
-- [x] ~~CHANGELOG apps inexistant~~ → FAIT (2026-07-27) :
-      `OpenAether-apps/CHANGELOG.md`, démarré à cette date. Les 200 commits
-      antérieurs ne sont pas rétro-documentés — l'historique git fait foi, et le
-      « pourquoi » des décisions vit ici, dans ce backlog.
+- [x] ~~Merge `feat/pioche-backup-gitception` → main~~ → DONE (2026-07-27): a
+      single `main` branch in both repositories, `git_branch="main"` on the
+      `cluster/main.tf` side, and no `CHILD_BRANCH` left in `apps/clusters/`.
+- [x] ~~No CHANGELOG in apps~~ → DONE (2026-07-27):
+      `OpenAether-apps/CHANGELOG.md`, started on that date. The 200 earlier
+      commits are not retro-documented — the git history is authoritative, and
+      the "why" behind decisions lives here, in this backlog.
+- [x] ~~**Repository language**~~ → SETTLED (2026-07-28): English is the default
+      for code comments, documentation and READMEs; French is a translation
+      (`<name>.fr.md`), never the source. Recorded in both `CLAUDE.md` files.
+      This backlog is English-only on purpose: it is rewritten every session and
+      two copies would drift.
