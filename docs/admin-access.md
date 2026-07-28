@@ -211,6 +211,92 @@ Le chemin réseau Grafana → Zitadel (`:8080`, échange du code puis
 sans quoi la connexion échouerait en « operation not permitted », sans autre
 trace qu'un timeout côté Grafana.
 
+## 4ter. Tests NAVIGATEUR — ce qui ne peut pas être validé autrement
+
+Tout le reste du socle se vérifie en ligne de commande. Ces trois points-là,
+non : ils exigent un vrai navigateur, parce qu'ils reposent sur des redirections
+et des cookies.
+
+### Prérequis BLOQUANT — signer l'intermediate PKI
+
+Rien n'est accessible par la gateway tant que l'étape 2 n'est pas faite : le
+listener HTTPS reste `Programmed=False` et le certificat `openaether-tls`
+échoue sur
+
+```
+Vault failed to sign certificate: no default issuer currently configured
+```
+
+C'est attendu : la PKI d'OpenBao n'a pas d'intermediate signé. Vérifier :
+
+```bash
+kubectl get gateway -n services-gateway openaether-gateway \
+  -o jsonpath='{range .status.listeners[*]}{.name}={.conditions[?(@.type=="Programmed")].status}{"\n"}{end}'
+```
+
+Les deux doivent afficher `True`. Sinon, reprendre l'étape 2.
+
+### Ouvrir l'accès
+
+```bash
+ssh -i <clé bastion> -L 8443:172.16.12.241:443 bastion@<IP-bastion> -N
+# /etc/hosts :
+# 127.0.0.1 grafana.openaether.local zitadel.openaether.local vault.openaether.local longhorn.openaether.local
+```
+
+Importer la **root CA** dans le navigateur, sinon chaque page lèvera un
+avertissement de certificat qui masquera les vrais symptômes.
+
+### Test 1 — le SSO Grafana (le seul point vraiment ouvert)
+
+L'application Zitadel, le rôle `grafana-admin` et le secret sont déjà en place.
+Sur `https://grafana.openaether.local:8443` :
+
+1. le bouton **« Sign in with Zitadel »** est présent → la config est chargée ;
+2. il redirige vers Zitadel et la connexion aboutit → `client_id`/`client_secret`
+   et l'URI de redirection sont bons ;
+3. **le point à trancher** : le rôle obtenu. Menu *Administration → Users*.
+   - compte porteur de `grafana-admin` en **Admin** → le mapping fonctionne,
+     plus rien à faire ;
+   - tout le monde en **Viewer** → le claim de rôles n'est pas celui attendu.
+     Zitadel émet deux formes de nom selon le contexte ; on a retenu la forme
+     non préfixée. Pour trancher, décoder le token :
+
+     ```bash
+     # depuis la page Grafana, récupérer l'access token (outils dev → réseau)
+     curl -H "Authorization: Bearer <token>" \
+       https://zitadel.openaether.local:8443/oidc/v1/userinfo | jq 'keys'
+     ```
+
+     Si la clé est `urn:zitadel:iam:org:project:<ID>:roles`, reporter cet ID
+     dans `role_attribute_path` (`apps/base/observability/grafana.yaml`).
+     La STRUCTURE, elle, est confirmée : un objet dont les clés sont les rôles,
+     donc `keys()` reste correct.
+
+⚠️ Le formulaire de connexion local reste actif : c'est le filet si le SSO
+échoue. Ne le désactiver (`disable_login_form`) qu'une fois ce test passé.
+
+### Test 2 — l'UI OpenBao derrière la gateway
+
+`https://vault.openaether.local:8443` doit afficher l'écran d'unseal/login.
+C'est ce qui valide le `DestinationRule` en `credentialName` : la gateway parle
+désormais en TLS **vérifié** à OpenBao. Une page blanche ou un 503 avec, côté
+OpenBao, un log `TLS handshake error … client sent an HTTP request to an HTTPS
+server`, signifierait que le DestinationRule n'est pas pris en compte.
+
+### Test 3 — l'ingress PUBLIC (hors tunnel)
+
+Les deux tests ci-dessus passent par la VIP privée. Pour valider le chemin
+public de bout en bout, viser l'IP du LB applicatif **sans tunnel** :
+
+```bash
+curl -kv --resolve grafana.openaether.local:443:<IP-app-lb> \
+  https://grafana.openaether.local/login
+```
+
+Le raccordement LB → nodePorts 30080/30443 est déjà vérifié côté
+infrastructure ; ce test confirme la traversée applicative complète.
+
 ## 5. Clusters enfants CAPI (si surcouche piochée)
 
 Avant d'activer un fichier dans `apps/clusters/` (cf. son README), poser les
