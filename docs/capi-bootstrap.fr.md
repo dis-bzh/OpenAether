@@ -75,7 +75,7 @@ task local-down
 KUBECONFIG=mgmt-capi.kubeconfig clusterctl describe cluster mgmt-capi -n capi-clusters
 ```
 
-## Trois pièges, tous rencontrés en réel
+## Pièges, tous rencontrés en réel
 
 **`clusterctl move` refuse une cible équipée par notre opérateur.** L'opérateur
 et clusterctl tiennent des inventaires différents, et l'opérateur ne remplit pas
@@ -96,6 +96,20 @@ ensemble : ce flag kubelet sans le CCM laisse tous les nœuds taintés
 49152 : Docker refuse de publier et le cluster meurt 90 s plus tard sur « Talos
 API not ready ». Corrigé : `talos_api_port_base` par défaut à 41000. Diagnostic
 avec `netsh.exe int ipv4 show excludedportrange protocol=tcp`.
+
+**`clusterctl init` seul laisse CAPO mort (OpenStack/OVH).** CAPO v0.14 exige
+les CRD ORC (`Image.openstack.k-orc.cloud`) ; sans elles son manager perd le
+leader election et s'arrête, si bien que le contrôleur de cluster crée quand
+même réseau, routeur, LB et IP flottantes alors qu'**aucune instance n'est
+créée** — les machines restent en `Provisioning` sans erreur sur la CR. Notre
+brique opérateur installe ORC, un `clusterctl init` nu non :
+`kubectl apply --server-side -f https://github.com/k-orc/openstack-resource-controller/releases/download/v2.5.0/install.yaml`,
+puis redémarrer `capo-controller-manager`.
+
+**Outscale : `region` n'est pas une subregion.** CAPOSC construit son host d'API
+à partir de la clé `region` du secret : `eu-west-2a` donne
+`api.eu-west-2a.outscale.com`, qui ne résout pas — le Net ne réconcilie jamais.
+Mettre `eu-west-2` ; la subregion va dans `OSC_SUBREGION`.
 
 ## Teardown
 

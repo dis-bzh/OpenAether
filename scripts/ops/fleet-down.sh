@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# OpenAether — teardown COMPLET et idempotent d'une flotte (edges + management)
+# OpenAether — COMPLETE, idempotent fleet teardown (edges + management)
 #
-# POURQUOI
-#   The destruction order is not free: every CAPI child cluster must disappear
-#   BEFORE the management, otherwise nothing drives its VMs any more and they
-#   stay billed. `task destroy` alone only handles the management.
-#   This script chains, in the right order and unattended:
-#     1. `edge-down` on every child cluster still present (CAPI cascade);
-#     2. `tofu destroy` du management ;
-#     3. a report of what is left to purge by hand (buckets, images, keypairs…),
-#        deliberately NOT destroyed here: these objects outlive the clusters and
-#        deleting them is a choice, not a consequence.
+# The destruction order is not free: every CAPI child must disappear BEFORE the
+# management, or nothing drives its VMs any more and they stay billed. `task
+# destroy` alone only handles the management. This script chains, unattended:
+#   1. `edge-down` on every child cluster still present (CAPI cascade);
+#   2. `tofu destroy` of the management;
+#   3. a report of what is left to purge by hand (buckets, images, keypairs…),
+#      deliberately NOT destroyed here: those outlive the clusters, so deleting
+#      them is a choice, not a consequence.
 #
 # Idempotent: re-runnable at any time; skips whatever is already gone.
 #
