@@ -62,6 +62,21 @@ par la chaîne littérale française de leur en-tête. La traduire a rendu `--ch
 aveugle **en silence** (il annonçait « 0 profil » au lieu de 1). Avant de
 traduire une chaîne, vérifier qu'aucun code ne la compare.
 
+## Concision et refacto
+
+Le projet ne doit pas grossir en lignes plus vite qu'en fonctionnalités.
+
+- **Commentaire = le pourquoi, en 1 à 3 lignes.** Pas le récit de l'incident ni
+  la date : juste ce qui évite de refaire l'erreur. Le détail va dans le runbook.
+- **Doc courte qui POINTE** vers le fichier faisant autorité, au lieu de
+  recopier son contenu (la recopie dérive, et il faut la maintenir deux fois).
+- **Backlog = ouvert seulement.** Une entrée faite appartient à git.
+- **Refactorer au fil de l'eau** : factoriser les répétitions, supprimer le code
+  mort, fusionner les fichiers redondants. Un fichier qui gonfle est un signal.
+
+Avant d'écrire un pavé : que perd-on à le réduire à deux lignes ? Le plus
+souvent, rien.
+
 ## Backlog
 
 Toute amélioration identifiée (« mieux que l'existant ») va dans
