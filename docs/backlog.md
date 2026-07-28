@@ -28,7 +28,7 @@ manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
 
 - [ ] **Browser SSO login (Grafana ↔ Zitadel).** Everything else is done; only
       the claim form remains to confirm. Needs a live cluster.
-      Protocol: `admin-access.md` § 4ter.
+      Protocol: `admin-access.md` § 8 (browser tests).
 
 - [ ] **Gateway → UI path.** Untestable until the PKI intermediate is signed
       offline (`admin-access.md` § 2). The code is already hardened.
