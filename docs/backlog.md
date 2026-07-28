@@ -90,6 +90,24 @@ Ces deux premiers points exigent un cluster vivant : les rejouer au prochain
 déploiement. Le protocole complet des tests navigateur (prérequis bloquant,
 tunnel, les 3 tests) est dans `docs/admin-access.md` § 4ter.
 
+- [ ] **Passer ce backlog en anglais** (693 lignes). L'anglais est devenu la
+      langue par défaut du dépôt (cf. `CLAUDE.md` § Langue) : README et docs
+      sont bilingues (`.md` anglais canonique, `.fr.md` français), ce fichier
+      est la dernière doc restée en français. À faire en une passe dédiée ;
+      **sans doublon français** ensuite, il change à chaque session et deux
+      copies dériveraient.
+- [ ] **Convertir le fond de commentaires français du code** — ~210 fichiers,
+      ≥1600 lignes accentuées (le vrai total est plus haut, les commentaires
+      sans accent ne sont pas comptés). **Ne pas traduire en masse** : ces
+      commentaires encodent des pièges durement acquis ; les convertir au fil
+      des modifications de chaque fichier.
+- [ ] **`task validate` échoue hors contexte S3.** `tofu init -backend=false`
+      sur le root `cluster` réclame quand même des credentials AWS
+      (« No valid credential sources found »), alors que `-backend=false` est
+      précisément censé s'en passer. Les credentials du dépôt sont préfixés
+      (`SCW_AWS_*`, `OVH_AWS_*`) et résolus par `scripts/internal/`, que cette
+      task n'appelle pas. Résultat : un contrôle statique censé tourner sans
+      cloud ne tourne pas. Constaté le 2026-07-28 ; `opentofu-local` valide, lui.
 - [ ] **`fleet-down.sh` doit sortir en code non nul si une étape échoue.**
       Aujourd'hui il conclut `✓ fleet-down terminé` même quand le destroy du
       management n'a pas démarré — le `⚠` est noyé dans la sortie et un

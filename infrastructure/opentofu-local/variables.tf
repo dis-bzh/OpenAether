@@ -44,21 +44,20 @@ variable "worker_count" {
   }
 }
 
-# ⚠️ Base des ports HÔTE de l'API Talos : cp_i → base+i, worker_i → base+10+i.
+# ⚠️ Base for the Talos API HOST ports: cp_i → base+i, worker_i → base+10+i.
 #
-# NE PAS remonter cette valeur au-dessus de 49152 sous Windows/WSL2. Au-delà
-# commence la plage dynamique TCP, dans laquelle Hyper-V RÉSERVE des blocs de
-# 100 ports — Docker Desktop échoue alors à publier le port, avec un message
-# qui ne dit pas pourquoi :
+# DO NOT raise this above 49152 on Windows/WSL2. That is where the TCP dynamic
+# range starts, and Hyper-V RESERVES blocks of 100 ports inside it — Docker
+# Desktop then fails to publish the port with a message that does not say why:
 #   docker: Error response from daemon: ports are not available: exposing port
 #   TCP 127.0.0.1:51000 -> 127.0.0.1:0: /forwards/expose returned unexpected
 #   status: 500
-# et le cluster meurt plus loin sur « Talos API not ready after 90s ».
-# L'ancienne valeur (51000) tombait dans la réservation 50924-51023 constatée
-# le 2026-07-28. Ces blocs BOUGENT au redémarrage : une valeur sous 49152 est
-# hors plage dynamique, donc stable.
+# and the cluster dies further along on "Talos API not ready after 90s".
+# The previous value (51000) fell inside the 50924-51023 reservation observed on
+# 2026-07-28. Those blocks MOVE across reboots: a value below 49152 sits outside
+# the dynamic range and is therefore stable.
 #
-# Vérifier une machine :  netsh.exe int ipv4 show excludedportrange protocol=tcp
+# Inspect a machine with: netsh.exe int ipv4 show excludedportrange protocol=tcp
 variable "talos_api_port_base" {
   description = "Base host port for the Talos API (cp_i → base+i, worker_i → base+10+i). Keep below 49152 on Windows/WSL2: the dynamic range above is subject to Hyper-V reservations."
   type        = number

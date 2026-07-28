@@ -43,6 +43,27 @@ dédiés sous **Proxmox** (ZFS), VMs Talos. Single-host ou multi-host PVE cluste
 - `k3s-cluster` = **archive / inspiration seule**, jamais fusionnée ; refaire de 0 si
   plus propre.
 
+## Langue
+
+**L'anglais est la langue par défaut du dépôt** : commentaires de code, noms,
+messages de commit et documentation. Le français est une **traduction**, jamais
+la source.
+
+- Docs et README : `<nom>.md` = anglais (canonique), `<nom>.fr.md` = français.
+  Chaque fichier ouvre sur un lien vers l'autre langue.
+- Code (`.tf`, `.yaml`, `.py`, `.sh`) : commentaires en anglais.
+- Échange avec l'utilisateur : en français.
+
+### Deux exceptions, à résorber
+
+- **`docs/backlog.md` est encore en français** (693 lignes). Journal de travail
+  interne, réécrit à chaque session — à traduire en une passe dédiée, pas au
+  fil de l'eau.
+- **Fond de commentaires en français dans le code** : ~210 fichiers, ≥1600
+  lignes. Les convertir **au fil des modifications**, jamais en masse : ils
+  encodent des pièges durement acquis (course Neutron, substitution Flux,
+  `ipam.mode`…) qu'une traduction automatique abîmerait.
+
 ## Backlog
 
 Toute amélioration identifiée (« mieux que l'existant ») va dans
