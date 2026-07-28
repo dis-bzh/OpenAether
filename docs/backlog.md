@@ -3,393 +3,58 @@
 Tout ce qui a été identifié comme **mieux que l'existant**, avec le pourquoi.
 Alimenté au fil des sessions (humain + assistant). Retirer les entrées faites.
 
-## Où on en est (mis à jour le 2026-07-27, fin de session)
+## Où on en est (mis à jour le 2026-07-28)
 
-**Rien ne tourne, ni en cloud ni en local.** Les trois comptes sont vérifiés à
-zéro (OVH, Scaleway, Outscale) et le cluster Docker de test a été détruit
-(`task local-down` : 0 conteneur, 0 volume, 0 réseau, state supprimé).
-`restic-escrow-OUTSCALE.txt` est **conservé volontairement** — il déverrouille
-les dépôts restés en bucket.
+⚠️ **UNE FLOTTE OVH TOURNE** — laissée volontairement en fin de run pour
+inspection. Management HA **36/36 Kustomizations, 6 nœuds Ready** + enfant CAPI
+**edge-2 (OpenStack) 19/19, 2 nœuds, 0 pod en échec**. Teardown :
+`task fleet-down PROVIDER=ovh -- --yes`, puis purger la FIP pré-allouée
+d'edge-2 (facturée, elle ne part pas seule).
 
-**Le backlog est passé de 30 à 9 items ouverts.** Ce qui reste demande autre
-chose que du code : du matériel (Proxmox), une décision (hausse de quota
-Outscale, ouverture des issues upstream), un déploiement pour être observé
-(reboot spontané Outscale, nœud OVH `ACTIVE` mais mort, background-controller
-Kyverno), ou de l'amont (`talos_cluster_health`, bloqué tant que le provider
-0.12.x reste en alpha).
+edge-1 (Scaleway) est **désactivé** dans `apps/clusters/kustomization.yaml` : le
+périmètre du run était OVH seul. Le réactiver demande les secrets Scaleway.
 
-### Validé en cloud réel
+### Ce que ce run a VALIDÉ en cloud réel
 
-- Socle **provider-agnostique** : le même code a porté un management sur
-  Scaleway, OVH et Outscale.
-- **Kubeception/gitception cross-provider** : un management OVH pilotant un
-  enfant Scaleway ; edge-1 (Scaleway) et edge-2 (OpenStack) tous deux à 17/17,
-  sur des topologies réseau opposées.
-- **Backups** restic chiffrés client, multi-destination cross-provider.
-- **Résilience** : reboot simultané non sollicité de 6 VMs — retour seul.
+Les 5 chantiers livrés la veille sans jamais avoir tourné :
 
-### Validé sur cluster local (`task local-test`)
+| Chantier | Preuve |
+|---|---|
+| Port Neutron du bastion (`fixed_ip`) | 6/6 tunnels SSH |
+| **Ingress public** | EndpointSlice → pod réel ; nodePorts **30080/30443** ; pools LB OVH ciblant ces ports |
+| PITR CNPG | `s3://…/cnpg/{grafana,zitadel}-db` substitué depuis `cluster-identity` |
+| Préfixe restic par cluster | parent `openaether-dev-ovh` **vs** enfant `edge-2` — collision résolue |
+| `backupTarget` Longhorn | URL substituée (après correctif d'API, cf. plus bas) |
+| Alerting backups | 3 règles acceptées par l'opérateur VM → **le PromQL est valide** |
+| TLS interne OpenBao | 3/3 descellés, quorum raft HTTPS, ESO `store validated`, 6 policies en 204 — **et idem sur l'ENFANT**, via gitception |
 
-- **TLS interne OpenBao** : 3 réplicas `1/1`, quorum raft en HTTPS, job de
-  bootstrap intégralement en 204, ESO `store validated`, et un `ExternalSecret`
-  de bout en bout (`SecretSynced`, valeur matérialisée).
-- **Policies nominatives** : `sys/seal` et `sys/step-down` en 403, écriture
-  refusée au reader.
+⚠️ **SSO Grafana ↔ Zitadel : PARTIELLEMENT validé.** Ce qui est prouvé : config
+`auth.generic_oauth` chargée avec les bons endpoints, chemin réseau ouvert des
+DEUX côtés (CNP egress Grafana → ingress Zitadel, port 8080), et surtout
+**Grafana démarre alors que `secret/grafana/oidc` n'est pas seedé** — le
+garde-fou `optional: true` remplit son rôle, l'accès n'est pas verrouillé.
+**NON validé** : le flux de connexion réel et la STRUCTURE du claim de rôles.
+Cela demande de créer l'application côté Zitadel (console) puis de seeder le
+secret — étape opérateur, cf. `docs/admin-access.md` § 4bis.
 
-### ⚠️ Livré mais JAMAIS déployé — à valider au prochain run
+### Ce qui reste à faire au prochain run
 
-Tout ce qui suit est écrit, validé statiquement, mais n'a jamais tourné :
+1. **Terminer le SSO** : créer l'app Zitadel, seeder `secret/grafana/oidc`,
+   vérifier le claim sur un vrai token et ajuster `role_attribute_path`.
+2. **Durcir la gateway → UI OpenBao** : encore en `insecureSkipVerify`.
+3. **Réactiver edge-1** pour re-valider Scaleway.
 
-1. **Ingress public** — Service NodePort figé 30080/30443 + `app_lb_node_ports`
-   dans les 3 modules + CNP élargie. Vérifier d'abord
-   `kubectl get endpoints openaether-gateway-nodeport` : si le sélecteur ne
-   matche aucun pod, tout le reste est inutile.
-2. **SSO Grafana ↔ Zitadel** — confirmer la STRUCTURE du claim de rôles sur un
-   vrai token (`/oidc/v1/userinfo`) et ajuster `role_attribute_path`.
-3. **PITR CNPG** + **backupTarget Longhorn** + **préfixe restic par cluster** —
-   dépendent tous du ConfigMap `cluster-identity` posé au bootstrap.
-4. **Alerting backups** (PromQL non vérifié, `promtool` absent) et **test de
-   restauration mensuel**.
-5. **Port Neutron du bastion OVH** (`fixed_ip`) — corrige un échec d'apply
-   INTERMITTENT, donc un run vert ne prouve rien ; c'est le cumul qui comptera.
+### Note : les répertoires `local-path` en 0755 (PAS un défaut du code)
 
-### Ordre conseillé pour reprendre
-
-1. `task lint`, `task render-check`, `task apps-validate` — trois garde-fous.
-2. `task local-test` **avant tout déploiement cloud** : il a trouvé deux bugs
-   qu'aucune vérification statique ne voyait (continuations de ligne `\\`,
-   `volumeMount` sans `volume`).
-3. `task preflight-quotas PROVIDER=…` avant `task up`.
-4. Pour un enfant OpenStack : ré-allouer la FIP
-   (`scripts/ops/ensure-capo-fip.py edge-2`) et reporter l'adresse.
-
-## Identités & accès au quotidien (le chantier ouvert)
-
-- [x] ~~**Tokens OpenBao nominatifs**~~ → FAIT (2026-07-27). Deux policies
-      créées par le Job de bootstrap : `openaether-admin` (exploitation courante)
-      et `openaether-reader` (lecture seule, audit/astreinte). Procédure
-      `bao token create -policy=… -ttl=8h -display-name=<prénom>` documentée dans
-      `docs/admin-access.md` § 4.
-      `openaether-admin` **refuse explicitement** `sys/seal`, `sys/step-down`,
-      `sys/rekey/*` et `sys/rotate` — écrits en `deny` plutôt qu'omis, pour que
-      l'intention soit lisible dans la policy et qu'un élargissement futur de
-      `sys/*` ne les rouvre pas par accident. Ces gestes de dernier recours
-      restent au root token escrowé hors ligne.
-      ⚠️ DEUX pièges, dont un que seule l'exécution réelle a révélé :
-      (a) les policies sont écrites en `printf` une-ligne, pas en heredoc — un
-      heredoc s'indente à la colonne 0 et **sort du scalaire YAML** du script ;
-      (b) les continuations de ligne s'écrivaient `\\` au lieu de `\` : bash
-      prenait le backslash pour un argument littéral, l'appel partait **sans
-      token** (« permission denied ») et le JSON de la policy était exécuté comme
-      une commande. **`bash -n` ne peut pas l'attraper** — `\\` + saut de ligne
-      est syntaxiquement valide. Trouvé en déployant pour de vrai.
-
-      **VALIDÉ sur cluster Talos local** (3 CP + 3 workers, `task local-test`) :
-      `policy openaether-admin: HTTP=204`, `policy openaether-reader: HTTP=204`,
-      puis test d'acceptation depuis l'intérieur du cluster —
-      admin : `sys/mounts` 200, écriture secret 200, **`sys/seal` 403**,
-      **`sys/step-down` 403** ; reader : lecture 200, **écriture 403**.
-      (`sys/rekey/init` renvoie 405 : l'opération n'a pas lieu, mais rien ne
-      prouve que ce soit la policy qui la bloque.)
-      Suite naturelle : auth OIDC via Zitadel, pour des identités fédérées plutôt
-      que des tokens créés à la main.
-- [ ] **Wave 3 unsealer** : escrow direct Bitwarden EU des parts Shamir,
-      suppression du Secret etcd `openbao-recovery` (TODO déjà tracé dans
-      `unsealer.yaml` + CNP egress Bitwarden).
-- [x] ~~**SSO Grafana ↔ Zitadel (OIDC)**~~ → CÂBLÉ (2026-07-27). `auth.generic_oauth`
-      dans le HelmRelease Grafana, identifiants via ExternalSecret `grafana-oidc`
-      (`secret/grafana/oidc`). Endpoints **vérifiés contre la doc Zitadel** :
-      `/oauth/v2/authorize`, `/oauth/v2/token`, `/oidc/v1/userinfo`,
-      `/oidc/v1/end_session`.
-      Deux garde-fous délibérés : le **formulaire local reste actif** (l'admin
-      local est le filet si le SSO casse), et les variables d'environnement OIDC
-      sont **`optional: true`** — sans ça, un `secret/grafana/oidc` non seedé
-      bloquerait le pod et rendrait Grafana totalement inaccessible, l'inverse du
-      but recherché.
-      ⚠️ Le chemin réseau manquait : la CNP de Grafana n'autorisait **aucun**
-      egress vers Zitadel, alors que l'échange du code et `/oidc/v1/userinfo` sont
-      des appels SERVEUR-à-serveur. Ajouté des deux côtés (egress Grafana,
-      ingress Zitadel), ciblé par namespace + app + port réel.
-      **À confirmer au premier déploiement** : la structure du claim de rôles
-      (`urn:zitadel:iam:org:project:roles`) — le nom est confirmé, sa forme dépend
-      de la configuration de l'application côté Zitadel. `role_attribute_strict:
-      false` fait retomber sur `Viewer` plutôt que de refuser l'accès.
-      Reste ouvert (mêmes briques) : login OIDC d'OpenBao via Zitadel, et UI
-      Longhorn derrière authn.
-- [x] ~~**Wave 2 OpenBao TLS interne**~~ → FAIT et **VALIDÉ sur cluster local**
-      (2026-07-27). `tls_disable=1` est mort ; le listener sert un certificat
-      cert-manager.
-
-      **Conception** : chaîne selfSigned → CA → certificat serveur, **dédiée** et
-      indépendante de la PKI qu'OpenBao sert (l'utiliser créerait un cycle : il
-      devrait être joignable pour émettre le certificat qui le rend joignable).
-      La CA est un **ClusterIssuer** avec son Secret dans le namespace
-      `cert-manager` : c'est le seul endroit où le `ClusterIssuer` vault sait
-      lire un `caBundleSecretRef`. Une CA namespacée aurait imposé de la
-      recopier.
-      Prérequis : `foundation-vault dependsOn cert-manager`, possible seulement
-      depuis le retrait de la dépendance inverse (qui était fausse).
-
-      **Les 8 consommateurs** basculés : config du listener, `retry_join`
-      (`https://` + `leader_ca_cert_file`), StatefulSet (`BAO_CACERT`, probes en
-      `scheme: HTTPS`, montage du Secret), unsealer, job d'init, job de
-      bootstrap, `ClusterSecretStore` d'ESO (`caProvider` avec `namespace`
-      OBLIGATOIRE — un ClusterSecretStore n'en a pas), `ClusterIssuer` vault,
-      CronJob de backup.
-
-      **Validé en réel** (cluster Talos local, 3 CP + 3 workers) :
-      3 réplicas `1/1`, quorum raft reformé en HTTPS, `post-unseal setup
-      complete` ; job d'init OK ; job de bootstrap **intégralement en 204**
-      (policies + auth Kubernetes + rôles) ; unsealer opérant ; ESO
-      `store validated` ; et surtout un `ExternalSecret` de bout en bout —
-      `SecretSynced`, valeur matérialisée. La chaîne ESO → TLS → auth Kubernetes
-      → lecture KV fonctionne.
-
-      **Bugs trouvés PAR le déploiement**, qu'aucune vérification statique
-      n'attrapait : un `volumeMount` sans le `volume` correspondant dans le job
-      de bootstrap (rejeté à l'admission), et les continuations de ligne `\\`
-      des policies (cf. entrée « Tokens nominatifs »).
-
-      **Reste à durcir — une seule chose** : la gateway → UI OpenBao est
-      chiffrée (`DestinationRule`, mode SIMPLE) mais en `insecureSkipVerify`.
-      `caCertificates` exigerait la CA comme FICHIER dans l'Envoy de la gateway,
-      qu'Istio génère ; un chemin inexistant casserait l'UI — pire que l'état
-      d'avant. Deux sorties propres : canal expérimental de Gateway API pour un
-      `BackendTLSPolicy`, ou distribution de la CA aux proxies via trust-manager.
-      Non validé en local (Istio n'y est pas déployé) ; repli inchangé :
-      `scripts/ops/local-admin-portforward.sh`.
-
-      **Livré** : la dépendance superflue `cert-manager → foundation-vault` est
-      retirée. Elle était fausse (la brique cert-manager n'installe que
-      l'opérateur et un RBAC dans son propre namespace ; ce sont les ISSUERS, une
-      brique à part, qui dépendent d'OpenBao) et elle bloquait tout : cert-manager
-      arrivant APRÈS OpenBao, aucun certificat cert-manager ne pouvait servir son
-      listener. Gain immédiat au passage : OpenBao n'est plus sur le chemin
-      critique d'istio, observability et cluster-api-operator.
-
-      **Pourquoi je n'ai pas basculé** : contrairement au SSO ou aux tokens, ce
-      n'est pas un raccordement mais une modification du **chemin critique de
-      bootstrap**, avec 8 consommateurs à changer EN MÊME TEMPS —
-      `configmap.yaml` (listener + `retry_join` + `leader_api_addr`),
-      `statefulset.yaml`, `unsealer.yaml`, `openbao-init.yaml`,
-      `bootstrap-roles-job.yaml`, le `ClusterSecretStore` d'ESO, le
-      `ClusterIssuer` openbao, et le CronJob de backup. Si un seul est faux, le
-      cluster ne monte pas du tout : ni secrets, ni PKI, ni backups. Le livrer
-      sans l'avoir vu tourner reviendrait à jouer le prochain déploiement à pile
-      ou face.
-
-      **Plan d'exécution, à jouer sur `task local-test` d'abord** (cluster Docker,
-      pas de cloud, cycle court) :
-      1. Certificat serveur via cert-manager, à partir d'un **Issuer selfSigned →
-         CA dédiée**, PAS de la PKI d'OpenBao (sinon OpenBao devrait être debout
-         pour obtenir le certificat qui le rend joignable) ; SANs :
-         `openbao.foundation-vault.svc.cluster.local`, `openbao`,
-         `*.openbao.foundation-vault.svc.cluster.local` (noms par pod du
-         headless), `127.0.0.1`, `localhost`.
-      2. `tls_disable = 0` + `tls_cert_file`/`tls_key_file` ; `retry_join` en
-         `https://` avec `leader_ca_cert_file`.
-      3. Les 8 consommateurs : `https://` + CA de confiance (`BAO_CACERT` pour
-         les scripts, `caProvider` pour le `ClusterSecretStore`, `caBundle` pour
-         le `ClusterIssuer`).
-      4. L'HTTPRoute vers l'UI : la gateway parle alors à un backend TLS →
-         `BackendTLSPolicy`, sinon l'UI casse en silence.
-      5. Vérifier l'ordre de bootstrap complet à froid, pas seulement un cluster
-         déjà monté : c'est là que se cachent les cycles.
-
-      ⚠️ Ne pas tenter de substituer ces valeurs par Flux : la brique vault
-      contient des variables shell (`$POD_FQDN`) que la substitution viderait —
-      même piège que backup, storage et observability.
-
-## CAPI / multi-cluster
-
-- [x] ~~Collision secrets webhook capi-system~~ → FAIT (2026-07-25) : Outscale
-      isolé dans `capi-outscale-system`. Corrigeait AUSSI une 2e collision
-      (lease `controller-leader-election-capo` partagé avec CAPO, qui bloquait
-      entièrement OpenStack).
-- [x] ~~**Teardown d'un enfant annulé en boucle par Flux**~~ → corrigé
-      (2026-07-27). `edge-down` supprimait le `Cluster`, mais la Kustomization
-      `<cluster>-cluster` le **recréait** avant que la cascade CAPI n'ait
-      démarré : les Machines n'obtenaient jamais de `deletionTimestamp` et le
-      script bouclait jusqu'au timeout **sans rien signaler**, le `kubectl
-      delete` étant redirigé vers `/dev/null`. `edge-down.sh` suspend désormais
-      `<cluster>-cluster` **et** `capi-clusters` avant de supprimer, et sort
-      immédiatement si le delete est refusé. **Leçon** : sous GitOps, toute
-      suppression d'objet réconcilié doit commencer par suspendre sa source —
-      et un `delete` dont on jette la sortie transforme un refus en attente
-      silencieuse.
-- [x] ~~**`kubectl get/delete cluster` ambigu**~~ → corrigé (2026-07-27) : le
-      kind `Cluster` est aussi celui de CNPG (`postgresql.cnpg.io`). Sans CRDs
-      CAPI installées — management partiellement détruit, providers pas encore
-      réconciliés — `kubectl get cluster -A` retourne **les bases de données**
-      (constaté : `grafana-db`, `zitadel-db`). `fleet-down` les aurait alors
-      énumérées comme enfants à détruire, et `edge-down` aurait pu en supprimer
-      une. Tous les appels sont désormais qualifiés `clusters.cluster.x-k8s.io`.
-- [ ] **Issues upstream à ouvrir** (les deux constatées en réel) :
-      (a) CAPOSC/CAPS : `webhook-server-cert` et le lease `…-capo` non préfixés
-      → collisions silencieuses entre providers dans un même namespace ;
-      (b) CAPS : reconcile silencieusement arrêté quand son webhook de
-      conversion est cassé (aucun log), suppression bloquée sur finalizers.
-- [x] ~~**Outscale : import de snapshot très lent**~~ → traité : le module pose
-      `timeouts { create = "120m" }` sur `outscale_snapshot.talos` (le défaut du
-      provider, 40 min, était dépassé par un import mesuré > 60 min en
-      `in-queue 0%`), et la marche à suivre en cas de dépassement est écrite sur
-      place : attendre `completed` puis `tofu import`, surtout **ne pas**
-      relancer l'apply (il déclencherait un second import d'une heure).
-- [x] ~~**Purge du staging Outscale**~~ → FAIT et **vérifié en réel**
-      (2026-07-27). Le `.raw` de staging (10,9 Gio, un par version) était
-      conservé indéfiniment. `terraform_data.purge_staging` le supprime
-      désormais après enregistrement de l'OMI.
-
-      ⚠️ **Ce n'était pas qu'un `aws s3 rm` à ajouter** : `data.external.oos_object`
-      (presign + `head-object`) est évaluée à CHAQUE plan/refresh alors que ses
-      valeurs ne servent qu'à la création du snapshot. Purger sans la rendre
-      tolérante à l'absence de l'objet aurait **cassé tout `tofu plan`** du root
-      talos-image. La data source dégrade maintenant proprement (url vide,
-      taille 0) et `snapshot_size` rejoint `file_location` dans
-      `ignore_changes` — les deux viennent de cet objet transitoire.
-
-      Vérifié de bout en bout sur le compte réel : `plan` avant purge =
-      *1 to add, 0 to change, 0 to destroy* ; après purge et objet absent =
-      **« No changes »**. Les artefacts durables (snapshot `snap-3d4773e8`, OMI
-      `ami-16d2bedd`) sont intacts, et le `.raw` est reconstructible à
-      l'identique depuis l'Image Factory (schematic ID déterministe).
-- [x] ~~**DETTE — state talos-image Outscale désynchronisé**~~ → entrée PÉRIMÉE,
-      vérifiée le 2026-07-27 : `tofu state list` montre le snapshot ET l'OMI, aux
-      IDs exacts présents sur le compte (`snap-3d4773e8`, `ami-16d2bedd`). La
-      réconciliation a eu lieu au rebuild du 2026-07-26 ; les IDs cités dans
-      l'ancienne entrée (`ami-6711ec55`, `snap-6bc67b02`) n'existent plus.
-
-      ⚠️ **Piège de diagnostic** : le tfstate est **chiffré côté client**. Le
-      télécharger et le lire en JSON montre `resources: []` — ce qui ressemble à
-      un état vide et m'a d'abord fait conclure à tort. Toujours passer par
-      `tofu state list` avec `TF_VAR_encryption_passphrase`.
-- [x] **Cilium des enfants désaligné du socle parent** (2026-07-26) : les
-      `values` d'`apps/clusters/edge-*.yaml` laissaient `cni.exclusive` au défaut
-      du chart (`true`) et `socketLB.hostNamespaceOnly=false`. Cilium réécrivait
-      donc `05-cilium.conflist` en boucle en retirant le plugin chaîné istio-cni
-      → `istio-cni-node` 0/1 Ready indéfiniment → install Helm expirée → `istio`,
-      `ztunnel`, `services-gateway`, `istio-authorizationpolicies` bloqués sur
-      les DEUX edges. Corrigé + raison documentée dans les manifests.
-- [x] ~~`socketLB.hostNamespaceOnly` : parent=true, enfants=false~~ → l'asymétrie
-      **n'existait pas** (analysé le 2026-07-27). La doc du chart tranche :
-      *« Disable socket lb for non-root ns »* — le flag ne coupe le socket-LB que
-      pour les netns **non-root**. `kube-apiserver` est host-network, donc en
-      netns racine : il garde la traduction ClusterIP dans les deux réglages, et
-      ne peut pas être cassé par ce flag. Le « failed calling webhook » du
-      2026-07-26 a été observé **pendant** le rollout de CNI à chaud qui avait
-      déjà détruit le datapath des enfants — imputation erronée. Les enfants sont
-      repassés à `true`, aligné sur le socle et exigé par Istio ambient.
-      **Vraie cause de fond trouvée au passage : `ipam.mode` manquant** (entrée
-      ci-dessous).
-- [x] ~~Vérifier l'alignement parent/enfant automatiquement~~ → FAIT
-      (2026-07-27) : `scripts/ops/check-cilium-parity.py`, câblé dans
-      `task apps-validate`. Il compare 14 réglages structurants entre le bloc
-      production de `render-bootstrap-manifests.sh` et chaque HelmRelease
-      `*-cilium` des enfants ; une clé **absente** côté enfant est signalée
-      (elle prend le défaut du chart, qui diffère). Les écarts voulus se
-      déclarent dans `EXCEPTIONS` avec leur justification. Vérifié : il détecte
-      bien les deux défauts réels de la veille.
-- [x] ~~**Enfants CAPI : `ipam.mode` manquant** — LA dérive coûteuse~~ → corrigé
-      (2026-07-27). Les trois `apps/clusters/edge-*.yaml` ne posaient pas
-      `ipam.mode`, contrairement au socle parent *et* au fichier d'exemple
-      `example-scaleway.yaml.example` (qui l'avait, preuve de la dérive). Le
-      défaut du chart est `cluster-pool` : Cilium **ignore alors le
-      `clusterNetwork.pods` déclaré par CAPI** (10.244.0.0/16) et taille les CIDR
-      de pods dans `10.0.0.0/8` — le /8 où vivent justement les sous-réseaux de
-      nœuds (OpenStack 10.20.0.0/24, edge-3 10.30.0.0/16, et 10.0.0.0/24 pour
-      OVH/Outscale/Proxmox côté socle). Le parent pose `ipam.mode=kubernetes`
-      pour exactement cette raison : son propre subnet est `10.0.0.0/24`, soit le
-      **premier /24 distribué par le pool**. Explique la corrélation observée :
-      edge-1 (Scaleway, nœuds en IP publique, **hors** du /8) tenait à 11/17,
-      edge-2 (OpenStack, nœuds **dans** le /8) était à 0/17 avec le datapath
-      inter-nœuds mort. Piste sérieuse aussi pour le `kubelet:10250` ci-dessous.
-      **CONFIRMÉ sur edge-2 neuf le 2026-07-27** : `ipam=kubernetes`, nœuds en
-      `10.20.0.x`, pods réellement en `10.244.x`, `kubectl logs`/`exec`
-      fonctionnels, 17/17.
-- [x] ~~**HelmRepository `cilium` enfermée dans edge-1.yaml**~~ → corrigé
-      (2026-07-27). La source de chart est PARTAGÉE par tous les enfants mais
-      était déclarée dans le fichier de l'un d'eux : désactiver edge-1 dans
-      `kustomization.yaml` privait edge-2 de son CNI (« HelmRepository "cilium"
-      not found », nœuds NotReady indéfiniment). Sortie dans
-      `apps/clusters/helmrepository-cilium.yaml`. **Leçon** : une ressource
-      partagée par N enfants n'a rien à faire dans le fichier de l'un d'eux —
-      le couplage reste invisible tant que le premier enfant est activé.
-- [x] ~~**AuthorizationPolicies `foundation-storage` non décomposables**~~ →
-      corrigé (2026-07-27). `apps/base/istio/authz` est appliqué dès qu'Istio est
-      pioché, mais contenait deux policies visant `foundation-storage` —
-      namespace créé par la brique `storage`. Tout profil « istio sans storage »
-      (le profil `workload` des enfants !) bloquait sur « namespaces
-      "foundation-storage" not found » : edge-2 est resté à 16/17. Scindées dans
-      la brique compagnon `istio-authorizationpolicies-storage`
-      (`dependsOn: [istio-authorizationpolicies, storage]`).
-      **Règle générale à retenir** : une policy qui protège une brique
-      optionnelle doit suivre le sort de cette brique, sinon elle casse
-      l'invariant de décomposabilité du DAG. `pick.py --validate` ne peut pas
-      l'attraper : il valide les `dependsOn`, pas les références de namespace
-      à l'intérieur des manifests.
-- [ ] **⚠️ Changer les `values` Cilium d'un enfant EN VIE est risqué** (vécu
-      2026-07-26). Le HelmRelease `<edge>-cilium` du management pousse un upgrade
-      → rollout du DaemonSet CNI sur un cluster à 2 nœuds sans marge : sur edge-2
-      (OVH) le datapath inter-nœuds n'est pas revenu (`cilium-dbg status` :
-      `Cluster health 0/2 reachable`), les IP privées des deux nœuds ont changé
-      au passage (CP .90→.204→.251, worker .237→.36→.113) et le cluster est
-      tombé à 0/17 Kustomizations, pods pourtant tous Running. edge-1 (Scaleway)
-      a mieux encaissé (istio-cni enfin Ready, 11/17). **Préférer recréer
-      l'enfant** (CAPI) plutôt que muter son CNI en place ; réserver la mutation
-      en place aux clusters HA, et un nœud à la fois.
-- [x] ~~**edge-2/OVH : `apiserver → kubelet:10250` en timeout**~~ → RÉSOLU et
-      vérifié (2026-07-27). Sur un edge-2 recréé avec `ipam.mode=kubernetes`,
-      `kubectl logs` et `kubectl exec` fonctionnent. Les security groups CAPO
-      n'étaient pas en cause : en `cluster-pool`, Cilium tenait `10.0.0.0/8`
-      pour l'espace de pods du cluster, or le subnet des nœuds (`10.20.0.0/24`)
-      est DEDANS. Confirmé par la topologie : edge-1 (Scaleway, nœuds en IP
-      publique, hors du /8) n'a jamais eu le symptôme.
-      **Leçon de méthode** : le symptôme désignait le réseau du provider, la
-      cause était dans les values du CNI. Vérifier l'IPAM avant les SG.
-- [x] ~~Deux branches à garder synchro~~ → FAIT (2026-07-27) : plus qu'une
-      branche, `main`, dans les deux dépôts. Les `CHILD_BRANCH` des
-      `apps/clusters/*.yaml` ont été retirés (défaut `${CHILD_BRANCH:=main}`).
-      **Leçon** : la branche de test avait été supprimée côté git *sans* que les
-      overrides le soient — un enfant créé dans cet état aurait suivi une source
-      introuvable. Ne surcharger `CHILD_BRANCH` que le temps d'un test, et le
-      retirer avec la branche.
-- [ ] **Enfants durcis** : `network.controlPlaneLoadBalancer` (aujourd'hui
-      endpoint = IP publique du CP, non-HA) + private network / gateway au lieu
-      d'une IPv4 publique par nœud.
-- [~] **Rate-limit GitHub de l'operator CAPI** : mécanisme **vérifié et
-      documenté** (2026-07-27) en tête de
-      `apps/base/cluster-api-providers/core-providers.yaml`, mais **non activé**.
-      L'API a été confrontée au schéma réel de la CRD
-      `operator.cluster.x-k8s.io/v1alpha2` : `configSecret` (token GitHub, slot
-      libre — aucun provider ne l'utilise) et `fetchConfig.oci` (miroir).
-      Non activé volontairement : le token est un secret propre à l'opérateur et
-      **un `configSecret` pointant un Secret absent casse le provider**. Reste à
-      faire, côté opérateur : créer le Secret puis décommenter le bloc.
-- [x] ~~Teardown des edges non idempotent~~ → FAIT : `task edge-down` (cascade
-      CAPI dans le bon ordre) + `task fleet-down` (edges PUIS management, rapport
-      de ce qui survit). Le prune Flux seul est documenté comme insuffisant.
-      ⚠️ LEÇON (2026-07-26) : la 1re version de fleet-down se contentait d'un
-      AVERTISSEMENT quand le management était injoignable (kubeconfig supprimé
-      avec le state) puis détruisait quand même → VMs des 3 edges orphelines sur
-      les 3 clouds, purgées à la main. Corrigé : arrêt bloquant, `--force-no-edges`
-      pour l'assumer explicitement, et un edge-down en échec bloque aussi.
-      Scripts de purge d'orphelins industrialisés :
-      `scripts/ops/purge-orphans/{ovh,outscale}.py` (+ README) — filet de
-      dernier recours, dry-run par défaut.
-- [x] ~~**Moderniser le template Scaleway**~~ → entrée PÉRIMÉE, vérifiée le
-      2026-07-27 : les **trois** templates sont déjà en `cluster.x-k8s.io/v1beta2`
-      avec des refs `{apiGroup, kind, name}`. Les `v1alpha2`/`v1alpha3` restants
-      sont les CRD **propres à chaque provider** (CAPS v1alpha2, CABPT/CACPPT
-      v1alpha3) — leur version courante, pas de la dette.
-- [x] ~~**Longhorn/iscsi sur les enfants**~~ → entrée PÉRIMÉE, vérifiée le
-      2026-07-27 : `talos-image/schematic.yaml` contient bien `iscsi-tools` ET
-      `util-linux-tools`, et il résout en `53513e54bb39…` — exactement l'ID
-      enregistré pour les images v1.13.4 des trois clouds. Les images publiées
-      embarquent donc les extensions.
-      Méthode de vérification (rejouable) : `curl -X POST
-      https://factory.talos.dev/schematics --data-binary @schematic.yaml` → l'ID
-      est déterministe, même contenu = même ID.
-      Reste non exercé : piocher réellement `storage` sur un enfant.
+Les `initdb` de CNPG ont échoué en `Permission denied` : le répertoire de leur
+PVC avait été créé en `0755` au lieu du `0777` que pose le script `setup` du
+provisioner. Celui d'OpenBao, créé plus tard, était correct — et le script
+déployé était intact (`$VOL_DIR` non vidé, ce qui **valide au passage
+l'isolement de la substitution Flux**). Cause probable : le Deployment du
+provisioner a roulé **6 fois** pendant le déploiement, sous l'effet des pushes
+successifs de correctifs, et une demande de volume est tombée pendant une
+transition. Re-provisionner a suffi. À re-vérifier sur un run sans push
+intermédiaire avant d'en faire une entrée de dette.
 
 ## Défauts trouvés par le run cloud du 2026-07-28
 
