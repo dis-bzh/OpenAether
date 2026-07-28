@@ -94,6 +94,14 @@ full browser-test protocol (blocking prerequisite, tunnel, the 3 tests) is in
       lines (the real total is higher; comments without accents are not
       counted). **Do not bulk-translate**: these comments encode hard-won traps;
       convert them as each file is otherwise modified.
+- [ ] **`apps/base/platform/ccm/scaleway` does not build — dead code.** Its
+      `kustomization.yaml` lists a `helmrepository.yaml` that does not exist, so
+      `kubectl kustomize` fails on it. Nothing references it: the brick is absent
+      from the Flux DAG and from `bricks.yaml`, and the CCM was explicitly ruled
+      out (see "Public ingress" below). It is the only one of the repo's 48
+      kustomizations that fails to build. Either delete it, or restore the
+      missing file and document why it is kept. Found 2026-07-28 while sweeping
+      every kustomization.
 - [ ] **`task validate` fails outside an S3 context.** `tofu init -backend=false`
       on the `cluster` root still demands AWS credentials ("No valid credential
       sources found"), when `-backend=false` is precisely meant to avoid that.
