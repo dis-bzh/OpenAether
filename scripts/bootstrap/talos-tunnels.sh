@@ -173,8 +173,8 @@ until ssh -o UserKnownHostsFile="$BASTION_KH" -o StrictHostKeyChecking=accept-ne
           -o BatchMode=yes -o ConnectTimeout=8 -i "$KEY" \
           "${BUSER}@${BASTION}" true 2>/dev/null; do
   if (( SECONDS >= __deadline )); then
-    echo "⚠ bastion toujours inaccessible après ${BASTION_WAIT}s — on tente quand même."
-    echo "  (vérifier: cloud-init terminé ? bonne clé ? admin_ip à jour ?)"
+    echo "⚠ bastion still unreachable after ${BASTION_WAIT}s — trying anyway."
+    echo "  (check: cloud-init finished? right key? admin_ip up to date?)"
     break
   fi
   sleep 10

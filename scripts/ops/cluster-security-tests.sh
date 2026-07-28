@@ -95,30 +95,30 @@ fi
 
 # 1.2 DNS egress allowed everywhere
 if kubectl get ccnp allow-dns &>/dev/null; then
-  pass "1.2 DNS egress autorisé partout"
+  pass "1.2 DNS egress allowed everywhere"
 else
-  fail "1.2 DNS egress autorisé partout" "CCNP allow-dns not found"
+  fail "1.2 DNS egress allowed everywhere" "CCNP allow-dns not found"
 fi
 
 # 1.3 Kube-API egress allowed
 if kubectl get ccnp allow-kube-api &>/dev/null; then
-  pass "1.3 Kube-API egress autorisé"
+  pass "1.3 Kube-API egress allowed"
 else
-  fail "1.3 Kube-API egress autorisé" "CCNP allow-kube-api not found"
+  fail "1.3 Kube-API egress allowed" "CCNP allow-kube-api not found"
 fi
 
 # 1.4 MinIO ingress bounded (local only — skipped if the namespace is absent)
 if kubectl get ns foundation-storage &>/dev/null 2>&1; then
   MINIO_CNP=$(kubectl get cnp minio -n foundation-storage -o yaml 2>/dev/null || true)
   if echo "$MINIO_CNP" | grep -q "services-observability" && echo "$MINIO_CNP" | grep -q '"9000"'; then
-    pass "1.4 MinIO ingress borné (services-observability:9000)"
+    pass "1.4 MinIO ingress bounded (services-observability:9000)"
   elif [ -z "$MINIO_CNP" ]; then
-    skip "1.4 MinIO ingress borné" "Namespace foundation-storage not present (cloud-only)"
+    skip "1.4 MinIO ingress bounded" "Namespace foundation-storage not present (cloud-only)"
   else
-    fail "1.4 MinIO ingress borné" "CNP minio does not restrict ingress to services-observability:9000"
+    fail "1.4 MinIO ingress bounded" "CNP minio does not restrict ingress to services-observability:9000"
   fi
 else
-  skip "1.4 MinIO ingress borné" "Namespace foundation-storage not present (cloud-only)"
+  skip "1.4 MinIO ingress bounded" "Namespace foundation-storage not present (cloud-only)"
 fi
 
 # 1.5 Loki egress — no toEntities:world
@@ -139,12 +139,12 @@ if [ -f "$VMAgent_CNP" ]; then
   # toEntities and cluster sit on separate lines in the Cilium YAML
   if grep -A60 "name: vmagent" "$VMAgent_CNP" | grep -q "toEntities:" && \
      grep -A60 "name: vmagent" "$VMAgent_CNP" | grep -q "cluster"; then
-    pass "1.6 VMAgent scraping borné (toEntities: cluster)"
+    pass "1.6 VMAgent scraping bounded (toEntities: cluster)"
   else
-    fail "1.6 VMAgent scraping borné" "CNP VMAgent missing toEntities: cluster on scraping block"
+    fail "1.6 VMAgent scraping bounded" "CNP VMAgent missing toEntities: cluster on scraping block"
   fi
 else
-  skip "1.6 VMAgent scraping borné" "VMAgent CNP file not found"
+  skip "1.6 VMAgent scraping bounded" "VMAgent CNP file not found"
 fi
 
 # 1.7 Fondation hors-mesh : CNP existent
@@ -506,9 +506,9 @@ for p in pods:
 print(caps)
 " 2>/dev/null || echo "0")
 if [ "$ADDED_CAPS" -eq 0 ]; then
-  pass "5.4 Pas de pod avec capabilities addées (hors ns système)"
+  pass "5.4 No pod with added capabilities (outside system ns)"
 else
-  fail "5.4 Pas de pod avec capabilities addées" "$ADDED_CAPS conteneur(s) avec capabilities.add non vides"
+  fail "5.4 No pod with added capabilities" "$ADDED_CAPS container(s) with non-empty capabilities.add"
 fi
 
 # 5.5 PriorityClass platform-critical
@@ -526,11 +526,11 @@ fi
 echo ""
 echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
 if [ "$FAIL" -eq 0 ]; then
-  echo -e "${GREEN}${BOLD} RÉSULTAT: $PASS/$TOTAL passés${NC}"
-  [ "$SKIP" -gt 0 ] && echo -e "${YELLOW} ($SKIP ignorés — environnement non applicable)${NC}"
+  echo -e "${GREEN}${BOLD} RESULT: $PASS/$TOTAL passed${NC}"
+  [ "$SKIP" -gt 0 ] && echo -e "${YELLOW} ($SKIP skipped — environment not applicable)${NC}"
 else
-  echo -e "${RED}${BOLD} RÉSULTAT: $PASS/$TOTAL passés, $FAIL échoué(s)${NC}"
-  [ "$SKIP" -gt 0 ] && echo -e "${YELLOW} ($SKIP ignorés)${NC}"
+  echo -e "${RED}${BOLD} RESULT: $PASS/$TOTAL passed, $FAIL failed${NC}"
+  [ "$SKIP" -gt 0 ] && echo -e "${YELLOW} ($SKIP skipped)${NC}"
 fi
 echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
 

@@ -57,17 +57,17 @@ command -v kubectl >/dev/null 2>&1 || { echo "✗ kubectl requis" >&2; exit 1; }
 kubectl cluster-info >/dev/null 2>&1 || { echo "✗ KUBECONFIG ne pointe aucun cluster joignable" >&2; exit 1; }
 
 if ! kubectl get clusters.cluster.x-k8s.io "$CLUSTER" -n "$NS" >/dev/null 2>&1; then
-  ok "cluster '$CLUSTER' déjà absent (rien à faire)"
+  ok "cluster '$CLUSTER' already absent (nothing to do)"
   exit 0
 fi
 
 # Inventory before deletion — used for the final report.
 mapfile -t MACHINES < <(kubectl get machines -n "$NS" \
   -l "cluster.x-k8s.io/cluster-name=$CLUSTER" -o name 2>/dev/null)
-info "Cluster '$CLUSTER' (ns $NS) : ${#MACHINES[@]} machine(s) à détruire"
+info "Cluster '$CLUSTER' (ns $NS): ${#MACHINES[@]} machine(s) to destroy"
 
 if [ "$ASSUME_YES" -eq 0 ]; then
-  read -rp "Détruire définitivement '$CLUSTER' et ses VMs ? [y/N] " a
+  read -rp "Permanently destroy '$CLUSTER' and its VMs? [y/N] " a
   [ "$a" = y ] || [ "$a" = Y ] || { echo "abandon"; exit 1; }
 fi
 
@@ -91,7 +91,7 @@ done
 #    must show immediately, not after 15 min of silent waiting.
 info "kubectl delete cluster $CLUSTER (cascade CAPI)…"
 if ! kubectl delete clusters.cluster.x-k8s.io "$CLUSTER" -n "$NS" --wait=false; then
-  echo "✗ la suppression du Cluster a été REFUSÉE (voir l'erreur ci-dessus)." >&2
+  echo "✗ the Cluster deletion was REFUSED (see the error above)." >&2
   exit 1
 fi
 
@@ -103,7 +103,7 @@ while (( SECONDS < deadline )); do
   mach=$(kubectl get machines -n "$NS" -l "cluster.x-k8s.io/cluster-name=$CLUSTER" \
            --no-headers 2>/dev/null | wc -l)
   if [ "$left" = 0 ] && [ "$mach" = 0 ]; then
-    ok "cluster '$CLUSTER' entièrement supprimé"
+    ok "cluster '$CLUSTER' fully deleted"
     exit 0
   fi
   printf '  … cluster=%s machines=%s\n' "$left" "$mach"
@@ -111,12 +111,12 @@ while (( SECONDS < deadline )); do
 done
 
 # 4. Safety net — the provider is stuck (known bug: see docs/backlog.md).
-warn "timeout après ${TIMEOUT}s — le provider n'a pas fini la cascade."
-warn "Levée des finalizers sur les objets infra restants (les VMs peuvent survivre !) :"
+warn "timeout after ${TIMEOUT}s — the provider did not finish the cascade."
+warn "Lifting finalizers on the remaining infra objects (the VMs may survive!):"
 for kind in scalewaymachine oscmachine openstackmachine scalewaycluster osccluster openstackcluster; do
   for obj in $(kubectl get "$kind" -n "$NS" -o name 2>/dev/null | grep -- "$CLUSTER" || true); do
     kubectl patch "$obj" -n "$NS" --type merge -p '{"metadata":{"finalizers":null}}' >/dev/null 2>&1 \
-      && warn "  finalizers levés : $obj"
+      && warn "  finalizers lifted: $obj"
   done
 done
 for obj in $(kubectl get machines -n "$NS" -o name 2>/dev/null | grep -- "$CLUSTER" || true); do
@@ -126,11 +126,11 @@ kubectl patch clusters.cluster.x-k8s.io "$CLUSTER" -n "$NS" --type merge -p '{"m
 
 cat >&2 <<EOT
 
-⚠ ACTION MANUELLE REQUISE — vérifier qu'aucune VM ne survit côté provider :
+⚠ MANUAL ACTION REQUIRED — check that no VM survives on the provider side:
     Scaleway : scw instance server list   (ou console)  → chercher '${CLUSTER}-'
     OVH      : openstack server list                    → chercher '${CLUSTER}-'
     Outscale : ReadVms (API)                            → chercher les tags ${CLUSTER}
-  Les objets Kubernetes ont été forcés, mais les ressources cloud correspondantes
-  ne sont PAS garanties détruites.
+  The Kubernetes objects were forced, but the matching cloud resources are
+  NOT guaranteed to be destroyed.
 EOT
 exit 1

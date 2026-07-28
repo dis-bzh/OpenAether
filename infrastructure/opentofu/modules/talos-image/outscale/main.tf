@@ -171,7 +171,7 @@ resource "terraform_data" "purge_staging" {
       echo "▶ Purge du staging : s3://${var.bucket_name}/${local.object_key}"
       aws s3 rm "s3://${var.bucket_name}/${local.object_key}" \
         --endpoint-url "${var.s3_endpoint}" --region "${var.region}" || true
-      echo "✓ staging purgé (l'OMI et le snapshot restent les artefacts durables)"
+      echo "✓ staging purged (the OMI and the snapshot remain the durable artifacts)"
     EOT
   }
 
