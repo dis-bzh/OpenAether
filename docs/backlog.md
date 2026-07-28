@@ -263,6 +263,68 @@ port-forward — la CNP bloque l'accès direct depuis un pod quelconque).
       le comparer à un cluster sain — et le confirmer par un test de trafic réel
       (DNS cross-nœud, `kubectl exec`), pas par la sonde seule.
 
+## Piste architecture — amorcer le cluster de management via CAPI (2026-07-28)
+
+Idée issue de [cet article](https://blog.filador.ch/posts/a-la-decouverte-de-cluster-api-le-cluster-de-management/)
+(Proxmox + CAPMOX + CABPT/CACPPT) : ajouter, **à côté** du chemin OpenTofu, la
+possibilité de créer le premier cluster par CAPI puis de le rendre autogéré.
+
+**On est déjà à 80 %** : `cluster-api-operator` + CABPT v0.6.12 + CACPPT v0.5.13
++ CAPS/CAPO/CAPOSC sont installés et **prouvés en réel** (edge-1 Scaleway,
+edge-2 OpenStack). Le pattern de description d'un cluster existe (`apps/clusters/`).
+
+### Le vrai périmètre : CAPI ne remplace pas OpenTofu
+
+Sur OVH, OpenTofu crée **~44 ressources dont seulement 3 instances de calcul**.
+Le reste — réseau, routeur, 14 règles de SG, LB + FIP, bastion, volume, et les
+buckets S3 de `cluster/backup.tf` — n'a pas d'équivalent CAPI. Le découpage
+honnête est donc :
+
+> **OpenTofu = le substrat. CAPI = les machines.**
+
+Ce qui veut dire qu'on **n'enlève rien** : on ajoute un troisième chemin. À
+peser contre « le plus simple possible ».
+
+### Pas besoin de `kind`
+
+L'article amorce sur `kind`. Nous avons déjà `task local-up` (Talos local) **et**
+les briques CAPI piochables. Le cluster éphémère peut donc être le nôtre —
+aucune dépendance nouvelle, sur un chemin déjà testé :
+
+`task local-up` → pioche `cluster-api-providers` → décrire le management dans
+`apps/clusters/` → pivot → `task local-down`.
+
+### Le point dur n'est pas le pivot, c'est **pivot × Flux**
+
+`clusterctl move` suppose que les CR ne vivent QUE dans le cluster. Chez nous
+Flux les rend depuis git. La bascule doit être ordonnée :
+`Cluster` en pause → `move` (il transporte UID, `status`, `ownerReferences`,
+c'est-à-dire le lien Machine ↔ instance réelle) → le Flux de la cible **adopte**
+par SSA (mêmes GVK/nom/ns ⇒ patch, pas recréation). Dans le mauvais ordre : soit
+un second cluster est créé, soit `prune` supprime ce que le `move` vient de poser.
+**C'est là que ça casserait — à traiter avant d'écrire la moindre ligne.**
+
+### Ce que ça achèterait vraiment (c'est du day-2, pas du day-1)
+
+- **`MachineHealthCheck`** : un nœud mort est remplacé tout seul. OpenTofu ne
+  sait pas faire.
+- **Upgrades Talos** par rollout CACPPT au lieu de notre `rolling-replace`
+  maison (ForceNew, 1 nœud à la fois, evict etcd — délicat, cf. mémoire).
+- Scaler = changer un nombre dans git.
+- Un seul vocabulaire : le management décrit comme les edges.
+
+### Ce que ça coûterait
+
+- Un cluster autogéré **ne peut pas se réparer lui-même**. Il faut un chemin de
+  secours documenté (re-lever le local, pivoter en sens inverse).
+- Couverture : il manquerait **CAPMOX** (Proxmox) et **CAPD** (local). Nos 5
+  providers OpenTofu resteraient de toute façon la référence.
+
+### Recommandation
+
+Oui, **en chemin optionnel**, d'abord sur OVH/Scaleway (providers déjà prouvés),
+Proxmox ensuite — et **conditionné à la résolution de `pivot × Flux`**.
+
 ## Multi-provider / infra
 
 - [x] ~~**OVH : port du bastion sans `fixed_ip` → apply intermittent**~~ → corrigé
