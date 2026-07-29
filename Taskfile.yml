@@ -126,6 +126,7 @@ tasks:
       PROVIDER=scaleway|ovh|outscale|proxmox [VERSION=v1.13.4] [ENSURE=1]
     vars:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+      # renovate: datasource=github-releases depName=siderolabs/talos
       VERSION: '{{.VERSION | default "v1.13.4"}}'
       ENSURE: '{{.ENSURE | default ""}}'
     cmds:
@@ -140,6 +141,7 @@ tasks:
       ROLE: '{{.ROLE | default "management"}}'
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
+      # renovate: datasource=github-releases depName=siderolabs/talos
       VERSION: '{{.VERSION | default "v1.13.4"}}'
     cmds:
       - task: talos-image

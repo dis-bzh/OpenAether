@@ -19,6 +19,7 @@ jobs:
       - name: Setup OpenTofu
         uses: opentofu/setup-opentofu@v1
         with:
+          # renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
           tofu_version: "1.12.2"
 
       - name: Setup TFLint
@@ -56,6 +57,7 @@ jobs:
       - name: Setup OpenTofu
         uses: opentofu/setup-opentofu@v1
         with:
+          # renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
           tofu_version: "1.12.2"
 
       - name: Setup Task
@@ -79,6 +81,7 @@ jobs:
       - name: Setup OpenTofu
         uses: opentofu/setup-opentofu@v1
         with:
+          # renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
           tofu_version: "1.12.2"
 
       - name: Setup Task
