@@ -30,21 +30,12 @@ etcd, Cilium, Flux and cert-manager are scraped. Everything is torn down.
       ⚠️ The LB-IPAM VIP is not reachable from the bastion; reach the gateway by
       port-forward or from inside the cluster.
 
-- [ ] **Close the watchdog loop outside the cluster.** `Watchdog` reaches Slack
-      daily, so the chain proves itself while alive — but its absence only
-      alarms someone if something outside is watching. Point that route at a
-      dead-man's-switch service (healthchecks.io, PagerDuty DMS).
-
-- [ ] **Flux has no per-object Ready signal.** `gotk_reconcile_condition` is
-      gone in Flux 2.8; `FluxReconciliationStalled` covers "stopped", not
-      "failing". The kube-state-metrics `customResourceState` route produced a
-      series exactly once and could not be reproduced, so nothing was shipped —
-      the full elimination list is in commit `9ac133d`. Next step is an upstream
-      question, not another config guess.
-
-- [ ] **Keep trimming.** Cut docs 2315 → 987 lines (07-28) and this file
-      215 → ~90 (07-29). Do not trim by line count: cut where a comment narrates
-      an incident instead of stating the why.
+- [~] **Flux has no per-object Ready signal.** `gotk_reconcile_condition` is gone
+      in Flux 2.8; `FluxReconciliationStalled` covers "stopped", not "failing".
+      The kube-state-metrics `customResourceState` route produced a series
+      exactly once and could not be reproduced (elimination list in `9ac133d`).
+      Asked upstream 2026-07-29: kubernetes/kube-state-metrics#3052. Waiting —
+      do not spend more time guessing at config.
 
 ## Blocked on the world, not on us
 
@@ -106,6 +97,9 @@ One line each; the detail lives in the referenced file.
   Full reasoning in the `CiliumAgentMissing` rule comment.
 - **A rule on a metric nobody produces never fires, and never says so** —
   `task check-alerts` asks a live cluster which referenced metrics have no data.
+- **`repeat_interval` must be strictly greater than `group_interval`** —
+  Alertmanager sent one webhook in 11 min when both were 5m, which would trip a
+  dead-man's switch on a healthy cluster.
 - **A failed Job is permanent under Flux** — it re-applies the same spec and
   never restarts a finished Job. A bootstrap Job must WAIT for its dependency,
   not exit; `openbao-vault-bootstrap` left a cluster with no KV and no PKI while
