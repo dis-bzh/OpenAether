@@ -63,9 +63,10 @@ manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
       secret — an operator decision — plus the matching egress in the
       `vmalertmanager` CNP, or the notification is dropped silently.
 
-- [ ] **Cilium is not scraped.** Needs `prometheus.enabled` in its Helm values,
-      which must stay in step with `check-cilium-parity.py`, on a component you
-      cannot safely mutate on a live child. etcd is done (2026-07-29).
+- [ ] **Roll the CNI metrics onto the live children.** Cilium now serves metrics
+      (2026-07-29) and `check-cilium-parity.py` enforces the two keys, but the
+      values only take effect on the NEXT bootstrap. Do not push the change onto
+      a running child's HelmRelease — see the CNI mutation rule.
 
 - [ ] **The alert path dies with the cluster it watches.** Verified by stopping
       2 of 3 control planes: every metric was correct in hindsight, and nothing
@@ -152,6 +153,13 @@ One line each; the detail lives in the referenced file.
   builds an API host that does not resolve. Use `eu-west-2`.
 - **A generated artifact drifts silently** — hence `task render-check` and
   `pick.py --check`. Prefer guardrails that compare over ones that assume.
+- **`up == 0` only works for NODE-discovered targets** — a node object outlives
+  the node, so the target stays and reports 0 (etcd). A POD-discovered target
+  leaves service discovery when the pod goes: the series disappears, and an
+  absent series matches nothing (Cilium). For a DaemonSet, compare
+  `number_ready < desired_number_scheduled` instead — but that says nothing
+  about a dead node either, since DaemonSet pods tolerate `unreachable` with no
+  timeout and are never evicted.
 - **Check that a metric EXISTS before writing a rule on it** — every guide
   still documents `gotk_reconcile_condition`; Flux 2.8 no longer emits it, and a
   rule on a missing metric evaluates clean and never fires. Scrape the target
