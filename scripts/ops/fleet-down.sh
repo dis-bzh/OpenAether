@@ -69,7 +69,7 @@ if [ ! -r "$KUBECONFIG" ] || ! kubectl cluster-info >/dev/null 2>&1; then
   What to do:
     • kubeconfig lost? regenerate it:
         cd infrastructure/opentofu/cluster && tofu output -raw kubeconfig > kubeconfig
-        (ou  talosctl -e <tunnel> -n <cp-ip> kubeconfig ./kubeconfig --force)
+        (or  talosctl -e <tunnel> -n <cp-ip> kubeconfig ./kubeconfig --force)
     • children already deleted / never created? re-run with --force-no-edges
     • when in doubt: inventory on the provider side FIRST (look for the child
       clusters' prefix among VMs, LBs, networks) — see docs/backlog.md
@@ -84,9 +84,9 @@ else
   # script would run `edge-down` against them. Always qualify the API group.
   mapfile -t EDGES < <(kubectl get clusters.cluster.x-k8s.io -A -o jsonpath='{range .items[*]}{.metadata.name} {.metadata.namespace}{"\n"}{end}' 2>/dev/null)
   if [ "${#EDGES[@]}" -eq 0 ]; then
-    ok "aucun cluster enfant"
+    ok "no child cluster"
   else
-    printf '  %s clusters enfants: %s\n' "${#EDGES[@]}" "$(printf '%s ' "${EDGES[@]%% *}")"
+    printf '  %s child clusters: %s\n' "${#EDGES[@]}" "$(printf '%s ' "${EDGES[@]%% *}")"
     for e in "${EDGES[@]}"; do
       name="${e%% *}"; ns="${e##* }"
       if ! "$ROOT/scripts/ops/edge-down.sh" "$name" --namespace "$ns" --timeout 900 \
@@ -128,10 +128,10 @@ cat <<EOT
   possibility of restoring:
     s3-${CN:-<projet>}-${PROVIDER}-tfstate-${ENVN:-<env>}      (+ -backup)
     s3-${CN:-<projet>}-${PROVIDER}-${ROLE}-${ENVN:-<env>}      (+ -backup)
-    s3-${CN:-<projet>}-*-backups-${ENVN:-<env>}                (restic, tous providers)
+    s3-${CN:-<projet>}-*-backups-${ENVN:-<env>}                (restic, all providers)
   Talos images (reusable — keeping them avoids a rebuild, ~1 h on Outscale):
-    task talos-image PROVIDER=$PROVIDER  re-applies; the talos-image root has its
-    propre state (bucket s3-${CN:-<projet>}-${PROVIDER}-talos-image).
+    task talos-image PROVIDER=$PROVIDER  re-applies; the talos-image root has
+    its own state (bucket s3-${CN:-<project>}-${PROVIDER}-talos-image).
   Objects created outside OpenTofu for CAPI (to recreate on the next deployment):
     Outscale keypair 'openaether-capi', pre-created OpenStack FIP (edge-2 certSANs).
   Local: kubeconfig, talosconfig, edge-*.kubeconfig, restic-escrow-*.txt

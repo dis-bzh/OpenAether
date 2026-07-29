@@ -497,16 +497,11 @@ resource "talos_cluster_kubeconfig" "this" {
 
   # ⚠️ DELIBERATELY DOES NOT DEPEND on `data.talos_cluster_health`.
   #
-  # That data source times out on HEALTHY clusters (a generic defect reproduced
-  # on OVH and Outscale: 6/6 nodes Ready, etcd OK, complete Flux DAG). As long
-  # as it gated the kubeconfig, its expiry failed the apply BEFORE the outputs —
-  # losing both kubeconfig AND talosconfig, plus the artifact backup,
-  # sur un cluster parfaitement fonctionnel.
-  #
-  # Decoupled, the two stay independent: the health check still fails the apply
-  # if it expires (the signal is not lost), but the kubeconfig is already in
-  # state — `tofu output -raw kubeconfig` and `task kubeconfig`
-  # fonctionnent, et un simple `task bootstrap-phase2` (idempotent) reprend.
+  # That data source times out on healthy clusters (reproduced on OVH and
+  # Outscale). While it gated the kubeconfig, an expiry failed the apply BEFORE
+  # the outputs — losing kubeconfig, talosconfig and the artifact backup.
+  # Decoupled, an expiry still fails the apply, so the signal is kept, but the
+  # kubeconfig is already in state and `task bootstrap-phase2` resumes.
   #
   # The bootstrap obviously remains a prerequisite: apid only serves the
   # kubeconfig once etcd is bootstrapped.

@@ -57,13 +57,25 @@ manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
 - [~] **`talos_cluster_health` times out on healthy clusters** (OVH, Outscale).
       The damage is fixed — `talos_cluster_kubeconfig` no longer depends on it,
       so an expiry keeps the signal without losing kubeconfig/talosconfig.
-      Workaround: `skip_health_check`. Upstream: the provider's 0.12.x line has
-      no stable release; either wait or open the issue with both traces.
+      Workaround: `skip_health_check`.
+      Upstream, re-checked 2026-07-29: 0.11.0 is still the newest stable, the
+      0.12.x line is alpha-only (now alpha.5) — nothing to adopt. The two open
+      issues on this data source do NOT match: #241 is the 5-minute timeout cap
+      (ours actually runs the configured 15 min), #206 is the kubelet-serving-CSR
+      check (we never enable `rotate-server-certificates`). Ours is distinct: a
+      bare `context deadline exceeded` with NO per-check output, so the stalled
+      check is unknown.
+      Blocked on evidence, not on a decision — filing it now would get it closed
+      as un-actionable. Capture on the next cloud run, from the applying host:
+      `TF_LOG=DEBUG` for the failing read; `talosctl health` at the same moment
+      (if that stalls too, it is not a provider bug); one run with
+      `skip_kubernetes_checks = true` to isolate the K8s-level checks.
 
-- [ ] **Keep trimming.** Done 2026-07-28: docs 2315 → 987 lines. Remaining: 48
-      comment blocks of 15+ lines (860 lines total) — mostly file headers, which
-      are legitimate; cut them only where they narrate an incident instead of
-      stating the why. See `CLAUDE.md` § Concision et refacto.
+- [ ] **Keep trimming.** Done 2026-07-28: docs 2315 → 987 lines. The 50 comment
+      blocks of 15+ lines were audited on 2026-07-29: nearly all are file
+      headers or input contracts that earn their length, so only the
+      `talos_cluster_health` blocks were cut. Do not trim by line count — cut
+      where a comment narrates an incident instead of stating the why.
 
 ## Traps worth remembering
 
@@ -96,3 +108,7 @@ One line each; the detail lives in the referenced file.
   builds an API host that does not resolve. Use `eu-west-2`.
 - **A generated artifact drifts silently** — hence `task render-check` and
   `pick.py --check`. Prefer guardrails that compare over ones that assume.
+- **A batch translation leaves half-translated blocks** — a French sentence
+  interleaved between English ones reads as finished and no linter catches it.
+  Sweep with a detector, never trust "already done" (both `CLAUDE.md` claimed
+  the repos were fully English while ~50 lines were not).
