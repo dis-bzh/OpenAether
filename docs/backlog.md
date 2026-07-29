@@ -47,12 +47,16 @@ manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
       the claim form remains to confirm. Needs a live cluster.
       Protocol: `admin-access.md` § 8 (browser tests).
 
-- [ ] **Gateway → UI path.** Needs a live cluster, NOT the production PKI
-      ceremony — that premise was wrong. Signing is a plain `openssl ca` on the
-      CSR the bootstrap Job prints, so a throwaway root CA in a tmpdir unblocks
-      it in minutes (`pki-root-offline-runbook.md` § 3). Only the real ceremony
-      (offline root, Bitwarden escrow) is operator-side, and that is a process,
-      not code. Pairs with the SSO test above: one deployment closes both.
+- [ ] **Reach a UI through the gateway.** The TLS half is DONE (2026-07-29,
+      Scaleway): a throwaway root CA signed the intermediate with `openssl ca`,
+      `bao write pki/intermediate/set-signed` imported it, `openaether-tls` went
+      Ready and the gateway's **https listener reports Programmed=True**. What
+      was never exercised is the hop after that — an actual HTTP request through
+      the gateway to a UI — because it needs a browser and a resolvable name.
+      Pairs with the SSO test above: one deployment closes both.
+      ⚠️ Import the signed intermediate ALONE. Concatenating the root makes
+      OpenBao import two issuers, and cert-manager then fails on whichever has
+      no private key.
 
 - [ ] **OVH: a node can stay `ACTIVE` on the hypervisor while dead.** Talos
       called `reboot()` and the kernel hung in `device_shutdown` / `vp_reset`.
@@ -81,13 +85,16 @@ manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
       values only take effect on the NEXT bootstrap. Do not push the change onto
       a running child's HelmRelease — see the CNI mutation rule.
 
-- [ ] **The alert path dies with the cluster it watches.** Verified by stopping
-      2 of 3 control planes: every metric was correct in hindsight, and nothing
-      fired at the time — DNS and the write path went with the control plane, so
-      VMAgent buffered and flushed only on recovery. No in-cluster arrangement
-      fixes this. It needs the external receiver above, and ideally a probe from
-      outside the cluster. Until then, treat cluster-wide alerts as a post-mortem
-      record, not a page.
+- [ ] **Close the watchdog loop outside the cluster.** A `Watchdog` alert now
+      fires permanently and reaches Slack once a day, so the whole chain
+      (rule → VMAlert → Alertmanager → Slack → egress) proves itself while it is
+      alive — its ABSENCE is the signal. But absence only alarms someone if
+      something outside the cluster is watching for it, and today that someone
+      is a human noticing the daily message stopped. Point the watchdog route at
+      a dead-man's-switch service (healthchecks.io, PagerDuty DMS…) instead: it
+      is the only arrangement that survives the cluster dying, which was
+      verified by killing etcd quorum — every metric correct in hindsight,
+      nothing delivered at the time.
 
 - [ ] **No per-object Ready condition for Flux.** `gotk_reconcile_condition`,
       which every monitoring guide still cites, is GONE in Flux 2.8.8 — the
@@ -141,8 +148,11 @@ manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
       check (we never enable `rotate-server-certificates`). Ours is distinct: a
       bare `context deadline exceeded` with NO per-check output, so the stalled
       check is unknown.
+      Narrowed 2026-07-29: a full Phase-2 apply on Scaleway passed the health
+      check with no error, so this is NOT provider-agnostic — it is OVH and
+      Outscale only. That belongs in the report; the old note called it generic.
       Blocked on evidence, not on a decision — filing it now would get it closed
-      as un-actionable. Capture on the next cloud run, from the applying host:
+      as un-actionable. Capture on the next OVH or Outscale run, from the host:
       `TF_LOG=DEBUG` for the failing read; `talosctl health` at the same moment
       (if that stalls too, it is not a provider bug); one run with
       `skip_kubernetes_checks = true` to isolate the K8s-level checks.
