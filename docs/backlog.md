@@ -56,16 +56,25 @@ manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
 
 - [ ] **OVH: a node can stay `ACTIVE` on the hypervisor while dead.** Talos
       called `reboot()` and the kernel hung in `device_shutdown` / `vp_reset`.
-      Recovery: `HARD` reboot through the Nova API. Open: why did Talos reboot?
-      Method: when `talosctl` resets on one node only, go to the serial console.
-      Detection is now covered (`NodeUnreachable`, 2026-07-29); the root cause
-      still needs the event to recur, and the console AT THAT MOMENT.
+      Recovery: `HARD` reboot through the Nova API.
+      Investigated 2026-07-29, and the conclusion is narrower than hoped.
+      `vp_reset` is virtio-pci's reset: the guest waits on a device the host is
+      no longer servicing. There is no Talos-side switch that avoids it —
+      `device_shutdown()` runs on EVERY reboot path, so neither
+      `talosctl reboot --mode=powercycle` nor `kexec_load_disabled=1` (the two
+      levers that exist) skips the sequence where it hung. Only a
+      hypervisor-level reset does, which is what the recovery already says.
+      So what is left is: (a) detection, now covered by `NodeUnreachable`;
+      (b) never wait on an in-guest reboot on OVH — go straight to Nova;
+      (c) the root cause, which still needs the event to recur AND the serial
+      console at that moment. Not schedulable — do not keep re-investigating it
+      from the outside.
 
-- [ ] **No alert reaches a human.** VMAlert and VMAlertmanager now evaluate and
-      group the rules, but the receiver is empty: alerts stop at the
-      Alertmanager API. Wiring one (email/Slack/webhook) needs a channel and its
-      secret — an operator decision — plus the matching egress in the
-      `vmalertmanager` CNP, or the notification is dropped silently.
+- [ ] **Slack delivery is wired but never sent a message.** The receiver, the
+      OpenBao/ESO path for the webhook and the `hooks.slack.com` egress are in
+      place and the config passes `amtool check-config`. What is NOT proven is a
+      message actually arriving: that needs a real webhook seeded in OpenBao on a
+      live cluster.
 
 - [ ] **Roll the CNI metrics onto the live children.** Cilium now serves metrics
       (2026-07-29) and `check-cilium-parity.py` enforces the two keys, but the
