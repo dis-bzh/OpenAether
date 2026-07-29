@@ -54,8 +54,11 @@ la source.
 - Code (`.tf`, `.yaml`, `.py`, `.sh`) : commentaires en anglais.
 - Échange avec l'utilisateur : en français.
 
-⚠️ Le dépôt est **entièrement en anglais depuis le 2026-07-28** (code, docs,
-messages CLI). Toute régression est un défaut : écrire directement en anglais.
+⚠️ Toute régression est un défaut : écrire directement en anglais. La bascule
+du 2026-07-28 s'est faite par lots et en a laissé passer — le 2026-07-29 il
+restait ~50 lignes dans les deux dépôts, dont des blocs à moitié traduits où une
+phrase française coupait une phrase anglaise. Ne pas se fier à « c'est déjà
+fait » : passer le détecteur.
 
 **Piège vécu lors de cette bascule** : `pick.py` identifiait ses profils générés
 par la chaîne littérale française de leur en-tête. La traduire a rendu `--check`

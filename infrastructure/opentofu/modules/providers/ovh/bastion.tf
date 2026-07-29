@@ -130,7 +130,7 @@ resource "openstack_networking_floatingip_associate_v2" "bastion" {
   floating_ip = openstack_networking_floatingip_v2.bastion.address
   port_id     = openstack_networking_port_v2.bastion.id
 
-  # ⚠️ depends_on OBLIGATOIRE sur l'interface du routeur. Neutron REFUSE
+  # ⚠️ depends_on on the router interface is MANDATORY. Neutron REFUSES to
   # associate a floating IP until the port's subnet has a route to the external
   # network:
   #   ExternalGatewayForFloatingIPNotFound: External network <id> is not

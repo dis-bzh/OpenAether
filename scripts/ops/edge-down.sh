@@ -26,7 +26,7 @@ while [ $# -gt 0 ]; do
     --namespace) NS="$2"; shift 2 ;;
     --timeout)   TIMEOUT="$2"; shift 2 ;;
     --yes | -y)  ASSUME_YES=1; shift ;;
-    *) echo "✗ flag inconnu: $1" >&2; exit 2 ;;
+    *) echo "✗ unknown flag: $1" >&2; exit 2 ;;
   esac
 done
 
@@ -37,8 +37,8 @@ warn() { printf '⚠ %s\n' "$*" >&2; }
 # ⚠️ Always qualify `clusters.cluster.x-k8s.io`: the `Cluster` kind is also
 # CNPG's (postgresql.cnpg.io). Without the CAPI CRDs installed, an unqualified
 # `kubectl delete cluster <name>` would target a DATABASE.
-command -v kubectl >/dev/null 2>&1 || { echo "✗ kubectl requis" >&2; exit 1; }
-kubectl cluster-info >/dev/null 2>&1 || { echo "✗ KUBECONFIG ne pointe aucun cluster joignable" >&2; exit 1; }
+command -v kubectl >/dev/null 2>&1 || { echo "✗ kubectl required" >&2; exit 1; }
+kubectl cluster-info >/dev/null 2>&1 || { echo "✗ KUBECONFIG points at no reachable cluster" >&2; exit 1; }
 
 if ! kubectl get clusters.cluster.x-k8s.io "$CLUSTER" -n "$NS" >/dev/null 2>&1; then
   ok "cluster '$CLUSTER' already absent (nothing to do)"
@@ -52,7 +52,7 @@ info "Cluster '$CLUSTER' (ns $NS): ${#MACHINES[@]} machine(s) to destroy"
 
 if [ "$ASSUME_YES" -eq 0 ]; then
   read -rp "Permanently destroy '$CLUSTER' and its VMs? [y/N] " a
-  [ "$a" = y ] || [ "$a" = Y ] || { echo "abandon"; exit 1; }
+  [ "$a" = y ] || [ "$a" = Y ] || { echo "aborted"; exit 1; }
 fi
 
 # 1. SUSPEND Flux first — otherwise the deletion is undone in a loop.
@@ -66,7 +66,7 @@ fi
 for k in "${CLUSTER}-cluster" capi-clusters; do
   if kubectl get kustomization -n flux-system "$k" >/dev/null 2>&1; then
     kubectl patch kustomization -n flux-system "$k" --type=merge \
-      -p '{"spec":{"suspend":true}}' >/dev/null 2>&1 && info "Flux suspendu : $k"
+      -p '{"spec":{"suspend":true}}' >/dev/null 2>&1 && info "Flux suspended: $k"
   fi
 done
 
@@ -111,9 +111,9 @@ kubectl patch clusters.cluster.x-k8s.io "$CLUSTER" -n "$NS" --type merge -p '{"m
 cat >&2 <<EOT
 
 ⚠ MANUAL ACTION REQUIRED — check that no VM survives on the provider side:
-    Scaleway : scw instance server list   (ou console)  → chercher '${CLUSTER}-'
-    OVH      : openstack server list                    → chercher '${CLUSTER}-'
-    Outscale : ReadVms (API)                            → chercher les tags ${CLUSTER}
+    Scaleway: scw instance server list  (or console)  → look for '${CLUSTER}-'
+    OVH:      openstack server list                   → look for '${CLUSTER}-'
+    Outscale: ReadVms (API)                           → look for tag ${CLUSTER}
   The Kubernetes objects were forced, but the matching cloud resources are
   NOT guaranteed to be destroyed.
 EOT

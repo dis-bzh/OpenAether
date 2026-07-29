@@ -95,6 +95,10 @@ infrastructure/opentofu/cluster/.talos-bastion-known-hosts
 .claude/hooks/*
 !.claude/hooks/session-start.sh
 
-# Kubeconfigs extraits + escrow (jamais commiter)
+# Extracted kubeconfigs + escrow (never commit)
 *.kubeconfig
 restic-escrow-*.txt
+
+# Python bytecode caches (committed by accident on 2026-07-28).
+__pycache__/
+*.pyc

@@ -80,7 +80,7 @@ tasks:
 
   preflight-quotas:
     desc: >-
-      Vérifie les quotas d'un provider AVANT de déployer (lecture seule). Usage: task preflight-quotas
+      Read-only quota check on a provider BEFORE deploying. Usage: task preflight-quotas
       PROVIDER=ovh|outscale [-- --add-vms 2 --add-cores 4 --add-ram-gb 16]
     vars:
       PROVIDER: '{{.PROVIDER | default "outscale"}}'
@@ -270,9 +270,9 @@ tasks:
 
   edge-down:
     desc: >-
-      Décommission PROPRE d'un cluster enfant CAPI (idempotent). À lancer AVANT de
-      retirer le fichier de apps/clusters/kustomization.yaml : le prune Flux seul
-      supprime tout en désordre et bloque la cascade CAPI (VMs orphelines facturées).
+      CLEAN decommission of a CAPI child cluster (idempotent). Run it BEFORE removing
+      the file from apps/clusters/kustomization.yaml: a bare Flux prune deletes
+      everything out of order and stalls the CAPI cascade (orphaned VMs, billed).
       Usage: task edge-down CLUSTER=edge-1 [NS=capi-clusters] [TIMEOUT=900] [-- --yes]
     vars:
       CLUSTER: '{{.CLUSTER}}'
@@ -280,9 +280,9 @@ tasks:
       TIMEOUT: '{{.TIMEOUT | default "900"}}'
     preconditions:
       - sh: '[ -n "{{.CLUSTER}}" ]'
-        msg: "CLUSTER= est requis (ex: task edge-down CLUSTER=edge-1)"
+        msg: "CLUSTER= is required (e.g. task edge-down CLUSTER=edge-1)"
       - sh: '[ -n "$KUBECONFIG" ] || [ -f infrastructure/opentofu/cluster/kubeconfig ]'
-        msg: "KUBECONFIG doit pointer le cluster de management"
+        msg: "KUBECONFIG must point at the management cluster"
     cmds:
       - |
         export KUBECONFIG="${KUBECONFIG:-$PWD/infrastructure/opentofu/cluster/kubeconfig}"
@@ -290,11 +290,11 @@ tasks:
 
   fleet-down:
     desc: >-
-      Teardown COMPLET et idempotent d'une flotte : chaque cluster enfant CAPI
-      (edge-down, cascade propre) PUIS le management (tofu destroy), puis un
-      rapport de ce qui reste à purger à la main (buckets, images, keypairs).
-      Ordre non négociable : un enfant survivant au management = VMs orphelines
-      facturées. Usage: task fleet-down PROVIDER=ovh [ROLE=management] [-- --yes]
+      COMPLETE, idempotent fleet teardown: every CAPI child cluster (edge-down,
+      clean cascade) THEN the management (tofu destroy), then a report of what is
+      left to purge by hand (buckets, images, keypairs). The order is not
+      negotiable: a child outliving the management means orphaned, billed VMs.
+      Usage: task fleet-down PROVIDER=ovh [ROLE=management] [-- --yes]
     vars:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
       ROLE: '{{.ROLE | default "management"}}'

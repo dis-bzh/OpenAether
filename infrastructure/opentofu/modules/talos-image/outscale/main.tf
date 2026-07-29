@@ -4,7 +4,7 @@
 #   Factory (aws-<arch>.raw.zst) -> raw -> OOS (Object Storage)
 #     -> outscale_snapshot (import via file_location) -> outscale_image (OMI)
 #
-# PLATEFORME `aws` (et non `nocloud`) : Outscale est EC2-compatible et expose
+# PLATFORM `aws` (not `nocloud`): Outscale is EC2-compatible and exposes
 # an EC2 IMDS. Talos's aws variant reads it, which brings TWO things that are
 # essential to CAPI (CAPOSC delivers the machine config as user-data, like EC2):
 #   1. user-data ingestion  -> without it CAPI VMs would stay in maintenance
@@ -112,8 +112,8 @@ resource "outscale_snapshot" "talos" {
   lifecycle {
     # `file_location` (pre-signed URL, changes every run) AND `snapshot_size`
     # both come from the staging object, which is purged after the import:
-    # without ignoring them, every plan would see drift and want to recreate a
-    # import d'une heure.
+    # without ignoring them, every plan would see drift and redo a one-hour
+    # import.
     ignore_changes       = [file_location, snapshot_size]
     replace_triggered_by = [terraform_data.build_and_upload]
   }

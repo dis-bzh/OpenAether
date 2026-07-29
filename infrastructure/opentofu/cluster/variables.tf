@@ -33,16 +33,14 @@ variable "skip_health_check" {
   description = <<-EOT
     Skip the post-bootstrap `talos_cluster_health` data source.
 
-    This check can time out on a PERFECTLY healthy cluster — observed
-    sur un management HA OVH (3 CP + 3 workers) : tous les nœuds Ready, etcd
-    HEALTH OK sur les 3 CP, DAG Flux complet, mais le data source retourne
-    "context deadline exceeded" et INTERROMPT l'apply avant les outputs
-    (kubeconfig/talosconfig) and the encrypted artifact backup.
+    That data source times out on clusters that are demonstrably healthy (HA
+    managements on OVH and Outscale: every node Ready, etcd HEALTH OK on all
+    control planes, complete Flux DAG) and returns a bare "context deadline
+    exceeded" — see docs/backlog.md.
 
-    Setting it to true lets you finish a cluster whose health was verified
-    autrement (`talosctl -n <cp> service etcd`, `kubectl get nodes`). À n'activer
-    knowingly: you lose the guardrail that detects a silently failed
-    bootstrap.
+    Enabling this costs the guardrail that catches a silently failed bootstrap,
+    so verify health out of band (`talosctl -n <cp> service etcd`,
+    `kubectl get nodes`).
   EOT
   type        = bool
   default     = false

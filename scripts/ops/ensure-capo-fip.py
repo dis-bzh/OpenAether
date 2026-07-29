@@ -55,7 +55,7 @@ def keystone_token() -> tuple[str, list]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("cluster", help="nom du cluster enfant (ex: edge-2)")
+    parser.add_argument("cluster", help="child cluster name (e.g. edge-2)")
     parser.add_argument("--network", default="Ext-Net", help="external network (default: Ext-Net)")
     parser.add_argument("--count", type=int, default=1, help="nombre de FIP (1 par CP)")
     args = parser.parse_args()

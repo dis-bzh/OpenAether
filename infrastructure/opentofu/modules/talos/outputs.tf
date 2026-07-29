@@ -69,14 +69,10 @@ output "worker_machine_configs" {
   sensitive   = true
 }
 
-# Rattache `data.talos_cluster_health` au graphe.
-#
-# It is no longer referenced by `talos_cluster_kubeconfig` (see the comment
-# there: it times out on HEALTHY clusters and used to lose both kubeconfig AND
-# talosconfig). An unreferenced data source is still evaluated on every
-# plan/apply — so its expiry still fails the apply and the signal is kept — but
-# tflint rightly flags it as orphaned. This output attaches it explicitly AND
-# makes the state visible to the operator.
+# Attaches `data.talos_cluster_health` to the graph. Nothing references it any
+# more (see talos_cluster_kubeconfig): it is still evaluated on every apply, so
+# the signal is kept, but tflint flags it as orphaned. This output silences that
+# and surfaces the state to the operator.
 output "cluster_health" {
   description = "State of the Talos health verification: 'skipped' (skip_health_check) or 'verified'."
   value       = var.skip_health_check ? "skipped" : (length(data.talos_cluster_health.this) > 0 ? "verified" : "n/a")
