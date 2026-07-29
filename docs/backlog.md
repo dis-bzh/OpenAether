@@ -70,11 +70,11 @@ manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
       console at that moment. Not schedulable — do not keep re-investigating it
       from the outside.
 
-- [ ] **VMAgent cannot scrape its own peers.** 7 of 8 `vmagent-vmagent` targets
-      report `up == 0` on a real cluster (the 8th is the pod scraping itself).
-      Sharded VMAgent pods scrape each other on :8429, which no CNP allows.
-      Found 2026-07-29; harmless for the alert rules, but it means VMAgent's own
-      health is invisible.
+- [ ] **Alertmanager blocks a local observability deploy.** It is fail-closed on
+      the Slack webhook, and a local cluster has no OpenBao to serve it, so the
+      pod sits in `Init:0/1`. Harmless today (the `local` profile suspends
+      observability) but it will bite whoever deploys that brick locally. Either
+      seed a dummy secret in the local path or make the receiver optional there.
 
 - [ ] **Roll the CNI metrics onto the live children.** Cilium now serves metrics
       (2026-07-29) and `check-cilium-parity.py` enforces the two keys, but the
@@ -93,15 +93,33 @@ manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
       which every monitoring guide still cites, is GONE in Flux 2.8.8 — the
       controllers expose only `gotk_reconcile_duration_seconds` and
       `controller_runtime_*`. `FluxReconciliationStalled` covers "stopped
-      reconciling"; "reconciling but failing" has no signal. Note that a
+      reconciling"; "reconciling but failing" still has no signal. A
       Kustomization blocked on a missing source counts as `requeue`, NOT
-      `error`, so `controller_runtime_reconcile_total` does not see it either.
-      The official route is kube-state-metrics `customResourceState`. Tried on
-      2026-07-29 and abandoned: the config loads and KSM logs
-      `familyNames=["gotk_resource_info"]`, RBAC passes, the objects exist —
-      and not one series is produced, with or without `--resources`, and with
-      the labels both nested under `each.info` and hoisted beside it. Needs a
-      KSM-side investigation, not another config guess.
+      `error`, so `controller_runtime_reconcile_total` misses it too.
+
+      The route is kube-state-metrics `customResourceState`. Two sessions spent;
+      here is everything ELIMINATED so nobody repeats it:
+      * RBAC is not the cause — the chart already grants
+        `customresourcedefinitions` list/watch whenever the feature is enabled,
+        and `auth can-i list kustomizations` passes for the ServiceAccount.
+      * the config is not rejected — KSM resolves the plurals and logs
+        `familyNames=["gotk_resource_info"]` every time, including when it then
+        serves nothing. That silent success is the whole trap.
+      * label naming: upstream uses `exported_namespace`; `namespace` was tried
+        and is not the difference on its own.
+      * `--custom-resource-state-only=true` makes the instance serve ONLY these
+        metrics — zero built-ins — so it can never share an instance with the
+        one feeding the node/pod/volume/backup rules. A dedicated second KSM
+        release is the only shape that could work.
+      * ⚠️ It DID produce a series exactly once, with fluxcd's own values on a
+        release named `kube-state-metrics` (`ready="False"` on a deliberately
+        broken Kustomization). The SAME values on a release named
+        `kube-state-metrics-flux` produced nothing, before and after 4 minutes,
+        with and without `collectors: []`. Not reproducible, so nothing was
+        shipped — a component that cannot be made to work on demand is worse
+        than a documented gap.
+      Next step is an upstream question with that reproduction, not more config
+      guessing.
 
 - [ ] **Outscale RAM quota (40 GB) saturated by an HA management (44 GB).**
       The overrun is tolerated at creation, then every further VM is refused
