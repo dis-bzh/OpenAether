@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Preflight the local cluster's host ports against the Hyper-V reservations.
+#
+# On Windows/WSL2 those reserved blocks MOVE across reboots and are not confined
+# to the dynamic range (40625-41224 was reserved on 2026-07-29). Docker Desktop
+# reports a collision as a bare "/forwards/expose returned unexpected status:
+# 500", then the apply burns 5 retries and a 90s timeout per node before dying
+# on something unrelated-looking. Failing here names the actual range.
+#
+# No-op off WSL2 (netsh.exe absent) and non-fatal if the exclusions are
+# unreadable: this guards a known trap, it must never block a working setup.
+#
+# Usage: check-host-ports.sh [base]   (default: the tfvars/variable default)
+set -uo pipefail
+
+BASE="${1:-45000}"
+# cp_i → base+i (3), worker_i → base+10+i (3), plus the Kubernetes API on 6443.
+PORTS=("$((BASE))" "$((BASE + 1))" "$((BASE + 2))" "$((BASE + 10))" "$((BASE + 11))" "$((BASE + 12))" 6443)
+
+command -v netsh.exe >/dev/null 2>&1 || exit 0
+
+RANGES="$(netsh.exe int ipv4 show excludedportrange protocol=tcp 2>/dev/null \
+  | tr -d '\r' | awk '$1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ {print $1, $2}')"
+[ -n "$RANGES" ] || exit 0
+
+conflict=0
+for p in "${PORTS[@]}"; do
+  while read -r start end; do
+    if [ "$p" -ge "$start" ] && [ "$p" -le "$end" ]; then
+      echo "✗ host port $p is inside the Hyper-V reserved range ${start}-${end}" >&2
+      conflict=1
+    fi
+  done <<< "$RANGES"
+done
+
+if [ "$conflict" -ne 0 ]; then
+  cat >&2 <<EOT
+
+  Docker Desktop cannot publish these ports; the apply would fail on an opaque
+  500 and then on "Talos API not ready after 90s".
+
+  Pick a free base (it needs base..base+12 clear) and pass it through:
+      task local-up TALOS_API_PORT_BASE=<base>
+  Current reservations:
+$(printf '%s\n' "$RANGES" | sed 's/^/      /')
+EOT
+  exit 1
+fi
+
+echo "✓ host ports free (base $BASE)"

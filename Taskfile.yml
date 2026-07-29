@@ -388,13 +388,20 @@ tasks:
 
   local-up:
     desc: "Deploy the local Talos cluster — 3 CP + 3 workers (config + containers + bootstrap + kubeconfig)"
-    dir: infrastructure/opentofu-local
+    vars:
+      TALOS_API_PORT_BASE: '{{.TALOS_API_PORT_BASE | default "45000"}}'
     cmds:
-      - tofu init -upgrade > /dev/null 2>&1 || tofu init > /dev/null
+      # Fail fast on a Hyper-V port reservation: Docker Desktop only reports it
+      # as an opaque 500, five retries and a 90s timeout later.
+      - ./scripts/dev/check-host-ports.sh {{.TALOS_API_PORT_BASE}}
       - |
-        export TF_VAR_cilium_manifest="$(cat ../opentofu/cluster/bootstrap-manifests/cilium-local.yaml \
+        cd infrastructure/opentofu-local
+        tofu init -upgrade > /dev/null 2>&1 || tofu init > /dev/null
+      - |
+        export TF_VAR_cilium_manifest="$(cat infrastructure/opentofu/cluster/bootstrap-manifests/cilium-local.yaml \
           2>/dev/null || echo 'placeholder')"
-        tofu apply -var talos_bootstrap=true -auto-approve
+        tofu -chdir=infrastructure/opentofu-local apply -var talos_bootstrap=true \
+          -var talos_api_port_base={{.TALOS_API_PORT_BASE}} -auto-approve
 
   local-test:
     desc: "Full end-to-end local test: 3 CP + 3 workers + etcd quorum + Cilium + Flux + GitOps"
