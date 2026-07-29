@@ -47,8 +47,12 @@ manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
       the claim form remains to confirm. Needs a live cluster.
       Protocol: `admin-access.md` § 8 (browser tests).
 
-- [ ] **Gateway → UI path.** Untestable until the PKI intermediate is signed
-      offline (`admin-access.md` § 2). The code is already hardened.
+- [ ] **Gateway → UI path.** Needs a live cluster, NOT the production PKI
+      ceremony — that premise was wrong. Signing is a plain `openssl ca` on the
+      CSR the bootstrap Job prints, so a throwaway root CA in a tmpdir unblocks
+      it in minutes (`pki-root-offline-runbook.md` § 3). Only the real ceremony
+      (offline root, Bitwarden escrow) is operator-side, and that is a process,
+      not code. Pairs with the SSO test above: one deployment closes both.
 
 - [ ] **OVH: a node can stay `ACTIVE` on the hypervisor while dead.** Talos
       called `reboot()` and the kernel hung in `device_shutdown` / `vp_reset`.

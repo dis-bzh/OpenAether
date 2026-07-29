@@ -264,9 +264,15 @@ data "talos_machine_configuration" "control_plane" {
             # from on its own, and nothing else in the stack reports it: the
             # kubelet keeps saying Ready while writes fail.
             # 0.0.0.0 and not 127.0.0.1: VMAgent is a pod and reaches the node
-            # by its address. This port carries NO secret (no keys, no object
-            # contents) and stays unreachable from outside — every provider's
-            # security group is inbound_default_policy=drop and never opens it.
+            # by its address. The port carries NO secret (no keys, no object
+            # contents).
+            # Reachable node-to-node because all three providers allow the full
+            # intra-cluster mesh (scw: ANY from 10.0.0.0/8 + 172.16.0.0/12;
+            # ovh: remote_group_id on its own SG; outscale: protocol -1 on
+            # security_groups_members) — that mesh rule is what makes the scrape
+            # work at all. Not reachable from outside: each SG defaults to deny
+            # and only opens 6443, 50000 and the app NodePorts, each from a
+            # named source.
             extraArgs = {
               listen-metrics-urls = "http://0.0.0.0:2381"
             }
