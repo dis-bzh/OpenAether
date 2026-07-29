@@ -102,13 +102,15 @@ variable "ssh_key_path" {
 variable "talos_version" {
   description = "Talos Linux version"
   type        = string
-  default     = "v1.12.0"
+  # renovate: datasource=github-releases depName=siderolabs/talos
+  default = "v1.13.4"
 }
 
 variable "kubernetes_version" {
   description = "Kubernetes version"
   type        = string
-  default     = "v1.34.4"
+  # renovate: datasource=github-releases depName=kubernetes/kubernetes
+  default = "v1.34.4"
 }
 
 variable "node_distribution" {
