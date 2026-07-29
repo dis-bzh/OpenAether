@@ -55,6 +55,11 @@ CHECKED = [
     "cgroup.hostRoot",
     "k8sServiceHost",
     "k8sServicePort",
+    # Not datapath, but the same class of silent failure: a child without these
+    # serves no CNI metrics at all while the parent is monitored, and nothing
+    # says so.
+    "prometheus.enabled",
+    "operator.prometheus.enabled",
 ]
 
 # Accepted mismatches: key -> reason. Any other mismatch is a regression.

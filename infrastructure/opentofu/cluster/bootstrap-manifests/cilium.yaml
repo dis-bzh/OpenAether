@@ -69,6 +69,19 @@ data:
   # default, always and never.
   # https://docs.cilium.io/en/latest/security/policy/intro/#policy-enforcement-modes
   enable-policy: "default"
+  # If you want metrics enabled in all of your Cilium agents, set the port for
+  # which the Cilium agents will have their metrics exposed.
+  # This option deprecates the "prometheus-serve-addr" in the
+  # "cilium-metrics-config" ConfigMap
+  # NOTE that this will open the port on ALL nodes where Cilium pods are
+  # scheduled.
+  prometheus-serve-addr: ":9962"
+  # A space-separated list of controller groups for which to enable metrics.
+  # The special values of "all" and "none" are supported.
+  controller-group-metrics:
+    write-cni-file
+    sync-host-ips
+    sync-lb-maps-with-k8s-services
   # If you want metrics enabled in cilium-operator, set the port for
   # which the Cilium Operator will have their metrics exposed.
   # NOTE that this will open the port on the nodes where Cilium operator pod
@@ -891,6 +904,8 @@ spec:
   template:
     metadata:
       annotations:
+        prometheus.io/port: "9962"
+        prometheus.io/scrape: "true"
         kubectl.kubernetes.io/default-container: cilium-agent
       labels:
         k8s-app: cilium
@@ -1012,6 +1027,10 @@ spec:
         - name: health
           containerPort: 9879
           hostPort: 9879
+          protocol: TCP
+        - name: prometheus
+          containerPort: 9962
+          hostPort: 9962
           protocol: TCP
         securityContext:
           seLinuxOptions:
