@@ -143,6 +143,8 @@ if [[ "$LOCAL_MODE" == "true" ]]; then
     --set k8sServiceHost=localhost \
     --set k8sServicePort=7445 \
     --set hubble.enabled=false \
+    --set prometheus.enabled=true \
+    --set operator.prometheus.enabled=true \
     --set operator.replicas=1 \
     --set encryption.enabled=false \
     --set securityContext.capabilities.ciliumAgent="{CHOWN,KILL,NET_ADMIN,NET_RAW,IPC_LOCK,SYS_ADMIN,SYS_RESOURCE,DAC_OVERRIDE,FOWNER,SETGID,SETUID}" \
@@ -151,6 +153,12 @@ if [[ "$LOCAL_MODE" == "true" ]]; then
   echo "  ✅ Written to bootstrap-manifests/cilium-local.yaml"
 else
   # Production mode: full Cilium with WireGuard encryption + kube-proxy replacement
+  #
+  # prometheus.enabled / operator.prometheus.enabled: the agent and the operator
+  # serve no metrics at all without them, so the CNI — the one component every
+  # other one depends on — was the last blind spot in the stack. No Service is
+  # created (serviceMonitor stays off): the scrape is a VMPodScrape, see
+  # apps/base/observability/vm-customresources/vmscapes.yaml.
   #
   # ⚠️ Both settings are REQUIRED by Istio ambient (apps/base/istio) — do not
   # remove them without removing the mesh, or istio-cni never becomes Ready:
@@ -176,6 +184,8 @@ else
     --set k8sServiceHost=localhost \
     --set k8sServicePort=7445 \
     --set hubble.enabled=false \
+    --set prometheus.enabled=true \
+    --set operator.prometheus.enabled=true \
     --set operator.replicas=1 \
     --set encryption.enabled=true \
     --set encryption.type=wireguard \
