@@ -34,7 +34,7 @@ if [ -r "$ENV_FILE" ]; then
   . "$ENV_FILE"
   set +a
 else
-  log "✗ fichier d'environnement introuvable : $ENV_FILE"
+  log "✗ environment file not found: $ENV_FILE"
   log "  (set it through OPENAETHER_ENV_FILE if the repo lives elsewhere)"
   exit 1
 fi

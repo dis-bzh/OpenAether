@@ -155,11 +155,11 @@ for ns in cert-manager foundation-vault cnpg-system longhorn-system foundation-p
   fi
 done
 if [ "$NS_WITH_CNP" -ge 5 ]; then
-  pass "1.7 Fondation hors-mesh: $NS_WITH_CNP/6 namespaces avec CNP"
+  pass "1.7 Foundation out of mesh: $NS_WITH_CNP/6 namespaces with CNP"
 elif [ "$NS_WITH_CNP" -ge 3 ]; then
-  pass "1.7 Fondation hors-mesh: $NS_WITH_CNP/6 namespaces avec CNP (partiel)"
+  pass "1.7 Foundation out of mesh: $NS_WITH_CNP/6 namespaces with CNP (partial)"
 else
-  fail "1.7 Fondation hors-mesh Cilium" "Seulement $NS_WITH_CNP/6 namespaces avec CNP"
+  fail "1.7 Foundation out of mesh (Cilium)" "Only $NS_WITH_CNP/6 namespaces with CNP"
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -191,7 +191,7 @@ if [ -d "$AUTHZ_DIR" ]; then
   if [ "$FOUND" -ge 4 ]; then
     pass "2.2 Default-deny authz: $FOUND/${#AMBIENT_NS[@]} ns ambient couverts"
   else
-    fail "2.2 Default-deny authz par ns ambient" "Seulement $FOUND/${#AMBIENT_NS[@]} ns ambient avec default-deny"
+    fail "2.2 Default-deny authz per ambient ns" "Only $FOUND/${#AMBIENT_NS[@]} ambient ns with default-deny"
   fi
 else
   skip "2.2 Default-deny authz par ns ambient" "AuthZ dir not found"
@@ -212,12 +212,12 @@ if [ -d "$AUTHZ_DIR" ]; then
   BAD_REFS=$(grep -r "principals" "$AUTHZ_DIR/authorizationpolicy-explicit-allows.yaml" 2>/dev/null | grep -c "openaether\.local" || true)
   BAD_REFS=${BAD_REFS:-0}
   if [ "$BAD_REFS" -eq 0 ]; then
-    pass "2.4 Pas de principal openaether.local"
+    pass "2.4 No openaether.local principal"
   else
-    fail "2.4 Pas de principal openaether.local" "$BAD_REFS principals still using openaether.local"
+    fail "2.4 No openaether.local principal" "$BAD_REFS principals still using openaether.local"
   fi
 else
-  skip "2.4 Pas de principal openaether.local" "AuthZ dir not found"
+  skip "2.4 No openaether.local principal" "AuthZ dir not found"
 fi
 
 # 2.5 Gateway TLS : HTTPRoute redirect + certificate
@@ -252,12 +252,12 @@ if [ -d "$AUTHZ_DIR" ]; then
     fi
   done
   if [ "$UNWANTED" -eq 0 ]; then
-    pass "2.7 Hors-mesh: 0 AuthorizationPolicy inerte (0/${#OFF_MESH_NS[@]})"
+    pass "2.7 Out of mesh: 0 inert AuthorizationPolicy (0/${#OFF_MESH_NS[@]})"
   else
-    fail "2.7 Hors-mesh sans AuthZ Istio" "$UNWANTED/${#OFF_MESH_NS[@]} ns hors-mesh still have AuthZ policies (inertes)"
+    fail "2.7 Out of mesh, no Istio AuthZ" "$UNWANTED/${#OFF_MESH_NS[@]} out-of-mesh ns still have (inert) AuthZ policies"
   fi
 else
-  skip "2.7 Hors-mesh sans AuthZ Istio" "AuthZ dir not found"
+  skip "2.7 Out of mesh, no Istio AuthZ" "AuthZ dir not found"
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -292,16 +292,16 @@ print(len(audit))
 if [ "$AUDIT_COUNT" -ge 3 ]; then
   pass "3.3 Kyverno audit policies: $AUDIT_COUNT attendues"
 else
-  fail "3.3 Kyverno audit policies" "Seulement $AUDIT_COUNT policies en Audit (attendu ≥3)"
+  fail "3.3 Kyverno audit policies" "Only $AUDIT_COUNT policies in Audit (expected >=3)"
 fi
 
-# 3.4 PSA restricted sur fondation PKI
+# 3.4 PSA restricted on the PKI foundation
 PKI_ENFORCE=$(kubectl get ns foundation-pki-root -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}' 2>/dev/null || echo "")
 VAULT_ENFORCE=$(kubectl get ns foundation-vault -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}' 2>/dev/null || echo "")
 if [ "$PKI_ENFORCE" = "restricted" ] && [ "$VAULT_ENFORCE" = "restricted" ]; then
-  pass "3.4 PSA restricted sur fondation PKI (pki-root + vault)"
+  pass "3.4 PSA restricted on the PKI foundation (pki-root + vault)"
 else
-  fail "3.4 PSA restricted sur fondation PKI" "pki-root=$PKI_ENFORCE, vault=$VAULT_ENFORCE (expected restricted)"
+  fail "3.4 PSA restricted on the PKI foundation" "pki-root=$PKI_ENFORCE, vault=$VAULT_ENFORCE (expected restricted)"
 fi
 
 # 3.5 PSA au moins baseline partout
@@ -315,9 +315,9 @@ for ns in $MANAGED_NS; do
 done
 NS_COUNT=$(echo "$MANAGED_NS" | wc -w)
 if [ "$MISSING_PSA" -eq 0 ] && [ "$NS_COUNT" -gt 0 ]; then
-  pass "3.5 PSA au moins baseline: $NS_COUNT ns managed tous avec enforce label"
+  pass "3.5 PSA at least baseline: all $NS_COUNT managed ns carry the enforce label"
 else
-  fail "3.5 PSA au moins baseline partout" "$MISSING_PSA/$NS_COUNT ns managed sans enforce label"
+  fail "3.5 PSA at least baseline everywhere" "$MISSING_PSA/$NS_COUNT managed ns without an enforce label"
 fi
 
 # 3.6 Minimal RBAC — no wildcards on custom ClusterRoles
@@ -332,9 +332,9 @@ wildcards=[r for r in roles
 print(len(wildcards))
 " 2>/dev/null || echo "0")
 if [ "$WILDCARD_ROLES" -eq 0 ]; then
-  pass "3.6 RBAC minimal: 0 ClusterRole custom avec wildcards"
+  pass "3.6 Minimal RBAC: 0 custom ClusterRole with wildcards"
 else
-  fail "3.6 RBAC minimal custom" "$WILDCARD_ROLES ClusterRoles avec verbs:['*'] ou resources:['*']"
+  fail "3.6 Minimal RBAC (custom)" "$WILDCARD_ROLES ClusterRoles with verbs:['*'] or resources:['*']"
 fi
 
 # 3.7 No custom cluster-admin binding
@@ -348,9 +348,9 @@ custom=[b for b in bindings
 print(len(custom))
 " 2>/dev/null || echo "0")
 if [ "$ADMIN_BINDINGS" -eq 0 ]; then
-  pass "3.7 Pas de cluster-admin binding custom"
+  pass "3.7 No custom cluster-admin binding"
 else
-  fail "3.7 Pas de cluster-admin binding custom" "$ADMIN_BINDINGS custom ClusterRoleBindings vers cluster-admin"
+  fail "3.7 No custom cluster-admin binding" "$ADMIN_BINDINGS custom ClusterRoleBindings to cluster-admin"
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -381,9 +381,9 @@ if [ -d "$BASE_DIR" ]; then
   done < <(find "$BASE_DIR" -name "*.yaml" 2>/dev/null)
 fi
 if [ "$SECRETS_IN_PLAIN" -eq 0 ]; then
-  pass "4.1 Pas de secret en clair dans les YAML"
+  pass "4.1 No plaintext secret in the YAML"
 else
-  fail "4.1 Pas de secret en clair dans les YAML" "$SECRETS_IN_PLAIN fichier(s) avec des Secrets non-ExternalSecret"
+  fail "4.1 No plaintext secret in the YAML" "$SECRETS_IN_PLAIN file(s) holding non-ExternalSecret Secrets"
 fi
 
 # 4.2 ExternalSecrets present
@@ -392,7 +392,7 @@ ESO_PODS=${ESO_PODS:-0}
 if [ "$ESO_PODS" -gt 0 ]; then
   pass "4.2 External Secrets Operator actif ($ESO_PODS pod(s) Running)"
 else
-  fail "4.2 External Secrets Operator actif" "Aucun pod ESO Running dans foundation-pki-management"
+  fail "4.2 External Secrets Operator actif" "No ESO pod Running in foundation-pki-management"
 fi
 
 # 4.3 ClusterSecretStore actif
@@ -411,7 +411,7 @@ if [ "$OBAO_PODS" -ge 3 ]; then
 elif [ "$OBAO_PODS" -gt 0 ]; then
   pass "4.4 OpenBao: $OBAO_PODS pod(s) Running (non-HA)"
 else
-  fail "4.4 OpenBao HA" "Aucun pod openbao Running dans foundation-vault"
+  fail "4.4 OpenBao HA" "No openbao pod Running in foundation-vault"
 fi
 
 # 4.5 Unsealer actif
@@ -442,9 +442,9 @@ for p in pods:
 print(root)
 " 2>/dev/null || echo "0")
 if [ "$VAULT_PODS_ROOT" -eq 0 ]; then
-  pass "5.1 Pas de pod root dans fondation-vault"
+  pass "5.1 No root pod in foundation-vault"
 else
-  fail "5.1 Pas de pod root dans fondation-vault" "$VAULT_PODS_ROOT conteneur(s) sans runAsNonRoot"
+  fail "5.1 No root pod in foundation-vault" "$VAULT_PODS_ROOT container(s) without runAsNonRoot"
 fi
 
 # 5.2 OpenBao: drop ALL + readOnlyRootFS
@@ -461,9 +461,9 @@ for p in pods:
 print(ok)
 " 2>/dev/null || echo "0")
 if [ "$OBAO_HARDENED" -ge 3 ]; then
-  pass "5.2 OpenBao durci: $OBAO_HARDENED/3 conteneurs (drop ALL + readOnlyRootFS)"
+  pass "5.2 OpenBao hardened: $OBAO_HARDENED/3 containers (drop ALL + readOnlyRootFS)"
 else
-  fail "5.2 OpenBao durci" "Seulement $OBAO_HARDENED/3 conteneurs avec securityContext complet"
+  fail "5.2 OpenBao hardened" "Only $OBAO_HARDENED/3 containers with a complete securityContext"
 fi
 
 # 5.3 CoreDNS: no privileged pod
@@ -478,9 +478,9 @@ for p in pods:
 print(priv)
 " 2>/dev/null || echo "0")
 if [ "$COREDNS_PRIV" -eq 0 ]; then
-  pass "5.3 CoreDNS: aucun pod privileged"
+  pass "5.3 CoreDNS: no privileged pod"
 else
-  fail "5.3 CoreDNS: pas de pod privileged" "$COREDNS_PRIV conteneur(s) CoreDNS privileged"
+  fail "5.3 CoreDNS: no privileged pod" "$COREDNS_PRIV privileged CoreDNS container(s)"
 fi
 
 # 5.4 No pod with added capabilities (outside system ns + CNI/CSI workloads)

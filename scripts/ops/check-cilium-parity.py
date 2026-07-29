@@ -3,9 +3,9 @@
 
 Why this check exists
 ---------------------------
-Le socle parent configure Cilium via `helm template --set …` dans
-`scripts/bootstrap/render-bootstrap-manifests.sh` ; les enfants CAPI le
-configurent via le bloc `values:` d'un HelmRelease dans
+The parent foundation configures Cilium through `helm template --set …` in
+`scripts/bootstrap/render-bootstrap-manifests.sh`; the CAPI children configure
+it through the `values:` block of a HelmRelease in
 `OpenAether-apps/apps/clusters/*.yaml`. Two formats, two repositories, no
 mechanical link: the drift is silent and only shows up in production.
 
@@ -13,13 +13,13 @@ It cost dearly on 2026-07-26: the children had lost `ipam.mode=kubernetes`.
 The chart default (`cluster-pool`) ignores the `clusterNetwork.pods` declared
 by CAPI and carves pod CIDRs out of 10.0.0.0/8 — the very /8 where the node
 subnets live (10.20.0.0/24 on OpenStack, 10.0.0.0/24 for OVH, Outscale and
-Proxmox). The parent sets this explicitly, for
-exactement cette raison.
+Proxmox). The parent sets it explicitly, for exactly
+that reason.
 
 What the check does
 -----------------------
 It compares, key by key, a restricted set of "structural" settings between the
-bloc production du script de rendu et chaque HelmRelease `*-cilium` des enfants.
+render script's production block and each child's `*-cilium` HelmRelease.
 INTENDED differences are declared in EXCEPTIONS with their rationale: an
 undeclared divergence fails the check.
 
@@ -62,12 +62,12 @@ EXCEPTIONS: dict[str, str] = {}
 
 
 def parse_parent() -> dict[str, str]:
-    """Extrait les --set du bloc PRODUCTION (pas le bloc local) du script."""
+    """Extract the --set flags from the script's PRODUCTION block, not the local one."""
     text = RENDER_SH.read_text()
     # The prod block is the one following the `else` of the LOCAL_MODE test.
     marker = "# Production mode"
     if marker not in text:
-        sys.exit(f"❌ bloc production introuvable dans {RENDER_SH}")
+        sys.exit(f"❌ production block not found in {RENDER_SH}")
     prod = text.split(marker, 1)[1]
     values: dict[str, str] = {}
     for key, val in re.findall(r"--set\s+([\w.]+)=(\S+)", prod):
@@ -119,14 +119,14 @@ def main() -> int:
                     "A missing key takes the CHART DEFAULT, which differs."
                 )
             else:
-                drift.append(f"  {name} : `{key}`={got} — le socle pose {want}.")
+                drift.append(f"  {name}: `{key}`={got} — the foundation sets {want}.")
 
     if drift:
         print("❌ children's Cilium drifted from the foundation:\n" + "\n".join(drift))
         print(
-            "\nAligner apps/clusters/*.yaml sur le bloc production de\n"
-            f"{RENDER_SH.relative_to(INFRA)}, or declare the difference in EXCEPTIONS\n"
-            "de ce script avec sa justification."
+            "\nAlign apps/clusters/*.yaml with the production block of\n"
+            f"{RENDER_SH.relative_to(INFRA)}, or declare the difference in this\n"
+            "script's EXCEPTIONS with its rationale."
         )
         return 1
 

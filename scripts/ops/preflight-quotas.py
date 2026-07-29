@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """Quota preflight before deploying a cluster or instantiating a CAPI child.
 
-Pourquoi ce script existe
--------------------------
-Sur Outscale, un management HA (3 CP + 3 workers + bastion) consomme 44 Go de RAM
+Why this script exists
+----------------------
+On Outscale an HA management (3 CP + 3 workers + bastion) eats 44 GB of RAM
 against a `memory_limit` of 40. The overrun is TOLERATED at creation, but any
 further VM is then refused — and the diagnosis is painful: the OscMachine stays
 in `VmNotReady` with an endlessly reallocated IP and NO error in the CR; you
 have to read the CAPOSC manager's logs. Two deployments were lost to it.
 
-The same trap exists elsewhere: the OVH project in use caps at 10 instances,
-soit management (7 avec le bastion) + un seul enfant (2). Il n'y a pas de marge
-pour un second enfant.
+The same trap exists elsewhere: the OVH project in use caps at 10 instances —
+a management (7 with the bastion) plus a single child (2), with no room for a
+second child.
 
 This script reads the quotas AND the real usage, and can simulate what a given
 topology would add. Read-only.
@@ -144,7 +144,7 @@ def main():
         print(f"\n✗ The requested topology exceeds: {', '.join(over)}.")
         print("  On Outscale the overrun is TOLERATED at creation, then ANY further")
         print("  VM is refused (CreateVms → 10042 TooManyResources), with no")
-        print("  erreur dans le CR CAPI : l'OscMachine boucle en VmNotReady.")
+        print("  error in the CAPI CR: the OscMachine loops on VmNotReady.")
         return 1
     if simulating:
         print("\n✓ The requested topology fits within the quotas.")
