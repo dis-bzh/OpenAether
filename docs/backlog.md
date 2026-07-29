@@ -18,11 +18,17 @@ etcd, Cilium, Flux and cert-manager are scraped. Everything is torn down.
 
 ## Open — work we can do
 
-- [ ] **Reach a UI through the gateway, and log in.** The TLS half is done
-      (https listener `Programmed=True`, 2026-07-29). What is untested is an
-      actual request through the gateway and the Grafana↔Zitadel claim form.
-      Needs one live cluster and a browser; `grafana-oidc` must be seeded.
-      Protocol: `admin-access.md` § 8.
+- [ ] **Log in to a UI through the gateway.** The transport is DONE (2026-07-29,
+      Scaleway): `https://longhorn.openaether.local` answers **HTTP 200** through
+      the gateway, served with `CN=openaether.local` issued by our own
+      intermediate. What is left is only the Grafana↔Zitadel claim form, which
+      needs `grafana-oidc` seeded and a human browser.
+      Two traps found doing it: import the signed intermediate ALONE (the root
+      too and OpenBao picks an issuer with no private key), and re-signing the
+      same subject needs `unique_subject = no` in `index.txt.attr` — the `.cnf`
+      is not what controls it.
+      ⚠️ The LB-IPAM VIP is not reachable from the bastion; reach the gateway by
+      port-forward or from inside the cluster.
 
 - [ ] **Close the watchdog loop outside the cluster.** `Watchdog` reaches Slack
       daily, so the chain proves itself while alive — but its absence only
@@ -100,6 +106,10 @@ One line each; the detail lives in the referenced file.
   Full reasoning in the `CiliumAgentMissing` rule comment.
 - **A rule on a metric nobody produces never fires, and never says so** —
   `task check-alerts` asks a live cluster which referenced metrics have no data.
+- **A failed Job is permanent under Flux** — it re-applies the same spec and
+  never restarts a finished Job. A bootstrap Job must WAIT for its dependency,
+  not exit; `openbao-vault-bootstrap` left a cluster with no KV and no PKI while
+  its Kustomization reported Ready.
 - **A `VMRule` with no `VMAlert` is inert** — stored, never evaluated, and no
   component reports the gap.
 - **kube-state-metrics needs `honorLabels: true`** — otherwise its labels become
