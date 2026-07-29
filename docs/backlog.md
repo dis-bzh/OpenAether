@@ -63,11 +63,17 @@ manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
       secret — an operator decision — plus the matching egress in the
       `vmalertmanager` CNP, or the notification is dropped silently.
 
-- [ ] **etcd and Cilium are not scraped.** Both need a config change, not just a
-      scrape: etcd wants `listen-metrics-urls` in the Talos machine config,
-      Cilium wants `prometheus.enabled` in its Helm values — and the CNI values
-      must stay in step with `check-cilium-parity.py`, on a component you cannot
-      safely mutate on a live child.
+- [ ] **Cilium is not scraped.** Needs `prometheus.enabled` in its Helm values,
+      which must stay in step with `check-cilium-parity.py`, on a component you
+      cannot safely mutate on a live child. etcd is done (2026-07-29).
+
+- [ ] **The alert path dies with the cluster it watches.** Verified by stopping
+      2 of 3 control planes: every metric was correct in hindsight, and nothing
+      fired at the time — DNS and the write path went with the control plane, so
+      VMAgent buffered and flushed only on recovery. No in-cluster arrangement
+      fixes this. It needs the external receiver above, and ideally a probe from
+      outside the cluster. Until then, treat cluster-wide alerts as a post-mortem
+      record, not a page.
 
 - [ ] **No per-object Ready condition for Flux.** `gotk_reconcile_condition`,
       which every monitoring guide still cites, is GONE in Flux 2.8.8 — the
