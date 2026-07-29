@@ -70,11 +70,11 @@ manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
       console at that moment. Not schedulable — do not keep re-investigating it
       from the outside.
 
-- [ ] **Slack delivery is wired but never sent a message.** The receiver, the
-      OpenBao/ESO path for the webhook and the `hooks.slack.com` egress are in
-      place and the config passes `amtool check-config`. What is NOT proven is a
-      message actually arriving: that needs a real webhook seeded in OpenBao on a
-      live cluster.
+- [ ] **VMAgent cannot scrape its own peers.** 7 of 8 `vmagent-vmagent` targets
+      report `up == 0` on a real cluster (the 8th is the pod scraping itself).
+      Sharded VMAgent pods scrape each other on :8429, which no CNP allows.
+      Found 2026-07-29; harmless for the alert rules, but it means VMAgent's own
+      health is invisible.
 
 - [ ] **Roll the CNI metrics onto the live children.** Cilium now serves metrics
       (2026-07-29) and `check-cilium-parity.py` enforces the two keys, but the
