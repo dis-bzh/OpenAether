@@ -137,13 +137,18 @@ def main() -> int:
         import time
         time.sleep(6)
         base = f"http://localhost:{args.local_port}{PATH}"
+
+        # Probe ONCE. Without this the loop prints the same failure 17 times,
+        # which is how a tool teaches people to ignore it.
+        if query(base, "vector(1)") < 0:
+            print(f"✗ no reachable vmselect in {NAMESPACE} — is KUBECONFIG set, "
+                  "and is the observability brick deployed?")
+            return 2
+
         missing = []
         for name in sorted(metrics):
-            n = query(base, name)
-            if n == 0:
+            if query(base, name) == 0:
                 missing.append((name, sorted(metrics[name])))
-            elif n < 0:
-                print(f"  ⚠ {name}: query failed (is vmselect reachable?)")
     finally:
         pf.terminate()
 
