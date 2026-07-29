@@ -36,7 +36,9 @@ fi
 # FLUX_VERSION MUST stay pinned: `latest` once bumped Flux with nothing asking
 # for it and nothing reporting it. It is also what --check compares the
 # committed flux-install.yaml against, so bump the pin and the artifact together.
+# renovate: datasource=helm depName=cilium registryUrl=https://helm.cilium.io/
 CILIUM_VERSION="${CILIUM_VERSION:-1.19.2}"
+# renovate: datasource=github-releases depName=fluxcd/flux2
 FLUX_VERSION="${FLUX_VERSION:-v2.8.8}"
 FLUX_URL="https://github.com/fluxcd/flux2/releases/download/${FLUX_VERSION}/install.yaml"
 

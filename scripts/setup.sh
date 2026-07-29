@@ -125,7 +125,8 @@ install_image_tools() {
 }
 
 install_flux() {
-    local FLUX_VERSION="2.4.0"
+    # renovate: datasource=github-releases depName=fluxcd/flux2 extractVersion=^v(?<version>.*)$
+    local FLUX_VERSION="2.8.8"
     local ARCH="linux_amd64"
     echo "Installing Flux CLI v${FLUX_VERSION}..."
     local tmp
