@@ -40,6 +40,10 @@ bao kv put secret/observability/loki-s3 endpoint=… bucket=… accessKey=… se
 # Webhook entrant Slack — sans lui Alertmanager ne démarre pas, délibérément
 bao kv put secret/observability/alertmanager-slack webhook-url=https://hooks.slack.com/services/…
 # Sur un cluster jetable, N'IMPORTE quelle valeur convient : Alertmanager démarre, seul l'envoi échoue.
+# Dead man's switch — le SEUL signal qui survit à la mort du cluster.
+# Sans lui Alertmanager ne démarre pas non plus. Slack seul ? Retirer la route
+# Watchdog de vm-customresources/vmalert.yaml, délibérément.
+bao kv put secret/observability/alertmanager-deadmansswitch url=https://hc-ping.com/<uuid>
 ```
 
 `s3-primary` alimente trois mécanismes d'un coup : restic, PITR CNPG et backups
