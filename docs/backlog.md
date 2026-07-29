@@ -74,12 +74,6 @@ manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
       console at that moment. Not schedulable — do not keep re-investigating it
       from the outside.
 
-- [ ] **Alertmanager blocks a local observability deploy.** It is fail-closed on
-      the Slack webhook, and a local cluster has no OpenBao to serve it, so the
-      pod sits in `Init:0/1`. Harmless today (the `local` profile suspends
-      observability) but it will bite whoever deploys that brick locally. Either
-      seed a dummy secret in the local path or make the receiver optional there.
-
 - [ ] **Roll the CNI metrics onto the live children.** Cilium now serves metrics
       (2026-07-29) and `check-cilium-parity.py` enforces the two keys, but the
       values only take effect on the NEXT bootstrap. Do not push the change onto
@@ -203,8 +197,9 @@ One line each; the detail lives in the referenced file.
   timeout and are never evicted.
 - **Check that a metric EXISTS before writing a rule on it** — every guide
   still documents `gotk_reconcile_condition`; Flux 2.8 no longer emits it, and a
-  rule on a missing metric evaluates clean and never fires. Scrape the target
-  and read `# TYPE` before trusting any name.
+  rule on a missing metric evaluates clean and never fires. `task check-alerts`
+  asks a live cluster which referenced metrics have no data; it was written
+  after finding three such rules by hand in one day.
 - **A `VMRule` with no `VMAlert` is inert** — the operator stores it, nothing
   evaluates it, and no component reports the gap. The three backup rules sat
   like that from the day they were written until 2026-07-29.

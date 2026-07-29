@@ -39,6 +39,7 @@ bao kv put secret/backup/s3-replica endpoint=… bucket=… access_key=… secre
 bao kv put secret/observability/loki-s3 endpoint=… bucket=… accessKey=… secretKey=…
 # Slack incoming webhook — Alertmanager will not start without it, on purpose
 bao kv put secret/observability/alertmanager-slack webhook-url=https://hooks.slack.com/services/…
+# On a throwaway cluster ANY value works: Alertmanager starts, delivery just fails.
 ```
 
 `s3-primary` feeds three mechanisms at once: restic, CNPG PITR and Longhorn

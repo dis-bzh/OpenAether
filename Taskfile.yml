@@ -352,6 +352,14 @@ tasks:
     cmds:
       - ./scripts/bootstrap/render-bootstrap-manifests.sh
 
+  check-alerts:
+    desc: >-
+      Check that every metric the alert rules read actually has data on the
+      current cluster (KUBECONFIG). A rule on a metric nobody produces
+      evaluates clean and never fires. Usage: task check-alerts [-- --strict]
+    cmds:
+      - python3 scripts/ops/check-alert-metrics.py {{.CLI_ARGS}}
+
   render-check:
     desc: "Check the committed bootstrap manifests against their generator (writes nothing)"
     cmds:
