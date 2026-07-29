@@ -46,25 +46,26 @@ variable "worker_count" {
 
 # ⚠️ Base for the Talos API HOST ports: cp_i → base+i, worker_i → base+10+i.
 #
-# DO NOT raise this above 49152 on Windows/WSL2. That is where the TCP dynamic
-# range starts, and Hyper-V RESERVES blocks of 100 ports inside it — Docker
-# Desktop then fails to publish the port with a message that does not say why:
+# On Windows/WSL2, Hyper-V reserves blocks of 100 ports and Docker Desktop then
+# refuses to publish them, with a message that never names the cause:
 #   docker: Error response from daemon: ports are not available: exposing port
-#   TCP 127.0.0.1:51000 -> 127.0.0.1:0: /forwards/expose returned unexpected
+#   TCP 127.0.0.1:41002 -> 127.0.0.1:0: /forwards/expose returned unexpected
 #   status: 500
-# and the cluster dies further along on "Talos API not ready after 90s".
-# The previous value (51000) fell inside the 50924-51023 reservation observed on
-# 2026-07-28. Those blocks MOVE across reboots: a value below 49152 sits outside
-# the dynamic range and is therefore stable.
+# The cluster then dies later on "Talos API not ready after 90s".
 #
-# Inspect a machine with: netsh.exe int ipv4 show excludedportrange protocol=tcp
+# ⚠️ There is NO safe constant. This comment used to claim that staying under
+# 49152 (the dynamic range) made a value stable; 41000 was picked on that basis
+# and the reservations landed on 40625-41224 after a reboot. The blocks MOVE and
+# they are NOT confined to the dynamic range.
+# Hence `task local-up` preflights against the live exclusions
+# (scripts/dev/check-host-ports.sh) rather than trusting this default.
 variable "talos_api_port_base" {
-  description = "Base host port for the Talos API (cp_i → base+i, worker_i → base+10+i). Keep below 49152 on Windows/WSL2: the dynamic range above is subject to Hyper-V reservations."
+  description = "Base host port for the Talos API (cp_i → base+i, worker_i → base+10+i). Preflighted against the Hyper-V exclusions by scripts/dev/check-host-ports.sh."
   type        = number
-  default     = 41000
+  default     = 45000
   validation {
-    condition     = var.talos_api_port_base >= 1024 && var.talos_api_port_base <= 49100
-    error_message = "talos_api_port_base must be between 1024 and 49100 (above 49152 collides with the Windows dynamic port range reserved by Hyper-V)."
+    condition     = var.talos_api_port_base >= 1024 && var.talos_api_port_base <= 65400
+    error_message = "talos_api_port_base must be between 1024 and 65400."
   }
 }
 

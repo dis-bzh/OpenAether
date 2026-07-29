@@ -6,6 +6,16 @@ history, not here. English only (rewritten every session; two copies would drift
 Keep it short: one entry = the defect, its cost, what to do. Detail lives in the
 code comment or the runbook, referenced by path.
 
+## Where we stand (2026-07-29)
+
+**Alerting now exists.** The platform had three `VMRule`s and no evaluator, so
+none of them could ever fire — the backup safety net was decorative. Added
+VMAlert + VMAlertmanager and six cluster-health rules (nodes, pods, volumes,
+plus an `absent()` guard on kube-state-metrics itself). Validated on the local
+cluster: 9 rules loaded, 0 evaluation errors, a real `BackupJobFailed` goes
+`pending` against a genuinely failed Job, and a synthetic alert reaches
+Alertmanager. Three defects fell out of that run — see the traps below.
+
 ## Where we stand (2026-07-28)
 
 ✅ **Nothing running — accounts verified empty**, including block volumes (see
@@ -44,6 +54,20 @@ manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
       called `reboot()` and the kernel hung in `device_shutdown` / `vp_reset`.
       Recovery: `HARD` reboot through the Nova API. Open: why did Talos reboot?
       Method: when `talosctl` resets on one node only, go to the serial console.
+      Detection is now covered (`NodeUnreachable`, 2026-07-29); the root cause
+      still needs the event to recur, and the console AT THAT MOMENT.
+
+- [ ] **No alert reaches a human.** VMAlert and VMAlertmanager now evaluate and
+      group the rules, but the receiver is empty: alerts stop at the
+      Alertmanager API. Wiring one (email/Slack/webhook) needs a channel and its
+      secret — an operator decision — plus the matching egress in the
+      `vmalertmanager` CNP, or the notification is dropped silently.
+
+- [ ] **Flux, cert-manager, etcd and Cilium are not scraped.** Their signals
+      (failing Kustomization, certificate expiry, etcd quorum) are exactly the
+      silent failures this platform cares about, and no rule can be written on
+      them today. Each needs a VMServiceScrape AND the CNP openings on both
+      sides — see `apps/base/observability/vm-customresources/vmscapes.yaml`.
 
 - [ ] **Outscale RAM quota (40 GB) saturated by an HA management (44 GB).**
       The overrun is tolerated at creation, then every further VM is refused
@@ -108,6 +132,15 @@ One line each; the detail lives in the referenced file.
   builds an API host that does not resolve. Use `eu-west-2`.
 - **A generated artifact drifts silently** — hence `task render-check` and
   `pick.py --check`. Prefer guardrails that compare over ones that assume.
+- **A `VMRule` with no `VMAlert` is inert** — the operator stores it, nothing
+  evaluates it, and no component reports the gap. The three backup rules sat
+  like that from the day they were written until 2026-07-29.
+- **kube-state-metrics needs `honorLabels: true`** — KSM reports OTHER objects,
+  so without it the scraper's own labels win and KSM's become `exported_*`.
+  Every rule selecting on `namespace`/`pod` then matches nothing, silently.
+- **A component's metrics port is often its service port** — vmselect serves
+  queries AND /metrics on 8481. Removing a CNP rule as "query-only" took the
+  self-scrape down with it. Check `up == 0` after touching an observability CNP.
 - **A batch translation leaves half-translated blocks** — a French sentence
   interleaved between English ones reads as finished and no linter catches it.
   Sweep with a detector, never trust "already done" (both `CLAUDE.md` claimed
