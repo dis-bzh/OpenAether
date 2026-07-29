@@ -258,6 +258,19 @@ data "talos_machine_configuration" "control_plane" {
           # Key is generated once and stored in tfstate — stable across applies.
           secretboxEncryptionSecret = random_bytes.etcd_encryption_secret.base64
           inlineManifests           = local.inline_manifests
+          etcd = {
+            # Serve etcd's own metrics on :2381 so VMAgent can scrape them.
+            # Losing quorum is the one failure a Talos cluster cannot recover
+            # from on its own, and nothing else in the stack reports it: the
+            # kubelet keeps saying Ready while writes fail.
+            # 0.0.0.0 and not 127.0.0.1: VMAgent is a pod and reaches the node
+            # by its address. This port carries NO secret (no keys, no object
+            # contents) and stays unreachable from outside — every provider's
+            # security group is inbound_default_policy=drop and never opens it.
+            extraArgs = {
+              listen-metrics-urls = "http://0.0.0.0:2381"
+            }
+          }
         },
         local.apiserver_vip_certsans
       )
