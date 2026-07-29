@@ -63,11 +63,25 @@ manages itself** after the throwaway cluster is destroyed (`capi-bootstrap.md`).
       secret — an operator decision — plus the matching egress in the
       `vmalertmanager` CNP, or the notification is dropped silently.
 
-- [ ] **Flux, cert-manager, etcd and Cilium are not scraped.** Their signals
-      (failing Kustomization, certificate expiry, etcd quorum) are exactly the
-      silent failures this platform cares about, and no rule can be written on
-      them today. Each needs a VMServiceScrape AND the CNP openings on both
-      sides — see `apps/base/observability/vm-customresources/vmscapes.yaml`.
+- [ ] **etcd and Cilium are not scraped.** Both need a config change, not just a
+      scrape: etcd wants `listen-metrics-urls` in the Talos machine config,
+      Cilium wants `prometheus.enabled` in its Helm values — and the CNI values
+      must stay in step with `check-cilium-parity.py`, on a component you cannot
+      safely mutate on a live child.
+
+- [ ] **No per-object Ready condition for Flux.** `gotk_reconcile_condition`,
+      which every monitoring guide still cites, is GONE in Flux 2.8.8 — the
+      controllers expose only `gotk_reconcile_duration_seconds` and
+      `controller_runtime_*`. `FluxReconciliationStalled` covers "stopped
+      reconciling"; "reconciling but failing" has no signal. Note that a
+      Kustomization blocked on a missing source counts as `requeue`, NOT
+      `error`, so `controller_runtime_reconcile_total` does not see it either.
+      The official route is kube-state-metrics `customResourceState`. Tried on
+      2026-07-29 and abandoned: the config loads and KSM logs
+      `familyNames=["gotk_resource_info"]`, RBAC passes, the objects exist —
+      and not one series is produced, with or without `--resources`, and with
+      the labels both nested under `each.info` and hoisted beside it. Needs a
+      KSM-side investigation, not another config guess.
 
 - [ ] **Outscale RAM quota (40 GB) saturated by an HA management (44 GB).**
       The overrun is tolerated at creation, then every further VM is refused
@@ -132,6 +146,10 @@ One line each; the detail lives in the referenced file.
   builds an API host that does not resolve. Use `eu-west-2`.
 - **A generated artifact drifts silently** — hence `task render-check` and
   `pick.py --check`. Prefer guardrails that compare over ones that assume.
+- **Check that a metric EXISTS before writing a rule on it** — every guide
+  still documents `gotk_reconcile_condition`; Flux 2.8 no longer emits it, and a
+  rule on a missing metric evaluates clean and never fires. Scrape the target
+  and read `# TYPE` before trusting any name.
 - **A `VMRule` with no `VMAlert` is inert** — the operator stores it, nothing
   evaluates it, and no component reports the gap. The three backup rules sat
   like that from the day they were written until 2026-07-29.
