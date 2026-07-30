@@ -16,13 +16,13 @@ Alerting exists and is proven end to end: 19 rules, a real alert delivered to
 Slack from a Scaleway cluster, and a `Watchdog` whose silence is the signal.
 etcd, Cilium, Flux and cert-manager are scraped.
 
-2026-07-30: a real 3-provider fleet is up and verified — management
-(Scaleway, full apps profile, CAPI) + edge-2 (OVH) + edge-3 (Outscale), both
-edges gitception-injected and running the `workload` profile autonomously.
-CI hardened (SHA-pinned actions/hooks, branch rulesets, object-collision
-gate) on both repos. Not yet torn down — mid the 1.0.0 phased rollout
-(see task list); Phase 5 (Talos/K8s version upgrade, zero-downtime) and
-Phase 6 (full teardown + tag) still ahead.
+2026-07-30: the full 1.0.0 phased rollout ran end to end — a real 3-provider
+fleet (management/Scaleway + edge-2/OVH + edge-3/Outscale, both edges
+gitception-injected, `workload` profile autonomous), a real Talos/K8s rolling
+upgrade proven zero-downtime on edge-2 (after fixing a real surge-FIP gap),
+and a full `task fleet-down` teardown. CI hardened (SHA-pinned actions/hooks,
+branch rulesets, object-collision gate) on both repos. Fleet is torn down;
+the `1.0.0` tag itself is deliberately deferred to a later session.
 
 **Idempotency bilan (Phase 4, 2026-07-30):** CAPI provisioning, gitception
 injection and each child's own Flux reconciliation are genuinely automatic —
@@ -35,6 +35,24 @@ bug below). `task up`/`bootstrap-phase2` itself is NOT safely re-runnable
 against an already-bootstrapped cluster (see Open below).
 
 ## Open — work we can do
+
+- [ ] **`edge-down.sh`'s CAPI cascade doesn't verify the infra provider actually
+      cleaned up its OWN network resources.** Found live 2026-07-30 on the
+      `task fleet-down` teardown: after `edge-down edge-2` reported success (0
+      machines left) and the management was destroyed, an independent check
+      against OVH found the `OpenStackCluster`'s network, subnet, router
+      (with a still-attached interface) and both security groups still
+      existed — CAPO's own controller apparently doesn't always finish
+      tearing these down within the script's wait window, and nothing
+      re-checks. Not billed on OVH, but real cruft that collides with a
+      future edge-2 redeploy. Cleaned up manually this session (remove the
+      router interface, delete router, network, security groups — see the
+      Neutron API calls in the session, or re-derive from `ensure-capo-fip.py`'s
+      auth pattern). Outscale showed a similar gap (one orphaned, BILLED
+      Elastic IP survived edge-3's teardown). `edge-down.sh` should verify
+      (not just wait-and-trust) that the provider's network objects are
+      actually gone before declaring success — same discipline as
+      `fleet-down.sh`'s own `FAILED` flag for the management destroy.
 
 - [ ] **`bootstrap-phase2` is not idempotent against an already-bootstrapped
       cluster.** Found live 2026-07-30 re-running `task up` on the management
