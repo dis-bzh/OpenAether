@@ -4,21 +4,23 @@
 # It is NOT in the data path of client workloads.
 # ==============================================================================
 
-cluster_name       = "openaether"
-environment        = "prod"
-cluster_role       = "management"
-talos_version      = "v1.13.3"
-kubernetes_version = "v1.35.3"
-talos_bootstrap    = true
+cluster_name    = "openaether"
+environment     = "prod"
+cluster_role    = "management"
+talos_bootstrap = true
+# talos_version / kubernetes_version: leave unset to inherit the tracked
+# defaults from cluster/variables.tf (Renovate keeps those current) — a
+# stale copy here once caused a real deploy failure (image_name below
+# auto-derives from talos_version, drifted out of sync with the built image).
 node_distribution = {
   scaleway = {
     control_planes = 3 # HA needs 3; new Scaleway accounts may have a per-type quota of 1 — request an increase (Console → Quotas) or start with 1
     workers        = 2
     region         = "fr-par"
     zone           = "fr-par-1"
-    instance_type  = "POP2-2C-8G" # block-storage, dedicated CPU, in all 3 fr-par zones (DEV1-M is l_ssd + not in fr-par-3)
-    image_name     = "talos-scaleway-amd64-v1.13.3"
-    zones          = ["fr-par-1", "fr-par-2", "fr-par-3"]
+    instance_type  = "POP2-2C-8G" # block-storage, dedicated CPU, in all 3 fr-par zones (DEV1-M is l_ssd + not in fr-par-3; DEV1-L isn't in fr-par-3 either — verify any instance_type change against the API before assuming 3-zone coverage)
+    # image_name left unset — auto-derives to "talos-scaleway-amd64-${talos_version}".
+    zones = ["fr-par-1", "fr-par-2", "fr-par-3"]
   }
 }
 
