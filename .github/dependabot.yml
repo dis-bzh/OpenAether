@@ -1,0 +1,29 @@
+# Dependabot alerts/security-fix PRs stay on (Settings > Code security) — this
+# file only stops it from ALSO proposing routine version bumps: Renovate
+# (renovate.json5) already owns that job, and the two were opening competing
+# PRs for the same dependency (see PR #1 vs #3/#11: aquasecurity/trivy-action).
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: "terraform"
+    directory: "/infrastructure/opentofu/cluster"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: "terraform"
+    directory: "/infrastructure/opentofu/talos-image"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: "terraform"
+    directory: "/infrastructure/opentofu-local"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
