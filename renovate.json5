@@ -2,20 +2,30 @@
 // PR, never auto-merged — applying a Talos/Kubernetes/provider bump still
 // goes through `task rolling-replace` / `tofu plan` by hand.
 //
-// Native managers cover OpenTofu providers (`terraform`) and CI pins
-// (`github-actions`). Everything else — Talos, Kubernetes, the OpenTofu CLI
-// itself, Cilium, Flux — lives in a bash var, a Taskfile default or a
-// Terraform variable default, which Renovate can't see on its own. Those are
-// tracked with the standard `# renovate: datasource=... depName=...` anchor
-// comment placed one line above the value; see customManagers below.
+// Native managers cover OpenTofu providers (`terraform`), CI pins
+// (`github-actions`) and pre-commit hook revs (`pre-commit`). Everything
+// else — Talos, Kubernetes, the OpenTofu CLI itself, Cilium, Flux — lives in
+// a bash var, a Taskfile default or a Terraform variable default, which
+// Renovate can't see on its own. Those are tracked with the standard
+// `# renovate: datasource=... depName=...` anchor comment placed one line
+// above the value; see customManagers below.
+//
+// GitHub Actions and pre-commit hooks are both pinned to a commit SHA (with
+// the tag kept as a trailing comment) rather than a mutable tag — a tag can
+// be force-moved by the upstream repo (compromised or not) to point at
+// different code without our CI/pre-commit config changing at all.
+// `helpers:pinGitHubActionDigests` keeps the actions' SHAs current; the
+// `pinDigests` packageRule below does the same for pre-commit.
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
-  extends: ["config:recommended"],
+  extends: ["config:recommended", "helpers:pinGitHubActionDigests"],
   automerge: false,
   platformAutomerge: false,
   schedule: ["before 6am on monday"],
   timezone: "Europe/Paris",
   labels: ["dependencies"],
+
+  "pre-commit": { enabled: true },
 
   packageRules: [
     {
@@ -28,6 +38,11 @@
       description: "GitHub Actions are isolated to CI, low risk — safe to bundle.",
       matchManagers: ["github-actions"],
       groupName: "github actions",
+    },
+    {
+      description: "Pre-commit hooks execute third-party code on every commit — same supply-chain class as GitHub Actions, pin their digests too.",
+      matchManagers: ["pre-commit"],
+      pinDigests: true,
     },
     {
       description: "Talos/Kubernetes gate a running cluster's control plane. Bumping is a one-node-at-a-time `task rolling-replace`, never automated — see docs/backlog.md.",
@@ -76,10 +91,11 @@
     },
     {
       customType: "regex",
-      description: "ci.yml: the OpenTofu CLI version fed to opentofu/setup-opentofu's `with:` input — the github-actions manager only bumps the action's own `uses:` pin, not this.",
+      description: "ci.yml: values fed to CLI tools the github-actions manager can't see — the OpenTofu CLI version (opentofu/setup-opentofu's `with:` input) and talosctl (downloaded + checksum-verified directly in the talos job, not via an action).",
       fileMatch: ["^\\.github/workflows/ci\\.yml$"],
       matchStrings: [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: extractVersion=(?<extractVersion>\\S+))?\\s*\\n\\s*tofu_version:\\s*\"(?<currentValue>[^\"]+)\"",
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s*\\n\\s*TALOS_VERSION:\\s*\"(?<currentValue>[^\"]+)\"",
       ],
     },
   ],

@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# All jobs here are read-only validation — always safe to cancel a superseded run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -13,25 +18,29 @@ jobs:
   lint:
     name: Lint & Format
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
       - name: Setup OpenTofu
-        uses: opentofu/setup-opentofu@v2
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4  # v2
         with:
           # renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
           tofu_version: "1.12.5"
 
       - name: Setup TFLint
-        uses: terraform-linters/setup-tflint@v6
+        uses: terraform-linters/setup-tflint@6e1e0642c0289bd619021bf6b34e3c08ed1e005a  # v6
         with:
           tflint_version: latest
 
       - name: Setup Task
-        uses: arduino/setup-task@v3.0.0
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
 
       - name: Install yamllint
         run: pip install yamllint
+
+      - name: Validate Renovate config
+        run: npx --yes -p renovate -- renovate-config-validator renovate.json5
 
       # One-time per-runner setup task itself doesn't need — tflint plugin init
       # is CI-specific (a fresh runner has no cached plugins); local dev covers
@@ -46,22 +55,23 @@ jobs:
   validate:
     name: Validate
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       matrix:
         # Validate every OpenTofu root, not just the cluster. talos-image is a
         # separate root (own backend + providers).
         root: [cluster, talos-image]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
       - name: Setup OpenTofu
-        uses: opentofu/setup-opentofu@v2
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4  # v2
         with:
           # renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
           tofu_version: "1.12.5"
 
       - name: Setup Task
-        uses: arduino/setup-task@v3.0.0
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
 
       - name: task validate
         run: task validate ROOT=${{ matrix.root }}
@@ -74,18 +84,19 @@ jobs:
   test:
     name: OpenTofu Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: validate
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
       - name: Setup OpenTofu
-        uses: opentofu/setup-opentofu@v2
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4  # v2
         with:
           # renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
           tofu_version: "1.12.5"
 
       - name: Setup Task
-        uses: arduino/setup-task@v3.0.0
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
 
       - name: task test
         run: task test
@@ -98,12 +109,22 @@ jobs:
   talos:
     name: Talos Config Validation
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
-      - name: Install talosctl
+      - name: Install talosctl (pinned + checksum-verified)
+        env:
+          # renovate: datasource=github-releases depName=siderolabs/talos
+          TALOS_VERSION: "v1.13.7"
         run: |
-          curl -sL https://talos.dev/install | sh
+          set -euo pipefail
+          base="https://github.com/siderolabs/talos/releases/download/${TALOS_VERSION}"
+          curl -fsSL -o talosctl-linux-amd64 "${base}/talosctl-linux-amd64"
+          curl -fsSL "${base}/sha256sum.txt" | grep ' talosctl-linux-amd64$' > sha256sum.txt
+          sha256sum -c sha256sum.txt
+          chmod +x talosctl-linux-amd64
+          sudo install -m 0755 talosctl-linux-amd64 /usr/local/bin/talosctl
           talosctl version --client
 
       - name: Generate Talos secrets
@@ -130,13 +151,12 @@ jobs:
   security:
     name: IaC Security Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
       - name: Run Trivy IaC scan
-        # Pinned to a release tag instead of @master (supply-chain hardening).
-        # TODO: convert to a commit SHA pin for full immutability.
-        uses: aquasecurity/trivy-action@0.35.0
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1  # 0.35.0
         with:
           scan-type: config
           scan-ref: infrastructure/
@@ -154,7 +174,7 @@ jobs:
             **/bootstrap-manifests/flux-install.yaml
 
       - name: Run Checkov
-        uses: bridgecrewio/checkov-action@v12
+        uses: bridgecrewio/checkov-action@7b972723c44fb3d256283fac96fae5d7c1894bb7  # v12
         with:
           directory: infrastructure/opentofu
           # framework is declared in .checkov.yaml; not duplicated here.
