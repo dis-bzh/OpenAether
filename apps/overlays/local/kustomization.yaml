@@ -1,0 +1,128 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base/namespaces
+  - ../../base/external-secrets
+  - ../../base/kyverno-policies
+  - ../../base/traefik
+  - ../../base/linkerd
+  - ../../base/cnpg
+  - ../../base/cockroachdb # Added CockroachDB
+  - ../../base/openbao
+  - ../../base/keycloak
+  - ../../base/kyverno
+  - ../../base/keda
+  - ../../base/observability
+  - ../../base/demo-app
+  - ../../base/kubernetes-dashboard
+  - ../../base/storage
+
+patches:
+  # Reduce replicas for local dev
+  - target:
+      kind: Deployment
+      name: traefik
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  # Host Network for Traefik (to work with HaProxy)
+  - target:
+      kind: Deployment
+      name: traefik
+    patch: |-
+      - op: add
+        path: /spec/template/spec/hostNetwork
+        value: true
+  
+  # Configure Keycloak for Local Dev
+  - target:
+      kind: Deployment
+      name: keycloak
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: replace
+        path: /spec/template/spec/containers/0/args
+        value: ["start-dev"]
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: KC_HOSTNAME
+          value: "auth.localhost"
+      - op: add
+        path: /spec/template/spec/securityContext
+        value:
+          runAsUser: 1001
+          fsGroup: 1001
+          runAsNonRoot: true
+      - op: add
+        path: /spec/template/spec/containers/0/securityContext
+        value:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+
+  # Namespace PSS Patch for Local Development (Required for hostPath/local-path-provisioner)
+  - target:
+      kind: Namespace
+      name: default
+    patch: |-
+      - op: replace
+        path: /metadata/labels/pod-security.kubernetes.io~1enforce
+        value: privileged
+      - op: replace
+        path: /metadata/labels/pod-security.kubernetes.io~1audit
+        value: privileged
+      - op: replace
+        path: /metadata/labels/pod-security.kubernetes.io~1warn
+        value: privileged
+  
+  # Dev mode for OpenBao (in-memory, auto-unseal)
+  - target:
+      kind: StatefulSet
+      name: openbao
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/args
+        value:
+          - server
+          - -dev
+          - -dev-listen-address=0.0.0.0:8200
+  
+  # Reduce VictoriaMetrics Limits
+  - target:
+      kind: Deployment
+      name: victoriametrics
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: 128Mi
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 256Mi
+
+  # Configure CockroachDB for Local Dev (Single Node)
+  - target:
+      kind: StatefulSet
+      name: cockroachdb
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: replace
+        path: /spec/template/spec/containers/0/command
+        value:
+          - "/bin/bash"
+          - "-ecx"
+          - |
+            exec /cockroach/cockroach start-single-node \
+            --logtostderr \
+            --insecure \
+            --advertise-host=$(hostname -f) \
+            --http-addr=0.0.0.0 \
+            --cache=25% \
+            --max-sql-memory=25%

@@ -1,0 +1,86 @@
+version: "3"
+
+vars:
+  ENV: '{{.ENV | default "local"}}'
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  # ============================================
+  # CORE TASKS
+  # ============================================
+
+  setup:
+    desc: Run initial setup script
+    dir: scripts
+    cmds:
+      - bash setup.sh
+
+  lint:
+    desc: Run golangci-lint and yamllint
+    cmds:
+      - cd infrastructure && golangci-lint run ./...
+      - yamllint .
+
+  test:
+    desc: Run Go tests
+    dir: infrastructure
+    cmds:
+      - go test -v ./...
+
+  # ============================================
+  # DEPLOYMENT TASKS
+  # ============================================
+
+  deploy:
+    desc: "Deploy cluster. Usage: task deploy ENV=test"
+    dir: infrastructure
+    dotenv:
+      - '.env'
+      - 'environments/.env.{{.ENV}}'
+    cmds:
+      - pulumi login --local
+      - pulumi stack select {{.ENV}} --create
+      - pulumi up --stack {{.ENV}} --yes
+      - pulumi stack output kubeconfig --stack {{.ENV}} --show-secrets > ../kubeconfig-{{.ENV}}.yaml
+      - echo "✅ Deployed to {{.ENV}}"
+
+  destroy:
+    desc: "Destroy cluster. Usage: task destroy ENV=test"
+    dir: infrastructure
+    dotenv:
+      - '.env'
+      - 'environments/.env.{{.ENV}}'
+    cmds:
+      - pulumi destroy --stack {{.ENV}} --yes
+      - echo "🗑️ Destroyed {{.ENV}}"
+
+  preview:
+    desc: "Preview changes. Usage: task preview ENV=test"
+    dir: infrastructure
+    dotenv:
+      - '.env'
+      - 'environments/.env.{{.ENV}}'
+    cmds:
+      - pulumi login --local
+      - pulumi stack select {{.ENV}} --create
+      - pulumi preview --stack {{.ENV}}
+
+  status:
+    desc: "Show cluster status. Usage: task status ENV=test"
+    cmds:
+      - kubectl --kubeconfig kubeconfig-{{.ENV}}.yaml get nodes
+      - kubectl --kubeconfig kubeconfig-{{.ENV}}.yaml get pods -A
+
+  kubeconfig:
+    desc: "Export kubeconfig. Usage: task kubeconfig ENV=test"
+    dir: infrastructure
+    dotenv:
+      - '.env'
+      - 'environments/.env.{{.ENV}}'
+    cmds:
+      - pulumi stack output kubeconfig --stack {{.ENV}} --show-secrets > ../kubeconfig-{{.ENV}}.yaml
+      - echo "Kubeconfig saved to kubeconfig-{{.ENV}}.yaml"
