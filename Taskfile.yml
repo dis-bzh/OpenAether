@@ -31,7 +31,7 @@ tasks:
       # infrastructure/, so a broken .github/workflows/*.yml would pass CI
       # and only get caught by a contributor's local pre-commit, if they had
       # it installed. `task lint` now matches what pre-commit checks.
-      - yamllint -c infrastructure/.yamllint .github/workflows/ .pre-commit-config.yaml Taskfile.yml .checkov.yaml
+      - yamllint -c infrastructure/.yamllint .github/ .pre-commit-config.yaml Taskfile.yml .checkov.yaml
       - tflint --chdir=infrastructure/opentofu --recursive
 
   fmt:
