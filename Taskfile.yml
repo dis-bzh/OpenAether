@@ -127,7 +127,7 @@ tasks:
     vars:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
       # renovate: datasource=github-releases depName=siderolabs/talos
-      VERSION: '{{.VERSION | default "v1.13.4"}}'
+      VERSION: '{{.VERSION | default "v1.13.7"}}'
       ENSURE: '{{.ENSURE | default ""}}'
     cmds:
       - './scripts/bootstrap/talos-image.sh {{.PROVIDER}} {{.VERSION}}{{if .ENSURE}} --ensure{{end}}'
@@ -142,7 +142,7 @@ tasks:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
       # renovate: datasource=github-releases depName=siderolabs/talos
-      VERSION: '{{.VERSION | default "v1.13.4"}}'
+      VERSION: '{{.VERSION | default "v1.13.7"}}'
     cmds:
       - task: talos-image
         vars:
