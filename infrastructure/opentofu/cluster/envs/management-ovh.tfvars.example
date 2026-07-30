@@ -14,12 +14,15 @@
 #   (easiest: download the "OpenStack RC file v3" from the OVH console and source it)
 # ==============================================================================
 
-cluster_name       = "openaether"
-environment        = "prod"
-cluster_role       = "management"
-talos_version      = "v1.13.3"
-kubernetes_version = "v1.35.3"
-talos_bootstrap    = true
+cluster_name    = "openaether"
+environment     = "prod"
+cluster_role    = "management"
+talos_bootstrap = true
+# talos_version / kubernetes_version: leave unset to inherit the tracked
+# defaults from cluster/variables.tf. image_id below is a fixed OVH image
+# UUID though (unlike Scaleway's name-derived lookup) — rebuild it via
+# `task talos-image PROVIDER=ovh` before bumping talos_version in practice,
+# or the two silently point at different Talos versions.
 
 node_distribution = {
   ovh = {
