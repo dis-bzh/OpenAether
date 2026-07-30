@@ -23,7 +23,23 @@ jobs:
         with:
           fetch-depth: 0  # Full history for better detection
 
-      - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e  # v3
+      - name: Install gitleaks (pinned + checksum-verified)
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # gitleaks/gitleaks-action requires a paid license for org-owned
+          # repos since its v2 (dis-bzh is an org) — the CLI itself stays
+          # fully open source, so we run it directly instead of the Action.
+          # renovate: datasource=github-releases depName=gitleaks/gitleaks extractVersion=^v(?<version>.*)$
+          GITLEAKS_VERSION: "8.30.1"
+        run: |
+          set -euo pipefail
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          asset="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL -o "${asset}" "${base}/${asset}"
+          curl -fsSL "${base}/gitleaks_${GITLEAKS_VERSION}_checksums.txt" | grep " ${asset}$" > checksums.txt
+          sha256sum -c checksums.txt
+          tar xzf "${asset}" gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Run gitleaks
+        run: gitleaks git -v --redact
