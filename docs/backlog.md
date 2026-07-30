@@ -18,6 +18,17 @@ etcd, Cilium, Flux and cert-manager are scraped. Everything is torn down.
 
 ## Open — work we can do
 
+- [ ] **`clusterctl-inventory` brick is dead on an operator-only CAPI install.**
+      Found live 2026-07-30 (Scaleway management, full profile): the classic
+      `Provider` CRD (`clusterctl.cluster.x-k8s.io/v1alpha3`) it writes to
+      never gets installed — `cluster-api-operator` only installs its own
+      `operator.cluster.x-k8s.io` CRDs (CoreProvider, InfrastructureProvider…),
+      not the old imperative `clusterctl init` inventory. Non-blocking (no
+      other Kustomization depends on it, confirmed) but permanently
+      `ReconciliationFailed`. Either find how to get the classic CRD installed
+      alongside the operator, or drop the brick if `clusterctl move` support
+      isn't actually needed.
+
 - [ ] **Log in to a UI through the gateway.** The transport is DONE (2026-07-29,
       Scaleway): `https://longhorn.openaether.local` answers **HTTP 200** through
       the gateway, served with `CN=openaether.local` issued by our own
