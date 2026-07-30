@@ -9,12 +9,15 @@
 #   export OSC_REGION=eu-west-2
 # ==============================================================================
 
-cluster_name       = "openaether"
-environment        = "prod"
-cluster_role       = "management"
-talos_version      = "v1.13.3"
-kubernetes_version = "v1.35.3"
-talos_bootstrap    = true
+cluster_name    = "openaether"
+environment     = "prod"
+cluster_role    = "management"
+talos_bootstrap = true
+# talos_version / kubernetes_version: leave unset to inherit the tracked
+# defaults from cluster/variables.tf. image_id below is a fixed Outscale OMI
+# though (unlike Scaleway's name-derived lookup) — rebuild it via
+# `task talos-image PROVIDER=outscale` before bumping talos_version in
+# practice, or the two silently point at different Talos versions.
 
 node_distribution = {
   outscale = {
