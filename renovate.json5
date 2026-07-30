@@ -98,5 +98,13 @@
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s*\\n\\s*TALOS_VERSION:\\s*\"(?<currentValue>[^\"]+)\"",
       ],
     },
+    {
+      customType: "regex",
+      description: "security.yml: gitleaks CLI, downloaded + checksum-verified directly — gitleaks/gitleaks-action requires a paid org license (dis-bzh is an org), so we run the (always free) CLI instead of the Action github-actions would have tracked.",
+      fileMatch: ["^\\.github/workflows/security\\.yml$"],
+      matchStrings: [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: extractVersion=(?<extractVersion>\\S+))?\\s*\\n\\s*GITLEAKS_VERSION:\\s*\"(?<currentValue>[^\"]+)\"",
+      ],
+    },
   ],
 }
