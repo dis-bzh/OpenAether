@@ -14,9 +14,38 @@ explanation belongs in the commit that ruled it out.
 
 Alerting exists and is proven end to end: 19 rules, a real alert delivered to
 Slack from a Scaleway cluster, and a `Watchdog` whose silence is the signal.
-etcd, Cilium, Flux and cert-manager are scraped. Everything is torn down.
+etcd, Cilium, Flux and cert-manager are scraped.
+
+2026-07-30: a real 3-provider fleet is up and verified — management
+(Scaleway, full apps profile, CAPI) + edge-2 (OVH) + edge-3 (Outscale), both
+edges gitception-injected and running the `workload` profile autonomously.
+CI hardened (SHA-pinned actions/hooks, branch rulesets, object-collision
+gate) on both repos. Not yet torn down — mid the 1.0.0 phased rollout
+(see task list); Phase 5 (Talos/K8s version upgrade, zero-downtime) and
+Phase 6 (full teardown + tag) still ahead.
+
+**Idempotency bilan (Phase 4, 2026-07-30):** CAPI provisioning, gitception
+injection and each child's own Flux reconciliation are genuinely automatic —
+no operator step once credentials exist. What is NOT: per-provider CAPI
+credentials/keypairs (`kubectl create secret`, by hand, no `task` target);
+OVH's floating IP (scripted allocation, but the address is hand-copied into
+git); and OpenBao seeding (`bao kv put`, entirely manual per cluster, by
+design — secrets don't belong in git — but with real room for the ordering
+bug below). `task up`/`bootstrap-phase2` itself is NOT safely re-runnable
+against an already-bootstrapped cluster (see Open below).
 
 ## Open — work we can do
+
+- [ ] **`bootstrap-phase2` is not idempotent against an already-bootstrapped
+      cluster.** Found live 2026-07-30 re-running `task up` on the management
+      cluster to test idempotency: `talos_machine_bootstrap.this[0]` always
+      re-attempts the bootstrap RPC on `tofu apply -var talos_bootstrap=true`,
+      and Talos correctly refuses with `AlreadyExists: etcd data directory is
+      not empty` — but OpenTofu treats that as a resource error, failing the
+      whole apply. `task up`'s own description claims "every step above is
+      idempotent" — true for `infra`, false for `bootstrap-phase2`. Either
+      skip the resource when etcd is already healthy, or have the task target
+      tolerate this specific error as success.
 
 - [ ] **`clusterctl-inventory` brick is dead on an operator-only CAPI install.**
       Found live 2026-07-30 (Scaleway management, full profile): the classic
@@ -124,3 +153,15 @@ One line each; the detail lives in the referenced file.
   self-scrape down with it. Check `up == 0` after touching an observability CNP.
 - **A batch translation leaves half-translated blocks** — a French line between
   two English ones reads as finished and no linter catches it. Sweep, don't trust.
+- **A CNP with no egress-to-S3 rule doesn't fail fast, it hangs** — CNPG's own
+  instance pods (not just the separate `cnpg-dump` job) need it for
+  `barmanObjectStore` archive/restore. A single-instance cluster never
+  notices; a replica JOIN calling `restore_command` blocks forever instead of
+  erroring — found live on edge-3 2026-07-30, apps repo
+  `cnpg/networkpolicy-db-restricted.yaml`.
+- **Seed OpenBao app-DB secrets BEFORE the CNPG cluster's first `initdb`** —
+  seeding late doesn't stop the Cluster going Ready (bootstrap self-generates
+  a placeholder), it just leaves the live Postgres role's password out of
+  sync with what the Secret (and hence the app) now has. Needs `ALTER ROLE
+  ... WITH PASSWORD` to realign, or a CNPG `managed.roles` sync so future
+  secret rotations don't repeat this.
