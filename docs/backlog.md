@@ -46,6 +46,12 @@ against an already-bootstrapped cluster (see Open below).
       idempotent" — true for `infra`, false for `bootstrap-phase2`. Either
       skip the resource when etcd is already healthy, or have the task target
       tolerate this specific error as success.
+      ⚠️ Side effect, not just a clean failure: the failed apply also
+      invalidates the `kubeconfig` output/local file (empty after re-running
+      `tofu output -raw kubeconfig`) even though the cluster itself is
+      untouched (etcd/nodes verified healthy immediately after). Recovery
+      without re-running the broken apply: `talosctl -n <ip> -e <ip>
+      kubeconfig ./kubeconfig --force` against a live control-plane node.
 
 - [ ] **`clusterctl-inventory` brick is dead on an operator-only CAPI install.**
       Found live 2026-07-30 (Scaleway management, full profile): the classic
