@@ -20,7 +20,7 @@ jobs:
         uses: opentofu/setup-opentofu@v2
         with:
           # renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
-          tofu_version: "1.12.2"
+          tofu_version: "1.12.5"
 
       - name: Setup TFLint
         uses: terraform-linters/setup-tflint@v6
@@ -58,7 +58,7 @@ jobs:
         uses: opentofu/setup-opentofu@v2
         with:
           # renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
-          tofu_version: "1.12.2"
+          tofu_version: "1.12.5"
 
       - name: Setup Task
         uses: arduino/setup-task@v3.0.0
@@ -82,7 +82,7 @@ jobs:
         uses: opentofu/setup-opentofu@v2
         with:
           # renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
-          tofu_version: "1.12.2"
+          tofu_version: "1.12.5"
 
       - name: Setup Task
         uses: arduino/setup-task@v3.0.0
