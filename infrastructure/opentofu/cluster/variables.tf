@@ -110,7 +110,7 @@ variable "kubernetes_version" {
   description = "Kubernetes version"
   type        = string
   # renovate: datasource=github-releases depName=kubernetes/kubernetes
-  default = "v1.34.4"
+  default = "v1.36.3"
 }
 
 variable "node_distribution" {
