@@ -44,6 +44,17 @@ bao kv put secret/observability/alertmanager-slack webhook-url=https://hooks.sla
 # Alertmanager will not start without it either. Slack-only? Then drop the
 # Watchdog route from vm-customresources/vmalert.yaml, deliberately.
 bao kv put secret/observability/alertmanager-deadmansswitch url=https://hc-ping.com/<uuid>
+# Also required (missed on a first pass, found live 2026-07-30): the CNPG app
+# DB passwords and Longhorn's volume-encryption passphrase. Without these the
+# grafana-db/zitadel-db Cluster still becomes Ready (bootstrap generates ITS
+# OWN placeholder if the secret is absent at initdb time) but the app can't
+# actually connect — auth fails silently until this is seeded AND the
+# Postgres role is aligned (ALTER ROLE ... WITH PASSWORD, once, if initdb
+# already ran with a different placeholder).
+bao kv put secret/grafana/db password=$(openssl rand -base64 24 | tr -d '=+/')
+bao kv put secret/zitadel/db username=zitadel password=$(openssl rand -base64 24 | tr -d '=+/')
+bao kv put secret/backup/restic password=$(openssl rand -base64 36 | tr -d '=+/')
+bao kv put secret/longhorn/encryption passphrase=$(openssl rand -base64 48 | tr -d '=+/')
 ```
 
 `s3-primary` feeds three mechanisms at once: restic, CNPG PITR and Longhorn
