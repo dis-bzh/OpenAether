@@ -1,7 +1,7 @@
 repos:
   # General file hygiene
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: cef0300fd0fc4d2a87a85fa2093c6b283ea36f4b  # v5.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -12,13 +12,13 @@ repos:
 
   # Secret detection
   - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.22.1
+    rev: b69b5157a01fe4234a74a9acd186044152a80c43  # v8.22.1
     hooks:
       - id: gitleaks
 
   # OpenTofu / Terraform formatting
   - repo: https://github.com/antonbabenko/pre-commit-terraform
-    rev: v1.96.3
+    rev: 55d0143972eec4905fdaea2f444f1e88218f9dce  # v1.96.3
     hooks:
       - id: terraform_fmt
         args: ["--args=-recursive", "--hook-config=--tf-path=tofu"]
@@ -29,7 +29,7 @@ repos:
 
   # YAML linting (same config the CI uses)
   - repo: https://github.com/adrienverge/yamllint
-    rev: v1.35.1
+    rev: 81e9f98ffd059efe8aa9c1b1a42e5cce61b640c6  # v1.35.1
     hooks:
       - id: yamllint
         args: ["-c", "infrastructure/.yamllint"]

@@ -12,6 +12,11 @@ ignore: |
 
 rules:
   document-start: disable
+  # `on:` is the standard GitHub Actions trigger key — YAML 1.1 reads it as a
+  # boolean. check-keys: false stops that false positive on every workflow
+  # file while still catching a real unquoted yes/no/on/off used as a value.
+  truthy:
+    check-keys: false
   line-length:
     max: 120
     allow-non-breakable-words: true

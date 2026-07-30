@@ -27,6 +27,11 @@ tasks:
     cmds:
       - tofu fmt -check -recursive {{.TF_ROOTS}}
       - yamllint -c infrastructure/.yamllint infrastructure/
+      # Same config, the repo's other YAML — CI used to only lint
+      # infrastructure/, so a broken .github/workflows/*.yml would pass CI
+      # and only get caught by a contributor's local pre-commit, if they had
+      # it installed. `task lint` now matches what pre-commit checks.
+      - yamllint -c infrastructure/.yamllint .github/workflows/ .pre-commit-config.yaml Taskfile.yml .checkov.yaml
       - tflint --chdir=infrastructure/opentofu --recursive
 
   fmt:
