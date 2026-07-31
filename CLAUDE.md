@@ -4,6 +4,17 @@ Provisioning bare-metal / cloud + Talos (OpenTofu). Les manifests communs et le
 wiring Flux vivent dans `OpenAether-apps` ; les manifests **métier** dans chaque
 repo applicatif.
 
+## Dépôt public — aucune donnée réelle
+
+Ce dépôt est **public**. N'y committer que du code et des exemples — jamais une
+IP, un ID de compte cloud, ou toute autre donnée propre à un environnement ou un
+test réels. Pattern déjà en place : `envs/*.tfvars` (réel) est gitignore, seul
+`*.tfvars.example` (placeholders `YOUR_IP`, etc.) est public. Incident du
+2026-07-31 : des IP réelles (FIP OVH, egress management, IP admin) avaient fui
+dans `OpenAether-apps` et ont nécessité une purge d'historique (`git
+filter-repo`, `--replace-text` ET `--replace-message` — les messages de commit
+ne sont PAS couverts par le premier seul).
+
 ## Objectif produit — socle Talos modulaire, management CAPI optionnel
 
 OpenAether déploie **un cluster Talos** sur **n'importe quel provider** (Proxmox ou
