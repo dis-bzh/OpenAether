@@ -7,7 +7,10 @@ edge-down` / `task destroy`, which delete cleanly **and** update the state.
 
 These scripts talk to the provider API directly: they ignore the OpenTofu state
 and do not update it. They target the WHOLE project, not one cluster — only run
-them on an account whose expected contents you know.
+them on an account whose expected contents you know. If another cluster is
+live on the same provider, or you already know the exact resource(s) to
+remove (e.g. from `verify-provider-clean.py`'s output), use the scoped
+`../delete-openstack-resource.py <kind> <id>` instead — it touches nothing else.
 
 ```bash
 source .env.sh

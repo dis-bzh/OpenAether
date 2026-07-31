@@ -201,7 +201,20 @@ tasks:
     cmds:
       - ../../../scripts/internal/ensure-buckets.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars
       - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
-      - tofu apply -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=false
+      - |
+        # Idempotency guard: control_plane_count/worker_count (cluster/main.tf) are
+        # gated by talos_bootstrap, so forcing =false here on an ALREADY-bootstrapped
+        # cluster zeroes them and drops talos_machine_bootstrap et al. from state —
+        # bootstrap-phase2 then recreates them, re-sending the bootstrap RPC against
+        # a live etcd, which Talos correctly refuses (AlreadyExists) and which also
+        # invalidates the kubeconfig output. Found live 2026-07-30 re-running `task
+        # up` for an idempotency test. Only a truly fresh cluster gets false.
+        if tofu state list 2>/dev/null | grep -q 'module.talos.talos_machine_bootstrap'; then
+          TB=true
+        else
+          TB=false
+        fi
+        tofu apply -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=$TB
       - task: _backup-state
         vars: {PROVIDER: "{{.PROVIDER}}"}
 

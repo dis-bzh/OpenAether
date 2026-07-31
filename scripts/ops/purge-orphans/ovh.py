@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Purges the OVH resources left behind by an orphaned CAPI cluster.
-Targets everything carrying the given prefix (default: k8s-clusterapi / edge-).
+"""Purges ALL OVH project resources (servers, LBs, FIPs, routers, networks,
+security groups) — whole-account, no name filtering. See README.md.
 Usage: purge-orphans-ovh.py [--apply]   (dry-run by default)"""
 import os, sys, json, urllib.request
 
