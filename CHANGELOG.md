@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-07-31
+
+**Premier socle stable : multi-provider, multi-cluster, automatisé, idempotent.**
+Fleet réelle 3 providers (management + edges) déployée, opérée (upgrade rolling
+zéro coupure), et détruite proprement de bout en bout ; alerting, backup/DR et CI
+validés en réel. Point de bascule : les deux derniers comportements non-idempotents
+connus (`task up` re-run, nettoyage provider du teardown) sont corrigés et
+re-vérifiés en réel avant ce tag — voir « Fixed » ci-dessous.
+
 **Recentrage produit — socle Talos modulaire, management CAPI optionnel.** OpenAether
 déploie **un cluster Talos sur n'importe quel provider** (Proxmox ou cloud) avec pour
 **seul socle figé CNI (Cilium) + Flux**, puis **pioche modulairement** dans les
@@ -92,6 +101,67 @@ Proxmox** (SYS-1) aux côtés de Scaleway/OVH/Outscale ; abandon du multi-cloud
 - Règle egress cert-manager → ancien `foundation-pki-root` supprimée
   (cert-manager signe via l'unique OpenBao `pki/sign/openaether`).
 - Commentaire DAG de l'overlay `management` mis à jour (plus de « 10 pki-root »).
+
+### Added — multi-cluster CAPI réel, 3 providers
+
+- **Management CAPI (`cluster-api-operator` + providers Scaleway/OpenStack/Outscale)
+  pilotant des clusters enfants** via CAPI + Talos bootstrap/control-plane providers.
+  Un enfant est injecté sans intervention manuelle (« gitception ») : Cilium (values
+  alignées sur le socle) et Flux (`flux-gotk`) pilotés à distance via
+  `spec.kubeConfig`, puis l'enfant réconcilie seul son profil `apps/flux/<profil>`.
+  Validé en réel bout en bout : management/Scaleway + edge-2/OVH + edge-3/Outscale,
+  les deux enfants sur le profil `workload` autonome.
+- **providerID Talos ⇄ CCM** validé sur les 3 clouds (Scaleway/OVH/Outscale) : la CCM
+  `talos-cloud-controller-manager` résout le nodeRef sans transformation, condition
+  du fonctionnement de `MachineHealthCheck`.
+- **Rolling upgrade Talos/K8s zéro coupure** prouvé en réel sur edge-2 (OVH) après
+  correction d'un vrai trou de FIP de surge (`MACHINE_REV` + FIP surge dédiée dans
+  `certSANs`/`preAllocatedFloatingIPs` — voir le header du template
+  `cluster-talos-openstack/cluster.yaml`, repo apps).
+
+### Added — observability + alerting bout en bout
+
+- Stack VictoriaMetrics (vmagent/vmalert/vmselect/vminsert), 19 règles d'alerte,
+  Alertmanager → Slack. Une alerte réelle livrée depuis un cluster Scaleway, et un
+  `Watchdog` dont le SILENCE est le signal (dead-man's switch).
+- etcd, Cilium, Flux et cert-manager scrapés ; `task check-alerts` vérifie côté
+  cluster réel que chaque règle référence une métrique qui produit effectivement
+  de la donnée (une règle sur une métrique muette ne s'affiche jamais comme en
+  échec — voir « Traps » du backlog).
+
+### Added — backup/DR cross-provider
+
+- Brique `backup` (restic, chiffré côté client, 2 dépôts S3) + `task etcd-snapshot`
+  (snapshot etcd via `talosctl`, chiffré gpg, poussé primary + replica) validés en
+  réel cross-provider (Scaleway + OVH), buckets préexistants, escrow de mot de passe
+  restic obligatoire.
+
+### Changed — durcissement CI (les deux dépôts)
+
+- Actions et hooks GitHub épinglés par SHA, branch rulesets, gate anti-collision
+  d'objets Kustomize (`scripts/check-object-collisions.py`). CI verte sur
+  `OpenAether-infra` et `OpenAether-apps`.
+
+### Fixed — stabilité de `task up` / du cycle de vie complet (2026-07-31)
+
+- **`task infra` n'écrase plus un cluster déjà bootstrappé.** Le compte de nœuds du
+  module Talos était piloté par `var.talos_bootstrap`, donc chaque ré-exécution de
+  `task up` (qui repasse toujours par `task infra`, `talos_bootstrap=false`) mettait
+  ce compte à zéro et supprimait `talos_machine_bootstrap` de l'état — recréé
+  ensuite par `bootstrap-phase2`, qui renvoyait la RPC de bootstrap contre un etcd
+  déjà vivant (rejetée) et invalidait le kubeconfig local au passage. `task infra`
+  détecte maintenant l'état existant avant de décider.
+- **`edge-down.sh` vérifie réellement le nettoyage côté provider** au lieu de faire
+  confiance à la seule disparition des objets Kubernetes (nouveau
+  `scripts/ops/verify-provider-clean.py`, avec retries). Ce contrôle a immédiatement
+  trouvé un troisième bug réel : une load balancer Octavia orpheline d'un teardown
+  précédent, réutilisée par CAPO au déploiement suivant, cassait silencieusement le
+  redeploy (port VIP disparu, 404). Corrigé en réel (suppression ciblée via le
+  nouveau `scripts/ops/delete-openstack-resource.py`) et désormais détecté
+  automatiquement.
+- Les deux fixs validés sur un cycle complet réel : management fraîche → déploiement
+  edge-2 (OVH) réel → teardown avec vérification provider → `fleet-down` complet →
+  les 3 providers reconfirmés propres indépendamment.
 
 ---
 
