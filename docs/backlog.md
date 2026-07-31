@@ -24,6 +24,24 @@ and a full `task fleet-down` teardown. CI hardened (SHA-pinned actions/hooks,
 branch rulesets, object-collision gate) on both repos. Fleet is torn down;
 the `1.0.0` tag itself is deliberately deferred to a later session.
 
+2026-07-31: the two gaps the 2026-07-30 teardown had exposed are fixed and
+validated live, not just reasoned about — `task infra` no longer forces
+`talos_bootstrap=false` on an already-bootstrapped cluster (re-ran `task up`
+twice on a fresh Scaleway management: 0 changes on the second pass, node ages
+unchanged, kubeconfig intact), and `edge-down.sh` now re-checks the provider
+directly after the Kubernetes-level cascade instead of trusting it (new
+`scripts/ops/verify-provider-clean.py`). Proving that second fix live
+surfaced a THIRD real bug on the first try: an Octavia load balancer orphaned
+by the 2026-07-30 OVH teardown was silently reused by CAPO on the next
+`edge-2` deploy and broke it (stale VIP port, 404). Fixed live (scoped delete,
+`scripts/ops/delete-openstack-resource.py`) and now a permanent check in
+`verify-provider-clean.py`. Both fixes then proved on a full real cycle: fresh
+management → real OVH edge-2 deploy → `edge-down.sh` teardown (provider
+verified clean on the first pass) → full `fleet-down` (edge-3, never
+provisioned — blocked cleanly on missing Outscale credentials, no spend) →
+all 3 providers independently re-verified clean. Fleet is torn down again;
+`1.0.0` tag still pending.
+
 **Idempotency bilan (Phase 4, 2026-07-30):** CAPI provisioning, gitception
 injection and each child's own Flux reconciliation are genuinely automatic —
 no operator step once credentials exist. What is NOT: per-provider CAPI
@@ -31,45 +49,10 @@ credentials/keypairs (`kubectl create secret`, by hand, no `task` target);
 OVH's floating IP (scripted allocation, but the address is hand-copied into
 git); and OpenBao seeding (`bao kv put`, entirely manual per cluster, by
 design — secrets don't belong in git — but with real room for the ordering
-bug below). `task up`/`bootstrap-phase2` itself is NOT safely re-runnable
-against an already-bootstrapped cluster (see Open below).
+bug below). `task up`/`bootstrap-phase2` re-run safety against an
+already-bootstrapped cluster is fixed as of 2026-07-31, see above.
 
 ## Open — work we can do
-
-- [ ] **`edge-down.sh`'s CAPI cascade doesn't verify the infra provider actually
-      cleaned up its OWN network resources.** Found live 2026-07-30 on the
-      `task fleet-down` teardown: after `edge-down edge-2` reported success (0
-      machines left) and the management was destroyed, an independent check
-      against OVH found the `OpenStackCluster`'s network, subnet, router
-      (with a still-attached interface) and both security groups still
-      existed — CAPO's own controller apparently doesn't always finish
-      tearing these down within the script's wait window, and nothing
-      re-checks. Not billed on OVH, but real cruft that collides with a
-      future edge-2 redeploy. Cleaned up manually this session (remove the
-      router interface, delete router, network, security groups — see the
-      Neutron API calls in the session, or re-derive from `ensure-capo-fip.py`'s
-      auth pattern). Outscale showed a similar gap (one orphaned, BILLED
-      Elastic IP survived edge-3's teardown). `edge-down.sh` should verify
-      (not just wait-and-trust) that the provider's network objects are
-      actually gone before declaring success — same discipline as
-      `fleet-down.sh`'s own `FAILED` flag for the management destroy.
-
-- [ ] **`bootstrap-phase2` is not idempotent against an already-bootstrapped
-      cluster.** Found live 2026-07-30 re-running `task up` on the management
-      cluster to test idempotency: `talos_machine_bootstrap.this[0]` always
-      re-attempts the bootstrap RPC on `tofu apply -var talos_bootstrap=true`,
-      and Talos correctly refuses with `AlreadyExists: etcd data directory is
-      not empty` — but OpenTofu treats that as a resource error, failing the
-      whole apply. `task up`'s own description claims "every step above is
-      idempotent" — true for `infra`, false for `bootstrap-phase2`. Either
-      skip the resource when etcd is already healthy, or have the task target
-      tolerate this specific error as success.
-      ⚠️ Side effect, not just a clean failure: the failed apply also
-      invalidates the `kubeconfig` output/local file (empty after re-running
-      `tofu output -raw kubeconfig`) even though the cluster itself is
-      untouched (etcd/nodes verified healthy immediately after). Recovery
-      without re-running the broken apply: `talosctl -n <ip> -e <ip>
-      kubeconfig ./kubeconfig --force` against a live control-plane node.
 
 - [ ] **`clusterctl-inventory` brick is dead on an operator-only CAPI install.**
       Found live 2026-07-30 (Scaleway management, full profile): the classic
@@ -183,6 +166,20 @@ One line each; the detail lives in the referenced file.
   notices; a replica JOIN calling `restore_command` blocks forever instead of
   erroring — found live on edge-3 2026-07-30, apps repo
   `cnpg/networkpolicy-db-restricted.yaml`.
+- **A resource-count driven by a phase variable is not idempotent** — gating
+  `module.talos`'s `control_plane_count`/`worker_count` on `var.talos_bootstrap`
+  meant every re-run of `task infra` (talos_bootstrap=false, part of `task up`)
+  zeroed them and dropped `talos_machine_bootstrap` from state, which then got
+  RECREATED by `bootstrap-phase2` — re-sending the bootstrap RPC to a live
+  etcd. Fixed by reading `tofu state list` first (`Taskfile.yml`'s `infra`
+  task) instead of always forcing the phase-1 value.
+- **CAPO reuses an Octavia LB by NAME on the next deploy — a leftover isn't
+  just cruft, it silently breaks the redeploy.** A `kubeapi` LB orphaned by a
+  prior `edge-down` (its VIP port's network long gone) got picked up by CAPO
+  on the next `edge-2` apply instead of a fresh one being created; the FIP↔port
+  association then 404s forever with no error surfaced to Flux. `edge-down.sh`
+  now re-verifies the provider directly after the Kubernetes-level cascade
+  (`verify-provider-clean.py`, checks LBs too) instead of trusting it blindly.
 - **Seed OpenBao app-DB secrets BEFORE the CNPG cluster's first `initdb`** —
   seeding late doesn't stop the Cluster going Ready (bootstrap self-generates
   a placeholder), it just leaves the live Postgres role's password out of

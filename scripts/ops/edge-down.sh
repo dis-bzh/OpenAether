@@ -37,6 +37,8 @@ warn() { printf '⚠ %s\n' "$*" >&2; }
 # ⚠️ Always qualify `clusters.cluster.x-k8s.io`: the `Cluster` kind is also
 # CNPG's (postgresql.cnpg.io). Without the CAPI CRDs installed, an unqualified
 # `kubectl delete cluster <name>` would target a DATABASE.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
 command -v kubectl >/dev/null 2>&1 || { echo "✗ kubectl required" >&2; exit 1; }
 kubectl cluster-info >/dev/null 2>&1 || { echo "✗ KUBECONFIG points at no reachable cluster" >&2; exit 1; }
 
@@ -49,6 +51,18 @@ fi
 mapfile -t MACHINES < <(kubectl get machines -n "$NS" \
   -l "cluster.x-k8s.io/cluster-name=$CLUSTER" -o name 2>/dev/null)
 info "Cluster '$CLUSTER' (ns $NS): ${#MACHINES[@]} machine(s) to destroy"
+
+# Which infra provider this cluster is on — needed AFTER deletion (step 4) to
+# know which API to re-check, so it must be captured now, before the objects
+# that reveal it disappear.
+PROVIDER=""
+for kp in "openstackcluster:openstack" "osccluster:outscale" "scalewaycluster:scaleway"; do
+  kind="${kp%%:*}"; prov="${kp##*:}"
+  if kubectl get "$kind" -n "$NS" -o name 2>/dev/null | grep -q -- "$CLUSTER"; then
+    PROVIDER="$prov"
+    break
+  fi
+done
 
 if [ "$ASSUME_YES" -eq 0 ]; then
   read -rp "Permanently destroy '$CLUSTER' and its VMs? [y/N] " a
@@ -87,6 +101,43 @@ while (( SECONDS < deadline )); do
   mach=$(kubectl get machines -n "$NS" -l "cluster.x-k8s.io/cluster-name=$CLUSTER" \
            --no-headers 2>/dev/null | wc -l)
   if [ "$left" = 0 ] && [ "$mach" = 0 ]; then
+    ok "cluster '$CLUSTER' Kubernetes objects gone"
+
+    # 4. The Kubernetes-level signal above is NOT proof the provider finished:
+    # CAPO/CAPOSC's own network cleanup can lag past the object's own deletion
+    # (found live 2026-07-30 — OVH network/router/SGs and a billed Outscale EIP
+    # both survived a "fully deleted" report). Re-check the provider directly;
+    # retry a few times before failing, since this is a real async cascade, not
+    # necessarily a stuck one.
+    VERIFY="$ROOT/scripts/ops/verify-provider-clean.py"
+    if [ -n "$PROVIDER" ] && [ -f "$VERIFY" ]; then
+      info "Vérification côté provider ($PROVIDER)…"
+      for attempt in 1 2 3 4; do
+        OUT="$(python3 "$VERIFY" "$CLUSTER" "$PROVIDER" 2>&1)"; rc=$?
+        case $rc in
+          0) ok "cluster '$CLUSTER' fully deleted (provider verified clean)"; exit 0 ;;
+          2) warn "provider verification skipped: $OUT"
+             ok "cluster '$CLUSTER' Kubernetes objects gone (provider NOT re-checked)"
+             exit 0 ;;
+        esac
+        warn "attempt $attempt/4: $PROVIDER still has resources for '$CLUSTER', retrying in 20s…"
+        sleep 20
+      done
+      printf '%s\n' "$OUT" >&2
+      cat >&2 <<EOT
+
+✗ the Kubernetes-level cascade finished but $PROVIDER still has resources
+  tagged '$CLUSTER' (listed above) after 4 checks (~80s) — CAPO/CAPOSC's own
+  cleanup did not finish. Purge by hand, ONE resource at a time (a leftover
+  Octavia LB alone breaks the NEXT redeploy — found live 2026-07-31):
+    python3 scripts/ops/delete-openstack-resource.py <kind> <id>
+  scripts/ops/purge-orphans/ also works but is WHOLE-ACCOUNT (no name
+  filtering) — never run it while another cluster is live on the same
+  provider. Then re-run: this script is idempotent and will report clean
+  once they are gone.
+EOT
+      exit 1
+    fi
     ok "cluster '$CLUSTER' fully deleted"
     exit 0
   fi
