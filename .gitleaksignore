@@ -1,11 +1,13 @@
-# The commit this key lived in (91bd7b53) is no longer part of main's
-# history (see "archive: Pulumi-era prototype (squashed)") but stays
-# reachable via pre-existing tags (0.1.0-0.4.0, archive/pre-cleanup-*) — a
-# full clone still fetches those, so gitleaks still finds it. See the repo's
-# own discussion for whether/how those tags get cleaned up separately.
-91bd7b53e81aa694f9c671c43219ea7e3ead3728:apps/base/linkerd/linkerd-control-plane.yaml:kubernetes-secret-yaml:1945
-91bd7b53e81aa694f9c671c43219ea7e3ead3728:apps/base/linkerd/linkerd-control-plane.yaml:private-key:127
-91bd7b53e81aa694f9c671c43219ea7e3ead3728:apps/base/linkerd/linkerd-control-plane.yaml:private-key:172
-91bd7b53e81aa694f9c671c43219ea7e3ead3728:apps/base/linkerd/linkerd-control-plane.yaml:private-key:466
-91bd7b53e81aa694f9c671c43219ea7e3ead3728:apps/base/linkerd/linkerd-control-plane.yaml:private-key:781
-91bd7b53e81aa694f9c671c43219ea7e3ead3728:apps/base/linkerd/linkerd-control-plane.yaml:private-key:1946
+# Self-signed, CLI-generated Linkerd identity/webhook certs from an
+# abandoned prototype — never a real secret, never live (apps/base/linkerd/
+# is absent from current HEAD; only reachable via old tags 0.1.0-0.4.0 /
+# archive/pre-cleanup-*, which a full clone still fetches, so gitleaks still
+# finds it). Commit hash updated 2026-07-31 after a git-filter-repo history
+# rewrite (unrelated leak, real IPs — see CHANGELOG/backlog); content and
+# line numbers are unchanged, only the commit hash moved (91bd7b53 -> 00a81a49).
+00a81a496120ab4627b02f481b5d9a8da46f1a1b:apps/base/linkerd/linkerd-control-plane.yaml:kubernetes-secret-yaml:1945
+00a81a496120ab4627b02f481b5d9a8da46f1a1b:apps/base/linkerd/linkerd-control-plane.yaml:private-key:127
+00a81a496120ab4627b02f481b5d9a8da46f1a1b:apps/base/linkerd/linkerd-control-plane.yaml:private-key:172
+00a81a496120ab4627b02f481b5d9a8da46f1a1b:apps/base/linkerd/linkerd-control-plane.yaml:private-key:466
+00a81a496120ab4627b02f481b5d9a8da46f1a1b:apps/base/linkerd/linkerd-control-plane.yaml:private-key:781
+00a81a496120ab4627b02f481b5d9a8da46f1a1b:apps/base/linkerd/linkerd-control-plane.yaml:private-key:1946
