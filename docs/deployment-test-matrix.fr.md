@@ -7,8 +7,8 @@
 > `provider-contract.md`. Tenir la colonne **Statut** à jour — c'est l'intérêt
 > du fichier.
 >
-> ✅ testé par apply réel · 🧪 testé unitairement (mocké) · ⬜ non testé.
-> Revue 2026-07-28.
+> ✅ testé par apply réel · 🎭 émulé (Feint : vrai provider, vrai HTTP, sans
+> compte) · 🧪 testé unitairement (mocké) · ⬜ non testé. Revue 2026-07-28.
 
 ## Modèle mental
 
@@ -120,6 +120,25 @@ Deux couches de réglages orthogonales :
 | `CAPI-mgmt-pivot` | cluster jetable local | Scaleway | Management **né de CAPI**, qui déploie son propre enfant, puis `clusterctl move` vers lui-même. | ✅ *(mgmt-capi, 2026-07-28 — cf. `capi-bootstrap.fr.md`)* |
 | `CAPI-edge-osc` | management | Outscale | Enfant CAPOSC. | ⬜ *(quota RAM du compte)* |
 | `CAPI-providerid` | local jetable | Scaleway | CCM Talos → `providerID`, `nodeRef` résolu, MachineHealthCheck 3/3. | ✅ *(edge-pid, 2026-07-28)* |
+
+### Cloud émulé (Feint — sans compte, sans credentials)
+
+Les vrais binaires providers contre un émulateur local des APIs
+Scaleway/Outscale. Entre 🧪 et ✅ : vrai HTTP, vrai décodage, mais pas
+d'inventaire, pas de LB, pas de quotas. Ce que ça prouve et ce que ça ne prouve
+pas : `emulated-cloud.fr.md`.
+
+| ID | Voie | Ce qu'il exerce en propre | Statut |
+|---|---|---|---|
+| `FEINT-scw-plan` | `task feint-plan PROVIDER=scaleway` | Le **vrai** root cluster planifié sans le moindre credential à portée. | 🎭 (CI) |
+| `FEINT-osc-plan` | `task feint-plan PROVIDER=outscale` | Idem Outscale — jusqu'ici le seul provider sans aucune couverture en mode apply. | 🎭 (CI) |
+| `FEINT-scw-crud` | `task feint-apply PROVIDER=scaleway` | Vrai create/read/update/delete : jeu de règles du security group, adressage du NIC privé, cycle de vie serveur + volume, re-plan vide, destroy vérifié contre l'API. | 🎭 (CI) |
+| `FEINT-osc-crud` | `task feint-apply PROVIDER=outscale` | Idem sur Outscale : net/subnet/keypair/volume/VM, ordre des tags, terminated ≠ présent au destroy. | 🎭 (CI) |
+| `FEINT-guard` | endpoint non loopback | Test négatif : la voie doit refuser de piloter autre chose qu'un émulateur local. | 🎭 |
+
+Hors de portée de cette voie, et pourquoi : type de volume racine Scaleway,
+`volume_link` Outscale, `data.outscale_images` (fait segfaulter le provider).
+Cf. `backlog.md`.
 
 ### Scénarios d'exploitation transverses
 

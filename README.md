@@ -166,6 +166,22 @@ python3 scripts/ops/purge-orphans/ovh.py    # dry-run: confirm nothing is left
 and a **self-managed** cluster cannot finish deleting itself
 (see `docs/capi-bootstrap.md`).
 
+### Emulated cloud (Feint — no cloud account, no credentials)
+
+Points the **real** Scaleway and Outscale providers at a local emulator of their
+APIs. One step past the mocked `tofu test`: real HTTP, real decode, no bill.
+
+```bash
+task feint-up                        # start the emulator (pinned binary, checksum-verified)
+task feint-plan  PROVIDER=scaleway   # plan the REAL cluster root, zero credentials
+task feint-apply PROVIDER=outscale   # apply/destroy cycle on the reduced fixture
+task feint-down
+```
+
+⚠️ It does **not** prove a real deployment works — the emulator has no
+inventory, no load balancer and no quotas. See
+[docs/emulated-cloud.md](docs/emulated-cloud.md).
+
 ### Static checks (no cloud, no Docker)
 
 ```bash
@@ -181,6 +197,7 @@ task security            # hardening checks
 | [docs/admin-access.md](docs/admin-access.md) | Day-1 path: escrow, offline PKI, UI access, browser tests |
 | [docs/capi-bootstrap.md](docs/capi-bootstrap.md) | Bootstrap a management via CAPI and make it self-managed |
 | [docs/deployment-test-matrix.md](docs/deployment-test-matrix.md) | What is validated, where, and how |
+| [docs/emulated-cloud.md](docs/emulated-cloud.md) | Testing Scaleway/Outscale against a local emulator — and the limits of that |
 | [docs/backlog.md](docs/backlog.md) | **Source of truth**: current state, debt, improvements (French only — living working document) |
 
 ## Security

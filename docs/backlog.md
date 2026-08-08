@@ -84,6 +84,43 @@ already-bootstrapped cluster is fixed as of 2026-07-31, see above.
       Asked upstream 2026-07-29: kubernetes/kube-state-metrics#3052. Waiting —
       do not spend more time guessing at config.
 
+- [ ] **Emulated lane: three production attributes it cannot reach.** All found
+      by running it (`docs/emulated-cloud.md`), all upstream candidates at
+      `stephrobert/feint`. (a) `data.outscale_images` **segfaults** the Outscale
+      provider — `data_source_outscale_images.go:289` dereferences
+      `*image.BlockDeviceMappings` with no nil guard, unlike every neighbouring
+      field, and Feint omits it; injecting an empty one removes the crash, so it
+      is a gap and a provider bug at once. (b) `outscale_volume_link` needs
+      `ReadVolumes` to apply a `LinkVolumeVmIds` filter, which Feint refuses by
+      design. (c) Scaleway root volume type: the module asks `sbs_volume`, Feint
+      always answers `b_ssd`, and provider 2.80 refuses an explicit `b_ssd` — so
+      neither value can be declared.
+
+- [ ] **A full emulated apply of the cluster root needs routes Feint has not
+      mounted**: Scaleway LB, public gateway and `ipam BookIP` (so
+      `scaleway_ipam_ip` cannot be created) and `instance/v1 ListImages` (501,
+      so no image lookup by name); Outscale security groups, public IPs,
+      internet/NAT service, route tables and LBU. Until then the real root stops
+      at `plan` and the CRUD cycle runs on `infrastructure/opentofu-feint`.
+
+- [ ] **Six `envs/*.tfvars.example` cannot be applied as written.** They set
+      `bastion_ssh_keys = { <provider> = "ssh-ed25519 …" }`, a bare string, where
+      the variable is `map(list(string))`: `element "<provider>": list of string
+      required, but have string`. Confirmed by running it, 2026-08-08. Affects
+      failover/workload × scaleway/ovh/outscale, plus the commented proxmox
+      lines; only `management-scaleway` has the list form. One-token fix per
+      file, left out of the emulated-cloud change to keep that diff readable.
+
+- [ ] **`talos-image` root is outside the emulated lane.** It stages images
+      through object storage, which Feint does not emulate (the Scaleway
+      provider hardcodes the S3 endpoint in code — not redirectable).
+
+- [ ] **Outscale provider 1.x deprecates the top-level `region`.** The real path
+      still sets it, so every real Outscale command warns; only the emulated
+      path uses the `api {}` block. Moving real runs onto the block means
+      building `https://api.<region>.outscale.com/api/v1` ourselves, i.e.
+      hardcoding their DNS — decide which is worse before changing it.
+
 ## Blocked on the world, not on us
 
 Not work. Conditions. Do not re-investigate them from a desk.

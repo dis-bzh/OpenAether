@@ -2,8 +2,32 @@
 # Providers
 # ==============================================================================
 
+# Emulated-cloud lane (docs/emulated-cloud.md). Well-formed but meaningless
+# credentials: Feint checks their shape and never their value, and pinning them
+# is what stops a provider from finding real ones elsewhere.
+locals {
+  emulated = var.emulator_api_url != ""
+  emulator_creds = {
+    scw_access_key = "SCWXXXXXXXXXXXXXXXXX"
+    scw_secret_key = "11111111-1111-1111-1111-111111111111"
+    scw_project_id = "11111111-1111-1111-1111-111111111111"
+    osc_access_key = "AAAAAAAAAAAAAAAAAAAA"
+    osc_secret_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+  }
+}
+
 provider "talos" {}
-provider "scaleway" {}
+
+# Scaleway takes everything from the SCW_* environment for a real deploy. Under
+# the emulator every field is pinned instead: an unset credential does not fail,
+# it falls back to ~/.config/scw/config.yaml and drives a paying account.
+provider "scaleway" {
+  api_url         = local.emulated ? var.emulator_api_url : null
+  access_key      = local.emulated ? local.emulator_creds.scw_access_key : null
+  secret_key      = local.emulated ? local.emulator_creds.scw_secret_key : null
+  project_id      = local.emulated ? local.emulator_creds.scw_project_id : null
+  organization_id = local.emulated ? local.emulator_creds.scw_project_id : null
+}
 
 # Only the OVH module uses OpenStack. When OVH is not the active provider we feed
 # a placeholder auth_url so a Scaleway/Outscale-only apply doesn't require OVH
@@ -16,9 +40,23 @@ provider "openstack" {
 # resolved S3/API keys) so auth doesn't depend on the exact OSC_* env var names.
 # Empty/null when not deploying Outscale → no effect on Scaleway/OVH applies.
 provider "outscale" {
-  access_key_id = var.outscale_access_key_id != "" ? var.outscale_access_key_id : null
-  secret_key_id = var.outscale_secret_key_id != "" ? var.outscale_secret_key_id : null
-  region        = local.active_provider == "outscale" ? local.osc_dist.region : null
+  access_key_id = local.emulated ? local.emulator_creds.osc_access_key : (var.outscale_access_key_id != "" ? var.outscale_access_key_id : null)
+  secret_key_id = local.emulated ? local.emulator_creds.osc_secret_key : (var.outscale_secret_key_id != "" ? var.outscale_secret_key_id : null)
+
+  # region and the api{} block are mutually exclusive: the top-level argument is
+  # deprecated in favour of the block, and setting both warns on every command.
+  region = local.emulated ? null : (local.active_provider == "outscale" ? local.osc_dist.region : null)
+
+  # `endpoint` carries the whole API path, version segment included. Without it
+  # the provider retries with backoff for six minutes and reports a timeout,
+  # which reads like a slow server rather than a misdirected client.
+  dynamic "api" {
+    for_each = local.emulated ? [1] : []
+    content {
+      endpoint = "${var.emulator_api_url}/api/v1"
+      region   = local.osc_dist.region
+    }
+  }
 }
 
 # Proxmox (bpg) reads creds from the environment for a real Proxmox deploy:

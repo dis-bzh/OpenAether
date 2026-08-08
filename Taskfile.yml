@@ -10,6 +10,7 @@ vars:
     infrastructure/opentofu/modules
     infrastructure/opentofu/talos-image
     infrastructure/opentofu-local
+    infrastructure/opentofu-feint
 
 tasks:
   default:
@@ -404,6 +405,46 @@ tasks:
       - tofu output -raw kubeconfig > kubeconfig
       - tofu output -raw talosconfig > talosconfig
       - echo "KUBECONFIG and TALOSCONFIG written to infrastructure/opentofu/cluster/"
+
+  # ===========================================================================
+  # Emulated cloud (Feint) — no account, no credentials. docs/emulated-cloud.md
+  # ===========================================================================
+
+  feint-up:
+    desc: "Start the local Scaleway/Outscale API emulator (installs the pinned binary if absent)"
+    cmds:
+      - ./scripts/dev/feint.sh start
+
+  feint-down:
+    desc: "Stop the emulator and drop everything it created"
+    cmds:
+      - ./scripts/dev/feint.sh stop
+
+  feint-plan:
+    desc: "Plan the REAL cluster root against the emulator. Usage: task feint-plan PROVIDER=scaleway|outscale"
+    vars:
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    cmds:
+      - ./scripts/dev/feint.sh plan {{.PROVIDER}}
+
+  feint-apply:
+    desc: "Full apply/destroy cycle on the reduced fixture. Usage: task feint-apply PROVIDER=scaleway|outscale"
+    vars:
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    cmds:
+      - ./scripts/dev/feint.sh apply {{.PROVIDER}}
+
+  feint-test:
+    desc: "Both providers, both lanes (plan on the real root + apply/destroy on the fixture)"
+    cmds:
+      - task: feint-up
+      - for: [scaleway, outscale]
+        task: feint-plan
+        vars: {PROVIDER: "{{.ITEM}}"}
+      - for: [scaleway, outscale]
+        task: feint-apply
+        vars: {PROVIDER: "{{.ITEM}}"}
+      - task: feint-down
 
   # ===========================================================================
   # Local Testing (Docker / WSL2)

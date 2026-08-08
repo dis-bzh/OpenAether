@@ -106,6 +106,50 @@ jobs:
           AWS_SECRET_ACCESS_KEY: mock
           TF_VAR_encryption_passphrase: ci-mock-passphrase-for-validation-only-ci
 
+  emulated:
+    name: Emulated Cloud (${{ matrix.provider }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: validate
+    # The real provider binaries against a real HTTP API, with no account: one
+    # step past `tofu test`, which mocks the provider and never leaves the
+    # process. See docs/emulated-cloud.md for what it does and does not prove.
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [scaleway, outscale]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4  # v2
+        with:
+          # renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
+          tofu_version: "1.12.5"
+
+      - name: Setup Task
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+
+      - name: Install Feint (pinned + checksum-verified)
+        run: |
+          ./scripts/dev/feint.sh install
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: task feint-up
+        run: task feint-up
+
+      # No credentials anywhere in this job, deliberately: the lane must fail if
+      # anything in it ever needs one, rather than quietly reaching a real cloud.
+      - name: task feint-plan
+        run: task feint-plan PROVIDER=${{ matrix.provider }}
+
+      - name: task feint-apply
+        run: task feint-apply PROVIDER=${{ matrix.provider }}
+
+      - name: task feint-down
+        if: always()
+        run: task feint-down
+
   talos:
     name: Talos Config Validation
     runs-on: ubuntu-latest

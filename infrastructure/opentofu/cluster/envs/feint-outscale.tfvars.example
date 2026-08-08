@@ -1,0 +1,51 @@
+# ==============================================================================
+# Emulated cloud (Feint) — Outscale. NOT a deployable cluster.
+#
+# Drives `tofu plan` on this root against a local emulator, with no account and
+# no credentials: `task feint-plan PROVIDER=outscale`. See docs/emulated-cloud.md
+# for what that proves and what it does not.
+#
+# Every value here is fake by construction — this file is public, and nothing in
+# it may ever name a real environment. admin_ip is RFC 5737 TEST-NET-3.
+#
+# Both image ids are pinned, for two different reasons — see docs/backlog.md.
+#   image_id: leaving it unset runs data.outscale_images, which SEGFAULTS the
+#     provider. data_source_outscale_images.go:289 dereferences
+#     *image.BlockDeviceMappings with no nil guard (every neighbouring field uses
+#     ptr.From), and the emulator's ReadImages omits that field. Injecting an
+#     empty BlockDeviceMappings into the response removes the crash, which is
+#     what makes it a Feint gap and a provider bug at once.
+#   bastion_image_id: its data source addresses one image by id, but the emulator
+#     answers every filter with its whole catalogue — 3 images, so "more than one
+#     result". Pinning it skips the lookup.
+# ==============================================================================
+
+cluster_name    = "feint-outscale"
+environment     = "dev"
+cluster_role    = "workload"
+talos_bootstrap = false
+
+node_distribution = {
+  outscale = {
+    control_planes     = 1
+    workers            = 1
+    region             = "eu-west-2"
+    instance_type      = "tinav6.c1r1p2"
+    availability_zones = ["eu-west-2a"]
+    image_id           = "ami-00000001"
+    bastion_image_id   = "ami-00000001"
+  }
+}
+
+admin_ip = ["203.0.113.0/32"]
+
+bastion_ssh_keys = {
+  outscale = ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIr6pEFlAFO3YU0DNW/r8SkpjdbptN9ockkO2BtIolSD feint@emulated"]
+}
+
+# Never reached: the plan lane runs with a local backend and no apply. Declared
+# only because these four have no default.
+s3_primary_endpoint = "http://127.0.0.1:4599"
+s3_primary_region   = "eu-west-2"
+s3_replica_endpoint = "http://127.0.0.1:4599"
+s3_replica_region   = "eu-west-2"

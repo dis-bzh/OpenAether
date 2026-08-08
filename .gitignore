@@ -54,6 +54,8 @@ worker.yaml
 # Isolated TF_DATA_DIR for `task validate` — keeps the static check runnable
 # without cloud credentials (see the validate task in Taskfile.yml).
 .terraform-validate/
+# Same isolation for the emulated-cloud lane (docs/emulated-cloud.md).
+.terraform-feint/
 .terraform.lock.hcl
 *.tfstate
 *.tfstate.*
@@ -72,6 +74,12 @@ infrastructure/opentofu-local/terraform.tfstate*
 infrastructure/opentofu-local/kubeconfig
 infrastructure/opentofu-local/talosconfig
 infrastructure/opentofu/cluster/bootstrap-manifests/cilium-local.yaml
+
+# Emulated-cloud lane (Feint): disposable state, plus the temporary local-backend
+# override the plan lane drops into the cluster root. That override is removed by
+# a trap — if you ever see it in a working tree, a run died hard: delete it.
+infrastructure/opentofu-feint/terraform.tfstate*
+infrastructure/opentofu/cluster/zz-feint-backend_override.tf
 
 # Editor/IDE
 .idea/

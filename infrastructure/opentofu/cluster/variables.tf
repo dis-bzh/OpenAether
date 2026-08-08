@@ -327,3 +327,21 @@ variable "outscale_secret_key_id" {
   default     = ""
   sensitive   = true
 }
+
+# ==============================================================================
+# Emulated cloud (Feint) — see docs/emulated-cloud.md
+# ==============================================================================
+
+variable "emulator_api_url" {
+  description = "Base URL of a local Feint emulator to point the Scaleway and Outscale APIs at (e.g. http://127.0.0.1:4599). Empty = the real cloud."
+  type        = string
+  default     = ""
+
+  # Loopback or nothing. A remote value here would not be a misconfiguration but
+  # an apply against somebody's account, which is the one failure this switch
+  # must make impossible.
+  validation {
+    condition     = var.emulator_api_url == "" || can(regex("^http://(127\\.0\\.0\\.1|localhost|\\[::1\\]):[0-9]+$", var.emulator_api_url))
+    error_message = "emulator_api_url must be empty or a loopback URL (http://127.0.0.1:<port>): it exists to reach a local emulator, never a remote endpoint."
+  }
+}

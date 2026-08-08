@@ -70,7 +70,7 @@ resource "outscale_security_group_rule" "bastion_egress_https" {
 resource "outscale_public_ip" "bastion" {}
 
 resource "outscale_vm" "bastion" {
-  image_id           = coalesce(var.bastion_image_id, try(data.outscale_image.ubuntu.image_id, null))
+  image_id           = coalesce(var.bastion_image_id, try(data.outscale_image.ubuntu[0].image_id, null))
   vm_type            = var.bastion_vm_type
   subnet_id          = outscale_subnet.public.subnet_id
   security_group_ids = [outscale_security_group.bastion.security_group_id]
@@ -100,7 +100,10 @@ resource "outscale_public_ip_link" "bastion" {
   public_ip = outscale_public_ip.bastion.public_ip
 }
 
+# Skipped when bastion_image_id is given: the coalesce above already discards the
+# result. Same gate as data.outscale_images.talos in main.tf.
 data "outscale_image" "ubuntu" {
+  count = var.bastion_image_id == null ? 1 : 0
   filter {
     name   = "image_ids"
     values = ["ami-b29cea33"]

@@ -164,6 +164,23 @@ python3 scripts/ops/purge-orphans/ovh.py    # dry-run : vérifier qu'il ne reste
 cluster **autogéré** ne peut pas terminer sa propre suppression
 (cf. `docs/capi-bootstrap.fr.md`).
 
+### Cloud émulé (Feint — sans compte cloud, sans credentials)
+
+Pointe les **vrais** providers Scaleway et Outscale vers un émulateur local de
+leurs APIs. Un cran au-dessus du `tofu test` mocké : vrai HTTP, vrai décodage,
+aucune facture.
+
+```bash
+task feint-up                        # démarre l'émulateur (binaire épinglé, checksum vérifié)
+task feint-plan  PROVIDER=scaleway   # plan du VRAI root cluster, zéro credential
+task feint-apply PROVIDER=outscale   # cycle apply/destroy sur la fixture réduite
+task feint-down
+```
+
+⚠️ Ça ne prouve **pas** qu'un déploiement réel fonctionne — l'émulateur n'a ni
+inventaire, ni load balancer, ni quotas. Cf.
+[docs/emulated-cloud.fr.md](docs/emulated-cloud.fr.md).
+
 ### Contrôles statiques (sans cloud ni Docker)
 
 ```bash
@@ -179,6 +196,7 @@ task security            # contrôles de durcissement
 | [docs/admin-access.fr.md](docs/admin-access.fr.md) | Parcours jour-1 : escrow, PKI offline, accès UIs, tests navigateur |
 | [docs/capi-bootstrap.fr.md](docs/capi-bootstrap.fr.md) | Amorcer un management par CAPI et le rendre autogéré |
 | [docs/deployment-test-matrix.fr.md](docs/deployment-test-matrix.fr.md) | Ce qui est validé, où, et comment |
+| [docs/emulated-cloud.fr.md](docs/emulated-cloud.fr.md) | Tester Scaleway/Outscale contre un émulateur local — et les limites de l'exercice |
 | [docs/backlog.md](docs/backlog.md) | **Source de vérité** : état courant, dette, améliorations |
 
 ## Sécurité
