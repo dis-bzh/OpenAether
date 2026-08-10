@@ -139,19 +139,6 @@ invites someone to build what nobody decided.
       **Closes:** `feint shapes --check` green against a recording. Real cloud
       for the recording only.
 
-- [ ] **Six `envs/*.tfvars.example` cannot be applied as written.** They set
-      `bastion_ssh_keys = { <provider> = "ssh-ed25519 …" }`, a bare string, where
-      the variable is `map(list(string))`: `element "<provider>": list of string
-      required, but have string`. Confirmed by running it, 2026-08-08. Affects
-      failover/workload × scaleway/ovh/outscale, plus the commented proxmox
-      lines; only `management-scaleway` has the list form. One-token fix per
-      file, left out of the emulated-cloud change to keep that diff readable.
-      **Closes:** a plan on each of the six with no `list of string required`.
-      Measured: under a local backend override the error fires at
-      `variables.tf:235` before any provider call, so the plan lane already has
-      the machinery — pointing it at these examples fixes the six and catches
-      the seventh. No credentials, no cloud.
-
 - [ ] **Outscale provider 1.x deprecates the top-level `region`.** The real path
       still sets it, so every real Outscale command warns; only the emulated
       path uses the `api {}` block. Moving real runs onto the block means

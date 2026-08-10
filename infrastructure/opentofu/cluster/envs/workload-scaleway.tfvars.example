@@ -42,7 +42,7 @@ node_distribution = {
 admin_ip = ["YOUR_IP/32"]
 
 bastion_ssh_keys = {
-  scaleway = "ssh-ed25519 AAAA... user@host"
+  scaleway = ["ssh-ed25519 AAAA... user@host"]
 }
 
 git_repo_url     = "https://github.com/dis-bzh/OpenAether-apps.git"
