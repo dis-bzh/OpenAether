@@ -30,9 +30,14 @@ task feint-down
 
 **`feint-plan` — the real `cluster` root, plan only.** Real modules, real
 provider, `envs/feint-<provider>.tfvars.example`. It cannot go further than
-`plan`: the module always builds a Scaleway public gateway and IPAM
-reservations, and Outscale security groups, public IPs, an internet service, a
-NAT service, route tables and load balancers — the emulator serves none of them.
+`plan`, and what stops it is now a short list rather than a long one:
+
+- **Scaleway**: the module always builds a public gateway and IPAM reservations,
+  and neither is served. Unchanged since 0.5.0 — the Scaleway pack did not move.
+- **Outscale**: only the load balancers. Feint 0.6.0 took the pack from 31 routes
+  to 72, so security groups, public IPs, the internet service, the NAT service,
+  route tables and NICs all work now; `CreateLoadBalancer` is still declined.
+
 The root declares a partial S3 backend, so the lane drops a local-backend
 `*_override.tf` in and removes it on exit.
 
@@ -71,8 +76,16 @@ the only proof of a deployment; this catches wiring regressions before spending.
 
 ## Known gaps
 
-Three production attributes this lane cannot carry today, all recorded in
-[`backlog.md`](backlog.md): the Scaleway root volume type, `outscale_volume_link`,
-and `data.outscale_images` — which segfaults the Outscale provider, because
-`data_source_outscale_images.go:289` dereferences `*image.BlockDeviceMappings`
-with no nil guard and the emulator omits that field.
+Pinned to **Feint 0.6.0** (`scripts/dev/feint.sh`). What this lane still cannot
+carry, all recorded in [`backlog.md`](backlog.md):
+
+| Not exercised | Why |
+|---|---|
+| Outscale load balancers | `CreateLoadBalancer` is declined; only `ReadLoadBalancers` is mounted. The last thing between this lane and a full apply of the Outscale module. |
+| Scaleway LB, public gateway, IPAM reservations | Unserved, and the Scaleway pack did not change in 0.6.0. |
+| Scaleway root volume type | The module asks `sbs_volume`; the emulator answers `b_ssd`, and provider 2.80 refuses an explicit `b_ssd`. Honouring `sbs_volume` sends the provider to `block/v1`, which is not mounted. |
+| `data.outscale_images` | Segfaults the provider: `data_source_outscale_images.go:289` dereferences `*image.BlockDeviceMappings` with no nil guard and the catalogue omits it. Reported upstream, still open on 0.6.0 — which is why the tfvars pin `image_id`. |
+| Tags on route tables and internet services | `CreateTags` knows four identifier prefixes (`vpc-`, `subnet-`, `i-`, `key-`), so tagging an `igw-` or an `rtb-` is refused on a resource it has just created. The production module tags both. |
+
+`outscale_volume_link` used to be on this list and is not any more: 0.6.0 mounts
+the `LinkVolumeVmIds` filter its wait depends on.

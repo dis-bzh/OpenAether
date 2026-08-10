@@ -37,12 +37,17 @@ which is what makes a create/read/update/delete cycle possible at all. It is
   again. On Outscale a deleted VM stays readable as `terminated`, on the real API
   as here, so the check reads state rather than counting rows.
 
-## Three production attributes this fixture cannot carry
+## What this fixture cannot carry
 
-Each is a real emulator gap, recorded in `docs/backlog.md`:
+Pinned to **Feint 0.6.0**. Each line is a real emulator gap, recorded in
+`docs/backlog.md`:
 
 | Not exercised | Why |
 |---|---|
+| Outscale load balancers | `CreateLoadBalancer` is declined; only `ReadLoadBalancers` is mounted. The last family between this fixture and the whole Outscale module. |
+| Tags on route tables and internet services | `CreateTags` knows four identifier prefixes — `vpc-`, `subnet-`, `i-`, `key-` — so tagging an `igw-` or an `rtb-` is refused on a resource it has just created. The production module tags both. |
 | Scaleway root volume type | The module asks for `sbs_volume`; the emulator answers `b_ssd` whatever was requested, and provider 2.80 refuses an explicit `b_ssd`. Declaring either is a permanent diff or an error, so the type is left to the API. |
-| `outscale_volume_link` | The provider waits for the link through `ReadVolumes` with a `LinkVolumeVmIds` filter, which the emulator refuses — by design, since it applies a filter or rejects it rather than silently returning everything. |
-| `data.outscale_images` | Segfaults the provider: `data_source_outscale_images.go:289` dereferences `*image.BlockDeviceMappings` with no nil guard, and the emulator omits that field. |
+| `data.outscale_images` | Segfaults the provider: `data_source_outscale_images.go:289` dereferences `*image.BlockDeviceMappings` with no nil guard, and the catalogue omits that field. |
+
+`outscale_volume_link` was on this list until 0.6.0 mounted the
+`LinkVolumeVmIds` filter its wait depends on; it is in the fixture now.

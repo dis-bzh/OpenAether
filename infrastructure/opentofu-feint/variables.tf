@@ -33,3 +33,9 @@ variable "private_cidr" {
   type        = string
   default     = "10.180.0.0/16"
 }
+
+variable "admin_cidr" {
+  description = "Allowed CIDR for bastion SSH in the fixture. RFC 5737 TEST-NET-3: never a real address, this repository is public."
+  type        = string
+  default     = "203.0.113.0/32"
+}

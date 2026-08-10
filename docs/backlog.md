@@ -84,24 +84,42 @@ already-bootstrapped cluster is fixed as of 2026-07-31, see above.
       Asked upstream 2026-07-29: kubernetes/kube-state-metrics#3052. Waiting —
       do not spend more time guessing at config.
 
-- [ ] **Emulated lane: three production attributes it cannot reach.** All found
-      by running it (`docs/emulated-cloud.md`), all upstream candidates at
-      `stephrobert/feint`. (a) `data.outscale_images` **segfaults** the Outscale
-      provider — `data_source_outscale_images.go:289` dereferences
-      `*image.BlockDeviceMappings` with no nil guard, unlike every neighbouring
-      field, and Feint omits it; injecting an empty one removes the crash, so it
-      is a gap and a provider bug at once. (b) `outscale_volume_link` needs
-      `ReadVolumes` to apply a `LinkVolumeVmIds` filter, which Feint refuses by
-      design. (c) Scaleway root volume type: the module asks `sbs_volume`, Feint
-      always answers `b_ssd`, and provider 2.80 refuses an explicit `b_ssd` — so
-      neither value can be declared.
+- [ ] **Emulated lane, against Feint 0.6.0 — what it still cannot reach.** All
+      found by running it (`docs/emulated-cloud.md`). (a) `data.outscale_images`
+      **segfaults** the Outscale provider — `data_source_outscale_images.go:289`
+      dereferences `*image.BlockDeviceMappings` with no nil guard, unlike every
+      neighbouring field, and the catalogue omits it. Reported as
+      `stephrobert/feint#86`, fix ready on `dis-bzh/feint#1`, still open on
+      0.6.0, which is why the tfvars pin `image_id`. (b) `CreateTags` knows four
+      identifier prefixes — `vpc-`, `subnet-`, `i-`, `key-` — so tagging an
+      `igw-` or an `rtb-` is refused on a resource it has just created, while
+      0.6.0 creates both. Our fixture leaves them untagged; the production module
+      tags them. Not reported yet. (c) Scaleway root volume type: the module asks
+      `sbs_volume`, Feint answers `b_ssd`, provider 2.80 refuses an explicit
+      `b_ssd`, and honouring `sbs_volume` sends the provider to `block/v1` which
+      is unmounted — measured, and posted on `stephrobert/feint#8` (SW-3).
+      `outscale_volume_link` left this list in 0.6.0.
 
-- [ ] **A full emulated apply of the cluster root needs routes Feint has not
-      mounted**: Scaleway LB, public gateway and `ipam BookIP` (so
-      `scaleway_ipam_ip` cannot be created) and `instance/v1 ListImages` (501,
-      so no image lookup by name); Outscale security groups, public IPs,
-      internet/NAT service, route tables and LBU. Until then the real root stops
-      at `plan` and the CRUD cycle runs on `infrastructure/opentofu-feint`.
+- [ ] **A full emulated apply of the cluster root is now one family away on
+      Outscale, and three on Scaleway.** 0.6.0 took the Outscale pack from 31 to
+      72 routes, so only the load balancers are missing there
+      (`CreateLoadBalancer` declined, their OSC-5 `#16`, itself blocked by OSC-3
+      `#10`). Scaleway still needs `ipam BookIP` (SW-4 `#11`, unblocked, and the
+      pivot its own issue says `lb` and `vpcgw` wait on), then LB (SW-5 `#17`)
+      and the public gateway (SW-6 `#18`). `instance/v1 ListImages` is covered by
+      SW-2 `#7`. Until those land the real root stops at `plan` and the CRUD
+      cycle runs on `infrastructure/opentofu-feint`.
+
+- [ ] **Record our own deploys with `feint proxy` (0.6.0) and publish the
+      ranking.** The proxy sits between a real client and a real cloud and writes
+      one redacted JSON object per exchange; `feint transcript` then ranks the
+      operations no pack serves, most-called first, with the response shapes the
+      cloud actually returned. Recording one `task up` on Scaleway and one on
+      Outscale would produce exactly the list of what OpenAether needs, measured
+      rather than argued — useful on the batch issues above even if we implement
+      none of them, and it is literally what their X-4 `#74` asks for. Costs a
+      real deploy on a real account, so it rides on the next real-cloud session
+      rather than justifying one.
 
 - [ ] **Six `envs/*.tfvars.example` cannot be applied as written.** They set
       `bastion_ssh_keys = { <provider> = "ssh-ed25519 …" }`, a bare string, where

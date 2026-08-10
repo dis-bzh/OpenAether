@@ -31,11 +31,18 @@ task feint-down
 
 **`feint-plan` — le vrai root `cluster`, plan seulement.** Vrais modules, vrai
 provider, `envs/feint-<provider>.tfvars.example`. Impossible d'aller plus loin
-que le `plan` : le module crée toujours une public gateway et des réservations
-IPAM côté Scaleway, et côté Outscale des security groups, des IP publiques, un
-internet service, un NAT service, des route tables et des load balancers — que
-l'émulateur ne sert pas. Le root déclarant un backend S3 partiel, la voie y
-dépose un `*_override.tf` de backend local et le retire en sortant.
+que le `plan`, et ce qui l'en empêche tient désormais en une liste courte :
+
+- **Scaleway** : le module crée toujours une public gateway et des réservations
+  IPAM, aucune des deux n'est servie. Inchangé depuis la 0.5.0 — le pack
+  Scaleway n'a pas bougé.
+- **Outscale** : les load balancers, et rien d'autre. La 0.6.0 a fait passer le
+  pack de 31 à 72 routes : security groups, IP publiques, internet service, NAT
+  service, route tables et NICs fonctionnent tous ; `CreateLoadBalancer` reste
+  décliné.
+
+Le root déclarant un backend S3 partiel, la voie y dépose un `*_override.tf` de
+backend local et le retire en sortant.
 
 **`feint-apply` — `infrastructure/opentofu-feint/`, un vrai cycle CRUD.** Un root
 séparé (même principe que `infrastructure/opentofu-local`) qui porte les mêmes
@@ -74,8 +81,16 @@ régressions de câblage avant de dépenser.
 
 ## Manques connus
 
-Trois attributs de production que cette voie ne peut pas porter aujourd'hui, tous
-consignés dans [`backlog.md`](backlog.md) : le type de volume racine Scaleway,
-`outscale_volume_link`, et `data.outscale_images` — qui fait segfaulter le
-provider Outscale, parce que `data_source_outscale_images.go:289` déréférence
-`*image.BlockDeviceMappings` sans garde nil alors que l'émulateur omet ce champ.
+Épinglé sur **Feint 0.6.0** (`scripts/dev/feint.sh`). Ce que cette voie ne peut
+toujours pas porter, tout consigné dans [`backlog.md`](backlog.md) :
+
+| Non exercé | Pourquoi |
+|---|---|
+| Load balancers Outscale | `CreateLoadBalancer` est décliné ; seul `ReadLoadBalancers` est monté. C'est la dernière chose entre cette voie et un apply complet du module Outscale. |
+| LB, public gateway et réservations IPAM Scaleway | Non servis, et le pack Scaleway n'a pas changé en 0.6.0. |
+| Type de volume racine Scaleway | Le module demande `sbs_volume` ; l'émulateur répond `b_ssd`, et le provider 2.80 refuse un `b_ssd` explicite. Honorer `sbs_volume` envoie le provider sur `block/v1`, qui n'est pas monté. |
+| `data.outscale_images` | Fait segfaulter le provider : `data_source_outscale_images.go:289` déréférence `*image.BlockDeviceMappings` sans garde nil alors que le catalogue l'omet. Remonté en amont, toujours ouvert en 0.6.0 — d'où l'`image_id` épinglé dans les tfvars. |
+| Tags sur route tables et internet services | `CreateTags` ne connaît que quatre préfixes d'identifiant (`vpc-`, `subnet-`, `i-`, `key-`) : taguer un `igw-` ou un `rtb-` est refusé sur une ressource qu'il vient de créer. Le module de production tague les deux. |
+
+`outscale_volume_link` était dans cette liste et n'y est plus : la 0.6.0 monte le
+filtre `LinkVolumeVmIds` dont dépend son attente.
