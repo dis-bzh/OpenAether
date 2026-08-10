@@ -54,6 +54,14 @@ already-bootstrapped cluster is fixed as of 2026-07-31, see above.
 
 ## Open — work we can do
 
+Every entry ends with what would close it: **a command, run and green — never an
+intention** — and names the rung it needs (mocked / emulated / real cloud, see
+[`CONTRIBUTING.md`](../CONTRIBUTING.md)), because "prove it on a real cluster"
+and "run `task test`" are not the same cost. An entry hiding which one it needs
+is an entry that gets picked up and put back down. **Decide:** replaces
+**Closes:** when a question has to be settled first — a task-shaped entry
+invites someone to build what nobody decided.
+
 - [ ] **`clusterctl-inventory` brick is dead on an operator-only CAPI install.**
       Found live 2026-07-30 (Scaleway management, full profile): the classic
       `Provider` CRD (`clusterctl.cluster.x-k8s.io/v1alpha3`) it writes to
@@ -64,6 +72,10 @@ already-bootstrapped cluster is fixed as of 2026-07-31, see above.
       `ReconciliationFailed`. Either find how to get the classic CRD installed
       alongside the operator, or drop the brick if `clusterctl move` support
       isn't actually needed.
+      **Decide:** keep it and find how the classic CRD gets installed beside the
+      operator, or drop it — the answer belongs in the brick, or in the commit
+      that removes it. Then closes on a real management apply leaving no
+      Kustomization `ReconciliationFailed`.
 
 - [ ] **Log in to a UI through the gateway.** The transport is DONE (2026-07-29,
       Scaleway): `https://longhorn.openaether.local` answers **HTTP 200** through
@@ -76,6 +88,9 @@ already-bootstrapped cluster is fixed as of 2026-07-31, see above.
       is not what controls it.
       ⚠️ The LB-IPAM VIP is not reachable from the bastion; reach the gateway by
       port-forward or from inside the cluster.
+      **Closes:** a human reaching Grafana through the gateway and logging in
+      with a Zitadel account. Real cloud, and a browser — no rung below one can
+      show a claim form.
 
 - [~] **Flux has no per-object Ready signal.** `gotk_reconcile_condition` is gone
       in Flux 2.8; `FluxReconciliationStalled` covers "stopped", not "failing".
@@ -83,6 +98,9 @@ already-bootstrapped cluster is fixed as of 2026-07-31, see above.
       exactly once and could not be reproduced (elimination list in `9ac133d`).
       Asked upstream 2026-07-29: kubernetes/kube-state-metrics#3052. Waiting —
       do not spend more time guessing at config.
+      **Closes:** that issue answered, then the series present on two consecutive
+      scrapes. Any cluster running Flux 2.8 does — the local Docker root
+      qualifies, no cloud needed.
 
 - [ ] **`CreateTags` says a resource the emulator just created does not exist.**
       `taggable` (`internal/providers/outscale/tags.go`) knows four prefixes —
@@ -93,6 +111,8 @@ already-bootstrapped cluster is fixed as of 2026-07-31, see above.
       configuration cannot converge. Reproduced on 0.7.0 with a two-resource
       OpenTofu config. Our fixture works around it by leaving the internet
       service and route tables untagged. Reported as `stephrobert/feint#99`.
+      **Closes:** that issue served, then `task feint-apply PROVIDER=outscale`
+      green with the tags put back on the fixture. Emulated.
 
 - [ ] **A full emulated apply of the cluster root needs two routes, and two
       decisions reversed.** Measured on 0.6.0 and again on 0.7.0, identical both
@@ -104,6 +124,8 @@ already-bootstrapped cluster is fixed as of 2026-07-31, see above.
       to hand a working DNS name for. Arguing either means arguing a real client
       is blocked, not that a metric is short. Until then the real root stops at
       `plan` and the CRUD cycle runs on `infrastructure/opentofu-feint`.
+      **Closes:** `task feint-apply` reaching an apply on the *real* cluster root,
+      both providers. Emulated.
 
 - [ ] **Compare our providers' answers with a real cloud, using `feint shapes`
       (0.7.0).** `task feint-record` answers "what do we call that no pack
@@ -114,6 +136,8 @@ already-bootstrapped cluster is fixed as of 2026-07-31, see above.
       proposed. Recording needs a real account, so it rides on the next
       real-cloud session; `feint shapes --check` then compares offline with no
       credential.
+      **Closes:** `feint shapes --check` green against a recording. Real cloud
+      for the recording only.
 
 - [ ] **Six `envs/*.tfvars.example` cannot be applied as written.** They set
       `bastion_ssh_keys = { <provider> = "ssh-ed25519 …" }`, a bare string, where
@@ -122,20 +146,27 @@ already-bootstrapped cluster is fixed as of 2026-07-31, see above.
       failover/workload × scaleway/ovh/outscale, plus the commented proxmox
       lines; only `management-scaleway` has the list form. One-token fix per
       file, left out of the emulated-cloud change to keep that diff readable.
-
-- [ ] **`talos-image` root is outside the emulated lane.** It stages images
-      through object storage, which Feint does not emulate (the Scaleway
-      provider hardcodes the S3 endpoint in code — not redirectable).
+      **Closes:** a plan on each of the six with no `list of string required`.
+      Measured: under a local backend override the error fires at
+      `variables.tf:235` before any provider call, so the plan lane already has
+      the machinery — pointing it at these examples fixes the six and catches
+      the seventh. No credentials, no cloud.
 
 - [ ] **Outscale provider 1.x deprecates the top-level `region`.** The real path
       still sets it, so every real Outscale command warns; only the emulated
       path uses the `api {}` block. Moving real runs onto the block means
       building `https://api.<region>.outscale.com/api/v1` ourselves, i.e.
       hardcoding their DNS — decide which is worse before changing it.
+      **Decide:** build the URL ourselves, or keep the warning on every real run.
+      The answer belongs in a comment beside the provider block.
 
 ## Blocked on the world, not on us
 
 Not work. Conditions. Do not re-investigate them from a desk.
+
+- [ ] **`talos-image` root is outside the emulated lane.** It stages images
+      through object storage, which Feint does not emulate (the Scaleway
+      provider hardcodes the S3 endpoint in code — not redirectable).
 
 - [ ] **Proxmox never applied for real** — needs the hardware. Plus Ansible host
       hardening, documented but absent from the repo.
