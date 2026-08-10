@@ -92,7 +92,7 @@ already-bootstrapped cluster is fixed as of 2026-07-31, see above.
       tags`), the resource is tainted, and the next apply fails identically — the
       configuration cannot converge. Reproduced on 0.7.0 with a two-resource
       OpenTofu config. Our fixture works around it by leaving the internet
-      service and route tables untagged. Reported upstream.
+      service and route tables untagged. Reported as `stephrobert/feint#99`.
 
 - [ ] **A full emulated apply of the cluster root needs two routes, and two
       decisions reversed.** Measured on 0.6.0 and again on 0.7.0, identical both
