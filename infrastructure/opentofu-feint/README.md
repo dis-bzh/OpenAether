@@ -39,15 +39,15 @@ which is what makes a create/read/update/delete cycle possible at all. It is
 
 ## What this fixture cannot carry
 
-Pinned to **Feint 0.6.0**. Each line is a real emulator gap, recorded in
+Pinned to **Feint 0.7.0**. Each line is a real limit, recorded in
 `docs/backlog.md`:
 
 | Not exercised | Why |
 |---|---|
-| Outscale load balancers | `CreateLoadBalancer` is declined; only `ReadLoadBalancers` is mounted. The last family between this fixture and the whole Outscale module. |
+| Outscale load balancers | `CreateLoadBalancer` is declined on purpose — a load balancer is a data plane the emulator does not have, so creating one would hand back a DNS name resolving nowhere — and `ReadLoadBalancers` answers an empty list. The last family between this fixture and the whole Outscale module, and one that will stay there. |
 | Tags on route tables and internet services | `CreateTags` knows four identifier prefixes — `vpc-`, `subnet-`, `i-`, `key-` — so tagging an `igw-` or an `rtb-` is refused on a resource it has just created. The production module tags both. |
-| Scaleway root volume type | The module asks for `sbs_volume`; the emulator answers `b_ssd` whatever was requested, and provider 2.80 refuses an explicit `b_ssd`. Declaring either is a permanent diff or an error, so the type is left to the API. |
-| `data.outscale_images` | Segfaults the provider: `data_source_outscale_images.go:289` dereferences `*image.BlockDeviceMappings` with no nil guard, and the catalogue omits that field. |
+| Scaleway root volume type | No value is writable: provider 2.79+ refuses an explicit `b_ssd`, and `sbs_volume` is overridden so it plans for ever. The type is left to the API. Measured here, and now upstream's own stated limit. |
 
-`outscale_volume_link` was on this list until 0.6.0 mounted the
-`LinkVolumeVmIds` filter its wait depends on; it is in the fixture now.
+Two lines left this list: `outscale_volume_link` in 0.6.0, which mounted the
+`LinkVolumeVmIds` filter its wait depends on, and `data.outscale_images` in
+0.7.0, which no longer segfaults the provider.

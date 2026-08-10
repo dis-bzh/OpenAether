@@ -84,41 +84,33 @@ already-bootstrapped cluster is fixed as of 2026-07-31, see above.
       Asked upstream 2026-07-29: kubernetes/kube-state-metrics#3052. Waiting —
       do not spend more time guessing at config.
 
-- [ ] **Emulated lane, against Feint 0.6.0 — what it still cannot reach.** All
-      found by running it (`docs/emulated-cloud.md`). (a) `data.outscale_images`
-      **segfaults** the Outscale provider — `data_source_outscale_images.go:289`
-      dereferences `*image.BlockDeviceMappings` with no nil guard, unlike every
-      neighbouring field, and the catalogue omits it. Reported as
-      `stephrobert/feint#86`, fix ready on `dis-bzh/feint#1`, still open on
-      0.6.0, which is why the tfvars pin `image_id`. (b) `CreateTags` knows four
-      identifier prefixes — `vpc-`, `subnet-`, `i-`, `key-` — so tagging an
-      `igw-` or an `rtb-` is refused on a resource it has just created, while
-      0.6.0 creates both. Our fixture leaves them untagged; the production module
-      tags them. Not reported yet. (c) Scaleway root volume type: the module asks
-      `sbs_volume`, Feint answers `b_ssd`, provider 2.80 refuses an explicit
-      `b_ssd`, and honouring `sbs_volume` sends the provider to `block/v1` which
-      is unmounted — measured, and posted on `stephrobert/feint#8` (SW-3).
-      `outscale_volume_link` left this list in 0.6.0.
+- [ ] **`CreateTags` refuses the prefixes the emulator itself creates.** It
+      knows four — `vpc-`, `subnet-`, `i-`, `key-` (`internal/providers/outscale/
+      tags.go`, table `taggable`) — so tagging an `igw-` or an `rtb-` fails on a
+      resource 0.6.0 taught it to create. Our fixture leaves them untagged; the
+      production module tags both. Still four entries on 0.7.0, and still not
+      reported: the last unreported finding of the emulated lane.
 
-- [ ] **A full emulated apply of the cluster root is now one family away on
-      Outscale, and three on Scaleway.** 0.6.0 took the Outscale pack from 31 to
-      72 routes, so only the load balancers are missing there
-      (`CreateLoadBalancer` declined, their OSC-5 `#16`, itself blocked by OSC-3
-      `#10`). Scaleway still needs `ipam BookIP` (SW-4 `#11`, unblocked, and the
-      pivot its own issue says `lb` and `vpcgw` wait on), then LB (SW-5 `#17`)
-      and the public gateway (SW-6 `#18`). `instance/v1 ListImages` is covered by
-      SW-2 `#7`. Until those land the real root stops at `plan` and the CRUD
-      cycle runs on `infrastructure/opentofu-feint`.
+- [ ] **A full emulated apply of the cluster root needs two routes, and two
+      decisions reversed.** Measured on 0.6.0 and again on 0.7.0, identical both
+      times (`task feint-record`). Genuinely missing: Scaleway LB (SW-5 `#17`)
+      and public gateway (SW-6 `#18`). Declined *with a stated reason*, which is
+      a different conversation: `ipam BookIP` (SW-4 `#11`) because addresses come
+      from the subnet plan rather than a client reservation, and Outscale
+      `CreateLoadBalancer` (OSC-5 `#16`) because the emulator has no data plane
+      to hand a working DNS name for. Arguing either means arguing a real client
+      is blocked, not that a metric is short. Until then the real root stops at
+      `plan` and the CRUD cycle runs on `infrastructure/opentofu-feint`.
 
-- [ ] **Record the ranking against a *real* cloud.** `task feint-record` already
-      produces it against the emulator (see `docs/emulated-cloud.md`), which
-      answers "what do we call that is missing" — enough for the batch issues
-      above. What it cannot answer is "what shape does the real cloud return",
-      which is the other half of their X-4 `#74`: a client signing the host it
-      was configured with cannot be recorded through a reverse proxy, the cloud
-      checks the signature against its own name and answers 401. That needs the
-      DNS/TLS interception of their `#76`, and a real deploy — so it rides on the
-      next real-cloud session rather than justifying one.
+- [ ] **Compare our providers' answers with a real cloud, using `feint shapes`
+      (0.7.0).** `task feint-record` answers "what do we call that no pack
+      serves"; this answers "does the shape match", which is the half a proxy
+      cannot reach — a client signs the host it was configured with, so a real
+      cloud behind a reverse proxy answers 401. 0.7.0 solved it with a
+      per-provider signer rather than the DNS/TLS interception their `#76`
+      proposed. Recording needs a real account, so it rides on the next
+      real-cloud session; `feint shapes --check` then compares offline with no
+      credential.
 
 - [ ] **Six `envs/*.tfvars.example` cannot be applied as written.** They set
       `bastion_ssh_keys = { <provider> = "ssh-ed25519 …" }`, a bare string, where

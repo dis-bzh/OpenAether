@@ -131,7 +131,7 @@ pas : `emulated-cloud.fr.md`.
 | ID | Voie | Ce qu'il exerce en propre | Statut |
 |---|---|---|---|
 | `FEINT-scw-plan` | `task feint-plan PROVIDER=scaleway` | Le **vrai** root cluster planifié sans le moindre credential à portée. | 🎭 (CI) |
-| `FEINT-osc-plan` | `task feint-plan PROVIDER=outscale` | Idem Outscale — jusqu'ici le seul provider sans aucune couverture en mode apply. | 🎭 (CI) |
+| `FEINT-osc-plan` | `task feint-plan PROVIDER=outscale` | Idem Outscale, et il résout son image via `data.outscale_images` plutôt qu'un id épinglé — la forme `images[0]` que le module portait comme hypothèse non vérifiée. | 🎭 (CI) |
 | `FEINT-scw-crud` | `task feint-apply PROVIDER=scaleway` | Vrai create/read/update/delete : jeu de règles du security group, adressage du NIC privé, cycle de vie serveur + volume, re-plan vide, destroy vérifié contre l'API. | 🎭 (CI) |
 | `FEINT-osc-crud` | `task feint-apply PROVIDER=outscale` | Idem sur Outscale, et depuis Feint 0.6.0 presque tout le module : le plan d'egress à deux sous-réseaux (internet service, NAT, les deux route tables), security groups et règles, lien d'IP publique, lien de volume, keypair, trois VMs — 27 ressources. Seuls les load balancers restent hors de portée. | 🎭 (CI) |
 | `FEINT-record` | `task feint-record PROVIDER=…` | Enregistre le vrai module à travers `feint proxy` et classe les opérations qu'aucun pack ne sert. Mesure l'écart au lieu de l'affirmer ; l'apply derrière est censé échouer au premier appel non servi. | 🎭 |

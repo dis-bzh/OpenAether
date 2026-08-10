@@ -8,16 +8,17 @@
 # Every value here is fake by construction — this file is public, and nothing in
 # it may ever name a real environment. admin_ip is RFC 5737 TEST-NET-3.
 #
-# Both image ids are pinned, for two different reasons — see docs/backlog.md.
-#   image_id: leaving it unset runs data.outscale_images, which SEGFAULTS the
-#     provider. data_source_outscale_images.go:289 dereferences
-#     *image.BlockDeviceMappings with no nil guard (every neighbouring field uses
-#     ptr.From), and the emulator's ReadImages omits that field. Injecting an
-#     empty BlockDeviceMappings into the response removes the crash, which is
-#     what makes it a Feint gap and a provider bug at once.
-#   bastion_image_id: its data source addresses one image by id, but the emulator
-#     answers every filter with its whole catalogue — 3 images, so "more than one
-#     result". Pinning it skips the lookup.
+# image_id is deliberately unset: that runs data.outscale_images, whose
+# `images[0]` shape modules/providers/outscale/main.tf flagged as never
+# validated. Exercising it is the point of this lane, and Feint 0.7.0 is what
+# made it possible — before that the provider segfaulted on a catalogue with no
+# BlockDeviceMappings. image_name therefore names a CATALOGUE image, not our
+# Talos one: 0.7.0 applies the image_names filter, and no fixed catalogue can
+# hold an image a build pipeline publishes. So this proves the shape, not the
+# name resolution.
+#
+# bastion_image_id stays pinned: its data source filters on ami-b29cea33,
+# hardcoded in the module, which no emulator catalogue holds.
 # ==============================================================================
 
 cluster_name    = "feint-outscale"
@@ -32,7 +33,8 @@ node_distribution = {
     region             = "eu-west-2"
     instance_type      = "tinav6.c1r1p2"
     availability_zones = ["eu-west-2a"]
-    image_id           = "ami-00000001"
+    image_id           = null
+    image_name         = "Ubuntu-24.04-2025.01"
     bastion_image_id   = "ami-00000001"
   }
 }

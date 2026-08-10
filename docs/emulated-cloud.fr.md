@@ -35,12 +35,15 @@ provider, `envs/feint-<provider>.tfvars.example`. Impossible d'aller plus loin
 que le `plan`, et ce qui l'en empêche tient désormais en une liste courte :
 
 - **Scaleway** : le module crée toujours une public gateway et des réservations
-  IPAM, aucune des deux n'est servie. Inchangé depuis la 0.5.0 — le pack
-  Scaleway n'a pas bougé.
-- **Outscale** : les load balancers, et rien d'autre. La 0.6.0 a fait passer le
-  pack de 31 à 72 routes : security groups, IP publiques, internet service, NAT
-  service, route tables et NICs fonctionnent tous ; `CreateLoadBalancer` reste
-  décliné.
+  IPAM. La gateway n'est pas servie ; la réservation IPAM est déclinée
+  volontairement. Inchangé depuis la 0.5.0 — le pack Scaleway n'a bougé dans
+  aucune des deux versions suivantes.
+- **Outscale** : les load balancers, et rien d'autre — et c'est une décision, pas
+  un manque. La 0.6.0 a fait passer le pack de 31 à 72 routes : security groups,
+  IP publiques, internet service, NAT service, route tables et NICs fonctionnent
+  tous ; la 0.7.0 n'y ajoute aucune route mais a fait cesser le segfault de
+  `data.outscale_images`, ce qui permet à cette voie de résoudre son image par
+  la data source.
 
 Le root déclarant un backend S3 partiel, la voie y dépose un `*_override.tf` de
 backend local et le retire en sortant.
@@ -59,19 +62,25 @@ les plus appelées d'abord. L'apply derrière est *censé* échouer, au premier 
 non servi — tout ce qui précède est justement ce qui est enregistré. Résultat
 actuel, reproductible avec les commandes ci-dessus :
 
-| Provider | Appelé, servi par personne | Appels |
-|---|---|---|
-| Scaleway | `/ipam/v1/regions/fr-par/ips` (501) | 2 |
-| Scaleway | `/lb/v1/zones/fr-par-1/ips` (404) | 2 |
-| Scaleway | `/vpc-gw/v2/zones/fr-par-1/ips` (404) | 1 |
-| Outscale | `/api/v1/CreateLoadBalancer` (404) | 2 |
+| Provider | Appelé, servi par personne | Appels | Manquant, ou décliné ? |
+|---|---|---|---|
+| Scaleway | `POST /ipam/v1/regions/fr-par/ips` (501) | 2 | Décliné — le `GET` sur le même chemin répond 200 |
+| Scaleway | `/lb/v1/zones/fr-par-1/ips` (404) | 2 | Manquant |
+| Scaleway | `/vpc-gw/v2/zones/fr-par-1/ips` (404) | 1 | Manquant |
+| Outscale | `/api/v1/CreateLoadBalancer` (404) | 2 | Décliné |
 
-L'amont est ici l'émulateur, pas le cloud, et c'est une contrainte plutôt qu'un
-raccourci : un client qui signe l'hôte pour lequel il a été configuré — le
-provider Terraform le fait — ne peut pas être enregistré contre un vrai cloud à
-travers un reverse proxy, puisque le cloud vérifie la signature contre son propre
-nom et répond 401. Cette voie mesure donc *ce que nous appelons et qui manque*,
-pas ce que le vrai cloud répondrait.
+Identique en 0.6.0 et 0.7.0 : aucune des deux n'a bougé quoi que ce soit
+qu'appellent nos modules. La distinction de la dernière colonne est tout
+l'intérêt de rejouer la mesure — une route manquante est un trou que quelqu'un
+peut combler, un decline est une réponse.
+
+L'amont est ici l'émulateur, pas le cloud. Un client qui signe l'hôte pour lequel
+il a été configuré — le provider Terraform le fait — ne peut pas être enregistré
+contre un vrai cloud à travers un simple reverse proxy, puisque le cloud vérifie
+la signature contre son propre nom et répond 401. La 0.7.0 traite cette autre
+moitié séparément, avec `feint shapes` et un signataire par provider ; cette voie
+reste délibérément celle sans credential, et répond *ce que nous appelons et qui
+manque* plutôt que ce que le vrai cloud renvoie.
 
 ## Le garde-fou
 
@@ -103,16 +112,20 @@ régressions de câblage avant de dépenser.
 
 ## Manques connus
 
-Épinglé sur **Feint 0.6.0** (`scripts/dev/feint.sh`). Ce que cette voie ne peut
+Épinglé sur **Feint 0.7.0** (`scripts/dev/feint.sh`). Ce que cette voie ne peut
 toujours pas porter, tout consigné dans [`backlog.md`](backlog.md) :
 
 | Non exercé | Pourquoi |
 |---|---|
-| Load balancers Outscale | `CreateLoadBalancer` est décliné ; seul `ReadLoadBalancers` est monté. C'est la dernière chose entre cette voie et un apply complet du module Outscale. |
-| LB, public gateway et réservations IPAM Scaleway | Non servis, et le pack Scaleway n'a pas changé en 0.6.0. |
-| Type de volume racine Scaleway | Le module demande `sbs_volume` ; l'émulateur répond `b_ssd`, et le provider 2.80 refuse un `b_ssd` explicite. Honorer `sbs_volume` envoie le provider sur `block/v1`, qui n'est pas monté. |
-| `data.outscale_images` | Fait segfaulter le provider : `data_source_outscale_images.go:289` déréférence `*image.BlockDeviceMappings` sans garde nil alors que le catalogue l'omet. Remonté en amont, toujours ouvert en 0.6.0 — d'où l'`image_id` épinglé dans les tfvars. |
+| Load balancers Outscale | `CreateLoadBalancer` est **décliné volontairement**, pas manquant : un load balancer est un plan de données que l'émulateur n'a pas, en créer un rendrait un nom DNS ne résolvant nulle part. `ReadLoadBalancers` répond une liste vide. Celui-là ne bougera pas. |
+| Réservations IPAM Scaleway | Décliné aussi, avec une raison : les adresses viennent du plan de sous-réseau où le NIC est placé, donc `BookIP` distribuerait une adresse qu'aucun runtime ne configure. `scaleway_ipam_ip` est donc hors de portée ici. |
+| LB et public gateway Scaleway | Réellement absents — ni servis ni déclinés. Les deux vrais manques que nos modules rencontrent. |
+| Type de volume racine Scaleway | Aucun `root_volume { volume_type }` n'est écrivable : le provider 2.79+ refuse `b_ssd`, et `sbs_volume` planifie éternellement car l'émulateur l'écrase. L'honorer enverrait le provider sur `block/v1`, non monté. Mesuré ici, c'est devenu la limite documentée en amont et son issue #8. |
+| Résolution d'image par nom | Le catalogue est fixe, et la 0.7.0 applique le filtre `image_names` : un nom publié par un pipeline de build ne correspond à rien — des deux côtés. Les tfvars Scaleway épinglent `image_id` ; ceux d'Outscale pointent `image_name` sur une entrée du catalogue, ce qui exerce la recherche sans prétendre résoudre notre propre image. |
 | Tags sur route tables et internet services | `CreateTags` ne connaît que quatre préfixes d'identifiant (`vpc-`, `subnet-`, `i-`, `key-`) : taguer un `igw-` ou un `rtb-` est refusé sur une ressource qu'il vient de créer. Le module de production tague les deux. |
 
-`outscale_volume_link` était dans cette liste et n'y est plus : la 0.6.0 monte le
-filtre `LinkVolumeVmIds` dont dépend son attente.
+Deux choses ont quitté cette liste. `outscale_volume_link` en 0.6.0, qui a monté
+le filtre `LinkVolumeVmIds` dont dépend son attente. Et `data.outscale_images`
+en 0.7.0, qui ne fait plus segfaulter le provider — la voie Outscale résout donc
+son image par la data source plutôt que par un id épinglé, ce qui exerce la
+forme `images[0]` que le module portait comme une hypothèse non vérifiée.

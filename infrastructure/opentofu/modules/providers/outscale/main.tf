@@ -10,8 +10,10 @@
 # Looked up by name only when image_id is left unset — mirrors the Scaleway
 # module's data.scaleway_instance_image (the talos-image root publishes under
 # this same name convention; see talos-image/main.tf's local.image_name).
-# NOT validated against a real Outscale account yet — confirm the `images[0]`
-# shape (most-recent-first ordering, image_id attribute) before relying on it.
+# The `images[0].image_id` dereference is exercised by the emulated lane
+# (`task feint-plan PROVIDER=outscale`). Its ORDERING is not: the emulator
+# returns a fixed catalogue in declaration order, so "most recent first" remains
+# an assumption a real account has to confirm.
 data "outscale_images" "talos" {
   count = var.image_id == null ? 1 : 0
   filter {
