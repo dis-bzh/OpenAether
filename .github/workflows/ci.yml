@@ -15,6 +15,38 @@ permissions:
   contents: read
 
 jobs:
+  # The commit-msg hooks that enforce this live in .git/hooks/, which no clone
+  # carries — so the same checks run here on every subject a PR adds.
+  commits:
+    name: Commit messages
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          # cz needs the range, and the default single-commit checkout has none.
+          fetch-depth: 0
+
+      - name: Install commitizen
+        # renovate: datasource=pypi depName=commitizen
+        run: pip install commitizen==4.9.1
+
+      - name: Conventional Commits
+        run: cz check --rev-range origin/${{ github.base_ref }}..HEAD
+
+      # Scoped by the tree, not by a date or a pinned sha: a commit is checked
+      # only if the rule already existed in it. Commits predating the rule are
+      # skipped rather than rewritten.
+      - name: No authorship trailer naming a tool
+        run: |
+          check=scripts/dev/check-commit-trailers.sh
+          for sha in $(git log --format=%H "origin/${{ github.base_ref }}..HEAD"); do
+            git cat-file -e "$sha:$check" 2>/dev/null || continue
+            git log -1 --format=%B "$sha" > "$RUNNER_TEMP/msg"
+            "./$check" "$RUNNER_TEMP/msg"
+          done
+
   lint:
     name: Lint & Format
     runs-on: ubuntu-latest

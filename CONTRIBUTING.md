@@ -1,9 +1,36 @@
 # Contributing
 
+Several rules below are adapted from
+[Feint's `CONTRIBUTING.md`](https://github.com/stephrobert/feint/blob/main/CONTRIBUTING.md),
+met while wiring the emulated-cloud lane. Read it there for the reasoning at
+length; kept here is what transfers to an infrastructure repository.
+
 ## Setup
 
     task setup      # installs OpenTofu, talosctl, kubectl, Task, pre-commit
     pre-commit install
+
+**`pre-commit install` is a real step, not a courtesy.** Git hooks live in
+`.git/hooks/`, which is not versioned, so a fresh clone has none of them however
+complete `.pre-commit-config.yaml` looks. It installs two hook types —
+`pre-commit` and `commit-msg` — declared through `default_install_hook_types`,
+so the single command is enough.
+
+## The one rule
+
+**A change to a provider module is not done until something real exercised it.**
+
+A mock asserts what we believe a provider does. The provider binary asserts what
+it actually does. Three rungs, and a PR says which one it reached — and says
+explicitly what could not be run:
+
+| Rung | Command | What it proves |
+|---|---|---|
+| Mocked | `task test` | The graph resolves and the assertions hold. The provider binary never speaks. |
+| Emulated | `task feint-plan` / `task feint-apply` | The real provider binary, real HTTP, zero credentials — over the subset the emulator serves. See [`docs/emulated-cloud.md`](docs/emulated-cloud.md). |
+| Real cloud | `task up` | The only proof a deployment works. Costs money, so it is not required of every PR — saying you skipped it is. |
+
+"The tests should pass" is not a rung.
 
 ## Before opening a PR
 
@@ -13,11 +40,21 @@
     task test
 
 All four run in CI too — a PR can't merge until they're green (see the required
-checks on `main`).
+checks on `main`). `task feint-test` also runs there, on both providers.
 
 Before touching the Flux DAG in the sibling `OpenAether-apps` repo:
 
     task apps-validate
+
+## Commits
+
+[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/), scope by
+area (`feat(outscale):`, `fix(talos):`, `chore(deps):`). Checked twice by the
+same tool: the `commit-msg` hook refuses a subject as you write it, and the
+`commits` CI job checks every subject a PR adds — because a hook lives in
+`.git/hooks/`, which no clone carries.
+
+    cz check --rev-range origin/main..HEAD   # what CI will say
 
 ## Conventions
 
@@ -26,12 +63,55 @@ Before touching the Flux DAG in the sibling `OpenAether-apps` repo:
 - Comments explain the *why*, not the *what* — 1-3 lines, no incident narratives.
 - Open work items live in `docs/backlog.md`, not scattered TODOs — read it before
   starting non-trivial work, and drop an entry once it's done (that's what git
-  history is for).
+  history is for). Write an entry as **the symptom, not the diagnosis**: the
+  diagnosis is often wrong when the entry is written, and the entry outlives it.
 - Dependency bumps (OpenTofu providers, Talos, Kubernetes, Cilium, Flux, CI
   actions, pre-commit hooks) are proposed by Renovate and never auto-merged —
   review the diff, especially anything labeled `needs-regen` (the pinned version
   bumped but a vendored manifest needs regenerating by hand) or
   `vendored-manifest`.
+
+## AI-assisted contributions
+
+Welcome, under one condition, and the condition is not about AI: **bring the
+evidence, not the intention.** A PR claiming it fixes the Outscale egress path
+and showing no run is refused whoever wrote it.
+
+**Disclose it** with the `Assisted-by:` git trailer, naming the tool and the
+model version — the convention the Linux kernel, Fedora, Mesa and QGIS converged
+on. It exists so a future reader of `git log` knows what to re-check.
+
+    feat(outscale): two-subnet egress plan
+
+    Assisted-by: Claude Code (claude-opus-5)
+
+`Co-Authored-By` and `Signed-off-by` from a tool are **forbidden**: those
+trailers assert authorship and certify origin, and a model can do neither. The
+human submitting is the author and takes responsibility for every line,
+licensing included. Refused by the `commit-msg` hook and again in CI, which
+scopes itself by the tree — a commit is checked only if
+`scripts/dev/check-commit-trailers.sh` already existed in it, so commits
+predating the rule are skipped rather than rewritten. Skip the trailer entirely
+for spelling, formatting, or a completion that saved three keystrokes.
+
+**Run it before you send it** — the rungs above, and say which one.
+
+**Do not send what you have not read.** The failure mode here is not bad code,
+it is confident code against an API nobody checked: a plausible attribute name
+the provider's schema does not define, with a mock test asserting the invention
+— and a mock will assert anything. If you cannot say where an attribute came
+from (the provider's schema, its documentation, or a run), do not send it. "The
+model produced it" is not a source.
+
+### Refused on sight
+
+- A change to a provider module with no run of any rung, that says so or shows it.
+- A batch across several providers with no single reviewable claim.
+- A real IP, cloud account id, or any environment-specific value outside the
+  gitignored `envs/*.tfvars`. The repository is public and has had to purge its
+  history once — see `CLAUDE.md`.
+- Anything justified by a metric — resource count, coverage — rather than by
+  what it unblocks.
 
 ## Pull requests
 

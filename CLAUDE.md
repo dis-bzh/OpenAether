@@ -76,6 +76,20 @@ par la chaîne littérale française de leur en-tête. La traduire a rendu `--ch
 aveugle **en silence** (il annonçait « 0 profil » au lieu de 1). Avant de
 traduire une chaîne, vérifier qu'aucun code ne la compare.
 
+## Contribution assistée par IA
+
+Règles reprises de `CONTRIBUTING.md` (lui-même adapté du CONTRIBUTING de Feint) —
+deux qui changent l'écriture des commits :
+
+- **Trailer `Assisted-by: Claude Code (<modèle>)`**, jamais `Co-Authored-By` ni
+  `Signed-off-by` pour un outil : ces deux-là revendiquent la paternité ou
+  certifient l'origine, ce qu'un modèle ne peut pas faire. Refusé par le hook
+  `commit-msg` et par la CI.
+- **Apporter la preuve, pas l'intention** : une modif de module provider n'est
+  pas finie tant que quelque chose de réel ne l'a pas exercée. Trois barreaux
+  (`task test` mocké → `task feint-*` émulé → cloud réel) ; dire lequel on a
+  atteint et lequel on a sauté. « Ça devrait passer » n'est pas un barreau.
+
 ## Concision et refacto
 
 Le projet ne doit pas grossir en lignes plus vite qu'en fonctionnalités.
