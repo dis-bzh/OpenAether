@@ -90,8 +90,8 @@ trailers assert authorship and certify origin, and a model can do neither. The
 human submitting is the author and takes responsibility for every line,
 licensing included. Refused by the `commit-msg` hook and again in CI, which
 scopes itself by the tree — a commit is checked only if
-`scripts/dev/check-commit-trailers.sh` already existed in it, so commits
-predating the rule are skipped rather than rewritten. Skip the trailer entirely
+`scripts/dev/check-commit-trailers.sh` already existed in it, so history from
+before the rule does not fail the build. Skip the trailer entirely
 for spelling, formatting, or a completion that saved three keystrokes.
 
 **Run it before you send it** — the rungs above, and say which one.
