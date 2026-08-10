@@ -39,15 +39,13 @@ which is what makes a create/read/update/delete cycle possible at all. It is
 
 ## What this fixture cannot carry
 
-Pinned to **Feint 0.7.0**. Each line is a real limit, recorded in
-`docs/backlog.md`:
+The list of limits lives in
+**[`docs/emulated-cloud.md`](../../docs/emulated-cloud.md)**, under "Known gaps",
+and is not repeated here — it used to be, and the two copies were already
+wording the same limits differently. Pin: **Feint 0.7.0** (`scripts/dev/feint.sh`).
 
-| Not exercised | Why |
-|---|---|
-| Outscale load balancers | `CreateLoadBalancer` is declined on purpose — a load balancer is a data plane the emulator does not have, so creating one would hand back a DNS name resolving nowhere — and `ReadLoadBalancers` answers an empty list. The last family between this fixture and the whole Outscale module, and one that will stay there. |
-| Tags on route tables and internet services | `CreateTags` knows four identifier prefixes — `vpc-`, `subnet-`, `i-`, `key-` — so tagging an `igw-` or an `rtb-` is refused on a resource it has just created. The production module tags both. |
-| Scaleway root volume type | No value is writable: provider 2.79+ refuses an explicit `b_ssd`, and `sbs_volume` is overridden so it plans for ever. The type is left to the API. Measured here, and now upstream's own stated limit. |
-
-Two lines left this list: `outscale_volume_link` in 0.6.0, which mounted the
-`LinkVolumeVmIds` filter its wait depends on, and `data.outscale_images` in
-0.7.0, which no longer segfaults the provider.
+What is specific to this root rather than to the lane: the fixture **omits the
+`root_volume` block** and leaves the internet service and route tables
+**untagged**. Both are deliberate — those are the two inputs that fail — and
+both mean the fixture is quieter than the production module at exactly the
+points where it differs from it.
