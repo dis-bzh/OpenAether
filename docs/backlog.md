@@ -84,12 +84,15 @@ already-bootstrapped cluster is fixed as of 2026-07-31, see above.
       Asked upstream 2026-07-29: kubernetes/kube-state-metrics#3052. Waiting —
       do not spend more time guessing at config.
 
-- [ ] **`CreateTags` refuses the prefixes the emulator itself creates.** It
-      knows four — `vpc-`, `subnet-`, `i-`, `key-` (`internal/providers/outscale/
-      tags.go`, table `taggable`) — so tagging an `igw-` or an `rtb-` fails on a
-      resource 0.6.0 taught it to create. Our fixture leaves them untagged; the
-      production module tags both. Still four entries on 0.7.0, and still not
-      reported: the last unreported finding of the emulated lane.
+- [ ] **`CreateTags` says a resource the emulator just created does not exist.**
+      `taggable` (`internal/providers/outscale/tags.go`) knows four prefixes —
+      `vpc-`, `subnet-`, `i-`, `key-` — against sixteen the pack mints, so ten
+      taggable kinds answer `5063 InvalidResource` on ids it returns from its own
+      `Read*`. Not cosmetic: the provider fails the apply (`Unable to create
+      tags`), the resource is tainted, and the next apply fails identically — the
+      configuration cannot converge. Reproduced on 0.7.0 with a two-resource
+      OpenTofu config. Our fixture works around it by leaving the internet
+      service and route tables untagged. Reported upstream.
 
 - [ ] **A full emulated apply of the cluster root needs two routes, and two
       decisions reversed.** Measured on 0.6.0 and again on 0.7.0, identical both
