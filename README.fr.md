@@ -172,8 +172,9 @@ aucune facture.
 
 ```bash
 task feint-up                        # démarre l'émulateur (binaire épinglé, checksum vérifié)
-task feint-plan  PROVIDER=scaleway   # plan du VRAI root cluster, zéro credential
-task feint-apply PROVIDER=outscale   # cycle apply/destroy sur la fixture réduite
+task feint-plan   PROVIDER=scaleway  # plan du VRAI root cluster, zéro credential
+task feint-apply  PROVIDER=outscale  # cycle apply/destroy sur la fixture réduite
+task feint-record PROVIDER=scaleway  # classe les opérations qu'on appelle et qu'aucun pack ne sert
 task feint-down
 ```
 

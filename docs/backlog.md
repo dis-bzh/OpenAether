@@ -110,16 +110,15 @@ already-bootstrapped cluster is fixed as of 2026-07-31, see above.
       SW-2 `#7`. Until those land the real root stops at `plan` and the CRUD
       cycle runs on `infrastructure/opentofu-feint`.
 
-- [ ] **Record our own deploys with `feint proxy` (0.6.0) and publish the
-      ranking.** The proxy sits between a real client and a real cloud and writes
-      one redacted JSON object per exchange; `feint transcript` then ranks the
-      operations no pack serves, most-called first, with the response shapes the
-      cloud actually returned. Recording one `task up` on Scaleway and one on
-      Outscale would produce exactly the list of what OpenAether needs, measured
-      rather than argued — useful on the batch issues above even if we implement
-      none of them, and it is literally what their X-4 `#74` asks for. Costs a
-      real deploy on a real account, so it rides on the next real-cloud session
-      rather than justifying one.
+- [ ] **Record the ranking against a *real* cloud.** `task feint-record` already
+      produces it against the emulator (see `docs/emulated-cloud.md`), which
+      answers "what do we call that is missing" — enough for the batch issues
+      above. What it cannot answer is "what shape does the real cloud return",
+      which is the other half of their X-4 `#74`: a client signing the host it
+      was configured with cannot be recorded through a reverse proxy, the cloud
+      checks the signature against its own name and answers 401. That needs the
+      DNS/TLS interception of their `#76`, and a real deploy — so it rides on the
+      next real-cloud session rather than justifying one.
 
 - [ ] **Six `envs/*.tfvars.example` cannot be applied as written.** They set
       `bastion_ssh_keys = { <provider> = "ssh-ed25519 …" }`, a bare string, where

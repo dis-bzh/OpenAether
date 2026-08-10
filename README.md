@@ -173,8 +173,9 @@ APIs. One step past the mocked `tofu test`: real HTTP, real decode, no bill.
 
 ```bash
 task feint-up                        # start the emulator (pinned binary, checksum-verified)
-task feint-plan  PROVIDER=scaleway   # plan the REAL cluster root, zero credentials
-task feint-apply PROVIDER=outscale   # apply/destroy cycle on the reduced fixture
+task feint-plan   PROVIDER=scaleway  # plan the REAL cluster root, zero credentials
+task feint-apply  PROVIDER=outscale  # apply/destroy cycle on the reduced fixture
+task feint-record PROVIDER=scaleway  # rank the operations we call that no pack serves
 task feint-down
 ```
 

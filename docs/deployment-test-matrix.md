@@ -133,6 +133,7 @@ quotas. What it proves and what it does not: `emulated-cloud.md`.
 | `FEINT-osc-plan` | `task feint-plan PROVIDER=outscale` | Same for Outscale — until now the only provider with no apply-mode coverage at all. | 🎭 (CI) |
 | `FEINT-scw-crud` | `task feint-apply PROVIDER=scaleway` | Real create/read/update/delete: security-group rule set, private NIC addressing, server + volume lifecycle, empty re-plan, destroy verified against the API. | 🎭 (CI) |
 | `FEINT-osc-crud` | `task feint-apply PROVIDER=outscale` | Same on Outscale, and since Feint 0.6.0 nearly the whole module: the two-subnet egress plan (internet service, NAT, both route tables), security groups and rules, public IP link, volume link, keypair, three VMs — 27 resources. Only the load balancers are out of reach. | 🎭 (CI) |
+| `FEINT-record` | `task feint-record PROVIDER=…` | Records the real module through `feint proxy` and ranks the operations no pack serves. Measures the gap rather than asserting; the apply behind it is expected to fail on the first unserved call. | 🎭 |
 | `FEINT-guard` | non-loopback endpoint | Negative test: the lane must refuse to drive anything but a local emulator. | 🎭 |
 
 Not reachable in this lane, and why: Scaleway root volume type, Outscale

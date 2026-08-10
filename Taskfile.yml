@@ -434,6 +434,15 @@ tasks:
     cmds:
       - ./scripts/dev/feint.sh apply {{.PROVIDER}}
 
+  feint-record:
+    desc: >-
+      Rank the operations our module calls that the emulator does not serve. Usage: task feint-record
+      PROVIDER=scaleway|outscale
+    vars:
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    cmds:
+      - ./scripts/dev/feint.sh record {{.PROVIDER}}
+
   feint-test:
     desc: "Both providers, both lanes (plan on the real root + apply/destroy on the fixture)"
     cmds:

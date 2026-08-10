@@ -21,13 +21,14 @@ là-bas plutôt qu'ici, elles bougent :
 
 ```bash
 task feint-up                          # démarre l'émulateur (installe le binaire épinglé si absent)
-task feint-plan  PROVIDER=scaleway     # plan du VRAI root cluster, sans credentials
-task feint-apply PROVIDER=outscale     # cycle apply/destroy sur la fixture réduite
-task feint-test                        # les deux providers, les deux voies
+task feint-plan   PROVIDER=scaleway    # plan du VRAI root cluster, sans credentials
+task feint-apply  PROVIDER=outscale    # cycle apply/destroy sur la fixture réduite
+task feint-record PROVIDER=scaleway    # classe ce que notre module appelle et qu'aucun pack ne sert
+task feint-test                        # les deux providers, plan + apply
 task feint-down
 ```
 
-## Deux voies, parce qu'une seule ne peut pas faire les deux
+## Trois voies, parce qu'une seule ne peut pas faire les trois
 
 **`feint-plan` — le vrai root `cluster`, plan seulement.** Vrais modules, vrai
 provider, `envs/feint-<provider>.tfvars.example`. Impossible d'aller plus loin
@@ -50,6 +51,27 @@ formes sur le sous-ensemble réellement servi : init → validate → plan → a
 **second plan vide** → destroy, l'existence comme la disparition étant relues
 depuis l'API et non depuis le state. Voir son
 [README](../infrastructure/opentofu-feint/README.md).
+
+**`feint-record` — mesurer le mur au lieu d'en discuter.** `feint proxy`
+s'intercale entre le provider et l'émulateur et écrit un objet JSON caviardé par
+échange ; `feint transcript` classe ensuite les opérations qu'aucun pack ne sert,
+les plus appelées d'abord. L'apply derrière est *censé* échouer, au premier appel
+non servi — tout ce qui précède est justement ce qui est enregistré. Résultat
+actuel, reproductible avec les commandes ci-dessus :
+
+| Provider | Appelé, servi par personne | Appels |
+|---|---|---|
+| Scaleway | `/ipam/v1/regions/fr-par/ips` (501) | 2 |
+| Scaleway | `/lb/v1/zones/fr-par-1/ips` (404) | 2 |
+| Scaleway | `/vpc-gw/v2/zones/fr-par-1/ips` (404) | 1 |
+| Outscale | `/api/v1/CreateLoadBalancer` (404) | 2 |
+
+L'amont est ici l'émulateur, pas le cloud, et c'est une contrainte plutôt qu'un
+raccourci : un client qui signe l'hôte pour lequel il a été configuré — le
+provider Terraform le fait — ne peut pas être enregistré contre un vrai cloud à
+travers un reverse proxy, puisque le cloud vérifie la signature contre son propre
+nom et répond 401. Cette voie mesure donc *ce que nous appelons et qui manque*,
+pas ce que le vrai cloud répondrait.
 
 ## Le garde-fou
 
