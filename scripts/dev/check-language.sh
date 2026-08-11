@@ -37,6 +37,11 @@ esac
 # not a silencer: everything not named in it is checked.
 ignored() {
   local repo="$1" path="$2" pattern
+  # This file, always and without an entry anywhere. It necessarily contains the
+  # words it hunts — the list itself, and the sentence explaining `sans` versus
+  # the SANs acronym. Relying on each repository to remember an allowlist line
+  # meant the copy in the sibling repository failed its own CI on first run.
+  [ "$path" = "scripts/dev/check-language.sh" ] && return 0
   [ -f "$repo/.languageignore" ] || return 1
   while read -r pattern; do
     case "$pattern" in ''|\#*) continue ;; esac
