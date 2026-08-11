@@ -48,8 +48,8 @@ English is canonical. The 1.0.0 entry below stays in French, unrewritten.
   `apps/clusters`.
   The Flux `GitRepository` now uses `ref.name` rather than `ref.branch` — one field that
   carries either — and the substitution injected through the gitception loop is
-  `GIT_REF` instead of `GIT_BRANCH`. **Requires OpenAether-apps 1.0.1**, and that tag
-  must exist before this one is cut.
+  `GIT_REF` instead of `GIT_BRANCH`. **The examples require OpenAether-apps 1.0.1**, so that
+  tag is cut first; nothing else depends on it existing.
   Rung: statically validated (`tofu validate`, rendered template inspected, apps-side
   YAML linted). **Not yet exercised on a live cluster** — the tag path in particular.
 - `apps/clusters` no longer enables the DIS fleet's own children by default; see the

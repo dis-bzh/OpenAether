@@ -254,10 +254,15 @@ variable "git_repo_url" {
 # repo named a deployable system. `refs/tags/…` by default, and a branch stays
 # available for testing — which is also how two managements avoid sharing
 # apps/clusters (see OpenAether-apps/README.md).
+# The DEFAULT tracks a branch and the EXAMPLES pin a tag, deliberately in that
+# order. A tag default makes the repository undeployable between releases —
+# you cannot test the ref mechanism until the tag exists, and after it exists
+# main still deploys the previous platform. Development tracks main; a user
+# copies an example and gets a pinned pair.
 variable "git_ref" {
-  description = "Git ref OpenAether-apps is tracked at, fully qualified: refs/tags/<version> or refs/heads/<branch>"
+  description = "Git ref OpenAether-apps is tracked at, fully qualified: refs/heads/<branch> to develop, refs/tags/<version> to deploy"
   type        = string
-  default     = "refs/tags/1.0.1"
+  default     = "refs/heads/main"
 
   validation {
     condition     = can(regex("^refs/(heads|tags)/.+$", var.git_ref))
