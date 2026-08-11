@@ -172,6 +172,21 @@ tasks:
           echo "    cp $TFVARS.example $TFVARS" >&2
           exit 1
         }
+        # The two keys are a PAIR and nothing else says so: bastion_ssh_keys is
+        # the public half, injected by cloud-init; KEY is the private half the
+        # tunnel authenticates with. A mismatch fails in phase 2 — after the
+        # bill — with an SSH error naming neither file. Skipped silently when
+        # the public half cannot be derived (a passphrase-protected key), because
+        # refusing to deploy over a check we could not run is worse.
+        PUB="$(ssh-keygen -y -f "$KEY" 2>/dev/null | awk '{print $2}')" || true
+        if [ -n "$PUB" ] && ! grep -qF "$PUB" "$TFVARS"; then
+          echo "✗ $KEY is not the private half of any key in bastion_ssh_keys." >&2
+          echo "  The bastion would be built without it and phase 2 could not" >&2
+          echo "  connect — after infra had spent. Add its public half:" >&2
+          echo "    ssh-keygen -y -f $KEY" >&2
+          echo "  to bastion_ssh_keys in $TFVARS, or pass the matching KEY=." >&2
+          exit 1
+        fi
       - task: talos-image
         vars:
           PROVIDER: "{{.PROVIDER}}"

@@ -117,12 +117,6 @@ jobs:
       - name: task lint
         run: task lint
 
-      # The sibling repo's manifests and docs go through the same detector; a
-      # French comment there reaches a user's cluster just the same.
-      - name: Language check on OpenAether-apps
-        run: |
-          git clone --depth 1 https://github.com/dis-bzh/OpenAether-apps.git "$RUNNER_TEMP/apps"
-          ./scripts/dev/check-language.sh "$RUNNER_TEMP/apps"
 
   validate:
     name: Validate

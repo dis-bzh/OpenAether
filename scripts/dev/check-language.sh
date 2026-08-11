@@ -106,12 +106,18 @@ scan_code() {
   done < <(code_files "$repo")
 }
 
-for repo in "${@:-$ROOT}"; do
+repos=("${@:-$ROOT}")
+for repo in "${repos[@]}"; do
   repo="$(cd "$repo" && pwd)"
   out="$( { scan_markdown "$repo"; scan_code "$repo"; } || true )"
   if [ -n "$out" ]; then
-    # shellcheck disable=SC2001  # a per-line prefix, not a single substitution
-    echo "$out" | sed "s|^|$(basename "$repo")/|"
+    # Prefix only when several repositories are in play: with one, it turns a
+    # real path into one that does not exist.
+    if [ "${#repos[@]}" -gt 1 ]; then
+      # shellcheck disable=SC2001  # a per-line prefix, not a single substitution
+      out="$(echo "$out" | sed "s|^|$(basename "$repo")/|")"
+    fi
+    echo "$out"
     hits=$(( hits + $(echo "$out" | wc -l) ))
   fi
 done
