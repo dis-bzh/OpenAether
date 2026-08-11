@@ -106,13 +106,13 @@ invites someone to build what nobody decided.
       escapes it (`scripts/ops/preflight-quotas.py:138` and two `ovh/*.tf`
       lines were found that way).
 
-- [ ] **`gitleaks` runs with no ruleset for the class of leak that happened.**
-      Both repos call it bare; a plain IP, a numeric account id and a bucket
-      name pass green while a `ghp_` token is caught. The 2026-07-31 incident
-      would pass CI today. The only control is human review, which already
-      failed once.
-      **Closes:** a `.gitleaks.toml` with rules for those three shapes, and a
-      deliberately seeded value failing the scan. Mocked.
+- [ ] **`OpenAether-apps` still runs `gitleaks` bare.** Done in this repo
+      (`.gitleaks-envdata.toml` + the `leaks` job on a PR's own commits); apps
+      has the same exposure and none of it, and it is the repo the 2026-07-31
+      IPs and the Outscale account id actually leaked from.
+      **Closes:** the same two files copied across, plus
+      `scripts/dev/check-gitleaks-rules.sh` — a ruleset that matches nothing
+      passes silently, and two rules here did exactly that.
 
 - [ ] **`clusterctl-inventory` brick is dead on an operator-only CAPI install.**
       Found live 2026-07-30 (Scaleway management, full profile): the classic

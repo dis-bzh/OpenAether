@@ -49,9 +49,10 @@ jobs:
 
   # Environment data — real IPs, account ids, bucket names — is what actually
   # leaked here, and the credential rules gitleaks ships do not look for it.
-  # Scoped to what a PR ADDS: the rules find ~150 values in history, all of them
-  # already public and most of them synthetic, and re-litigating that would make
-  # the gate noise. What matters is that the next one is caught.
+  # Scoped to what a PR ADDS, and the config is passed with -c rather than named
+  # .gitleaks.toml, so the full-history scan in security.yml keeps its own scope:
+  # these rules find 214 values in history and every one is a public resolver, a
+  # synthetic fixture or a documented example. What matters is the next one.
   leaks:
     name: Environment data in new commits
     if: github.event_name == 'pull_request'
@@ -75,9 +76,14 @@ jobs:
           tar xzf "${asset}" gitleaks
           sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
 
+      # Before trusting the scan: a rule that matches nothing passes silently,
+      # and two in this config did. See the script's header.
+      - name: The rules still catch what they claim
+        run: ./scripts/dev/check-gitleaks-rules.sh
+
       - name: Scan what this PR adds
         run: |
-          gitleaks git -c .gitleaks.toml \
+          gitleaks git -c .gitleaks-envdata.toml \
             --log-opts="origin/${{ github.base_ref }}..HEAD" -v --redact
 
   lint:

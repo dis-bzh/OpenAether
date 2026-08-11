@@ -88,8 +88,11 @@ same tool: the `commit-msg` hook refuses a subject as you write it, and the
   accents, because accent-free French is what the last three sweeps left behind.
   `.languageignore` lists what is French on purpose, one reason per entry.
 - Environment data — a real IP, an account id, a bucket name — is caught by
-  `.gitleaks.toml` on what a PR adds. The credential rules gitleaks ships do not
-  look for any of it, and that is exactly what leaked here once.
+  `.gitleaks-envdata.toml` on what a PR adds. The credential rules gitleaks
+  ships do not look for any of it, and that is exactly what leaked here once.
+  The file is deliberately not named `.gitleaks.toml`: that name is auto-loaded
+  from the repository root, which would put these rules on the full-history and
+  whole-tree scans too, where every hit is a synthetic fixture.
 - Comments explain the *why*, not the *what* — 1-3 lines, no incident narratives.
 - Open work items live in `docs/backlog.md`, not scattered TODOs — read it before
   starting non-trivial work, and drop an entry once it's done (that's what git
