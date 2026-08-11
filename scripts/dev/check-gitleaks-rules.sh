@@ -16,13 +16,20 @@ cd "$(dirname "$0")/../.."
 CONFIG="$PWD/.gitleaks-envdata.toml"
 command -v gitleaks >/dev/null || { echo "✗ gitleaks not on PATH" >&2; exit 1; }
 
+# Split so the prefix and body are never adjacent in this file. A contiguous
+# literal is a real github-pat match, and security.yml scans FULL HISTORY with
+# the default rules — the commit that introduced it stays red forever, and no
+# allowlist of ours applies there because that job runs without -c. The probe
+# file assembles it, so the rule is still exercised.
+FAKE_PAT="ghp""_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+
 # One case per line, in order; the line number is what the report is matched on.
 CATCH=(
   'admin_ip        = ["51.68.44.219/32"]'
   'account_id      = "123456789012"'
   'project_id      = "7f3a91c2-4d5e-4b8a-9c1d-2e6f8a0b3c5d"'
   'organization_id = "7f3a91c2-4d5e-4b8a-9c1d-2e6f8a0b3c5d"'
-  'token           = "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"'
+  "token           = \"${FAKE_PAT}\""
   's3_bucket       = "s3-acme-scaleway-tfstate-prod"'
 )
 PASS=(
