@@ -34,6 +34,10 @@ tasks:
       # it installed. `task lint` now matches what pre-commit checks.
       - yamllint -c infrastructure/.yamllint .github/ .pre-commit-config.yaml Taskfile.yml .checkov.yaml
       - tflint --chdir=infrastructure/opentofu --recursive
+      # The detector CLAUDE.md asks for and the repository did not have.
+      # English is canonical; French belongs in *.fr.md, and .languageignore
+      # lists what is French on purpose, one reason per entry.
+      - ./scripts/dev/check-language.sh
 
   fmt:
     desc: Format OpenTofu code

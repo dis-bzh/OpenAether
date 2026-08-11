@@ -13,7 +13,7 @@
 ---
 # Cluster identity, consumed through `postBuild.substituteFrom` by the bricks
 # that must distinguish themselves from ANOTHER cluster. Today: the restic
-# restic (apps/flux/base/22-backup.yaml), car plusieurs clusters partagent des
+# restic (apps/flux/base/22-backup.yaml), because several clusters share
 # cross-provider buckets, and a restic repository is only readable with the
 # RESTIC_PASSWORD of the cluster that created it — two clusters on the same
 # bloquent mutuellement (« already initialized »).

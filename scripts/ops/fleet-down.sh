@@ -109,7 +109,7 @@ EOT
   fi
 fi
 
-# ----------------------------------------------------------- 2. le management
+# -------------------------------------------------------- 2. the management
 info "Step 2/3 — management cluster ($ROLE / $PROVIDER)"
 if [ "$ASSUME_YES" -eq 0 ]; then
   read -rp "Destroy the $ROLE-$PROVIDER management? [y/N] " a

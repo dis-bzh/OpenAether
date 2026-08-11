@@ -82,7 +82,14 @@ same tool: the `commit-msg` hook refuses a subject as you write it, and the
 ## Conventions
 
 - English for code, comments, commit messages and docs (`*.md` is canonical,
-  `*.fr.md` is a translation, never the source).
+  `*.fr.md` is a translation, never the source). `task lint` runs
+  `scripts/dev/check-language.sh`, which reads prose only — Markdown outside
+  code fences, comment lines in code — and keys on French *words* rather than
+  accents, because accent-free French is what the last three sweeps left behind.
+  `.languageignore` lists what is French on purpose, one reason per entry.
+- Environment data — a real IP, an account id, a bucket name — is caught by
+  `.gitleaks.toml` on what a PR adds. The credential rules gitleaks ships do not
+  look for any of it, and that is exactly what leaked here once.
 - Comments explain the *why*, not the *what* — 1-3 lines, no incident narratives.
 - Open work items live in `docs/backlog.md`, not scattered TODOs — read it before
   starting non-trivial work, and drop an entry once it's done (that's what git
