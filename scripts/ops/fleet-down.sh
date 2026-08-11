@@ -70,7 +70,10 @@ if [ ! -r "$KUBECONFIG" ] || ! kubectl cluster-info >/dev/null 2>&1; then
     • kubeconfig lost? regenerate it:
         cd infrastructure/opentofu/cluster && tofu output -raw kubeconfig > kubeconfig
         (or  talosctl -e <tunnel> -n <cp-ip> kubeconfig ./kubeconfig --force)
-    • children already deleted / never created? re-run with --force-no-edges
+    • children already deleted, or a bootstrap that never reached Kubernetes
+      (so no CAPI controller ever ran)? re-run asserting there is none:
+        task fleet-down PROVIDER=<provider> -- --force-no-edges --yes
+      The bare -- is not optional: without it Task keeps the flags itself.
     • when in doubt: inventory on the provider side FIRST (look for the child
       clusters' prefix among VMs, LBs, networks) — see docs/backlog.md
 EOT
