@@ -65,8 +65,10 @@ git_repo_url     = "https://github.com/dis-bzh/OpenAether-apps.git"
 git_ref          = "refs/tags/1.0.1"
 
 # --- Backup / DR object stores ------------------------------------------------
-# Derived buckets: state -> s3-openaether-scaleway-tfstate-prod (+ -backup),
-#                  kube/talos -> s3-openaether-scaleway-management-prod (+ -backup).
+# Derived buckets (you don't set them) — parts come from this file,
+# and each has a "-backup" twin:
+#   state            -> s3-<cluster_name>-scaleway-tfstate-<environment>
+#   kube/talosconfig -> s3-<cluster_name>-scaleway-management-<environment>
 # Replicate BACK to your primary provider once it recovers (export BACKUP_AWS_*).
 s3_primary_endpoint = "https://s3.fr-par.scw.cloud"
 s3_primary_region   = "fr-par"

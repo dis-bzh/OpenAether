@@ -56,8 +56,10 @@ git_repo_url     = "https://github.com/dis-bzh/OpenAether-apps.git"
 git_ref          = "refs/tags/1.0.1"
 
 # --- Backup / DR object stores (Outscale OOS, S3-compatible) ------------------
-# Derived buckets: state -> s3-openaether-outscale-tfstate-prod (+ -backup),
-#                  kube/talos -> s3-openaether-outscale-workload-prod (+ -backup).
+# Derived buckets (you don't set them) — parts come from this file,
+# and each has a "-backup" twin:
+#   state            -> s3-<cluster_name>-outscale-tfstate-<environment>
+#   kube/talosconfig -> s3-<cluster_name>-outscale-workload-<environment>
 # PRIMARY = Outscale (AWS_*). REPLICA = the "-backup" store; in prod point it at
 # a DIFFERENT provider (e.g. Scaleway) + export BACKUP_AWS_* for it.
 s3_primary_endpoint = "https://oos.eu-west-2.outscale.com"

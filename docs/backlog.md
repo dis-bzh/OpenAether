@@ -114,6 +114,17 @@ invites someone to build what nobody decided.
       `scripts/dev/check-gitleaks-rules.sh` — a ruleset that matches nothing
       passes silently, and two rules here did exactly that.
 
+- [ ] **The `talos-image` lane hardcodes the project name into its buckets.**
+      `scripts/bootstrap/talos-image.sh` builds `s3-openaether-<provider>-talos-image`
+      and `-talos-staging` as literals, and `talos-image/variables.tf` defaults
+      `staging_bucket` to `s3-openaether-scaleway-talos-staging`. Everywhere else
+      the project comes from `cluster_name`'s first segment. A fork of this repo
+      therefore creates buckets named after openaether, and the `.example` files
+      cannot honestly describe the naming as derived.
+      **Closes:** the same `split("-", cluster_name)[0]` derivation, plus a note
+      in the release checklist — an existing deployment's buckets do not rename
+      themselves, so this needs a migration line, not just a code change.
+
 - [ ] **`clusterctl-inventory` brick is dead on an operator-only CAPI install.**
       Found live 2026-07-30 (Scaleway management, full profile): the classic
       `Provider` CRD (`clusterctl.cluster.x-k8s.io/v1alpha3`) it writes to

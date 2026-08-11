@@ -22,6 +22,17 @@
 
 title = "OpenAether — environment data, not just credentials"
 
+# Global, and it covers the default credential rules too — the probe carries a
+# fake `ghp_` token as well.
+[allowlist]
+paths = [
+  # The rules' own test fixtures. It asserts these exact values are caught, so
+  # it necessarily contains every one of them. Exempting it here does not blunt
+  # the test: that runs gitleaks over a throwaway repository where the probe
+  # lines live in probe.tf, a path this list says nothing about.
+  '''scripts/dev/check-gitleaks-rules\.sh''',
+]
+
 [extend]
 # The credential rules stay. This file adds to them, it does not replace them.
 useDefault = true
