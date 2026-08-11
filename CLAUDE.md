@@ -20,7 +20,7 @@ ne sont PAS couverts par le premier seul).
 OpenAether déploie **un cluster Talos** sur **n'importe quel provider** (Proxmox ou
 cloud Scaleway/OVH/Outscale) avec pour **seul socle figé : CNI (Cilium) + Flux**.
 Par-dessus, on **pioche modulairement** dans les manifests communs d'`OpenAether-apps`
-selon les dépendances voulues (mesh ou non, Zitadel sans OpenBao, Harbor + OpenBao,
+selon les dépendances voulues (mesh ou non, Zitadel sans OpenBao, observability sans mesh,
 etc.). Les manifests **applicatifs métier** restent dans chaque repo d'app (ex.
 `seestar-fits`) et dépassent ce projet.
 

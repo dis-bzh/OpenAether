@@ -22,7 +22,7 @@ gitception-injected, `workload` profile autonomous), a real Talos/K8s rolling
 upgrade proven zero-downtime on edge-2 (after fixing a real surge-FIP gap),
 and a full `task fleet-down` teardown. CI hardened (SHA-pinned actions/hooks,
 branch rulesets, object-collision gate) on both repos. Fleet is torn down;
-the `1.0.0` tag itself is deliberately deferred to a later session.
+the `1.0.0` tag was cut on 2026-07-31 (`2a4c7df`); 1.0.1 follows on 2026-08-11.
 
 2026-07-31: the two gaps the 2026-07-30 teardown had exposed are fixed and
 validated live, not just reasoned about — `task infra` no longer forces
@@ -40,7 +40,7 @@ management → real OVH edge-2 deploy → `edge-down.sh` teardown (provider
 verified clean on the first pass) → full `fleet-down` (edge-3, never
 provisioned — blocked cleanly on missing Outscale credentials, no spend) →
 all 3 providers independently re-verified clean. Fleet is torn down again;
-`1.0.0` tag still pending.
+`1.0.0` was tagged the same day.
 
 **Idempotency bilan (Phase 4, 2026-07-30):** CAPI provisioning, gitception
 injection and each child's own Flux reconciliation are genuinely automatic —
@@ -61,6 +61,58 @@ and "run `task test`" are not the same cost. An entry hiding which one it needs
 is an entry that gets picked up and put back down. **Decide:** replaces
 **Closes:** when a question has to be settled first — a task-shaped entry
 invites someone to build what nobody decided.
+
+- [ ] **The stale `1.0.0 tag pending` line above is a warning, not an anecdote.**
+      "Where we stand" said the tag was deferred for eleven days after it was
+      cut, and it misled a reading of the project's own maturity. Re-read the
+      top of this file at the end of a session, not only at the start.
+      **Closes:** nothing recurring — it is a habit, kept honest by the next
+      session noticing.
+
+- [ ] **Three `dependsOn` edges are missing, and they only bite an ad-hoc pick.**
+      `external-secrets-stores` is absent from `21-storage.yaml`,
+      `20-cnpg.yaml` and `30-observability.yaml` though all three ship
+      ExternalSecrets bound to `ClusterSecretStore openbao` — `pick.py cnpg`
+      alone yields CNPG clusters waiting on secrets that can never exist. And
+      `foundation-vault` ships an Istio `DestinationRule` with no mesh
+      dependency; the fix is to MOVE that object to `services-gateway`, where
+      its Secret already lives, not to drag the mesh into every vault pick.
+      No shipped profile is affected — `workload` picks vault and gateway,
+      `management` takes the whole base — which is why nothing caught them.
+      **Closes:** `pick.py cnpg` and a vault-only pick each reaching Ready on
+      the local Docker cluster. No cloud needed.
+
+- [ ] **The only documented CAPI child on-ramp does not build.**
+      `apps/clusters/example-scaleway.yaml.example:39` declares a HelmRepository
+      at `source.toolkit.fluxcd.io/v2`, a version that does not exist. Fixing
+      the version alone then collides with the unconditional
+      `helmrepository-cilium.yaml`; the single correct fix is to delete those
+      lines. Lines 96/103 also use `${CLUSTER_NAME}` where no `postBuild`
+      reaches. Separately `edge-1.yaml` never got the three `CHILD_BACKUP_*`
+      vars that `edge-2`/`edge-3` have and `child-gitops` declares required.
+      **Closes:** `kustomize build apps/clusters` green with the example
+      renamed and listed. Mocked.
+
+- [ ] **Seven markdown files in OpenAether-apps are French at an
+      English-canonical name**, with no `.fr.md` twin — including the CAPI
+      credential-seeding runbook, the OpenBao unseal/rekey runbook and the
+      backup README. `scripts/pick.py` mixes languages in its own `--help`,
+      errors and docstrings, which is a stranger's first contact with the
+      headline feature. And `apps/flux/README.md:68` documents the profile
+      marker as `# Pioche :` where `pick.py:257` matches `# Pick: ` — the
+      silent-blindness trap, left half-fixed.
+      **Closes:** a detector in CI that fails on French outside `*.fr.md`,
+      then a green run. Note an accent regex is not enough: accent-free French
+      escapes it (`scripts/ops/preflight-quotas.py:138` and two `ovh/*.tf`
+      lines were found that way).
+
+- [ ] **`gitleaks` runs with no ruleset for the class of leak that happened.**
+      Both repos call it bare; a plain IP, a numeric account id and a bucket
+      name pass green while a `ghp_` token is caught. The 2026-07-31 incident
+      would pass CI today. The only control is human review, which already
+      failed once.
+      **Closes:** a `.gitleaks.toml` with rules for those three shapes, and a
+      deliberately seeded value failing the scan. Mocked.
 
 - [ ] **`clusterctl-inventory` brick is dead on an operator-only CAPI install.**
       Found live 2026-07-30 (Scaleway management, full profile): the classic
