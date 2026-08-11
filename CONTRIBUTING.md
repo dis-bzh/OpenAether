@@ -45,7 +45,13 @@ explicitly what could not be run:
 |---|---|---|
 | Mocked | `task test` | The graph resolves and the assertions hold. The provider binary never speaks. |
 | Emulated | `task feint-plan` / `task feint-apply` | The real provider binary, real HTTP, zero credentials — over the subset the emulator serves. See [`docs/emulated-cloud.md`](docs/emulated-cloud.md). |
-| Real cloud | `task up` | The only proof a deployment works. Costs money, so it is not required of every PR — saying you skipped it is. |
+| Real cloud | `task up`, or the `Staging` workflow | The only proof a deployment works. Costs money, so it is not required of every PR — saying you skipped it is. |
+
+The credentialed rung runs in CI as `.github/workflows/staging.yml`, on
+`workflow_dispatch` and a weekly schedule only. **Never on a pull request**:
+GitHub withholds secrets from fork PRs on purpose, and `pull_request_target`
+would run a stranger's code with this repository's cloud credentials. Before a
+release, `docs/release-checklist.md` says what to run by hand and in what order.
 
 "The tests should pass" is not a rung.
 

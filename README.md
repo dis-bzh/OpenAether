@@ -201,7 +201,8 @@ task security            # hardening checks
 | [docs/capi-bootstrap.md](docs/capi-bootstrap.md) | Bootstrap a management via CAPI and make it self-managed |
 | [docs/deployment-test-matrix.md](docs/deployment-test-matrix.md) | What is validated, where, and how |
 | [docs/emulated-cloud.md](docs/emulated-cloud.md) | Testing Scaleway/Outscale against a local emulator — and the limits of that |
-| [docs/backlog.md](docs/backlog.md) | **Source of truth**: current state, debt, improvements (French only — living working document) |
+| [docs/release-checklist.md](docs/release-checklist.md) | What to run before tagging a release, in the order that fails cheapest |
+| [docs/backlog.md](docs/backlog.md) | **Source of truth**: current state, debt, improvements (English only — living working document) |
 
 ## Security
 

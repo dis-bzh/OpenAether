@@ -200,7 +200,8 @@ task security            # contrôles de durcissement
 | [docs/capi-bootstrap.fr.md](docs/capi-bootstrap.fr.md) | Amorcer un management par CAPI et le rendre autogéré |
 | [docs/deployment-test-matrix.fr.md](docs/deployment-test-matrix.fr.md) | Ce qui est validé, où, et comment |
 | [docs/emulated-cloud.fr.md](docs/emulated-cloud.fr.md) | Tester Scaleway/Outscale contre un émulateur local — et les limites de l'exercice |
-| [docs/backlog.md](docs/backlog.md) | **Source de vérité** : état courant, dette, améliorations |
+| [docs/release-checklist.md](docs/release-checklist.md) | Ce qu'il faut lancer avant de taguer, dans l'ordre qui échoue le moins cher |
+| [docs/backlog.md](docs/backlog.md) | **Source de vérité** : état courant, dette, améliorations (anglais seulement) |
 
 ## Sécurité
 
