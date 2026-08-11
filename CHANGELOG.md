@@ -9,6 +9,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] — 2026-08-11
+
+Written in English: this file is documentation, and the repository's rule is that
+English is canonical. The 1.0.0 entry below stays in French, unrewritten.
+
+### Fixed
+
+- **`task local-up` built a cluster with no CNI on a fresh clone.** `cilium-local.yaml`
+  is gitignored, `local-up` had no render step, and the fallback emitted the string
+  `placeholder` — which the precondition in `modules/talos` does not match, because it
+  looks for `CILIUM-MANIFEST-PLACEHOLDER`. Three call sites checked that sentinel and
+  none ever wrote it, so the guard could not fire and an 11-byte inlineManifest shipped
+  as the CNI. It only failed for someone who had never rendered, i.e. every new reader.
+  `local-up` now renders when the file is missing, and the fallback emits the sentinel
+  the guard actually looks for.
+- **Every local verification dialled a port that is never published.** `local-status`
+  and `scripts/dev/test-talos-local.sh` hardcoded `127.0.0.1:50000`, the container-side
+  port, while the host base is `talos_api_port_base` (45000). Both now derive from that
+  base. The two checks that hid the defect above — etcd quorum and Talos health — fail
+  the run instead of warning and ending on a green banner.
+- **`scripts/setup.sh` did not install `helm`**, which `README` claimed it did and which
+  `render-bootstrap-manifests.sh` needs. It installs it now, and reports a missing `nc`,
+  required by the local provider and the SSH tunnels.
+- **Six `envs/*.tfvars.example` could not be planned as written**: `bastion_ssh_keys`
+  held a bare string against a `map(list(string))` variable.
+- Both READMEs announced `v0.4.0+` and pointed at an empty `[Unreleased]`, at the 1.0.0
+  tag itself; and the WSL2 note gave a port default of 41000 against an actual 45000.
+
+### Changed
+
+- **The OpenAether-apps ref is a variable, and defaults to a tag.** `git_branch` was
+  hardcoded to `"main"`, so no version of this repository identified a deployable
+  system: a commit in the platform repo could change a running cluster within the
+  reconcile interval. `git_ref` takes a fully-qualified ref, defaults to
+  `refs/tags/1.0.1`, and every `envs/*.tfvars.example` pins it. Branch tracking stays
+  available (`refs/heads/<branch>`), which is also how two managements avoid sharing
+  `apps/clusters`.
+  The Flux `GitRepository` now uses `ref.name` rather than `ref.branch` — one field that
+  carries either — and the substitution injected through the gitception loop is
+  `GIT_REF` instead of `GIT_BRANCH`. **Requires OpenAether-apps 1.0.1**, and that tag
+  must exist before this one is cut.
+  Rung: statically validated (`tofu validate`, rendered template inspected, apps-side
+  YAML linted). **Not yet exercised on a live cluster** — the tag path in particular.
+- `apps/clusters` no longer enables the DIS fleet's own children by default; see the
+  OpenAether-apps 1.0.1 entry.
+
 ## [1.0.0] — 2026-07-31
 
 **Premier socle stable : multi-provider, multi-cluster, automatisé, idempotent.**

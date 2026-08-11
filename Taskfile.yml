@@ -472,12 +472,23 @@ tasks:
       # Fail fast on a Hyper-V port reservation: Docker Desktop only reports it
       # as an opaque 500, five retries and a 90s timeout later.
       - ./scripts/dev/check-host-ports.sh {{.TALOS_API_PORT_BASE}}
+      # cilium-local.yaml is gitignored, so a fresh clone has none — render it
+      # rather than boot a cluster with no CNI. Mirrors what `up` does for the
+      # cloud manifest.
+      - |
+        CILIUM=infrastructure/opentofu/cluster/bootstrap-manifests/cilium-local.yaml
+        if [ ! -s "$CILIUM" ] || grep -q "CILIUM-MANIFEST-PLACEHOLDER" "$CILIUM"; then
+          ./scripts/bootstrap/render-bootstrap-manifests.sh --local
+        fi
       - |
         cd infrastructure/opentofu-local
         tofu init -upgrade > /dev/null 2>&1 || tofu init > /dev/null
       - |
+        # The fallback emits the sentinel the precondition in modules/talos looks
+        # for. It used to emit 'placeholder', which that check does not match —
+        # so a missing manifest sailed through and shipped an 11-byte inlineManifest.
         export TF_VAR_cilium_manifest="$(cat infrastructure/opentofu/cluster/bootstrap-manifests/cilium-local.yaml \
-          2>/dev/null || echo 'placeholder')"
+          2>/dev/null || echo 'CILIUM-MANIFEST-PLACEHOLDER')"
         tofu -chdir=infrastructure/opentofu-local apply -var talos_bootstrap=true \
           -var talos_api_port_base={{.TALOS_API_PORT_BASE}} -auto-approve
 
@@ -487,12 +498,18 @@ tasks:
       - ./scripts/dev/test-talos-local.sh
 
   local-status:
-    desc: "Check local cluster health (3 CP + 2 workers)"
+    desc: "Check local cluster health (3 CP + 3 workers)"
+    vars:
+      TALOS_API_PORT_BASE: '{{.TALOS_API_PORT_BASE | default "45000"}}'
     cmds:
+      # The endpoint is derived from the same base local-up publishes. It used to
+      # be hardcoded to 50000 — the container-internal port, never a host one —
+      # so this whole target failed against a healthy cluster.
       - |
         export KUBECONFIG=infrastructure/opentofu-local/kubeconfig
         export TALOSCONFIG=infrastructure/opentofu-local/talosconfig
-        echo "=== etcd quorum ===" && talosctl --nodes 10.5.0.10 --endpoints 127.0.0.1:50000 etcd members || true
+        echo "=== etcd quorum ===" && talosctl --nodes 10.5.0.10 \
+          --endpoints 127.0.0.1:{{.TALOS_API_PORT_BASE}} etcd members || true
         echo "=== Kubernetes nodes ===" && kubectl get nodes -o wide || true
         echo "=== kube-system pods ===" && kubectl get pods -n kube-system || true
         echo "=== Flux Kustomizations ===" && flux get kustomizations 2>/dev/null || echo "Flux not deployed yet"

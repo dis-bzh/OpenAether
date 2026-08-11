@@ -4,7 +4,7 @@
 #
 # Variables OpenTofu :
 #   ${git_repo_url}   — ex: https://github.com/dis-bzh/OpenAether.git
-#   ${git_branch}     — ex: main
+#   ${git_ref}        — ex: refs/tags/1.0.1, or refs/heads/main
 #   ${cluster_role}   — ex: management (→ apps/flux/management)
 #   ${cluster_id}     — e.g. openaether-dev-ovh (the cluster's UNIQUE identity)
 #   ${backup_target_url} — ex: s3://s3-openaether-ovh-backups-dev@eu-west-par/
@@ -51,7 +51,7 @@ spec:
   interval: 1m
   url: ${git_repo_url}
   ref:
-    branch: ${git_branch}
+    name: ${git_ref}
   timeout: 60s
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
@@ -69,9 +69,9 @@ spec:
   path: ./apps/flux/${cluster_role}
   prune: true
   wait: false
-  # Injects the branch into the flux layer objects (including the
-  # self-reapplied GitRepository — gitception trap: without it a test branch
-  # gets overwritten by the hard-coded `main` on the first reconcile).
+  # Injects the ref into the flux layer objects (including the self-reapplied
+  # GitRepository — gitception trap: without it the ref gets overwritten by the
+  # apps-side default on the first reconcile).
   postBuild:
     substitute:
-      GIT_BRANCH: ${git_branch}
+      GIT_REF: ${git_ref}

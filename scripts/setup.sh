@@ -145,6 +145,27 @@ install_flux() {
     rm -rf "$tmp"
 }
 
+install_helm() {
+    # renovate: datasource=github-releases depName=helm/helm extractVersion=^v(?<version>.*)$
+    local HELM_VERSION="3.21.3"
+    local ARCH="linux-amd64"
+    echo "Installing Helm v${HELM_VERSION}..."
+    local tmp
+    tmp="$(mktemp -d)"
+    curl -fsSL "https://get.helm.sh/helm-v${HELM_VERSION}-${ARCH}.tar.gz" -o "$tmp/helm.tar.gz"
+    tar -xzf "$tmp/helm.tar.gz" -C "$tmp"
+    if [ -w /usr/local/bin ]; then
+        install -m 755 "$tmp/${ARCH}/helm" /usr/local/bin/helm
+    elif command -v sudo &> /dev/null; then
+        sudo install -m 755 "$tmp/${ARCH}/helm" /usr/local/bin/helm
+    else
+        mkdir -p ~/.local/bin
+        install -m 755 "$tmp/${ARCH}/helm" ~/.local/bin/helm
+        echo "NOTE: helm installed to ~/.local/bin. Ensure it's in your PATH."
+    fi
+    rm -rf "$tmp"
+}
+
 install_precommit() {
     echo "Installing pre-commit..."
     if command -v apt-get &> /dev/null; then
@@ -199,7 +220,19 @@ if ! check_cmd flux; then
     install_flux
 fi
 
-# 8. Check pre-commit (optional but recommended)
+# 8. Check Helm — render-bootstrap-manifests.sh runs `helm template`, so every
+# path that renders Cilium or Flux needs it, including `task local-up`.
+if ! check_cmd helm; then
+    install_helm
+fi
+
+# 9. Check nc — the local Docker provider and talos-tunnels.sh poll ports with it.
+if ! check_cmd nc; then
+    echo -e "${RED}⚠ nc (netcat) is missing — 'task local-up' and the SSH tunnels poll ports with it.${NC}"
+    echo "   Debian/Ubuntu: sudo apt-get install -y netcat-openbsd"
+fi
+
+# 10. Check pre-commit (optional but recommended)
 if ! check_cmd pre-commit; then
     echo -e "${RED}⚠ pre-commit is not installed (recommended for DevSecOps)${NC}"
     read -p "Install pre-commit? (y/N) " -n 1 -r
@@ -218,6 +251,6 @@ echo "  2. export AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (= your Scaleway key
 echo "     (prod cross-provider backup: also export BACKUP_AWS_ACCESS_KEY_ID / BACKUP_AWS_SECRET_ACCESS_KEY)"
 echo "  3. export TF_VAR_encryption_passphrase=<32+ chars>   # encrypts tfstate AND the backups"
 echo "  4. Build the Talos image once:  task talos-image PROVIDER=scaleway   (or ovh or outscale)"
-echo "  5. cd infrastructure/opentofu"
+echo "  5. cd infrastructure/opentofu/cluster"
 echo "  6. cp envs/management-scaleway.tfvars.example envs/management-scaleway.tfvars  # then edit"
-echo "  7. tofu init -reconfigure \$(../../../scripts/tf-backend.sh envs/management-scaleway.tfvars) && tofu plan -var-file=envs/management-scaleway.tfvars"
+echo "  7. cd - && task up ROLE=management PROVIDER=scaleway"

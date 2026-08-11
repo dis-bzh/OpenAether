@@ -289,7 +289,7 @@ data "talos_machine_configuration" "control_plane" {
       # so a real manifest that happens to contain that word in a comment can't
       # falsely trip the guard.
       condition     = var.control_plane_count == 0 || !strcontains(var.cilium_manifest, "CILIUM-MANIFEST-PLACEHOLDER")
-      error_message = "Cilium manifest is an unrendered placeholder. Run ./scripts/render-bootstrap-manifests.sh before bootstrapping."
+      error_message = "Cilium manifest is an unrendered placeholder. Run ./scripts/bootstrap/render-bootstrap-manifests.sh (add --local for the Docker cluster) before bootstrapping."
     }
   }
 }

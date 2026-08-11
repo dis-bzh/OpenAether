@@ -248,6 +248,23 @@ variable "git_repo_url" {
   default     = "https://github.com/dis-bzh/OpenAether-apps.git"
 }
 
+# A release of this repo has to identify a release of the platform it deploys.
+# This was hardcoded to the `main` branch: a commit in OpenAether-apps could then
+# change a running cluster within the reconcile interval, and no version of this
+# repo named a deployable system. `refs/tags/…` by default, and a branch stays
+# available for testing — which is also how two managements avoid sharing
+# apps/clusters (see OpenAether-apps/README.md).
+variable "git_ref" {
+  description = "Git ref OpenAether-apps is tracked at, fully qualified: refs/tags/<version> or refs/heads/<branch>"
+  type        = string
+  default     = "refs/tags/1.0.1"
+
+  validation {
+    condition     = can(regex("^refs/(heads|tags)/.+$", var.git_ref))
+    error_message = "git_ref must be fully qualified: refs/tags/<version> or refs/heads/<branch>."
+  }
+}
+
 variable "flux_namespace" {
   description = "Namespace for Flux installation"
   type        = string

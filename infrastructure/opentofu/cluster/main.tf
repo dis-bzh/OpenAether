@@ -417,7 +417,7 @@ locals {
   flux_bootstrap_manifest = var.flux_bootstrap_manifest != null ? var.flux_bootstrap_manifest : templatefile("${path.module}/bootstrap-manifests/flux-bootstrap.yaml.tftpl", {
     namespace    = var.flux_namespace
     git_repo_url = var.git_repo_url
-    git_branch   = "main"
+    git_ref      = var.git_ref
     cluster_role = var.cluster_role
     cluster_id   = local.cluster_id
     # Destination for Longhorn volume backups. The full URL is assembled HERE:

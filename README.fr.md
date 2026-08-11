@@ -9,8 +9,8 @@
 
 ## Version
 
-**v0.4.0+** — socle Talos modulaire multi-provider (cf. `CLAUDE.md` et
-`CHANGELOG.md [Unreleased]`).
+**1.0.1** — socle Talos modulaire multi-provider (cf. `CHANGELOG.md`). Déploie
+le tag `OpenAether-apps` correspondant : une version identifie un système.
 
 Management validé de bout en bout sur **Scaleway, OVH et Outscale** ; local
 Docker validé (3 CP + 3 workers) ; Proxmox code-complet mais **jamais appliqué
@@ -126,7 +126,7 @@ task local-down      # destruction (conteneurs + volumes + state)
 
 ⚠️ **Sous Windows/WSL2** : Hyper-V réserve des blocs de ports au-dessus de
 49152, et ces blocs bougent au redémarrage. La base des ports hôte est donc
-paramétrable (`talos_api_port_base`, défaut 41000). Diagnostiquer avec
+paramétrable (`talos_api_port_base`, défaut 45000). Diagnostiquer avec
 `netsh.exe int ipv4 show excludedportrange protocol=tcp`.
 
 ### Cluster de management (cloud)
@@ -137,6 +137,8 @@ source .env.sh
 cp infrastructure/opentofu/cluster/envs/management-scaleway.tfvars.example \
    infrastructure/opentofu/cluster/envs/management-scaleway.tfvars
 # Éditer : admin_ip, bastion_ssh_keys, image_name/image_id, s3_primary_*/s3_replica_*
+# Et git_repo_url + git_ref si tu utilises ton propre fork d'OpenAether-apps —
+# les défauts pointent sur le nôtre, et son apps/clusters n'est pas le tien.
 
 task preflight-quotas PROVIDER=ovh          # vérifier les quotas d'abord
 task talos-image PROVIDER=scaleway          # une fois par version d'image

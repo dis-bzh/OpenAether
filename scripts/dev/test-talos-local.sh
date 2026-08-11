@@ -40,11 +40,15 @@ fi
 
 CLUSTER_NAME="openaether-local-dev"
 CP_IPS=("10.5.0.10" "10.5.0.11" "10.5.0.12")
-CP_ENDPOINTS=("127.0.0.1:50000" "127.0.0.1:50001" "127.0.0.1:50002")
+# Host ports, derived from the same base local-up publishes rather than hardcoded:
+# 50000 is the CONTAINER-internal port, and pinning it here made every endpoint
+# unreachable while the checks below degraded to warnings and the run still ended green.
+PORT_BASE="${TALOS_API_PORT_BASE:-45000}"
+CP_ENDPOINTS=("127.0.0.1:$((PORT_BASE))" "127.0.0.1:$((PORT_BASE + 1))" "127.0.0.1:$((PORT_BASE + 2))")
 # Dedicated workers (worker_count=3 in opentofu-local/variables.tf): IPs at .20+,
-# host ports at 50010+i. Schedulable/untainted, for HA and real workload scheduling tests.
+# host ports at base+10+i. Schedulable/untainted, for HA and real workload scheduling tests.
 WORKER_IPS=("10.5.0.20" "10.5.0.21" "10.5.0.22")
-WORKER_ENDPOINTS=("127.0.0.1:50010" "127.0.0.1:50011" "127.0.0.1:50012")
+WORKER_ENDPOINTS=("127.0.0.1:$((PORT_BASE + 10))" "127.0.0.1:$((PORT_BASE + 11))" "127.0.0.1:$((PORT_BASE + 12))")
 TOTAL_NODES=$(( ${#CP_IPS[@]} + ${#WORKER_IPS[@]} ))
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
@@ -156,7 +160,8 @@ done
 if [[ "$MEMBERS" -eq 3 ]]; then
   success "etcd quorum: 3 members"
 else
-  warn "etcd members found: $MEMBERS (expected 3) — the 3rd may still be joining"
+  error "etcd members found: $MEMBERS (expected 3)"
+  exit 1
 fi
 
 CP_LIST=$(IFS=,; echo "${CP_IPS[*]}")
@@ -166,7 +171,8 @@ if talosctl --nodes "${CP_IPS[0]}" --endpoints "${CP_ENDPOINTS[0]}" health \
      --worker-nodes "${WORKER_LIST}" --wait-timeout 5m >/dev/null 2>&1; then
   success "Talos cluster reports healthy"
 else
-  warn "Talos health check did not fully pass (cluster may still be converging)"
+  error "Talos health check did not pass within the timeout"
+  exit 1
 fi
 
 # ==============================================================================
