@@ -79,7 +79,7 @@ tasks:
     internal: true
     dir: ../OpenAether-apps
     cmds:
-      # --validate : dependsOn inconnus, cycles, spec.path morts, catalogue.
+      # --validate : unknown dependsOn, cycles, dead spec.path, catalogue.
       # --check    : a profile freezes the list of EXCLUDED Kustomizations, so
       #   adding a brick to the DAG makes every generated profile stale. Without
       #   this check the brick is inherited from ../base without being picked and
@@ -154,6 +154,24 @@ tasks:
       # renovate: datasource=github-releases depName=siderolabs/talos
       VERSION: '{{.VERSION | default "v1.13.7"}}'
     cmds:
+      # Everything a later phase needs, checked BEFORE anything bills. The SSH
+      # key was verified in bootstrap-phase2, which runs after `infra` — so a
+      # missing key left a full cluster running and the run reported failure.
+      - |
+        KEY="{{.KEY}}"; KEY="${KEY/#\~/$HOME}"
+        [ -f "$KEY" ] || {
+          echo "✗ SSH key not found: $KEY" >&2
+          echo "  It is needed by bootstrap-phase2, AFTER infra would have created" >&2
+          echo "  billable resources — so this stops here. Pass KEY=/path/to/key." >&2
+          exit 1
+        }
+        TFVARS="infrastructure/opentofu/cluster/envs/{{.ROLE}}-{{.PROVIDER}}.tfvars"
+        [ -f "$TFVARS" ] || {
+          echo "✗ no env file: $TFVARS" >&2
+          echo "  Create it from the example, then edit it:" >&2
+          echo "    cp $TFVARS.example $TFVARS" >&2
+          exit 1
+        }
       - task: talos-image
         vars:
           PROVIDER: "{{.PROVIDER}}"
@@ -416,11 +434,23 @@ tasks:
 
   feint-up:
     desc: "Start the local Scaleway/Outscale API emulator (installs the pinned binary if absent)"
+    # Task vars are NOT environment variables: without this,
+    # `task feint-plan FEINT_ENDPOINT=https://api.scaleway.com` set a var the
+    # script never read, the loopback guard never saw it, and the negative
+    # test in docs/release-checklist.md passed without testing anything.
+    env:
+      FEINT_ENDPOINT: '{{.FEINT_ENDPOINT | default "http://127.0.0.1:4599"}}'
     cmds:
       - ./scripts/dev/feint.sh start
 
   feint-down:
     desc: "Stop the emulator and drop everything it created"
+    # Task vars are NOT environment variables: without this,
+    # `task feint-plan FEINT_ENDPOINT=https://api.scaleway.com` set a var the
+    # script never read, the loopback guard never saw it, and the negative
+    # test in docs/release-checklist.md passed without testing anything.
+    env:
+      FEINT_ENDPOINT: '{{.FEINT_ENDPOINT | default "http://127.0.0.1:4599"}}'
     cmds:
       - ./scripts/dev/feint.sh stop
 
@@ -428,6 +458,12 @@ tasks:
     desc: "Plan the REAL cluster root against the emulator. Usage: task feint-plan PROVIDER=scaleway|outscale"
     vars:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    # Task vars are NOT environment variables: without this,
+    # `task feint-plan FEINT_ENDPOINT=https://api.scaleway.com` set a var the
+    # script never read, the loopback guard never saw it, and the negative
+    # test in docs/release-checklist.md passed without testing anything.
+    env:
+      FEINT_ENDPOINT: '{{.FEINT_ENDPOINT | default "http://127.0.0.1:4599"}}'
     cmds:
       - ./scripts/dev/feint.sh plan {{.PROVIDER}}
 
@@ -435,6 +471,12 @@ tasks:
     desc: "Full apply/destroy cycle on the reduced fixture. Usage: task feint-apply PROVIDER=scaleway|outscale"
     vars:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    # Task vars are NOT environment variables: without this,
+    # `task feint-plan FEINT_ENDPOINT=https://api.scaleway.com` set a var the
+    # script never read, the loopback guard never saw it, and the negative
+    # test in docs/release-checklist.md passed without testing anything.
+    env:
+      FEINT_ENDPOINT: '{{.FEINT_ENDPOINT | default "http://127.0.0.1:4599"}}'
     cmds:
       - ./scripts/dev/feint.sh apply {{.PROVIDER}}
 
@@ -444,6 +486,12 @@ tasks:
       PROVIDER=scaleway|outscale
     vars:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    # Task vars are NOT environment variables: without this,
+    # `task feint-plan FEINT_ENDPOINT=https://api.scaleway.com` set a var the
+    # script never read, the loopback guard never saw it, and the negative
+    # test in docs/release-checklist.md passed without testing anything.
+    env:
+      FEINT_ENDPOINT: '{{.FEINT_ENDPOINT | default "http://127.0.0.1:4599"}}'
     cmds:
       - ./scripts/dev/feint.sh record {{.PROVIDER}}
 

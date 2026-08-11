@@ -80,7 +80,11 @@ task feint-down
 
 - [ ] both providers green on plan and on the apply/destroy cycle
 - [ ] the ranking still shows the four known operations and no new one
-- [ ] the guard refuses a non-loopback endpoint
+- [ ] the guard refuses a non-loopback endpoint:
+      `task feint-plan PROVIDER=scaleway FEINT_ENDPOINT=https://api.scaleway.com`
+      must print `endpoint … is not local` and exit non-zero. It did NOT until
+      2026-08-11: a Task variable is not an environment variable, so the script
+      never saw the value and this test passed without testing anything.
 
 ## 4. Cloud — Scaleway first, it is the reference
 
@@ -89,10 +93,15 @@ bill down unless the line says otherwise.
 
 ```bash
 source .env.sh
-task preflight-quotas PROVIDER=scaleway
+cp infrastructure/opentofu/cluster/envs/management-scaleway.tfvars{.example,}
+$EDITOR infrastructure/opentofu/cluster/envs/management-scaleway.tfvars
 task talos-image PROVIDER=scaleway
-task up ROLE=management PROVIDER=scaleway
+task up ROLE=management PROVIDER=scaleway KEY=~/.ssh/your-key
 ```
+
+`preflight-quotas` has no Scaleway backend — it takes `ovh` or `outscale` only.
+`task up` now refuses before spending if the env file or the SSH key is missing;
+it used to check the key in phase 2, i.e. after `infra` had created VMs.
 
 - [ ] **`SCW-mgmt-nonha`** — 1 CP + 1 worker, the cheapest real path
 - [ ] the apps `GitRepository` resolves the ref you pinned:

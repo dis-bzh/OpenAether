@@ -10,3 +10,7 @@ CLAUDE.md
 # French; rewriting them would falsify what was published under those tags.
 # Entries from 1.0.1 on are English — see the note at the top of that entry.
 CHANGELOG.md
+
+# The detector's own source. It necessarily contains the French it hunts for —
+# the word list itself, and the CLAUDE.md line that asked for it.
+scripts/dev/check-language.sh
