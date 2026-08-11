@@ -120,7 +120,10 @@ invites someone to build what nobody decided.
       `staging_bucket` to `s3-openaether-scaleway-talos-staging`. Everywhere else
       the project comes from `cluster_name`'s first segment. A fork of this repo
       therefore creates buckets named after openaether, and the `.example` files
-      cannot honestly describe the naming as derived.
+      cannot honestly describe the naming as derived. Already user-visible:
+      `fleet-down.sh`'s manual-purge list prints the talos-image bucket as
+      `s3-<cluster_name>-<provider>-talos-image`, so anyone not named openaether
+      is pointed at a bucket that does not exist while the real one survives.
       **Closes:** the same `split("-", cluster_name)[0]` derivation, plus a note
       in the release checklist — an existing deployment's buckets do not rename
       themselves, so this needs a migration line, not just a code change.
@@ -316,3 +319,12 @@ One line each; the detail lives in the referenced file.
   sync with what the Secret (and hence the app) now has. Needs `ALTER ROLE
   ... WITH PASSWORD` to realign, or a CNPG `managed.roles` sync so future
   secret rotations don't repeat this.
+
+- [ ] **The language detector cannot see user-facing output.** It reads prose
+      only — Markdown outside fences, comment lines — because a French word in a
+      string literal or an identifier is not a translation defect. But a heredoc
+      printed to a terminal is prose, and `fleet-down.sh` shipped `<projet>`
+      next to `<project>` in the same block for exactly that reason.
+      **Decide:** whether the gain is worth the false positives on identifiers,
+      or whether printed strings (`cat <<EOT`, `echo`, `printf`) are a narrow
+      enough surface to read as prose on their own.

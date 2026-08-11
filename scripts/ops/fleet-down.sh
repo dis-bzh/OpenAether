@@ -129,9 +129,10 @@ ENVN="$(grep -E '^[[:space:]]*environment' "$CLUSTER_DIR/envs/$ROLE-$PROVIDER.tf
 cat <<EOT
   S3 buckets (state, artifacts, backups) — destroying them also removes any
   possibility of restoring:
-    s3-${CN:-<projet>}-${PROVIDER}-tfstate-${ENVN:-<env>}      (+ -backup)
-    s3-${CN:-<projet>}-${PROVIDER}-${ROLE}-${ENVN:-<env>}      (+ -backup)
-    s3-${CN:-<projet>}-*-backups-${ENVN:-<env>}                (restic, all providers)
+    (each of the first two also has a "-backup" twin)
+    s3-${CN:-<project>}-${PROVIDER}-tfstate-${ENVN:-<env>}
+    s3-${CN:-<project>}-${PROVIDER}-${ROLE}-${ENVN:-<env>}
+    s3-${CN:-<project>}-*-backups-${ENVN:-<env>}   (restic, all providers)
   Talos images (reusable — keeping them avoids a rebuild, ~1 h on Outscale):
     task talos-image PROVIDER=$PROVIDER  re-applies; the talos-image root has
     its own state (bucket s3-${CN:-<project>}-${PROVIDER}-talos-image).
