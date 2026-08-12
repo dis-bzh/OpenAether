@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Relicensed from AGPLv3 to Apache 2.0.** The copyleft was deterring the one
+  thing this project wants — people running it. Apache 2.0 matches Feint, which
+  OpenAether now depends on for its emulated lane. A relaxation, so anything
+  already obtained under AGPLv3 remains available under it.
+
 ## [1.0.1] — 2026-08-11
 
 Written in English: this file is documentation, and the repository's rule is that

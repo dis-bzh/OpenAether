@@ -231,6 +231,7 @@ task security            # hardening checks
 ## License
 
 **OpenAether** is licensed under the
-[GNU Affero General Public License v3.0 (AGPLv3)](LICENSE).
+[Apache License 2.0](LICENSE). It was AGPLv3 until 1.1.0; the change is a
+relaxation, so anything you already had under AGPLv3 stays yours under it.
 
 Source: **https://github.com/dis-bzh/OpenAether-infra**
