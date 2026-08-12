@@ -117,6 +117,16 @@ talos_ep() { # <type> <index>
   esac
 }
 
+# Kubernetes node name for a private IP. Node NAMES are provider-specific; the
+# InternalIP is not, and it is what the tofu state gives us.
+k8s_node_for_ip() { # <private-ip>
+  local name
+  name="$("${KCTL[@]}" get nodes -o jsonpath="{range .items[*]}{.metadata.name}{' '}{range .status.addresses[?(@.type=='InternalIP')]}{.address}{end}{'\n'}{end}" 2>/dev/null \
+          | awk -v ip="$1" '$2 == ip { print $1; exit }')"
+  [[ -n "$name" ]] || return 1
+  printf '%s\n' "$name"
+}
+
 # ==============================================================================
 # Health gates
 # ==============================================================================
@@ -235,10 +245,18 @@ replace_node() { # <type: cp|worker> <index>
   local t="$1" i="$2"
   local node_name node_ip ep cfg_addr tf_t
   if [[ "$t" == "cp" ]]; then
-    node_name="${NODE_PREFIX}-cp-${i}"; node_ip="${CP_IPS[$i]}"; tf_t="control_plane"
+    node_ip="${CP_IPS[$i]}"; tf_t="control_plane"
   else
-    node_name="${NODE_PREFIX}-worker-${i}"; node_ip="${WK_IPS[$i]}"; tf_t="worker"
+    node_ip="${WK_IPS[$i]}"; tf_t="worker"
   fi
+  # Ask the cluster what this node is called instead of assuming the naming
+  # convention. Scaleway and OVH get their hostname from the machine config
+  # (<cluster>-<env>-cp-N); on Outscale Talos keeps the platform hostname, so
+  # the nodes are ip-10-0-0-53 and every `kubectl cordon` here failed on "node
+  # not found" — the dry-run printed the invented names and looked fine.
+  # The private IP is the one identity all providers agree on.
+  node_name="$(k8s_node_for_ip "$node_ip")" \
+    || die "no Kubernetes node has internal IP ${node_ip} — is the cluster the one this state describes?"
   ep="$(talos_ep "$t" "$i")"
   cfg_addr="module.talos.talos_machine_configuration_apply.${tf_t}[${i}]"
 
