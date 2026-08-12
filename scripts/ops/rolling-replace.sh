@@ -6,7 +6,13 @@
 # etcd loses quorum. This script does one node at a time: cordon+drain →
 # targeted apply → wait for etcd/Longhorn → uncordon.
 #
-# Three non-obvious points:
+# Before each node it PLANS and counts what would be destroyed, and refuses if
+# that exceeds the resources it targets. "One node at a time" used to be an
+# intention nothing checked: on 2026-08-12 one extra -target pulled a whole
+# provider module in and a per-node apply replaced all three control planes
+# together. The count is now the check.
+#
+# Four non-obvious points:
 #   * `-replace` on the INSTANCE is ESSENTIAL, and `-target` is not enough:
 #     -target narrows the plan, it forces nothing. Whether an image change is
 #     ForceNew is provider-specific — true on Scaleway, false on OpenStack,
@@ -278,6 +284,19 @@ replace_node() { # <type: cp|worker> <index>
   [[ -n "$inst_addr" ]] \
     || die "no compute instance among the targets for ${node_name} — new provider whose instance resource this script does not know?"
 
+  # The machine config lives under module.talos, and node_targets only collects
+  # module.<provider>[0].* — so -target excluded it and the -replace naming it
+  # below was silently dropped: tofu said "some changes requested in the
+  # configuration may have been ignored" and carried on, the fresh VM booted into
+  # maintenance mode, and the health gate waited 600s for a kubelet that was
+  # never coming. Seen identically on OVH and Scaleway, 2026-08-12.
+  #
+  # Safe to target only because cluster/main.tf no longer gives module.talos a
+  # module-level depends_on over the provider modules; with it, this single line
+  # pulled every instance into the plan. Check the blast radius with --dry-run
+  # and a plan before trusting it on a cluster you care about.
+  targets+=("-target=${cfg_addr}")
+
   hr
   info "Node ${node_name}  (ip ${node_ip}, talos ${ep})"
 
@@ -308,7 +327,26 @@ replace_node() { # <type: cp|worker> <index>
     etcd_remove_member "$node_name" "$i"
   fi
 
-  # 2. targeted recreate of THIS node only + forced Talos config re-apply
+  # 2. Count the blast radius BEFORE applying. "One node at a time" was an
+  # intention this script never checked: on 2026-08-12 a single extra -target
+  # pulled the whole provider module into the plan and one "per-node" apply
+  # replaced all three control planes together, taking etcd down. A targeted
+  # plan must not destroy more than the resources it targets.
+  info "Planning ${node_name} and counting what it would destroy…"
+  local doomed
+  doomed="$(tofu plan "${targets[@]}" -replace="$inst_addr" -replace="$cfg_addr" \
+              -var-file="$TFVARS" -var talos_bootstrap=true -no-color 2>/dev/null \
+            | sed -nE 's/^Plan: [0-9]+ to add, [0-9]+ to change, ([0-9]+) to destroy\./\1/p' | tail -1)"
+  [[ -n "$doomed" ]] || die "could not read a plan for ${node_name} — refusing to apply blind"
+  if (( doomed > ${#targets[@]} )); then
+    die "plan destroys ${doomed} resources for ONE node (it targets ${#targets[@]}) — refusing.
+  Something outside this node is being pulled in; a module-level depends_on has
+  done exactly that before. Inspect with:
+    tofu plan ${targets[*]} -replace='${inst_addr}' -replace='${cfg_addr}' -var-file='${TFVARS}' -var talos_bootstrap=true"
+  fi
+  ok "plan destroys ${doomed} resource(s), targets ${#targets[@]} — proceeding"
+
+  # 3. targeted recreate of THIS node only + forced Talos config re-apply
   info "tofu apply (targeted) — recreate ${node_name} + reattach NIC/IP + re-apply Talos config…"
   info "targets: ${targets[*]#-target=}"
   tofu apply \
@@ -320,7 +358,7 @@ replace_node() { # <type: cp|worker> <index>
     -auto-approve \
     || die "tofu apply failed for ${node_name} — cluster left with ${node_name} cordoned; investigate before retrying"
 
-  # 3. Talos services up on the fresh VM (-e tunnel connects, -n real IP = identity)
+  # 4. Talos services up on the fresh VM (-e tunnel connects, -n real IP = identity)
   info "Waiting for Talos to come up on ${node_name} (${ep} → ${node_ip})…"
   local td=$(( SECONDS + NODE_READY_TIMEOUT ))
   until talosctl -e "$ep" -n "$node_ip" service kubelet 2>/dev/null | grep -qE 'HEALTH[[:space:]]+OK'; do
@@ -329,18 +367,18 @@ replace_node() { # <type: cp|worker> <index>
   done
   ok "Talos services up on ${node_name}"
 
-  # 4. node Ready in k8s
+  # 5. node Ready in k8s
   wait_node_ready "$node_name" || die "node ${node_name} not Ready in time — STOP"
 
-  # 5. for control planes: etcd must be back to full membership before the next CP
+  # 6. for control planes: etcd must be back to full membership before the next CP
   if [[ "$t" == "cp" ]]; then
     wait_etcd_healthy "${#CP_IPS[@]}" || die "etcd did not return to ${#CP_IPS[@]}/${#CP_IPS[@]} healthy — STOP (do NOT replace another CP)"
   fi
 
-  # 6. Longhorn rebuild complete (no degraded/faulted)
+  # 7. Longhorn rebuild complete (no degraded/faulted)
   wait_longhorn_healthy || die "Longhorn not healthy after replacing ${node_name} — STOP"
 
-  # 7. back into rotation
+  # 8. back into rotation
   "${KCTL[@]}" uncordon "$node_name" || warn "uncordon failed for ${node_name} (re-run manually)"
   ok "Node ${node_name} replaced and back in rotation"
 }

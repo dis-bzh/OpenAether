@@ -527,11 +527,21 @@ module "talos" {
   # Dedicated worker data volumes (encrypted UserVolumeConfig). Empty on local.
   worker_storage = var.worker_storage
 
-  # terraform_data.talos_tunnels only exists when auto_tunnels=true (count=0
-  # otherwise) — depending on it is then a no-op, not a hard requirement, so
-  # this list works identically for both the documented two-phase flow and
-  # the experimental single-apply path.
-  depends_on = [module.scw, module.ovh, module.outscale, module.proxmox, terraform_data.talos_tunnels]
+  # The provider modules are DELIBERATELY not listed here. A module-level
+  # depends_on makes every resource in this module depend on every resource in
+  # those — which made per-node targeting impossible: `rolling-replace` could not
+  # re-apply one node's machine config without dragging the whole provider module
+  # into the plan, and with a Talos version bump leaving every instance ForceNew
+  # that is a parallel replacement of all three control planes. Measured
+  # 2026-08-12: it took a healthy cluster's etcd down.
+  #
+  # Ordering does not depend on it. The supported flow is two phases — `task
+  # infra` builds the VMs with talos_bootstrap=false, which counts these
+  # resources out entirely — and modules/talos then waits on its own
+  # talos_port_ready_* guards before touching a node. terraform_data.talos_tunnels
+  # stays, and only exists when auto_tunnels=true, so it orders the experimental
+  # single-apply path and is a no-op otherwise.
+  depends_on = [terraform_data.talos_tunnels]
 }
 
 # ==============================================================================
