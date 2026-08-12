@@ -8,6 +8,18 @@ NC='\033[0m'
 
 echo -e "${GREEN}🌐 Checking OpenAether Development Environment...${NC}"
 
+# Root in a container has no sudo and needs none. Bare `sudo` calls exited 127
+# there, and set -e took the whole bootstrap with them: on a clean machine this
+# died at yamllint and never reached task, flux or helm.
+if [ "$(id -u)" -eq 0 ]; then
+    SUDO=""
+elif command -v sudo &> /dev/null; then
+    SUDO="sudo"
+else
+    SUDO=""
+    echo -e "${RED}⚠ Neither root nor sudo: system-wide installs will fail.${NC}"
+fi
+
 # Helper to check command existence
 check_cmd() {
     if ! command -v "$1" &> /dev/null; then
@@ -23,11 +35,26 @@ check_cmd() {
 install_tofu() {
     echo "Installing OpenTofu..."
     if command -v snap &> /dev/null; then
-        sudo snap install --classic opentofu
+        $SUDO snap install --classic opentofu
     elif command -v brew &> /dev/null; then
         brew install opentofu
     else
-        # Official install script
+        # The official installer unzips its download and verifies the signature,
+        # refusing to run without unzip, and without either cosign or gpg. A
+        # minimal image has none of them: it aborted here, and set -e meant
+        # nothing at all got installed — not even the tools further down.
+        local need=()
+        command -v unzip &> /dev/null || need+=(unzip)
+        { command -v gpg &> /dev/null || command -v cosign &> /dev/null; } || need+=(gnupg)
+        if [ ${#need[@]} -gt 0 ]; then
+            if command -v apt-get &> /dev/null; then
+                $SUDO apt-get update && $SUDO apt-get install -y "${need[@]}"
+            else
+                echo "⚠️  OpenTofu's installer needs: ${need[*]}"
+                echo "    Install them, then re-run ./scripts/setup.sh"
+                return 1
+            fi
+        fi
         curl -fsSL https://get.opentofu.org/install-opentofu.sh -o install-opentofu.sh
         chmod +x install-opentofu.sh
         ./install-opentofu.sh --install-method standalone
@@ -53,7 +80,7 @@ install_kubectl() {
     if [ -w /usr/local/bin ]; then
         mv kubectl /usr/local/bin/
     elif command -v sudo &> /dev/null; then
-        sudo mv kubectl /usr/local/bin/
+        $SUDO mv kubectl /usr/local/bin/
     else
         mkdir -p ~/.local/bin
         mv kubectl ~/.local/bin/
@@ -66,7 +93,7 @@ install_yamllint() {
     if command -v pip3 &> /dev/null; then
         pip3 install --user yamllint
     elif command -v apt-get &> /dev/null; then
-        sudo apt-get update && sudo apt-get install -y yamllint
+        $SUDO apt-get update && $SUDO apt-get install -y yamllint
     else
         echo "⚠️  Could not install yamllint automatically. Please install it manually."
     fi
@@ -77,7 +104,7 @@ install_task() {
     if [ -w /usr/local/bin ]; then
         sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
     elif command -v sudo &> /dev/null; then
-        sudo sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+        $SUDO sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
     else
         mkdir -p ~/.local/bin
         sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b ~/.local/bin
@@ -87,11 +114,11 @@ install_task() {
 
 install_awscli_bundle() {
     echo "Installing AWS CLI v2 from the official bundle..."
-    command -v unzip &> /dev/null || sudo apt-get install -y unzip
+    command -v unzip &> /dev/null || $SUDO apt-get install -y unzip
     local tmp
     tmp="$(mktemp -d)"
     curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o "$tmp/aws.zip"
-    (cd "$tmp" && unzip -q aws.zip && sudo ./aws/install --update)
+    (cd "$tmp" && unzip -q aws.zip && $SUDO ./aws/install --update)
     rm -rf "$tmp"
 }
 
@@ -102,11 +129,11 @@ install_image_tools() {
     # (backup-state.sh) — installed separately so a missing aws package never
     # blocks them (Ubuntu 24.04 dropped awscli from apt).
     if command -v apt-get &> /dev/null; then
-        sudo apt-get update && sudo apt-get install -y zstd qemu-utils gnupg jq
+        $SUDO apt-get update && $SUDO apt-get install -y zstd qemu-utils gnupg jq
     elif command -v brew &> /dev/null; then
         brew install zstd qemu gnupg jq
     elif command -v dnf &> /dev/null; then
-        sudo dnf install -y zstd qemu-img gnupg2 jq
+        $SUDO dnf install -y zstd qemu-img gnupg2 jq
     else
         echo "⚠️  Could not auto-install zstd/qemu-img/gpg/jq. Install them manually."
     fi
@@ -117,7 +144,7 @@ install_image_tools() {
         if command -v brew &> /dev/null; then
             brew install awscli
         elif command -v snap &> /dev/null; then
-            sudo snap install aws-cli --classic 2>/dev/null || install_awscli_bundle
+            $SUDO snap install aws-cli --classic 2>/dev/null || install_awscli_bundle
         else
             install_awscli_bundle
         fi
@@ -136,7 +163,7 @@ install_flux() {
     if [ -w /usr/local/bin ]; then
         install -m 755 "$tmp/flux" /usr/local/bin/flux
     elif command -v sudo &> /dev/null; then
-        sudo install -m 755 "$tmp/flux" /usr/local/bin/flux
+        $SUDO install -m 755 "$tmp/flux" /usr/local/bin/flux
     else
         mkdir -p ~/.local/bin
         install -m 755 "$tmp/flux" ~/.local/bin/flux
@@ -157,7 +184,7 @@ install_helm() {
     if [ -w /usr/local/bin ]; then
         install -m 755 "$tmp/${ARCH}/helm" /usr/local/bin/helm
     elif command -v sudo &> /dev/null; then
-        sudo install -m 755 "$tmp/${ARCH}/helm" /usr/local/bin/helm
+        $SUDO install -m 755 "$tmp/${ARCH}/helm" /usr/local/bin/helm
     else
         mkdir -p ~/.local/bin
         install -m 755 "$tmp/${ARCH}/helm" ~/.local/bin/helm
@@ -169,7 +196,7 @@ install_helm() {
 install_precommit() {
     echo "Installing pre-commit..."
     if command -v apt-get &> /dev/null; then
-        sudo apt-get update && sudo apt-get install -y pre-commit
+        $SUDO apt-get update && $SUDO apt-get install -y pre-commit
     elif command -v brew &> /dev/null; then
         brew install pre-commit
     elif command -v pip3 &> /dev/null; then
