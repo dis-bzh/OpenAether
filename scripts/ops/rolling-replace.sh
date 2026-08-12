@@ -297,6 +297,19 @@ replace_node() { # <type: cp|worker> <index>
   # and a plan before trusting it on a cluster you care about.
   targets+=("-target=${cfg_addr}")
 
+  # And the port-ready guard the config apply depends on. Its triggers_replace is
+  # the node ENDPOINT, which is unchanged by a replacement (same private IP), so
+  # it is never re-created on its own — and being in module.talos it was outside
+  # -target too. Without it the config apply fired against a node that had not
+  # finished booting and reported "Creation complete after 0s" having done
+  # nothing; the health gate then waited 600s for a kubelet that never started.
+  # Absent from state when skip_port_ready_wait is set, hence the lookup.
+  local guard_addr=""
+  if tofu state list 2>/dev/null | grep -qxF "module.talos.terraform_data.talos_port_ready_${tf_t}[${i}]"; then
+    guard_addr="module.talos.terraform_data.talos_port_ready_${tf_t}[${i}]"
+    targets+=("-target=${guard_addr}")
+  fi
+
   hr
   info "Node ${node_name}  (ip ${node_ip}, talos ${ep})"
 
@@ -305,7 +318,7 @@ replace_node() { # <type: cp|worker> <index>
     echo "  would: kubectl drain ${node_name} --ignore-daemonsets --delete-emptydir-data --timeout=${DRAIN_TIMEOUT}"
     [[ $t == cp ]] && echo "  would: talosctl etcd remove-member ${node_name} (via a healthy peer CP)"
     echo "  would: tofu apply ${targets[*]} \\"
-    echo "                    -replace='${inst_addr}' -replace='${cfg_addr}' \\"
+    echo "                    -replace='${inst_addr}' -replace='${cfg_addr}'${guard_addr:+ -replace=\'${guard_addr}\'} \\"
     echo "                    -var-file='${TFVARS}' -var talos_bootstrap=true -auto-approve"
     echo "  would: wait Talos health @ ${ep}, node Ready, $( [[ $t == cp ]] && echo 'etcd 3/3, ' )Longhorn healthy"
     echo "  would: kubectl uncordon ${node_name}"
@@ -335,6 +348,7 @@ replace_node() { # <type: cp|worker> <index>
   info "Planning ${node_name} and counting what it would destroy…"
   local doomed
   doomed="$(tofu plan "${targets[@]}" -replace="$inst_addr" -replace="$cfg_addr" \
+              ${guard_addr:+-replace="$guard_addr"} \
               -var-file="$TFVARS" -var talos_bootstrap=true -no-color 2>/dev/null \
             | sed -nE 's/^Plan: [0-9]+ to add, [0-9]+ to change, ([0-9]+) to destroy\./\1/p' | tail -1)"
   [[ -n "$doomed" ]] || die "could not read a plan for ${node_name} — refusing to apply blind"
@@ -353,6 +367,7 @@ replace_node() { # <type: cp|worker> <index>
     "${targets[@]}" \
     -replace="$inst_addr" \
     -replace="$cfg_addr" \
+    ${guard_addr:+-replace="$guard_addr"} \
     -var-file="$TFVARS" \
     -var talos_bootstrap=true \
     -auto-approve \

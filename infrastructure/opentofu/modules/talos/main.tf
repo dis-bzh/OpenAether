@@ -406,6 +406,9 @@ resource "terraform_data" "talos_port_ready_cp" {
   count = local.do_apply && !var.skip_port_ready_wait ? var.control_plane_count : 0
 
   # Re-run when the endpoint changes (e.g. node replacement).
+  # The endpoint alone is stable across a replacement (same private IP), so a
+  # rebuilt node kept a guard that had already "succeeded". rolling-replace now
+  # -replaces this explicitly; the trigger stays endpoint-based for normal applies.
   triggers_replace = [local.cp_endpoints[count.index]]
 
   provisioner "local-exec" {
@@ -413,6 +416,7 @@ resource "terraform_data" "talos_port_ready_cp" {
     command     = "${path.module}/scripts/wait-talos-port.sh"
     environment = {
       ENDPOINT = local.cp_endpoints[count.index]
+      NODE     = var.control_plane_ips[count.index]
     }
   }
 }
@@ -427,6 +431,7 @@ resource "terraform_data" "talos_port_ready_worker" {
     command     = "${path.module}/scripts/wait-talos-port.sh"
     environment = {
       ENDPOINT = local.worker_endpoints[count.index]
+      NODE     = var.worker_ips[count.index]
     }
   }
 }
