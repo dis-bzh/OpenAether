@@ -35,7 +35,15 @@ def call(action, payload=None):
         return {'error': e.read().decode()[:200]}
 
 
+# Counted so a clean account SAYS it is clean. This script is the last thing
+# standing between a failed teardown and a bill, and it used to report that by
+# printing nothing at all — which reads like a finding, not like an all-clear.
+TOTAL = 0
+
+
 def do(action, payload, label):
+    global TOTAL
+    TOTAL += 1
     if not APPLY:
         print("  [dry-run]", label); return
     r = call(action, payload)
@@ -68,4 +76,9 @@ for sn in call('ReadSubnets').get('Subnets', []):
     do('DeleteSubnet', {'SubnetId': sn['SubnetId']}, f"subnet {sn['SubnetId']}")
 for net in call('ReadNets').get('Nets', []):
     do('DeleteNet', {'NetId': net['NetId']}, f"net {net['NetId']} ({net.get('IpRange')})")
-print("\n(dry-run — --apply to delete)" if not APPLY else "\nOutscale purge complete")
+if TOTAL == 0:
+    print("Nothing to purge — the account is clean.")
+elif not APPLY:
+    print(f"\n{TOTAL} resource(s) targeted. Re-run with --apply to delete them.")
+else:
+    print("\nOutscale purge complete")
