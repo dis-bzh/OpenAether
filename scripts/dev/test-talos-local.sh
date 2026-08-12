@@ -188,9 +188,28 @@ for i in $(seq 1 60); do
 done
 echo "Nodes:"
 kubectl get nodes -o wide 2>/dev/null | sed 's/^/    /'
-[[ "$READY" -eq "$TOTAL_NODES" ]] && success "All ${TOTAL_NODES} nodes Ready (${#CP_IPS[@]} CP + ${#WORKER_IPS[@]} workers)" || warn "Nodes Ready: ${READY}/${TOTAL_NODES}"
-CILIUM=$(kubectl -n kube-system get pods -l k8s-app=cilium --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
-[[ "$CILIUM" -ge "$TOTAL_NODES" ]] && success "Cilium running on all ${CILIUM} nodes" || warn "Cilium pods running: ${CILIUM}/${TOTAL_NODES}"
+# Fatal, both of them. These two were still `|| warn` while the header above
+# claimed the degrade-to-warning bug was fixed — it was, for etcd and the Talos
+# health check only. A cluster with no working CNI reached the green banner.
+if [[ "$READY" -eq "$TOTAL_NODES" ]]; then
+  success "All ${TOTAL_NODES} nodes Ready (${#CP_IPS[@]} CP + ${#WORKER_IPS[@]} workers)"
+else
+  error "Nodes Ready: ${READY}/${TOTAL_NODES}"
+  exit 1
+fi
+# Cilium gets the same bounded wait as the nodes above: sampled once, a check
+# this strict would go red on a cluster that was merely a few seconds behind.
+for i in $(seq 1 60); do
+  CILIUM=$(kubectl -n kube-system get pods -l k8s-app=cilium --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
+  [[ "$CILIUM" -ge "$TOTAL_NODES" ]] && break
+  sleep 5
+done
+if [[ "$CILIUM" -ge "$TOTAL_NODES" ]]; then
+  success "Cilium running on all ${CILIUM} nodes"
+else
+  error "Cilium pods running: ${CILIUM}/${TOTAL_NODES} — the cluster has no working CNI"
+  exit 1
+fi
 
 # ==============================================================================
 # Step 5 — Scheduling: with dedicated workers the control planes stay tainted
