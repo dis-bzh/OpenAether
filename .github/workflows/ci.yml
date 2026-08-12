@@ -123,6 +123,36 @@ jobs:
       - name: task lint
         run: task lint
 
+  # `task render-check` existed but nothing ran it. Renovate bumped Cilium to
+  # 1.20.0 and Flux to v2.9.3 on the same day (2026-07-30); it moves the pinned
+  # version in the generator, never the generated artifact. Both committed
+  # manifests stayed two weeks behind the versions the repo claimed, and the
+  # only check that compares them was a target a human had to remember.
+  manifests:
+    name: Generated Manifests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - name: Install Helm (pinned + checksum-verified)
+        env:
+          # renovate: datasource=github-releases depName=helm/helm extractVersion=^v(?<version>.*)$
+          HELM_VERSION: "3.21.3"
+        run: |
+          set -euo pipefail
+          asset="helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          curl -fsSL -O "https://get.helm.sh/${asset}"
+          curl -fsSL "https://get.helm.sh/${asset}.sha256sum" | sha256sum -c
+          tar xzf "${asset}" linux-amd64/helm
+          sudo install -m 0755 linux-amd64/helm /usr/local/bin/helm
+          rm -rf "${asset}" linux-amd64
+
+      - name: Setup Task
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+
+      - name: task render-check
+        run: task render-check
 
   validate:
     name: Validate
