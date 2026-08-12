@@ -129,7 +129,12 @@ task up ROLE=management PROVIDER=scaleway KEY=~/.ssh/your-key
 `task up` now refuses before spending if the env file or the SSH key is missing;
 it used to check the key in phase 2, i.e. after `infra` had created VMs.
 
-- [ ] **`SCW-mgmt-nonha`** — 1 CP + 1 worker, the cheapest real path
+- [x] **`SCW-mgmt-ha`** — 3 CP across 3 AZs, run instead of the cheaper non-HA
+      path. 6 nodes Ready, k8s v1.36.3, Cilium on all six. The multi-AZ etcd
+      case the matrix ranks highest had never been applied; it has now.
+      Two defects surfaced on the way, both in the backlog: the bootstrap
+      resource is not idempotent despite its comment, and its retry is
+      unbounded — it ran 2h46 against billed resources before being stopped.
 - [ ] the apps `GitRepository` resolves the ref you pinned:
       `kubectl -n flux-system get gitrepository openaether -o yaml | grep -A3 'ref:'`
       → this is the **`ref.name` change**, and the first time it meets Flux.
@@ -138,15 +143,28 @@ it used to check the key in phase 2, i.e. after `infra` had created VMs.
       back to `refs/heads/main`, and the twelve `.example` files point at
       `refs/tags/…` — a ref that has never existed and that no deployment has
       ever resolved. Tag apps first, set `git_ref` to it, and check it here.
-- [ ] every Flux Kustomization Ready: `flux get kustomizations -A`
-- [ ] **no Longhorn HTTPRoute**: `kubectl -n longhorn-system get httproute`
-      → should be empty. Then add the route back by hand and confirm the UI is
-      reachable, so you know the opt-in path still works before you document it.
-- [ ] **idempotency**: `task up` a second time → 0 changes, node ages unchanged,
-      kubeconfig still valid
-- [ ] `task etcd-snapshot PROVIDER=scaleway` writes to both buckets
-- [ ] **teardown**: `task fleet-down PROVIDER=scaleway -- --yes`, then
+      → **done, and it works**: apps tagged `1.1.0-rc1` (its first tag ever),
+      `git_ref` pinned to it, GitRepository Ready=True with
+      `artifact.revision = refs/tags/1.1.0-rc1@sha1:9918021…`.
+- [~] every Flux Kustomization Ready: `flux get kustomizations -A`
+      → 29/36. Six wait on a cascade behind `cnpg`, whose ExternalSecrets for
+      the backup S3 credentials cannot sync: seeding those into OpenBao is the
+      manual per-cluster step the backlog records as deliberate. The
+      auto-generated secrets did sync. The seventh is `clusterctl-inventory`,
+      already open in the backlog. Nothing here is a new defect — but the box
+      cannot be ticked without seeding, so say so rather than call it green.
+- [x] **no Longhorn HTTPRoute**: `kubectl -n longhorn-system get httproute`
+      → empty, and Longhorn runs anyway (23 pods). Both Gateways came up with
+      their LB-IPAM VIPs. Adding the route back by hand is still untested.
+- [x] **idempotency**: `task up` a second time → 0 changes, node ages unchanged,
+      kubeconfig still valid → "0 added, 0 changed, 0 destroyed" on both phases,
+      nodes aged only by the elapsed minute.
+- [x] `task etcd-snapshot PROVIDER=scaleway` writes to both buckets → 49 MB,
+      encrypted, in the primary and its `-backup` twin. Pass `KEY=` if your key
+      is not `~/.ssh/id_ed25519`.
+- [x] **teardown**: `task fleet-down PROVIDER=scaleway -- --yes`, then
       `python3 scripts/ops/purge-orphans/scaleway.py` reports nothing left
+      → 62 destroyed, "no child cluster" from the fail-safe, project clean.
 
 ### Worth the extra spend, in priority order
 
