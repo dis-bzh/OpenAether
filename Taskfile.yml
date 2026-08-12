@@ -60,10 +60,14 @@ tasks:
     # Since that cache is the normal state of a working tree, a check meant to
     # run offline never ran (observed 2026-07-28). A dedicated data dir isolates
     # it from the backend cache while still caching the providers between runs.
+    # Shared with `test`, which needs the same isolation for the same reason.
     env:
       TF_DATA_DIR: .terraform-validate
     cmds:
-      - tofu init -backend=false
+      # -upgrade because .terraform.lock.hcl is gitignored — a pure local cache,
+      # yet shared with the deploy lane. Without it, every existing clone breaks
+      # the moment a version constraint moves, naming a command this never runs.
+      - tofu init -backend=false -upgrade
       - tofu validate
 
   apps-validate:
@@ -110,7 +114,16 @@ tasks:
         --skip-files "**/bootstrap-manifests/flux-install.yaml"
       # Same scope as CI (whole opentofu tree, not just cluster).
       - checkov -d infrastructure/opentofu --config-file .checkov.yaml
-      - gitleaks detect --source . --no-git
+      # Only what git can see. Scanning the raw tree flagged .env.sh and the
+      # *.kubeconfig files — gitignored on purpose — so this gate could never be
+      # green on an operator's machine, only on a bare CI runner.
+      # `gitleaks dir` takes ONE path: hand it a file list and it silently
+      # scans the whole tree instead, which is how that went unnoticed.
+      - |
+        tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+        git ls-files --cached --others --exclude-standard -z \
+          | tar --null -T - -cf - | tar -xf - -C "$tmp"
+        cd "$tmp" && gitleaks dir . --redact --no-banner
       # Default rules only, above — the env-data rules in .gitleaks-envdata.toml
       # are scoped to what a PR adds (the `leaks` CI job), because this tree's
       # test fixtures use synthetic-but-routable quads. This asserts they still
@@ -120,10 +133,24 @@ tasks:
   test:
     desc: Run OpenTofu tests (cluster root)
     dir: infrastructure/opentofu/cluster
+    # Same isolation as `validate`, and for the same reason — the comment there
+    # claimed this task already matched it, but only the init flag was copied,
+    # not TF_DATA_DIR. So every tree that had once deployed failed here on the
+    # S3 backend recorded in .terraform/, green on a fresh CI runner only.
+    env:
+      TF_DATA_DIR: .terraform-validate
+      # The mocked lane must not need a credential file. These lived in the CI
+      # job only, so locally `tofu test` failed on a required root variable
+      # unless you had sourced .env.sh — which is exactly what this rung is
+      # supposed to prove you don't need. Values are inert placeholders.
+      TF_VAR_encryption_passphrase: test-mock-passphrase-for-validation-only
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: mock
+      AWS_SECRET_ACCESS_KEY: mock
     cmds:
-      # Self-sufficient from a cold shell/CI runner (matches `validate`'s own
-      # init step) — `tofu test` needs providers/modules resolved first.
-      - tofu init -backend=false
+      # Self-sufficient from a cold shell/CI runner — `tofu test` needs the
+      # providers and modules resolved first. -upgrade: see `validate`.
+      - tofu init -backend=false -upgrade
       - tofu test
 
   cluster-security:
