@@ -62,6 +62,24 @@ is an entry that gets picked up and put back down. **Decide:** replaces
 **Closes:** when a question has to be settled first — a task-shaped entry
 invites someone to build what nobody decided.
 
+- [ ] **The Outscale image lane cannot replace an existing image.** Building
+      v1.13.8 over the v1.13.4 already in that account failed with `Unable to
+      delete Snapshot — 409 ResourceConflict (9094)`: the AMI still references
+      the snapshot, so the snapshot cannot go first. Deregister the image before
+      deleting the snapshot, or create the new pair before destroying the old
+      (`create_before_destroy`). Until then Outscale is stuck on whatever image
+      it already has — it is three patch versions behind the other providers,
+      and nothing said so.
+
+- [ ] **Outscale cannot run the HA topology under its default quota.** 3 CP +
+      3 workers of `tinav5.c2r7p2` is 42 GB against a 40 GB RAM quota, so the
+      documented `OSC-mgmt-ha` case is unreachable without a quota request.
+      `preflight-quotas` refuses correctly and explains why — the overrun is
+      tolerated at creation and then every later VM is silently refused. Either
+      raise the quota, or write the reduced topology (3 CP + 1 worker, 28 GB)
+      into the example and the matrix so nobody plans around a case that cannot
+      run.
+
 - [ ] **A Talos version upgrade does not complete on OVH.** Attempted live
       2026-08-12, v1.13.7 → v1.13.8 on a 3+3 HA cluster. Two causes were found
       and fixed — `rolling-replace` replaced nothing (`-target` narrows a plan,
