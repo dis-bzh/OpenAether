@@ -9,20 +9,116 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-08-12
+
+Written in English: this file is documentation, and the repository's rule is that
+English is canonical. The 1.0.0 entry below stays in French, unrewritten.
+
+**Numbered 1.1.0, not the 1.0.1 this section was drafted as.** The emulated lane
+is a new capability, not a patch, and 1.0.1 was never tagged. 1.0.0 is untouched:
+this project pins deployments by tag, so moving one would silently change what a
+cluster reconciles.
+
+### Added
+
+- **An emulated cloud lane — real provider binaries, no account, no bill.**
+  [Feint](https://github.com/stephrobert/feint) serves the Scaleway and Outscale
+  APIs on loopback; `task feint-plan` runs the real `cluster` root against it and
+  `task feint-apply` a full create / empty re-plan / destroy confirmed by the API,
+  not by the state. It sits between `tofu test`, where the provider is mocked and
+  never leaves the process, and a real deployment. Two locks, because the failure
+  mode is spending money by accident: the endpoint variable rejects anything that
+  is not loopback, and the lane pins fake credentials so a provider cannot fall
+  back to your profile. What it proves and what it does not is in
+  `docs/emulated-cloud.md` — Feint has no inventory, so a nonexistent image or
+  machine type is accepted where a real cloud refuses.
+- **`task feint-record`** ranks what our modules call that the emulator does not
+  serve, so the gap is measured instead of guessed. Four operations remain.
+- **A credentialed staging workflow** (`workflow_dispatch` + weekly), deploying,
+  verifying and destroying on a real provider, with a reaper that runs even when
+  the deploy job never reached its teardown. Never `pull_request`: this
+  repository is public and that trigger would hand a stranger its cloud
+  credentials.
+
 ### Changed
 
 - **Relicensed from AGPLv3 to Apache 2.0.** The copyleft was deterring the one
   thing this project wants — people running it. Apache 2.0 matches Feint, which
   OpenAether now depends on for its emulated lane. A relaxation, so anything
   already obtained under AGPLv3 remains available under it.
-
-## [1.0.1] — 2026-08-11
-
-Written in English: this file is documentation, and the repository's rule is that
-English is canonical. The 1.0.0 entry below stays in French, unrewritten.
+- **Talos v1.13.8**, and the vendored artifacts match their generators again.
+  Renovate raised Cilium to 1.20.0 and Flux to v2.9.3 on 2026-07-30 and moved
+  only the pinned versions, never the rendered files: for two weeks, and through
+  the 1.0.0 tag, clusters bootstrapped a Cilium missing the whole 1.20 config
+  surface and a Flux built by an older controller-gen. `task render-check`
+  existed and caught it — nothing ran it. It is a CI job now.
+- **The OpenAether-apps ref is a variable, and defaults to a tag.** `git_branch` was
+  hardcoded to `"main"`, so no version of this repository identified a deployable
+  system: a commit in the platform repo could change a running cluster within the
+  reconcile interval. `git_ref` takes a fully-qualified ref, defaults to
+  `refs/tags/1.1.0`, and every `envs/*.tfvars.example` pins it. Branch tracking stays
+  available (`refs/heads/<branch>`), which is also how two managements avoid sharing
+  `apps/clusters`.
+  The Flux `GitRepository` now uses `ref.name` rather than `ref.branch` — one field that
+  carries either — and the substitution injected through the gitception loop is
+  `GIT_REF` instead of `GIT_BRANCH`. **The examples require OpenAether-apps 1.1.0**, so that
+  tag is cut first; nothing else depends on it existing.
+  Rung: proven on live clusters, 2026-08-12. `OpenAether-apps` had never carried a
+  tag at all, so the examples pointed at a ref that could not resolve and every real
+  deployment had silently fallen back to a branch. Tagged, pinned, and checked on
+  Scaleway, OVH and Outscale: the `GitRepository` reports Ready against
+  `refs/tags/…@sha1:…`.
+- `apps/clusters` no longer enables the DIS fleet's own children by default; see the
+  OpenAether-apps 1.1.0 entry.
 
 ### Fixed
 
+Most of what follows was found on 2026-08-12 by running the release checklist on
+a real machine and three real clouds rather than trusting CI. They share a shape
+worth naming: **a check that could not fail**, or one asserting something other
+than what its name promised. None of them was visible from a green pipeline.
+
+- **`./scripts/setup.sh` installed nothing at all on a clean machine.** Three
+  prerequisites hidden behind one another, each turned into a total abort by
+  `set -euo pipefail`: OpenTofu's installer refuses without `unzip` and without
+  either `cosign` or `gpg`, then `sudo` does not exist in a container already
+  running as root. In a bare `ubuntu:24.04` it exited 1 having installed nothing;
+  it now installs the seven tools and reports a missing `nc` without pretending
+  otherwise.
+- **`task validate`, `task test` and `task security` were only ever green on a
+  fresh CI runner.** `validate` broke on a stale provider lock the moment a
+  version constraint moved; `test` claimed in its own comment to match it but had
+  copied only the flag, not the data-dir isolation, and needed a credential file
+  the mocked lane exists to avoid; `security` scanned `.env.sh` and the
+  `*.kubeconfig` files, gitignored by design, so it could not be green where it
+  is meant to run. Watch out for `gitleaks dir`: it takes one path and silently
+  scans everything if handed a list.
+- **`test-talos-local.sh` reached its green banner on a cluster with no CNI.**
+  Its header said the degrade-to-warning bug was fixed; it was, for etcd only.
+  Node-readiness and Cilium were still warnings. Proven by deleting the Cilium
+  DaemonSet: the old checks printed yellow and exited 0.
+- **The staging workflow could never have deployed anything.** It sets
+  `TF_INPUT=0` and has no tty, and `task infra` applies without `-auto-approve`
+  on purpose — so its first apply aborted, every time, after loading the secrets.
+- **`rolling-replace` replaced nothing on OpenStack.** `-target` narrows a plan,
+  it forces nothing, and an image change is only ForceNew on Scaleway: a Talos
+  bump rewrote the attribute in place and left the VM on the old image, the state
+  claiming a version no node was running. It also invented node names from a
+  convention Outscale does not follow, where every `kubectl cordon` would have
+  failed. Both fixed; names now come from the cluster, by private IP.
+- **`talos-image` printed the right image id and let you deploy the wrong one.**
+  On OVH and Outscale the cluster reads the id from a tfvars, copied by hand, and
+  nothing compared the two — a rebuilt image failed at server creation, after the
+  network and bastion were billed. It refuses now.
+- **`talos_machine_bootstrap` retried an unreachable node for 2h46 on billed
+  resources**, having no timeout while the two resources above it do. Bounded to
+  15m. Its comment also called it idempotent, which it is not.
+- **A unit test named `installer_image_uses_talos_version` asserted that the
+  variable it had just set held the value it set.** The installer reference it
+  claimed to cover is what decides the Talos version a node actually runs.
+- **Two of the three `purge-orphans` scripts never said "clean".** They printed
+  only their dry-run footer, so an empty account and a full one differed by the
+  absence of lines. These are the last thing between a failed teardown and a bill.
 - **`task local-up` built a cluster with no CNI on a fresh clone.** `cilium-local.yaml`
   is gitignored, `local-up` had no render step, and the fallback emitted the string
   `placeholder` — which the precondition in `modules/talos` does not match, because it
@@ -43,24 +139,6 @@ English is canonical. The 1.0.0 entry below stays in French, unrewritten.
   held a bare string against a `map(list(string))` variable.
 - Both READMEs announced `v0.4.0+` and pointed at an empty `[Unreleased]`, at the 1.0.0
   tag itself; and the WSL2 note gave a port default of 41000 against an actual 45000.
-
-### Changed
-
-- **The OpenAether-apps ref is a variable, and defaults to a tag.** `git_branch` was
-  hardcoded to `"main"`, so no version of this repository identified a deployable
-  system: a commit in the platform repo could change a running cluster within the
-  reconcile interval. `git_ref` takes a fully-qualified ref, defaults to
-  `refs/tags/1.0.1`, and every `envs/*.tfvars.example` pins it. Branch tracking stays
-  available (`refs/heads/<branch>`), which is also how two managements avoid sharing
-  `apps/clusters`.
-  The Flux `GitRepository` now uses `ref.name` rather than `ref.branch` — one field that
-  carries either — and the substitution injected through the gitception loop is
-  `GIT_REF` instead of `GIT_BRANCH`. **The examples require OpenAether-apps 1.0.1**, so that
-  tag is cut first; nothing else depends on it existing.
-  Rung: statically validated (`tofu validate`, rendered template inspected, apps-side
-  YAML linted). **Not yet exercised on a live cluster** — the tag path in particular.
-- `apps/clusters` no longer enables the DIS fleet's own children by default; see the
-  OpenAether-apps 1.0.1 entry.
 
 ## [1.0.0] — 2026-07-31
 
