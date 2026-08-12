@@ -458,8 +458,14 @@ resource "talos_machine_configuration_apply" "worker" {
 # ==============================================================================
 # Bootstrap
 # Triggers the initial etcd/control plane bootstrap on the first CP node.
-# One-shot, idempotent. In 'userdata' mode there are no apply resources to wait
-# on — the provider retries connection until the (USERDATA-configured) node is up.
+# One-shot, and NOT idempotent — the comment here used to claim it was. Once the
+# node is bootstrapped, a create returns `AlreadyExists: etcd data directory is
+# not empty`, so any run whose success was not recorded in state (an interrupted
+# apply, a dropped tunnel) is stuck for good against a perfectly healthy
+# cluster. Recover by adopting the resource instead of re-creating it:
+#   tofu import 'module.talos.talos_machine_bootstrap.this[0]' <first-cp-ip>
+# In 'userdata' mode there are no apply resources to wait on — the provider
+# retries connection until the (USERDATA-configured) node is up.
 # ==============================================================================
 
 resource "talos_machine_bootstrap" "this" {
@@ -468,6 +474,13 @@ resource "talos_machine_bootstrap" "this" {
   client_configuration = local.machine_secrets.client_configuration
   endpoint             = local.cp_endpoints[0]
   node                 = var.control_plane_ips[0]
+
+  # Same 15m as the config_apply resources above, and for a sharper reason: with
+  # no bound, this retried "bootstrap is not available yet" for 2h46 against six
+  # billed VMs (2026-08-12) and would not have stopped on its own.
+  timeouts = {
+    create = "15m"
+  }
 
   depends_on = [
     talos_machine_configuration_apply.control_plane

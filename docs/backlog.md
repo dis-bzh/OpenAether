@@ -62,22 +62,17 @@ is an entry that gets picked up and put back down. **Decide:** replaces
 **Closes:** when a question has to be settled first — a task-shaped entry
 invites someone to build what nobody decided.
 
-- [ ] **`talos_machine_bootstrap` is not idempotent, and its comment says it
-      is.** When the bootstrap succeeds on the node but is not recorded in state
-      — an interrupted apply, a Ctrl-C, a laptop that sleeps — every later run
-      dies on `AlreadyExists: etcd data directory is not empty`, so `task up` is
-      stuck for good against a healthy cluster. That contradicts the repo's own
-      "re-run to resume". Recovery works and is undocumented:
-      `tofu import 'module.talos.talos_machine_bootstrap.this[0]' <cp-ip>`.
-      Fix the comment, document the recovery, and consider wrapping the
-      resource so AlreadyExists reads as success.
-
-- [ ] **The bootstrap retry is unbounded, on billed resources.** Observed
-      2026-08-12: `talos_machine_bootstrap` retried `FailedPrecondition:
-      bootstrap is not available yet` for 2h46 with six VMs running, and would
-      not have stopped on its own. Anything that spends money should fail fast.
-      A timeout on that resource, or a wrapper that gives up, is worth more than
-      the retries.
+- [ ] **`talos_machine_bootstrap` still needs a human after an interrupted
+      apply.** The comment and the missing timeout are fixed; the behaviour is
+      not. A bootstrap that succeeds on the node without being recorded in state
+      still fails every later run with `AlreadyExists: etcd data directory is
+      not empty`, against a healthy cluster, which contradicts the repo's own
+      "re-run to resume". The recovery is now in the module header
+      (`tofu import` the resource) but it is a manual step nobody will remember
+      at 2am. Making it self-healing means either wrapping the call so
+      AlreadyExists reads as success, or gating `count` on a data source that
+      detects an already-bootstrapped etcd — both are design changes, not
+      release-week edits. Decide, then do one.
 
 - [ ] **The tag path has never been exercised, and the examples point into the
       void.** `OpenAether-apps` carries no tag at all — not even 1.0.0. The
