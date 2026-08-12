@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 # OpenAether — rolling node replacement (zero-downtime ForceNew apply)
 #
-# `instance_type` and the Talos image are ForceNew: a plain `tofu apply` replaces
-# every node IN PARALLEL → the 3 control planes reboot at once → etcd loses
-# quorum. This script does one node at a time: cordon+drain → targeted apply →
-# wait for etcd/Longhorn → uncordon.
+# `instance_type` and the Talos image change what a node must boot, and a plain
+# `tofu apply` acts on every node AT ONCE → the 3 control planes go together →
+# etcd loses quorum. This script does one node at a time: cordon+drain →
+# targeted apply → wait for etcd/Longhorn → uncordon.
 #
-# Two non-obvious points:
+# Three non-obvious points:
+#   * `-replace` on the INSTANCE is ESSENTIAL, and `-target` is not enough:
+#     -target narrows the plan, it forces nothing. Whether an image change is
+#     ForceNew is provider-specific — true on Scaleway, false on OpenStack,
+#     where image_id updates in place. Without the explicit replace, a Talos
+#     version bump on OVH rewrote the attribute and left the VM booted on the
+#     old image: state said v1.13.8, every node reported v1.13.7 (2026-08-12).
 #   * `-replace` on talos_machine_configuration_apply is ESSENTIAL — it never
 #     references the instance ID, so a replaced VM yields no diff and would stay
 #     in maintenance mode, unconfigured.
@@ -242,6 +248,18 @@ replace_node() { # <type: cp|worker> <index>
   [[ ${#targets[@]} -gt 0 ]] \
     || die "no state resources match module.${MOD}[0].*.${tf_t}[${i}] — wrong PROVIDER, or state not initialized?"
 
+  # -target only NARROWS the plan; it does not force anything to be replaced.
+  # The header of this script assumes a Talos image change is ForceNew, which is
+  # true on Scaleway and false on OpenStack: there image_id updates in place, so
+  # a version bump rewrote the attribute and left the VM booted on the old image
+  # — state claiming v1.13.8 while every node reported v1.13.7 (2026-08-12).
+  # Name the instance and replace it explicitly. NOT the port: recreating that
+  # would hand the node a new private IP, which is its identity.
+  local inst_addr
+  inst_addr="$(printf '%s\n' "${targets[@]#-target=}" | grep -E '\.(scaleway_instance_server|openstack_compute_instance_v2|outscale_vm|proxmox_virtual_environment_vm)\.' | head -1)"
+  [[ -n "$inst_addr" ]] \
+    || die "no compute instance among the targets for ${node_name} — new provider whose instance resource this script does not know?"
+
   hr
   info "Node ${node_name}  (ip ${node_ip}, talos ${ep})"
 
@@ -250,7 +268,7 @@ replace_node() { # <type: cp|worker> <index>
     echo "  would: kubectl drain ${node_name} --ignore-daemonsets --delete-emptydir-data --timeout=${DRAIN_TIMEOUT}"
     [[ $t == cp ]] && echo "  would: talosctl etcd remove-member ${node_name} (via a healthy peer CP)"
     echo "  would: tofu apply ${targets[*]} \\"
-    echo "                    -replace='${cfg_addr}' \\"
+    echo "                    -replace='${inst_addr}' -replace='${cfg_addr}' \\"
     echo "                    -var-file='${TFVARS}' -var talos_bootstrap=true -auto-approve"
     echo "  would: wait Talos health @ ${ep}, node Ready, $( [[ $t == cp ]] && echo 'etcd 3/3, ' )Longhorn healthy"
     echo "  would: kubectl uncordon ${node_name}"
@@ -277,6 +295,7 @@ replace_node() { # <type: cp|worker> <index>
   info "targets: ${targets[*]#-target=}"
   tofu apply \
     "${targets[@]}" \
+    -replace="$inst_addr" \
     -replace="$cfg_addr" \
     -var-file="$TFVARS" \
     -var talos_bootstrap=true \
