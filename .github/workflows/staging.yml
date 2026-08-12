@@ -56,6 +56,11 @@ jobs:
       ROLE: ${{ inputs.role || 'management' }}
       TF_IN_AUTOMATION: "1"
       TF_INPUT: "0"
+      # `task infra` and `bootstrap-phase2` apply WITHOUT -auto-approve, on
+      # purpose: a human running `task up` should be asked before spending. With
+      # TF_INPUT=0 and no tty that same apply just aborts, so this job could
+      # never have deployed anything. Same mechanism fleet-down uses for destroy.
+      TF_CLI_ARGS_apply: -auto-approve
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
