@@ -62,6 +62,19 @@ is an entry that gets picked up and put back down. **Decide:** replaces
 **Closes:** when a question has to be settled first — a task-shaped entry
 invites someone to build what nobody decided.
 
+- [ ] **The tag path has never been exercised, and the examples point into the
+      void.** `OpenAether-apps` carries no tag at all — not even 1.0.0. The
+      twelve `envs/*.tfvars.example` pin `git_ref = refs/tags/…` against it, so
+      a newcomer copying an example gets a `GitRepository` that can never
+      resolve. The real tfvars carry no `git_ref` line and fall back to
+      `refs/heads/main`, which is why no deployment ever hit it. Tag apps, point
+      the examples at that tag, and prove it on a real cluster.
+
+- [ ] **Two checks in `test-talos-local.sh` are still warnings** — schedulable
+      workers Ready, and Flux controllers running. Same shape as the CNI check
+      made fatal in `01a081a`; left alone because the banner only claims
+      `modules/talos`. Decide whether the banner moves or the checks do.
+
 - [ ] **The stale `1.0.0 tag pending` line above is a warning, not an anecdote.**
       "Where we stand" said the tag was deferred for eleven days after it was
       cut, and it misled a reading of the project's own maturity. Re-read the

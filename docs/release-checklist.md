@@ -38,9 +38,23 @@ cd OpenAether-infra && git checkout <the 1.0.1 candidate>
 ./scripts/setup.sh
 ```
 
-- [ ] `setup.sh` completes and installs **helm** (`command -v helm`)
-- [ ] it warns if `nc` is absent, and does not claim to install it
-- [ ] every command the README quick start names exists (`task --list`)
+Your workstation is not a clean machine and a fresh clone on it proves little —
+run this in a bare container instead, which is what a newcomer actually meets:
+
+```bash
+git archive --format=tar HEAD > /tmp/repo.tar
+docker run --rm -v /tmp/repo.tar:/tmp/repo.tar:ro ubuntu:24.04 bash -c '
+  apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null
+  mkdir /oa && tar -xf /tmp/repo.tar -C /oa && cd /oa && ./scripts/setup.sh'
+```
+
+- [x] `setup.sh` completes and installs **helm** (`command -v helm`)
+      → 2026-08-12: exit 0, and tofu/talosctl/kubectl/task/flux/helm/yamllint all
+      present. Before `c5ec82f` this exited 1 having installed **nothing**:
+      unzip and gpg missing (OpenTofu's installer refuses without them), then
+      `sudo` missing as root, and `set -e` turned each into a total abort.
+- [x] it warns if `nc` is absent, and does not claim to install it → yes
+- [x] every command the README quick start names exists (`task --list`) → exit 0
 
 ## 2. Local Docker — the credential-free rung
 
@@ -53,19 +67,26 @@ task local-test
 task local-down
 ```
 
-- [ ] `local-up` renders `cilium-local.yaml` itself (watch for the render step)
-- [ ] **Cilium is actually running** — `kubectl -n kube-system get pods -l k8s-app=cilium`.
+- [x] `local-up` renders `cilium-local.yaml` itself (watch for the render step)
+      → yes, from a tree with the manifest removed
+- [x] **Cilium is actually running** — `kubectl -n kube-system get pods -l k8s-app=cilium`.
       This is the one that was broken. A cluster whose pods are Pending with no
-      CNI still looks like a successful apply.
-- [ ] `local-status` prints etcd members — it dialled the wrong port until now
-- [ ] `local-test` reaches its green banner **and** its etcd/health checks are
-      fatal now: make one fail on purpose (stop a container mid-run) and confirm
-      the script exits non-zero
-- [ ] `local-down` leaves no container, volume or network behind (`docker ps -a`,
-      `docker volume ls`)
+      CNI still looks like a successful apply. → 6/6 Running
+- [x] `local-status` prints etcd members — it dialled the wrong port until now
+      → 3 members listed
+- [x] `local-test` reaches its green banner **and** its checks are fatal.
+      Do NOT test this by stopping a container: the script re-applies before it
+      checks, so tofu simply recreates it. Break something the apply will not
+      put back — `kubectl -n kube-system delete daemonset cilium` — then run the
+      Step 4 checks. → `01a081a`: the old lines warned and exited 0 on 0/6 pods,
+      the new ones exit 1.
+- [x] `local-down` leaves no container, volume or network behind. Diff against a
+      snapshot taken before `local-up`; a bare `docker ps -a` on a workstation
+      lists every other project you have ever run. → nothing left
 
 Then repeat `local-up` **with the manifest already rendered** — the normal case
-for you — and confirm it does not re-render needlessly.
+for you — and confirm it does not re-render needlessly. → no render step, and
+the manifest's checksum is unchanged.
 
 ## 3. Emulated cloud — no account, real provider binaries
 
@@ -78,9 +99,14 @@ task feint-plan PROVIDER=scaleway FEINT_ENDPOINT=https://api.scaleway.com   # mu
 task feint-down
 ```
 
-- [ ] both providers green on plan and on the apply/destroy cycle
-- [ ] the ranking still shows the four known operations and no new one
-- [ ] the guard refuses a non-loopback endpoint:
+- [x] both providers green on plan and on the apply/destroy cycle
+      → Feint 0.7.0: scaleway 8 resources, outscale 27, each with an empty
+      re-plan and a destroy confirmed against the API
+- [x] the ranking still shows the four known operations and no new one
+      → 3 on Scaleway (`ipam BookIP`, `lb ips`, `vpc-gw ips`), 1 on Outscale
+      (`CreateLoadBalancer`)
+- [x] the guard refuses a non-loopback endpoint — checked both ways, as a Task
+      variable and as an environment variable:
       `task feint-plan PROVIDER=scaleway FEINT_ENDPOINT=https://api.scaleway.com`
       must print `endpoint … is not local` and exit non-zero. It did NOT until
       2026-08-11: a Task variable is not an environment variable, so the script
@@ -106,7 +132,12 @@ it used to check the key in phase 2, i.e. after `infra` had created VMs.
 - [ ] **`SCW-mgmt-nonha`** — 1 CP + 1 worker, the cheapest real path
 - [ ] the apps `GitRepository` resolves the ref you pinned:
       `kubectl -n flux-system get gitrepository openaether -o yaml | grep -A3 'ref:'`
-      → this is the **`ref.name` change**, and the first time it meets Flux
+      → this is the **`ref.name` change**, and the first time it meets Flux.
+      ⚠️ Pin a **tag** for this, deliberately. `OpenAether-apps` has never been
+      tagged at all, the real `envs/*.tfvars` carry no `git_ref` line and so fall
+      back to `refs/heads/main`, and the twelve `.example` files point at
+      `refs/tags/…` — a ref that has never existed and that no deployment has
+      ever resolved. Tag apps first, set `git_ref` to it, and check it here.
 - [ ] every Flux Kustomization Ready: `flux get kustomizations -A`
 - [ ] **no Longhorn HTTPRoute**: `kubectl -n longhorn-system get httproute`
       → should be empty. Then add the route back by hand and confirm the UI is
