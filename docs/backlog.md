@@ -62,6 +62,17 @@ is an entry that gets picked up and put back down. **Decide:** replaces
 **Closes:** when a question has to be settled first — a task-shaped entry
 invites someone to build what nobody decided.
 
+- [ ] **A Talos version upgrade does not complete on OVH.** Attempted live
+      2026-08-12, v1.13.7 → v1.13.8 on a 3+3 HA cluster. Two causes were found
+      and fixed — `rolling-replace` replaced nothing (`-target` narrows a plan,
+      it forces nothing, and an image change is ForceNew on Scaleway only), and
+      the installer reference had no real test. A third is open: with the
+      explicit replace the VM WAS rebuilt from the v1.13.8 image, and the node
+      never rejoined the cluster. Availability was never the problem — 1300+
+      probes through the load balancer, zero failures — so this is about the
+      node coming back, not about downtime. Reproduce on a fresh cluster, watch
+      one node end to end, and only then let the release notes mention upgrades.
+
 - [ ] **`talos_machine_bootstrap` still needs a human after an interrupted
       apply.** The comment and the missing timeout are fixed; the behaviour is
       not. A bootstrap that succeeds on the node without being recorded in state

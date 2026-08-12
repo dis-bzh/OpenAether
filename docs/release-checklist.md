@@ -188,11 +188,27 @@ task preflight-quotas PROVIDER=ovh
 task up ROLE=management PROVIDER=ovh
 ```
 
-- [ ] **`OVH-mgmt-ha`** — Octavia LB, floating IP, SNAT router
-- [ ] teardown **twice**: the Octavia LB orphaned in the 2026-07-30 teardown was
+- [x] **`OVH-mgmt-ha`** — Octavia LB, floating IP, SNAT router → 3 CP + 3
+      workers Ready, two Octavia LBs with their listeners and members, three
+      floating IPs, the SNAT router and its interface. The Flux GitRepository
+      resolved the pinned **tag** here too.
+      First attempt died in 3 minutes on "Can not find requested image", after
+      the network and bastion were billed: the tfvars pinned an image id the
+      talos-image lane had replaced. `talos-image.sh` refuses on that mismatch
+      now — it already knew both halves and merely suggested copying one over.
+- [x] teardown **twice**: the Octavia LB orphaned in the 2026-07-30 teardown was
       silently reused by CAPO on the next deploy. `verify-provider-clean.py`
       covers it now; this is the run that proves the check, not the fix.
-- [ ] `python3 scripts/ops/purge-orphans/ovh.py` clean on the first pass
+      → 79 destroyed, then "No changes, 0 destroyed". No LB survived.
+- [x] `python3 scripts/ops/purge-orphans/ovh.py` clean on the first pass → yes
+- [~] **the Talos upgrade does not complete on OVH.** Covered here because this
+      is where it was attempted; see the backlog entry. `rolling-replace` is
+      fixed (it replaced nothing: `-target` narrows a plan, it forces nothing,
+      and an image change is only ForceNew on Scaleway) and the API stayed up
+      throughout — 1300+ calls through the load balancer, zero failures. But the
+      replaced node never rejoined, and the run was stopped rather than pushed
+      further on a billed cluster. Do not claim a zero-downtime Talos upgrade
+      for 1.1.0 on OVH.
 - [ ] **`OVH-vip`** if budget allows — `k8s_lb_mode=vip` has never been applied
       on OVH, and Neutron's `allowed_address_pairs` is a different mechanism from
       Scaleway's anti-spoofing
