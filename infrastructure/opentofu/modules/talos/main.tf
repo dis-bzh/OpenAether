@@ -26,6 +26,12 @@ resource "talos_machine_secrets" "unprotected" {
 
 locals {
   machine_secrets = one(concat(talos_machine_secrets.this[*], talos_machine_secrets.unprotected[*]))
+
+  # The version a node actually RUNS comes from this installer, not from the
+  # image the VM boots. Named once, and exposed as an output, so a test can
+  # assert it and an operator can read it back after an upgrade instead of
+  # inferring it from `kubectl`, whose node osImage lags a Talos rejoin.
+  installer_image = "ghcr.io/siderolabs/installer:${var.talos_version}"
 }
 
 # 32-byte random key for Kubernetes Secrets encryption at rest (AES-256-GCM via
@@ -239,7 +245,7 @@ data "talos_machine_configuration" "control_plane" {
           install = {
             disk  = "/dev/vda"
             wipe  = true
-            image = "ghcr.io/siderolabs/installer:${var.talos_version}"
+            image = local.installer_image
           }
         },
         local.apiserver_vip_network_patch
@@ -357,7 +363,7 @@ data "talos_machine_configuration" "worker" {
           install = {
             disk  = "/dev/vda"
             wipe  = true
-            image = "ghcr.io/siderolabs/installer:${var.talos_version}"
+            image = local.installer_image
           }
         }
       )
