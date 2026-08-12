@@ -220,15 +220,28 @@ task preflight-quotas PROVIDER=outscale -- --add-vms 2 --add-cores 4 --add-ram-g
 task up ROLE=management PROVIDER=outscale
 ```
 
-- [ ] **`OSC-mgmt-ha`** — the LB returns a **DNS name**, not an IP; that path is
-      unique to this provider
-- [ ] the RAM quota (40 GB) is checked *before*, not discovered after: an HA
+- [~] **`OSC-mgmt-ha`** — the LB returns a **DNS name**, not an IP; that path is
+      unique to this provider → the DNS name is confirmed
+      (`…-k8s-lb-….lbu.outscale.com:6443`), but the topology was **3 CP + 1
+      worker**, not 3+3: see the quota line below. etcd is still HA.
+      Deploy and idempotency both clean — three applies, then "0 added, 0
+      changed, 0 destroyed" on the second run.
+- [x] the RAM quota (40 GB) is checked *before*, not discovered after: an HA
       management needs 44 GB, the overrun is tolerated at creation and then every
       further VM is silently refused
+      → it refused, with that explanation. 3+3 of `tinav5.c2r7p2` is 42 GB and
+      does not fit. Fix the quota or stop writing `OSC-mgmt-ha` as reachable.
 - [ ] **`data.outscale_images`** resolves against the real API — the emulated lane
       exercises the `images[0]` shape but says nothing about *ordering*, and the
       module assumes most-recent-first
-- [ ] teardown + `purge-orphans/outscale.py` clean
+      → **not testable here.** The account holds exactly one Talos image, and
+      building a second failed (see the backlog: the lane cannot replace an
+      image while its AMI still references the snapshot). One image has no
+      ordering to get wrong.
+- [x] teardown + `purge-orphans/outscale.py` clean → 57 destroyed, account clean.
+      Careful reading it: run straight after `fleet-down`, the purge listed five
+      resources that were merely still being deleted — Outscale removes load
+      balancers asynchronously. Re-run before concluding anything.
 
 ## 7. Cross-repo and CAPI, if you are exercising the optional layer
 
