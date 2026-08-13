@@ -24,7 +24,7 @@ operator's kubeconfig; OVH was never idempotent; a worker could never be upgrade
 in place; no node could be fully drained; and a tfvars backup was not gitignored.
 The upgrade path itself is the headline — 1.0.0 shipped it unverified.
 
-Still open and deliberately not fixed for 1.1.0: the PodDisruptionBudgets that
+Still open and deliberately not fixed for 1.0.0: the PodDisruptionBudgets that
 make a node undrainable (OpenAether-apps), the two applies a version bump needs,
 and the Outscale image lane that cannot replace an image. All below.
 

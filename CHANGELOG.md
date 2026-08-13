@@ -9,15 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.0] — 2026-08-12
+## [1.0.0] — 2026-08-13
 
 Written in English: this file is documentation, and the repository's rule is that
-English is canonical. The 1.0.0 entry below stays in French, unrewritten.
+English is canonical. The withdrawn 1.0.0 entry below stays in French, unrewritten.
 
-**Numbered 1.1.0, not the 1.0.1 this section was drafted as.** The emulated lane
-is a new capability, not a patch, and 1.0.1 was never tagged. 1.0.0 is untouched:
-this project pins deployments by tag, so moving one would silently change what a
-cluster reconciles.
+**This is 1.0.0, and the tag of that name has been re-cut.** A 1.0.0 was tagged on
+2026-07-31, before deploy, idempotency and upgrade had ever been run end to end on
+the three cloud providers — which is what the number was meant to certify. That
+tag has been deleted and 1.0.0 now points here. Nothing had been published under
+it: there was no GitHub release, and OpenAether-apps had never been tagged 1.0.0
+at all. Anyone who fetched the old tag will get different content under the same
+name, which is why it is said plainly here rather than left to be discovered.
+
+**What 1.0.0 now means, measured rather than asserted.** On Scaleway (3+3), OVH
+(3+3) and Outscale (3+1): a cluster deploys, a second apply reports no changes,
+Kubernetes moves 1.36.2 → 1.36.3, and Talos moves to 1.13.8 in place on every
+node — with the API answering throughout, in gaps of at most nine seconds while a
+load balancer re-pooled. Then all three tear down and leave nothing behind.
+
+### Known limits
+
+Three things are open and deliberately not fixed here. Read them before upgrading
+a cluster that matters; each has an entry in [`docs/backlog.md`](docs/backlog.md).
+
+- **A node cannot be fully drained.** Seven PodDisruptionBudgets in the app stack
+  allow zero disruptions — `istio-system/istiod` runs one replica and declares
+  `minAvailable: 1`, which is a budget asking never to be moved. `rolling-replace`
+  reports the stuck eviction, waits out its timeout and continues, so the node
+  reboots with those pods still on it. Nothing observable broke in testing, but
+  "drained before reboot" is not a property this release can claim. The manifests
+  are in OpenAether-apps.
+- **A version bump needs two applies.** Bumping `talos_version` and applying fails
+  once with "Provider produced inconsistent final plan", per machine config, on
+  both OVH and Outscale; running it again succeeds. Nothing is left half-applied,
+  but the first failure is expected and unexplained.
+- **The Outscale image lane cannot replace an image.** Rebuilding returns 409 on
+  the snapshot while the existing OMI still references it. It does not block a
+  deployment — pin the OMI and use `task infra` + `task bootstrap-phase2` — and it
+  never blocks an upgrade, since `--upgrade` pulls its installer from a registry
+  and needs no cloud image at all.
 
 ### Added
 
@@ -63,12 +94,12 @@ cluster reconciles.
   hardcoded to `"main"`, so no version of this repository identified a deployable
   system: a commit in the platform repo could change a running cluster within the
   reconcile interval. `git_ref` takes a fully-qualified ref, defaults to
-  `refs/tags/1.1.0`, and every `envs/*.tfvars.example` pins it. Branch tracking stays
+  `refs/tags/1.0.0`, and every `envs/*.tfvars.example` pins it. Branch tracking stays
   available (`refs/heads/<branch>`), which is also how two managements avoid sharing
   `apps/clusters`.
   The Flux `GitRepository` now uses `ref.name` rather than `ref.branch` — one field that
   carries either — and the substitution injected through the gitception loop is
-  `GIT_REF` instead of `GIT_BRANCH`. **The examples require OpenAether-apps 1.1.0**, so that
+  `GIT_REF` instead of `GIT_BRANCH`. **The examples require OpenAether-apps 1.0.0**, so that
   tag is cut first; nothing else depends on it existing.
   Rung: proven on live clusters, 2026-08-12. `OpenAether-apps` had never carried a
   tag at all, so the examples pointed at a ref that could not resolve and every real
@@ -76,7 +107,7 @@ cluster reconciles.
   Scaleway, OVH and Outscale: the `GitRepository` reports Ready against
   `refs/tags/…@sha1:…`.
 - `apps/clusters` no longer enables the DIS fleet's own children by default; see the
-  OpenAether-apps 1.1.0 entry.
+  OpenAether-apps 1.0.0 entry.
 
 ### Fixed
 
@@ -199,7 +230,12 @@ than what its name promised. None of them was visible from a green pipeline.
 - Both READMEs announced `v0.4.0+` and pointed at an empty `[Unreleased]`, at the 1.0.0
   tag itself; and the WSL2 note gave a port default of 41000 against an actual 45000.
 
-## [1.0.0] — 2026-07-31
+## [1.0.0 — withdrawn] — 2026-07-31
+
+> This tag was cut before the three use cases above had ever been exercised on the
+> three providers. It has been deleted and 1.0.0 re-cut on 2026-08-13. Its
+> contents are kept here because they are part of what 1.0.0 now ships.
+
 
 **Premier socle stable : multi-provider, multi-cluster, automatisé, idempotent.**
 Fleet réelle 3 providers (management + edges) déployée, opérée (upgrade rolling

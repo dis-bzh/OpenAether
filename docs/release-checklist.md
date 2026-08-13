@@ -145,7 +145,9 @@ it used to check the key in phase 2, i.e. after `infra` had created VMs.
       ever resolved. Tag apps first, set `git_ref` to it, and check it here.
       → **done, and it works**: apps tagged `1.1.0-rc1` (its first tag ever),
       `git_ref` pinned to it, GitRepository Ready=True with
-      `artifact.revision = refs/tags/1.1.0-rc1@sha1:9918021…`.
+      `artifact.revision = refs/tags/1.1.0-rc1@sha1:9918021…`. That throwaway
+      tag has since been deleted and replaced by `1.0.0`; what it proved — a
+      tag ref resolves where a branch ref did not — holds either way.
 - [~] every Flux Kustomization Ready: `flux get kustomizations -A`
       → 29/36. Six wait on a cascade behind `cnpg`, whose ExternalSecrets for
       the backup S3 credentials cannot sync: seeding those into OpenBao is the

@@ -230,7 +230,7 @@ task security            # contrôles de durcissement
 ## Licence
 
 **OpenAether** est distribué sous [licence Apache 2.0](LICENSE). Le projet était
-sous AGPLv3 jusqu'à la 1.1.0 ; le changement est un assouplissement, donc ce que
+sous AGPLv3 jusqu'aux versions 0.x ; le changement est un assouplissement, donc ce que
 vous déteniez déjà sous AGPLv3 le reste.
 
 Source : **https://github.com/dis-bzh/OpenAether-infra**
