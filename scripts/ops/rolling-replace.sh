@@ -6,6 +6,12 @@
 # etcd loses quorum. This script does one node at a time: cordon+drain →
 # targeted apply → wait for etcd/Longhorn → uncordon.
 #
+# Each node takes TWO applies: the instance first, then its Talos config once the
+# new VM exists. The graph does not order those — modules/talos reads each node's
+# address from IPAM, not from the instance — so in a single apply tofu configured
+# the OLD VM a second before destroying it, and the replacement came up in
+# maintenance mode. Every "kubelet not healthy after 600s" traced back to that.
+#
 # Before each node it PLANS and counts what would be destroyed, and refuses if
 # that exceeds the resources it targets. "One node at a time" used to be an
 # intention nothing checked: on 2026-08-12 one extra -target pulled a whole
@@ -360,18 +366,42 @@ replace_node() { # <type: cp|worker> <index>
   fi
   ok "plan destroys ${doomed} resource(s), targets ${#targets[@]} — proceeding"
 
-  # 3. targeted recreate of THIS node only + forced Talos config re-apply
-  info "tofu apply (targeted) — recreate ${node_name} + reattach NIC/IP + re-apply Talos config…"
-  info "targets: ${targets[*]#-target=}"
+  # 3. TWO applies, and the split is the whole point.
+  #
+  # modules/talos takes each node's address from the provider module's IPAM
+  # resource, never from its instance, so nothing in the graph says "configure
+  # the node after you have rebuilt it". In one apply tofu is free to order it
+  # the other way round, and it does: observed 2026-08-13, the config applied to
+  # the OLD VM one second before that VM was destroyed, and the replacement then
+  # booted into maintenance mode with no config at all — which is what every
+  # "kubelet not healthy after 600s" of the last two days actually was.
+  #
+  # The ordering has to come from here. First the instance, alone. Then the
+  # guard and the config, against a node that now exists.
+  local -a infra_targets=()
+  local t
+  for t in "${targets[@]}"; do
+    [[ "$t" == "-target=${cfg_addr}" || "$t" == "-target=${guard_addr}" ]] || infra_targets+=("$t")
+  done
+
+  info "tofu apply 1/2 — recreate ${node_name} (instance, NIC/IP)…"
+  info "targets: ${infra_targets[*]#-target=}"
   tofu apply \
-    "${targets[@]}" \
+    "${infra_targets[@]}" \
     -replace="$inst_addr" \
-    -replace="$cfg_addr" \
-    ${guard_addr:+-replace="$guard_addr"} \
     -var-file="$TFVARS" \
     -var talos_bootstrap=true \
     -auto-approve \
-    || die "tofu apply failed for ${node_name} — cluster left with ${node_name} cordoned; investigate before retrying"
+    || die "tofu apply (instance) failed for ${node_name} — cluster left with ${node_name} cordoned; investigate before retrying"
+
+  info "tofu apply 2/2 — wait for the new node, then apply its Talos config…"
+  tofu apply \
+    -target="$cfg_addr" ${guard_addr:+-target="$guard_addr"} \
+    -replace="$cfg_addr" ${guard_addr:+-replace="$guard_addr"} \
+    -var-file="$TFVARS" \
+    -var talos_bootstrap=true \
+    -auto-approve \
+    || die "tofu apply (config) failed for ${node_name} — the VM exists but is unconfigured (maintenance mode); re-run to resume"
 
   # 4. Talos services up on the fresh VM (-e tunnel connects, -n real IP = identity)
   info "Waiting for Talos to come up on ${node_name} (${ep} → ${node_ip})…"
