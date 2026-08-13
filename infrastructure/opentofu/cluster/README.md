@@ -33,7 +33,7 @@ tofu apply -var-file=envs/<cluster>.tfvars
 ### Provider Contract
 
 Every provider module in `modules/providers/<name>/` must implement the
-[provider contract](modules/providers/provider-contract.md). The root module's
+[provider contract](../modules/providers/provider-contract.md). The root module's
 junction point uses `coalesce()` to select the active provider's outputs.
 
 **Adding a new provider = implementing the contract interface.** The Talos module
@@ -140,7 +140,7 @@ Only the `*.tfvars.example` templates are versioned. Copy an example to its real
 credentials never get committed.
 
 > Local Docker testing (3 CP + 2 workers) is **not** an env file here — it lives in
-> [`../opentofu-local`](../opentofu-local) (its own root, `TF_VAR_`-driven).
+> [`../../opentofu-local`](../../opentofu-local) (its own root, `TF_VAR_`-driven).
 
 ## Workflow
 

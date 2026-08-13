@@ -21,12 +21,19 @@ from a green pipeline: a reboot renamed nodes on every provider (the images are
 `metal` builds, the names came from DHCP); a routine apply after an upgrade
 proposed replacing all three control planes at once; `task test` deleted the
 operator's kubeconfig; OVH was never idempotent; a worker could never be upgraded
-in place; no node could be fully drained; and a tfvars backup was not gitignored.
+in place; a node could not be fully drained; and a tfvars backup was not
+gitignored.
 The upgrade path itself is the headline — 1.0.0 shipped it unverified.
 
-Still open and deliberately not fixed for 1.0.0: the PodDisruptionBudgets that
-make a node undrainable (OpenAether-apps), the two applies a version bump needs,
-and the Outscale image lane that cannot replace an image. All below.
+Since then, on the same day: a node CAN be fully drained. istiod ran a single
+replica under a budget requiring one, which is what pinned it; with two, a worker
+drained clean — exit 0, zero non-DaemonSet pods left, about a minute while
+OpenBao's raft quorum settled. The six other zero-disruption budgets are correct
+and transient.
+
+Still open: the two applies a version bump needs, and the Outscale image lane,
+which cannot replace an image for a reason now measured rather than guessed —
+`create_before_destroy` was tried and reverted. Both below.
 
 Alerting exists and is proven end to end: 19 rules, a real alert delivered to
 Slack from a Scaleway cluster, and a `Watchdog` whose silence is the signal.
