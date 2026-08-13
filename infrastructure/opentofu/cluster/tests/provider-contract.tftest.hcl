@@ -9,6 +9,11 @@ mock_provider "openstack" {}
 mock_provider "outscale" {}
 mock_provider "proxmox" {}
 mock_provider "talos" {}
+# The `local` provider must be mocked too. local_file writes kubeconfig and
+# talosconfig into the module directory, so an unmocked test run overwrites a
+# live cluster's credentials and then DELETES them on teardown.
+mock_provider "local" {}
+
 
 # Scaleway overrides (needed even when inactive to avoid errors if module is not count=0)
 override_data {

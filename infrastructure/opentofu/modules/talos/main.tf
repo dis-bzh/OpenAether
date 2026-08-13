@@ -26,6 +26,12 @@ resource "talos_machine_secrets" "unprotected" {
 
 locals {
   machine_secrets = one(concat(talos_machine_secrets.this[*], talos_machine_secrets.unprotected[*]))
+
+  # The version a node actually RUNS comes from this installer, not from the
+  # image the VM boots. Named once, and exposed as an output, so a test can
+  # assert it and an operator can read it back after an upgrade instead of
+  # inferring it from `kubectl`, whose node osImage lags a Talos rejoin.
+  installer_image = "ghcr.io/siderolabs/installer:${var.talos_version}"
 }
 
 # 32-byte random key for Kubernetes Secrets encryption at rest (AES-256-GCM via
@@ -239,7 +245,7 @@ data "talos_machine_configuration" "control_plane" {
           install = {
             disk  = "/dev/vda"
             wipe  = true
-            image = "ghcr.io/siderolabs/installer:${var.talos_version}"
+            image = local.installer_image
           }
         },
         local.apiserver_vip_network_patch
@@ -280,6 +286,25 @@ data "talos_machine_configuration" "control_plane" {
         },
         local.apiserver_vip_certsans
       )
+    }),
+    # Our images are `metal` builds, so Talos has no cloud metadata to name the
+    # node from: the name came from DHCP, and the generated config falls back to
+    # `auto: stable` when a lease arrives without one. That is how a control
+    # plane rebooted by `talosctl upgrade` came back as talos-xxxxx and orphaned
+    # its own node object. A static hostname outranks DHCP and holds across
+    # reboots, identically on every provider.
+    # Two documents, not one: since Talos 1.12 the name lives in HostnameConfig
+    # rather than machine.network.hostname, and `auto` and `hostname` are
+    # mutually exclusive — so the generated document has to go first.
+    yamlencode({
+      apiVersion = "v1alpha1"
+      kind       = "HostnameConfig"
+      "$patch"   = "delete"
+    }),
+    yamlencode({
+      apiVersion = "v1alpha1"
+      kind       = "HostnameConfig"
+      hostname   = "${var.cluster_name}-cp-${count.index}"
     })
   ]
 
@@ -289,7 +314,7 @@ data "talos_machine_configuration" "control_plane" {
       # so a real manifest that happens to contain that word in a comment can't
       # falsely trip the guard.
       condition     = var.control_plane_count == 0 || !strcontains(var.cilium_manifest, "CILIUM-MANIFEST-PLACEHOLDER")
-      error_message = "Cilium manifest is an unrendered placeholder. Run ./scripts/render-bootstrap-manifests.sh before bootstrapping."
+      error_message = "Cilium manifest is an unrendered placeholder. Run ./scripts/bootstrap/render-bootstrap-manifests.sh (add --local for the Docker cluster) before bootstrapping."
     }
   }
 }
@@ -357,7 +382,7 @@ data "talos_machine_configuration" "worker" {
           install = {
             disk  = "/dev/vda"
             wipe  = true
-            image = "ghcr.io/siderolabs/installer:${var.talos_version}"
+            image = local.installer_image
           }
         }
       )
@@ -371,6 +396,17 @@ data "talos_machine_configuration" "worker" {
           disabled = true
         }
       }
+    }),
+    # Same reason as the control planes — see the HostnameConfig note there.
+    yamlencode({
+      apiVersion = "v1alpha1"
+      kind       = "HostnameConfig"
+      "$patch"   = "delete"
+    }),
+    yamlencode({
+      apiVersion = "v1alpha1"
+      kind       = "HostnameConfig"
+      hostname   = "${var.cluster_name}-worker-${count.index}"
     })
   ], local.worker_user_volume_patches)
 }
@@ -400,6 +436,9 @@ resource "terraform_data" "talos_port_ready_cp" {
   count = local.do_apply && !var.skip_port_ready_wait ? var.control_plane_count : 0
 
   # Re-run when the endpoint changes (e.g. node replacement).
+  # The endpoint alone is stable across a replacement (same private IP), so a
+  # rebuilt node kept a guard that had already "succeeded". rolling-replace now
+  # -replaces this explicitly; the trigger stays endpoint-based for normal applies.
   triggers_replace = [local.cp_endpoints[count.index]]
 
   provisioner "local-exec" {
@@ -407,6 +446,7 @@ resource "terraform_data" "talos_port_ready_cp" {
     command     = "${path.module}/scripts/wait-talos-port.sh"
     environment = {
       ENDPOINT = local.cp_endpoints[count.index]
+      NODE     = var.control_plane_ips[count.index]
     }
   }
 }
@@ -421,6 +461,7 @@ resource "terraform_data" "talos_port_ready_worker" {
     command     = "${path.module}/scripts/wait-talos-port.sh"
     environment = {
       ENDPOINT = local.worker_endpoints[count.index]
+      NODE     = var.worker_ips[count.index]
     }
   }
 }
@@ -458,8 +499,14 @@ resource "talos_machine_configuration_apply" "worker" {
 # ==============================================================================
 # Bootstrap
 # Triggers the initial etcd/control plane bootstrap on the first CP node.
-# One-shot, idempotent. In 'userdata' mode there are no apply resources to wait
-# on — the provider retries connection until the (USERDATA-configured) node is up.
+# One-shot, and NOT idempotent — the comment here used to claim it was. Once the
+# node is bootstrapped, a create returns `AlreadyExists: etcd data directory is
+# not empty`, so any run whose success was not recorded in state (an interrupted
+# apply, a dropped tunnel) is stuck for good against a perfectly healthy
+# cluster. Recover by adopting the resource instead of re-creating it:
+#   tofu import 'module.talos.talos_machine_bootstrap.this[0]' <first-cp-ip>
+# In 'userdata' mode there are no apply resources to wait on — the provider
+# retries connection until the (USERDATA-configured) node is up.
 # ==============================================================================
 
 resource "talos_machine_bootstrap" "this" {
@@ -468,6 +515,13 @@ resource "talos_machine_bootstrap" "this" {
   client_configuration = local.machine_secrets.client_configuration
   endpoint             = local.cp_endpoints[0]
   node                 = var.control_plane_ips[0]
+
+  # Same 15m as the config_apply resources above, and for a sharper reason: with
+  # no bound, this retried "bootstrap is not available yet" for 2h46 against six
+  # billed VMs (2026-08-12) and would not have stopped on its own.
+  timeouts = {
+    create = "15m"
+  }
 
   depends_on = [
     talos_machine_configuration_apply.control_plane

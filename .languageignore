@@ -1,0 +1,12 @@
+# Files this repository has decided are French on purpose. Everything else is
+# checked. A path here needs a reason above it — an entry with no reason is a
+# silenced defect, which is what this file exists NOT to become.
+
+# The instructions an AI assistant reads, and the exchange language with the
+# maintainer is French by the rule in it. Translating it would defeat its point.
+CLAUDE.md
+
+# Release entries are a historical record. 1.0.0 and earlier were written in
+# French; rewriting them would falsify what was published under those tags.
+# Entries from 1.0.1 on are English — see the note at the top of that entry.
+CHANGELOG.md

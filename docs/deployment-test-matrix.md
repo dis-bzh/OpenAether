@@ -7,7 +7,8 @@
 > `provider-contract.md`. Keep the **Status** column current — that is the point
 > of the file.
 >
-> ✅ apply-tested · 🧪 unit-tested only (mocked) · ⬜ untested. Reviewed 2026-07-28.
+> ✅ apply-tested · 🎭 emulated (Feint: real provider, real HTTP, no account) ·
+> 🧪 unit-tested only (mocked) · ⬜ untested. Reviewed 2026-07-28.
 
 ## Mental model
 
@@ -119,6 +120,25 @@ Two orthogonal layers of knobs:
 | `CAPI-mgmt-pivot` | local throwaway cluster | Scaleway | Management **born from CAPI**, deploying its own child, then `clusterctl move` onto itself. | ✅ *(mgmt-capi, 2026-07-28 — see `capi-bootstrap.md`)* |
 | `CAPI-edge-osc` | management | Outscale | CAPOSC child. | ⬜ *(account RAM quota)* |
 | `CAPI-providerid` | local throwaway | Scaleway | Talos CCM → `providerID`, `nodeRef` resolved, MachineHealthCheck 3/3. | ✅ *(edge-pid, 2026-07-28)* |
+
+### Emulated cloud (Feint — no account, no credentials)
+
+The real provider binaries against a local emulator of the Scaleway/Outscale
+APIs. Between 🧪 and ✅: real HTTP, real decode, but no inventory, no LB, no
+quotas. What it proves and what it does not: `emulated-cloud.md`.
+
+| ID | Lane | Uniquely exercises | Status |
+|---|---|---|---|
+| `FEINT-scw-plan` | `task feint-plan PROVIDER=scaleway` | The **real** cluster root planned with zero credentials in scope. | 🎭 (CI) |
+| `FEINT-osc-plan` | `task feint-plan PROVIDER=outscale` | Same for Outscale, and it resolves its image through `data.outscale_images` rather than a pinned id — the `images[0]` shape the module carried as an unverified assumption. | 🎭 (CI) |
+| `FEINT-scw-crud` | `task feint-apply PROVIDER=scaleway` | Real create/read/update/delete: security-group rule set, private NIC addressing, server + volume lifecycle, empty re-plan, destroy verified against the API. | 🎭 (CI) |
+| `FEINT-osc-crud` | `task feint-apply PROVIDER=outscale` | Same on Outscale, and since Feint 0.6.0 nearly the whole module: the two-subnet egress plan (internet service, NAT, both route tables), security groups and rules, public IP link, volume link, keypair, three VMs — 27 resources. Only the load balancers are out of reach. | 🎭 (CI) |
+| `FEINT-record` | `task feint-record PROVIDER=…` | Records the real module through `feint proxy` and ranks the operations no pack serves. Measures the gap rather than asserting; the apply behind it is expected to fail on the first unserved call. | 🎭 |
+| `FEINT-guard` | non-loopback endpoint | Negative test: the lane must refuse to drive anything but a local emulator. | 🎭 |
+
+Not reachable in this lane, and why: Scaleway root volume type, Outscale
+`volume_link`, `data.outscale_images` (segfaults the provider). See
+`backlog.md`.
 
 ### Cross-cutting operational scenarios
 

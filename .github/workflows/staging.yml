@@ -1,0 +1,184 @@
+name: Staging
+
+# The credentialed rung. Everything else in CI runs without a cloud account;
+# this one spends money on a real provider, so its trigger surface is the whole
+# design.
+#
+# ⚠️ NEVER add `pull_request` here. GitHub withholds secrets from fork pull
+# requests on purpose, and the usual workaround — `pull_request_target` — runs
+# with this repository's secrets in its own context: checking out the PR's code
+# under it hands a stranger the cloud credentials. This repository is public.
+# The only triggers are ones a maintainer controls.
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Provider to exercise
+        type: choice
+        options: [scaleway, ovh, outscale]
+        default: scaleway
+      role:
+        description: Cluster role
+        type: choice
+        options: [management, workload]
+        default: management
+      keep:
+        description: Leave the cluster up after the run (for manual inspection)
+        type: boolean
+        default: false
+  schedule:
+    # Weekly, Monday 03:17 UTC. Off the hour so it does not pile up with
+    # everything else the runners fire at :00.
+    - cron: "17 3 * * 1"
+
+# One staging cluster at a time. Two concurrent runs would collide on resource
+# names and on the remote state, and the loser would leave billed VMs behind.
+# Never cancel in progress: an interrupted apply is exactly what orphans things.
+concurrency:
+  group: staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: "Deploy, verify, destroy (${{ inputs.provider || 'scaleway' }})"
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # The Environment is what holds the secrets, and what lets you require an
+    # approval before the job starts. Configure `staging` with required
+    # reviewers in Settings → Environments; without that, a scheduled run can
+    # spend money with nobody looking.
+    environment: staging
+    env:
+      PROVIDER: ${{ inputs.provider || 'scaleway' }}
+      ROLE: ${{ inputs.role || 'management' }}
+      TF_IN_AUTOMATION: "1"
+      TF_INPUT: "0"
+      # `task infra` and `bootstrap-phase2` apply WITHOUT -auto-approve, on
+      # purpose: a human running `task up` should be asked before spending. With
+      # TF_INPUT=0 and no tty that same apply just aborts, so this job could
+      # never have deployed anything. Same mechanism fleet-down uses for destroy.
+      TF_CLI_ARGS_apply: -auto-approve
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4  # v2
+        with:
+          # renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
+          tofu_version: "1.12.5"
+
+      - name: Setup Task
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+
+      - name: Setup toolchain
+        run: ./scripts/setup.sh
+
+      # A dedicated staging account, never one that holds anything real. Every
+      # value below is a repository/environment secret — none of them belongs in
+      # git, and the teardown reads the same ones.
+      - name: Load credentials
+        run: |
+          {
+            echo "TF_VAR_encryption_passphrase=${{ secrets.STAGING_ENCRYPTION_PASSPHRASE }}"
+            case "$PROVIDER" in
+              scaleway)
+                echo "SCW_ACCESS_KEY=${{ secrets.STAGING_SCW_ACCESS_KEY }}"
+                echo "SCW_SECRET_KEY=${{ secrets.STAGING_SCW_SECRET_KEY }}"
+                echo "SCW_DEFAULT_PROJECT_ID=${{ secrets.STAGING_SCW_PROJECT_ID }}"
+                echo "SCW_AWS_ACCESS_KEY_ID=${{ secrets.STAGING_SCW_ACCESS_KEY }}"
+                echo "SCW_AWS_SECRET_ACCESS_KEY=${{ secrets.STAGING_SCW_SECRET_KEY }}"
+                ;;
+              ovh)
+                echo "OS_AUTH_URL=${{ secrets.STAGING_OS_AUTH_URL }}"
+                echo "OS_PROJECT_ID=${{ secrets.STAGING_OS_PROJECT_ID }}"
+                echo "OS_USERNAME=${{ secrets.STAGING_OS_USERNAME }}"
+                echo "OS_PASSWORD=${{ secrets.STAGING_OS_PASSWORD }}"
+                echo "OS_REGION_NAME=${{ secrets.STAGING_OS_REGION_NAME }}"
+                echo "OVH_AWS_ACCESS_KEY_ID=${{ secrets.STAGING_OVH_S3_ACCESS_KEY }}"
+                echo "OVH_AWS_SECRET_ACCESS_KEY=${{ secrets.STAGING_OVH_S3_SECRET_KEY }}"
+                ;;
+              outscale)
+                echo "OUTSCALE_ACCESS_KEY_ID=${{ secrets.STAGING_OSC_ACCESS_KEY }}"
+                echo "OUTSCALE_SECRET_KEY=${{ secrets.STAGING_OSC_SECRET_KEY }}"
+                echo "OUTSCALE_AWS_ACCESS_KEY_ID=${{ secrets.STAGING_OSC_ACCESS_KEY }}"
+                echo "OUTSCALE_AWS_SECRET_ACCESS_KEY=${{ secrets.STAGING_OSC_SECRET_KEY }}"
+                ;;
+            esac
+          } >> "$GITHUB_ENV"
+
+      # The tfvars is environment data and stays out of git — the whole point of
+      # the split. It is a base64 blob in the Environment, one secret per
+      # provider, built from the matching envs/*.tfvars.example.
+      - name: Materialise the tfvars
+        env:
+          TFVARS_B64: ${{ secrets.STAGING_TFVARS_B64 }}
+        run: |
+          test -n "$TFVARS_B64" || { echo "::error::STAGING_TFVARS_B64 is empty"; exit 1; }
+          printf '%s' "$TFVARS_B64" | base64 -d \
+            > "infrastructure/opentofu/cluster/envs/${ROLE}-${PROVIDER}.tfvars"
+
+      - name: Preflight quotas
+        continue-on-error: true
+        run: task preflight-quotas PROVIDER="$PROVIDER"
+
+      - name: Deploy
+        id: deploy
+        run: task up ROLE="$ROLE" PROVIDER="$PROVIDER"
+
+      - name: Verify
+        run: ./scripts/dev/staging-verify.sh "$PROVIDER" "$ROLE"
+
+      # `if: always()` is the load-bearing line in this file. A failed apply is
+      # precisely the case that leaves billed resources standing, so the teardown
+      # must run when the deploy did NOT succeed — and it must not be skipped by
+      # a cancelled job either.
+      - name: Destroy
+        if: always() && !(inputs.keep && github.event_name == 'workflow_dispatch')
+        run: task fleet-down PROVIDER="$PROVIDER" ROLE="$ROLE" -- --yes
+
+      - name: Confirm the provider is clean
+        if: always() && !(inputs.keep && github.event_name == 'workflow_dispatch')
+        run: python3 "scripts/ops/purge-orphans/${PROVIDER}.py"
+
+  # The reaper does not depend on the job above, and that is the point: it has
+  # to run when that job died, was cancelled, or never got to its teardown.
+  reap:
+    name: Sweep the staging account
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: staging
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [scaleway, ovh, outscale]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - name: Setup toolchain
+        run: ./scripts/setup.sh
+
+      - name: Load credentials
+        run: |
+          {
+            echo "SCW_ACCESS_KEY=${{ secrets.STAGING_SCW_ACCESS_KEY }}"
+            echo "SCW_SECRET_KEY=${{ secrets.STAGING_SCW_SECRET_KEY }}"
+            echo "SCW_DEFAULT_PROJECT_ID=${{ secrets.STAGING_SCW_PROJECT_ID }}"
+            echo "OS_AUTH_URL=${{ secrets.STAGING_OS_AUTH_URL }}"
+            echo "OS_PROJECT_ID=${{ secrets.STAGING_OS_PROJECT_ID }}"
+            echo "OS_USERNAME=${{ secrets.STAGING_OS_USERNAME }}"
+            echo "OS_PASSWORD=${{ secrets.STAGING_OS_PASSWORD }}"
+            echo "OS_REGION_NAME=${{ secrets.STAGING_OS_REGION_NAME }}"
+            echo "OUTSCALE_ACCESS_KEY_ID=${{ secrets.STAGING_OSC_ACCESS_KEY }}"
+            echo "OUTSCALE_SECRET_KEY=${{ secrets.STAGING_OSC_SECRET_KEY }}"
+          } >> "$GITHUB_ENV"
+
+      # Read-only by default (the purge scripts are dry-run unless told
+      # otherwise), so a green run means "nothing left" and a red one names what
+      # to delete. Deleting on a schedule, unattended, is a bigger risk than the
+      # leak it would prevent.
+      - name: Report what is still standing
+        run: python3 "scripts/ops/purge-orphans/${{ matrix.provider }}.py"

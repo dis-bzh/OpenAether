@@ -9,8 +9,8 @@
 
 ## Version
 
-**v0.4.0+** — modular multi-provider Talos foundation (see `CLAUDE.md` and
-`CHANGELOG.md [Unreleased]`).
+**1.0.1** — modular multi-provider Talos foundation (see `CHANGELOG.md`).
+Deploys the matching `OpenAether-apps` tag: one version identifies one system.
 
 Management validated end-to-end on **Scaleway, OVH and Outscale**; local Docker
 validated (3 CP + 3 workers); Proxmox is code-complete but **never applied on
@@ -128,7 +128,7 @@ task local-down      # tear down (containers + volumes + state)
 
 ⚠️ **On Windows/WSL2**: Hyper-V reserves blocks of ports above 49152, and those
 blocks move across reboots. The host port base is therefore configurable
-(`talos_api_port_base`, default 41000). Diagnose with
+(`talos_api_port_base`, default 45000). Diagnose with
 `netsh.exe int ipv4 show excludedportrange protocol=tcp`.
 
 ### Management cluster (cloud)
@@ -139,6 +139,8 @@ source .env.sh
 cp infrastructure/opentofu/cluster/envs/management-scaleway.tfvars.example \
    infrastructure/opentofu/cluster/envs/management-scaleway.tfvars
 # Edit: admin_ip, bastion_ssh_keys, image_name/image_id, s3_primary_*/s3_replica_*
+# And git_repo_url + git_ref if you run your own fork of OpenAether-apps —
+# the defaults point at ours, and its apps/clusters is not yours.
 
 task preflight-quotas PROVIDER=ovh          # check quotas first
 task talos-image PROVIDER=scaleway          # once per image version
@@ -166,6 +168,23 @@ python3 scripts/ops/purge-orphans/ovh.py    # dry-run: confirm nothing is left
 and a **self-managed** cluster cannot finish deleting itself
 (see `docs/capi-bootstrap.md`).
 
+### Emulated cloud (Feint — no cloud account, no credentials)
+
+Points the **real** Scaleway and Outscale providers at a local emulator of their
+APIs. One step past the mocked `tofu test`: real HTTP, real decode, no bill.
+
+```bash
+task feint-up                        # start the emulator (pinned binary, checksum-verified)
+task feint-plan   PROVIDER=scaleway  # plan the REAL cluster root, zero credentials
+task feint-apply  PROVIDER=outscale  # apply/destroy cycle on the reduced fixture
+task feint-record PROVIDER=scaleway  # rank the operations we call that no pack serves
+task feint-down
+```
+
+⚠️ It does **not** prove a real deployment works — the emulator has no
+inventory, no load balancer and no quotas. See
+[docs/emulated-cloud.md](docs/emulated-cloud.md).
+
 ### Static checks (no cloud, no Docker)
 
 ```bash
@@ -181,7 +200,9 @@ task security            # hardening checks
 | [docs/admin-access.md](docs/admin-access.md) | Day-1 path: escrow, offline PKI, UI access, browser tests |
 | [docs/capi-bootstrap.md](docs/capi-bootstrap.md) | Bootstrap a management via CAPI and make it self-managed |
 | [docs/deployment-test-matrix.md](docs/deployment-test-matrix.md) | What is validated, where, and how |
-| [docs/backlog.md](docs/backlog.md) | **Source of truth**: current state, debt, improvements (French only — living working document) |
+| [docs/emulated-cloud.md](docs/emulated-cloud.md) | Testing Scaleway/Outscale against a local emulator — and the limits of that |
+| [docs/release-checklist.md](docs/release-checklist.md) | What to run before tagging a release, in the order that fails cheapest |
+| [docs/backlog.md](docs/backlog.md) | **Source of truth**: current state, debt, improvements (English only — living working document) |
 
 ## Security
 
@@ -210,6 +231,7 @@ task security            # hardening checks
 ## License
 
 **OpenAether** is licensed under the
-[GNU Affero General Public License v3.0 (AGPLv3)](LICENSE).
+[Apache License 2.0](LICENSE). It was AGPLv3 through the 0.x releases; the change is a
+relaxation, so anything you already had under AGPLv3 stays yours under it.
 
 Source: **https://github.com/dis-bzh/OpenAether-infra**

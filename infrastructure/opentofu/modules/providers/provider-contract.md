@@ -49,6 +49,26 @@ this contract to be consumed by the Talos module and the root `main.tf`.
 4. **Security groups** — Inbound default policy MUST be `drop`. Only explicitly
    required ports should be allowed (6443 from LB, 50000 from bastion, inter-node mesh).
 
+## Node image drift
+
+Every node resource must carry `lifecycle { ignore_changes = [<image attribute>] }`.
+
+A Talos node's boot image is the medium it was *installed* from, nothing more.
+Once the node runs, its version comes from the installer image in the machine
+config, and `talosctl upgrade` changes that version without touching the cloud
+resource. So after an upgrade the two disagree by design: the instance still
+reports the old image id.
+
+Left alone, that disagreement is destructive. Bumping `talos_version` makes the
+image data source resolve to a new id, and the attribute is ForceNew on Scaleway
+and a disk-wiping rebuild on OpenStack — so a routine `tofu apply` would replace
+every node, all control planes at the same time, and etcd would lose quorum.
+
+Ignoring the attribute keeps new nodes on the new image while existing ones are
+upgraded in place. Re-imaging on purpose is still available and still the way to
+do it: `scripts/ops/rolling-replace.sh` passes an explicit `-replace`, one node
+at a time, with health gates between them.
+
 ## Architecture
 
 ```

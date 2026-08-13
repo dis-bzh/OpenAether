@@ -12,6 +12,11 @@ mock_provider "openstack" {}
 mock_provider "outscale" {}
 mock_provider "proxmox" {}
 mock_provider "talos" {}
+# The `local` provider must be mocked too. local_file writes kubeconfig and
+# talosconfig into the module directory, so an unmocked test run overwrites a
+# live cluster's credentials and then DELETES them on teardown.
+mock_provider "local" {}
+
 
 
 # Scaleway overrides (always needed even when not active in some tests)
@@ -249,9 +254,14 @@ run "installer_image_uses_talos_version" {
     talos_version   = "v1.13.3"
   }
 
+  # This used to assert `var.talos_version == "v1.13.3"` — that the variable the
+  # run had just set held the value it set. A tautology, under a name promising
+  # it checked the installer. It could not fail, and the installer reference it
+  # claims to cover is the one that decides which Talos a node actually runs:
+  # booting a newer image changes nothing if this string stays behind.
   assert {
-    condition     = var.talos_version == "v1.13.3"
-    error_message = "talos_version variable must be set correctly."
+    condition     = module.talos.installer_image == "ghcr.io/siderolabs/installer:v1.13.3"
+    error_message = "the machine config must pin the installer to var.talos_version"
   }
 }
 

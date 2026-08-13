@@ -40,11 +40,15 @@ fi
 
 CLUSTER_NAME="openaether-local-dev"
 CP_IPS=("10.5.0.10" "10.5.0.11" "10.5.0.12")
-CP_ENDPOINTS=("127.0.0.1:50000" "127.0.0.1:50001" "127.0.0.1:50002")
+# Host ports, derived from the same base local-up publishes rather than hardcoded:
+# 50000 is the CONTAINER-internal port, and pinning it here made every endpoint
+# unreachable while the checks below degraded to warnings and the run still ended green.
+PORT_BASE="${TALOS_API_PORT_BASE:-45000}"
+CP_ENDPOINTS=("127.0.0.1:$((PORT_BASE))" "127.0.0.1:$((PORT_BASE + 1))" "127.0.0.1:$((PORT_BASE + 2))")
 # Dedicated workers (worker_count=3 in opentofu-local/variables.tf): IPs at .20+,
-# host ports at 50010+i. Schedulable/untainted, for HA and real workload scheduling tests.
+# host ports at base+10+i. Schedulable/untainted, for HA and real workload scheduling tests.
 WORKER_IPS=("10.5.0.20" "10.5.0.21" "10.5.0.22")
-WORKER_ENDPOINTS=("127.0.0.1:50010" "127.0.0.1:50011" "127.0.0.1:50012")
+WORKER_ENDPOINTS=("127.0.0.1:$((PORT_BASE + 10))" "127.0.0.1:$((PORT_BASE + 11))" "127.0.0.1:$((PORT_BASE + 12))")
 TOTAL_NODES=$(( ${#CP_IPS[@]} + ${#WORKER_IPS[@]} ))
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
@@ -156,7 +160,8 @@ done
 if [[ "$MEMBERS" -eq 3 ]]; then
   success "etcd quorum: 3 members"
 else
-  warn "etcd members found: $MEMBERS (expected 3) — the 3rd may still be joining"
+  error "etcd members found: $MEMBERS (expected 3)"
+  exit 1
 fi
 
 CP_LIST=$(IFS=,; echo "${CP_IPS[*]}")
@@ -166,7 +171,8 @@ if talosctl --nodes "${CP_IPS[0]}" --endpoints "${CP_ENDPOINTS[0]}" health \
      --worker-nodes "${WORKER_LIST}" --wait-timeout 5m >/dev/null 2>&1; then
   success "Talos cluster reports healthy"
 else
-  warn "Talos health check did not fully pass (cluster may still be converging)"
+  error "Talos health check did not pass within the timeout"
+  exit 1
 fi
 
 # ==============================================================================
@@ -182,9 +188,28 @@ for i in $(seq 1 60); do
 done
 echo "Nodes:"
 kubectl get nodes -o wide 2>/dev/null | sed 's/^/    /'
-[[ "$READY" -eq "$TOTAL_NODES" ]] && success "All ${TOTAL_NODES} nodes Ready (${#CP_IPS[@]} CP + ${#WORKER_IPS[@]} workers)" || warn "Nodes Ready: ${READY}/${TOTAL_NODES}"
-CILIUM=$(kubectl -n kube-system get pods -l k8s-app=cilium --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
-[[ "$CILIUM" -ge "$TOTAL_NODES" ]] && success "Cilium running on all ${CILIUM} nodes" || warn "Cilium pods running: ${CILIUM}/${TOTAL_NODES}"
+# Fatal, both of them. These two were still `|| warn` while the header above
+# claimed the degrade-to-warning bug was fixed — it was, for etcd and the Talos
+# health check only. A cluster with no working CNI reached the green banner.
+if [[ "$READY" -eq "$TOTAL_NODES" ]]; then
+  success "All ${TOTAL_NODES} nodes Ready (${#CP_IPS[@]} CP + ${#WORKER_IPS[@]} workers)"
+else
+  error "Nodes Ready: ${READY}/${TOTAL_NODES}"
+  exit 1
+fi
+# Cilium gets the same bounded wait as the nodes above: sampled once, a check
+# this strict would go red on a cluster that was merely a few seconds behind.
+for i in $(seq 1 60); do
+  CILIUM=$(kubectl -n kube-system get pods -l k8s-app=cilium --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
+  [[ "$CILIUM" -ge "$TOTAL_NODES" ]] && break
+  sleep 5
+done
+if [[ "$CILIUM" -ge "$TOTAL_NODES" ]]; then
+  success "Cilium running on all ${CILIUM} nodes"
+else
+  error "Cilium pods running: ${CILIUM}/${TOTAL_NODES} — the cluster has no working CNI"
+  exit 1
+fi
 
 # ==============================================================================
 # Step 5 — Scheduling: with dedicated workers the control planes stay tainted

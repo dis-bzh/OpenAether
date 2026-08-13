@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: A security problem
+    url: https://github.com/dis-bzh/OpenAether-infra/security/advisories/new
+    about: Never in a public issue. Private vulnerability reporting, see SECURITY.md.
+  - name: Platform manifests and the Flux DAG
+    url: https://github.com/dis-bzh/OpenAether-apps/issues/new
+    about: OpenBao, ESO, cert-manager, Istio, CNPG, observability — those live in OpenAether-apps.

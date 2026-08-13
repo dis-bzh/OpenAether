@@ -1,0 +1,44 @@
+# ==============================================================================
+# Emulated cloud (Feint) — Scaleway. NOT a deployable cluster.
+#
+# Drives `tofu plan` on this root against a local emulator, with no account and
+# no credentials: `task feint-plan PROVIDER=scaleway`. See docs/emulated-cloud.md
+# for what that proves and what it does not.
+#
+# Every value here is fake by construction — this file is public, and nothing in
+# it may ever name a real environment. admin_ip is RFC 5737 TEST-NET-3.
+#
+# image_id is pinned because Feint serves no image search: `instance/v1
+# ListImages` answers 501, so a lookup by name cannot resolve. This id is the
+# single image the emulator publishes.
+# ==============================================================================
+
+cluster_name    = "feint-scaleway"
+environment     = "dev"
+cluster_role    = "workload"
+talos_bootstrap = false
+
+node_distribution = {
+  scaleway = {
+    control_planes = 1
+    workers        = 1
+    region         = "fr-par"
+    zone           = "fr-par-1"
+    zones          = ["fr-par-1"]
+    instance_type  = "DEV1-S"
+    image_id       = "22222222-2222-4222-8222-222222222222"
+  }
+}
+
+admin_ip = ["203.0.113.0/32"]
+
+bastion_ssh_keys = {
+  scaleway = ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIr6pEFlAFO3YU0DNW/r8SkpjdbptN9ockkO2BtIolSD feint@emulated"]
+}
+
+# Never reached: the plan lane runs with a local backend and no apply. Declared
+# only because these four have no default.
+s3_primary_endpoint = "http://127.0.0.1:4599"
+s3_primary_region   = "fr-par"
+s3_replica_endpoint = "http://127.0.0.1:4599"
+s3_replica_region   = "fr-par"

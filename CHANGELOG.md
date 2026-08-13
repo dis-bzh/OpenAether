@@ -9,7 +9,247 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0.0] — 2026-07-31
+## [1.0.0] — 2026-08-13
+
+Written in English: this file is documentation, and the repository's rule is that
+English is canonical. The withdrawn 1.0.0 entry below stays in French, unrewritten.
+
+**This is 1.0.0, and the tag of that name has been re-cut.** A 1.0.0 was tagged on
+2026-07-31, before deploy, idempotency and upgrade had ever been run end to end on
+the three cloud providers — which is what the number was meant to certify. That
+tag has been deleted and 1.0.0 now points here. Nothing had been published under
+it: there was no GitHub release, and OpenAether-apps had never been tagged 1.0.0
+at all. Anyone who fetched the old tag will get different content under the same
+name, which is why it is said plainly here rather than left to be discovered.
+
+**What 1.0.0 now means, measured rather than asserted.** On Scaleway (3+3), OVH
+(3+3) and Outscale (3+1): a cluster deploys, a second apply reports no changes,
+Kubernetes moves 1.36.2 → 1.36.3, and Talos moves to 1.13.8 in place on every
+node — with the API answering throughout, in gaps of at most nine seconds while a
+load balancer re-pooled. Then all three tear down and leave nothing behind.
+
+### Known limits
+
+Three things are open and deliberately not fixed here. Read them before upgrading
+a cluster that matters; each has an entry in [`docs/backlog.md`](docs/backlog.md).
+
+- **A node cannot be fully drained.** Seven PodDisruptionBudgets in the app stack
+  allow zero disruptions — `istio-system/istiod` runs one replica and declares
+  `minAvailable: 1`, which is a budget asking never to be moved. `rolling-replace`
+  reports the stuck eviction, waits out its timeout and continues, so the node
+  reboots with those pods still on it. Nothing observable broke in testing, but
+  "drained before reboot" is not a property this release can claim. The manifests
+  are in OpenAether-apps.
+- **A version bump needs two applies.** Bumping `talos_version` and applying fails
+  once with "Provider produced inconsistent final plan", per machine config, on
+  both OVH and Outscale; running it again succeeds. Nothing is left half-applied,
+  but the first failure is expected and unexplained.
+- **The Outscale image lane cannot replace an image.** Rebuilding returns 409 on
+  the snapshot while the existing OMI still references it. It does not block a
+  deployment — pin the OMI and use `task infra` + `task bootstrap-phase2` — and it
+  never blocks an upgrade, since `--upgrade` pulls its installer from a registry
+  and needs no cloud image at all.
+
+### Added
+
+- **An emulated cloud lane — real provider binaries, no account, no bill.**
+  [Feint](https://github.com/stephrobert/feint) serves the Scaleway and Outscale
+  APIs on loopback; `task feint-plan` runs the real `cluster` root against it and
+  `task feint-apply` a full create / empty re-plan / destroy confirmed by the API,
+  not by the state. It sits between `tofu test`, where the provider is mocked and
+  never leaves the process, and a real deployment. Two locks, because the failure
+  mode is spending money by accident: the endpoint variable rejects anything that
+  is not loopback, and the lane pins fake credentials so a provider cannot fall
+  back to your profile. What it proves and what it does not is in
+  `docs/emulated-cloud.md` — Feint has no inventory, so a nonexistent image or
+  machine type is accepted where a real cloud refuses.
+- **`task feint-record`** ranks what our modules call that the emulator does not
+  serve, so the gap is measured instead of guessed. Four operations remain.
+- **A credentialed staging workflow** (`workflow_dispatch` + weekly), deploying,
+  verifying and destroying on a real provider, with a reaper that runs even when
+  the deploy job never reached its teardown. Never `pull_request`: this
+  repository is public and that trigger would hand a stranger its cloud
+  credentials.
+
+### Changed
+
+- **`rolling-replace.sh` can now upgrade in place (`--upgrade`).** Replacing a VM
+  to change its Talos version throws away everything that made the node itself:
+  its disk, its identity, its etcd membership. `talosctl upgrade` keeps all three,
+  cordons and drains on its own, and refuses a control-plane upgrade that would
+  cost etcd its quorum. The script's own gates still run, still one node at a
+  time, and a node already on the target version is skipped rather than rebooted.
+  Replacement stays the default for anything that is not a version change.
+- **Relicensed from AGPLv3 to Apache 2.0.** The copyleft was deterring the one
+  thing this project wants — people running it. Apache 2.0 matches Feint, which
+  OpenAether now depends on for its emulated lane. A relaxation, so anything
+  already obtained under AGPLv3 remains available under it.
+- **Talos v1.13.8**, and the vendored artifacts match their generators again.
+  Renovate raised Cilium to 1.20.0 and Flux to v2.9.3 on 2026-07-30 and moved
+  only the pinned versions, never the rendered files: for two weeks, and through
+  the 1.0.0 tag, clusters bootstrapped a Cilium missing the whole 1.20 config
+  surface and a Flux built by an older controller-gen. `task render-check`
+  existed and caught it — nothing ran it. It is a CI job now.
+- **The OpenAether-apps ref is a variable, and defaults to a tag.** `git_branch` was
+  hardcoded to `"main"`, so no version of this repository identified a deployable
+  system: a commit in the platform repo could change a running cluster within the
+  reconcile interval. `git_ref` takes a fully-qualified ref, defaults to
+  `refs/tags/1.0.0`, and every `envs/*.tfvars.example` pins it. Branch tracking stays
+  available (`refs/heads/<branch>`), which is also how two managements avoid sharing
+  `apps/clusters`.
+  The Flux `GitRepository` now uses `ref.name` rather than `ref.branch` — one field that
+  carries either — and the substitution injected through the gitception loop is
+  `GIT_REF` instead of `GIT_BRANCH`. **The examples require OpenAether-apps 1.0.0**, so that
+  tag is cut first; nothing else depends on it existing.
+  Rung: proven on live clusters, 2026-08-12. `OpenAether-apps` had never carried a
+  tag at all, so the examples pointed at a ref that could not resolve and every real
+  deployment had silently fallen back to a branch. Tagged, pinned, and checked on
+  Scaleway, OVH and Outscale: the `GitRepository` reports Ready against
+  `refs/tags/…@sha1:…`.
+- `apps/clusters` no longer enables the DIS fleet's own children by default; see the
+  OpenAether-apps 1.0.0 entry.
+
+### Fixed
+
+Most of what follows was found on 2026-08-12 by running the release checklist on
+a real machine and three real clouds rather than trusting CI. They share a shape
+worth naming: **a check that could not fail**, or one asserting something other
+than what its name promised. None of them was visible from a green pipeline.
+
+- **The manifests CI job could never have passed.** `--check` compared
+  `cilium-local.yaml` too, which is gitignored on purpose — rendered on demand by
+  `task local-up`, never committed — so on a fresh checkout it read a file that
+  was not there and died. It skips absent artifacts now, saying which and why:
+  nothing committed means nothing to drift from.
+- **The manifest renderer had a second, undeclared input: helm itself.** The
+  Cilium chart version is pinned, but helm 3 and helm 4 emit different YAML for
+  it — helm 4 prunes empty values, so helm 3 adds three empty config keys and an
+  empty `--k8s-api-server-urls=` argument. Rendering on the other major silently
+  produced a different artifact, which CI then rejected with a diff that looked
+  like drift. The script now refuses to render under a helm major it was not
+  written for, and says which one to install. The vendored manifest is the one
+  the three clouds actually ran; CI's pin moved to match it, rather than the
+  artifact being re-rendered into something never deployed.
+- **`task security` could not pass on a machine this repo had set up.** It calls
+  `checkov` directly, but only CI ever had it — a pinned action — and
+  `scripts/setup.sh` never installed it, so the step died as "executable file not
+  found in $PATH" for anyone following §0 of the release checklist. setup.sh
+  installs it now, and the task fails with the remedy instead of exit 127. The
+  install path itself is unverified: the machine this was found on has neither
+  pipx nor pip nor passwordless sudo.
+- **A backup of a tfvars was not ignored.** `*.tfvars` does not match
+  `management-ovh.tfvars.bak`, so copying an env file before editing it — which
+  is what anyone does — left real IPs, image ids and account data untracked but
+  visible in a public repository. Found by doing exactly that while validating
+  this release. `*.tfvars.*` now covers the derived forms.
+- **The k8s listener on OVH diffed against its own state on every plan.**
+  Octavia returns `allowed_cidrs` sorted, the provider treats the attribute as
+  ordered, and the config sent it unsorted: OVH was never idempotent. The values
+  were always identical; only the order was not.
+- **A worker could never be upgraded in place, and no node could be drained.**
+  `talosctl upgrade` fetches a kubeconfig from the endpoint it is talking to in
+  order to drain, and a worker does not serve one — the install completed, the
+  command failed, the node never rebooted into the new version. Behind that, a
+  second wall: seven PodDisruptionBudgets allow zero disruptions, so the drain
+  could not finish either. The endpoint is always a control plane now, and the
+  drain is ours — the one that reports a stuck eviction and lets the operator
+  decide — with `talosctl --drain=false`. The budgets belong to OpenAether-apps
+  and are in the backlog. Both faults were invisible from Scaleway, which had
+  only ever rolled control planes.
+- **`task test` deleted the operator's cluster credentials.** The suite mocks
+  every cloud provider but not `local`, so `local_file.kubeconfig` and
+  `local_file.talosconfig` were genuinely written into the module directory —
+  mock content over a live cluster's files — and genuinely removed when the run
+  tore down. It cost access to a cluster mid-upgrade while validating this
+  release. `local` is mocked too now, and the files come through a run
+  byte-identical.
+- **A reboot could rename a node, and a Talos upgrade did.** Our images are
+  `metal` builds, so Talos has no cloud metadata to take a name from: the names
+  came from DHCP, and the generated config falls back to `auto: stable` when a
+  lease arrives without one. `talosctl upgrade` on a control plane brought it back
+  as `talos-8g3-a2w` — a second Kubernetes node object, the old one left NotReady,
+  and the etcd member renamed with it. The orphan is not cosmetic:
+  `data.talos_cluster_health` cannot pass while a node is NotReady, so `tofu plan`
+  itself wedges. Both roles now carry a `HostnameConfig` document with a static
+  name, which outranks DHCP and holds across reboots on every provider.
+- **After an in-place upgrade, the next `tofu apply` would have destroyed the
+  cluster.** `talosctl upgrade` changes the running version without touching the
+  cloud resource, so bumping `talos_version` leaves the instance's image id stale
+  — and that attribute is ForceNew on Scaleway, a disk-wiping rebuild on
+  OpenStack. Planned against a freshly upgraded cluster, it proposed replacing all
+  three control planes at once: six destroys, and etcd quorum with them. Node
+  resources now ignore that attribute, since the boot image is the install medium
+  and not the running version; the same plan then showed zero destroys. Deliberate
+  re-imaging is unchanged — `rolling-replace` passes an explicit `-replace`, one
+  node at a time.
+- **`./scripts/setup.sh` installed nothing at all on a clean machine.** Three
+  prerequisites hidden behind one another, each turned into a total abort by
+  `set -euo pipefail`: OpenTofu's installer refuses without `unzip` and without
+  either `cosign` or `gpg`, then `sudo` does not exist in a container already
+  running as root. In a bare `ubuntu:24.04` it exited 1 having installed nothing;
+  it now installs the seven tools and reports a missing `nc` without pretending
+  otherwise.
+- **`task validate`, `task test` and `task security` were only ever green on a
+  fresh CI runner.** `validate` broke on a stale provider lock the moment a
+  version constraint moved; `test` claimed in its own comment to match it but had
+  copied only the flag, not the data-dir isolation, and needed a credential file
+  the mocked lane exists to avoid; `security` scanned `.env.sh` and the
+  `*.kubeconfig` files, gitignored by design, so it could not be green where it
+  is meant to run. Watch out for `gitleaks dir`: it takes one path and silently
+  scans everything if handed a list.
+- **`test-talos-local.sh` reached its green banner on a cluster with no CNI.**
+  Its header said the degrade-to-warning bug was fixed; it was, for etcd only.
+  Node-readiness and Cilium were still warnings. Proven by deleting the Cilium
+  DaemonSet: the old checks printed yellow and exited 0.
+- **The staging workflow could never have deployed anything.** It sets
+  `TF_INPUT=0` and has no tty, and `task infra` applies without `-auto-approve`
+  on purpose — so its first apply aborted, every time, after loading the secrets.
+- **`rolling-replace` replaced nothing on OpenStack.** `-target` narrows a plan,
+  it forces nothing, and an image change is only ForceNew on Scaleway: a Talos
+  bump rewrote the attribute in place and left the VM on the old image, the state
+  claiming a version no node was running. It also invented node names from a
+  convention Outscale does not follow, where every `kubectl cordon` would have
+  failed. Both fixed; names now come from the cluster, by private IP.
+- **`talos-image` printed the right image id and let you deploy the wrong one.**
+  On OVH and Outscale the cluster reads the id from a tfvars, copied by hand, and
+  nothing compared the two — a rebuilt image failed at server creation, after the
+  network and bastion were billed. It refuses now.
+- **`talos_machine_bootstrap` retried an unreachable node for 2h46 on billed
+  resources**, having no timeout while the two resources above it do. Bounded to
+  15m. Its comment also called it idempotent, which it is not.
+- **A unit test named `installer_image_uses_talos_version` asserted that the
+  variable it had just set held the value it set.** The installer reference it
+  claimed to cover is what decides the Talos version a node actually runs.
+- **Two of the three `purge-orphans` scripts never said "clean".** They printed
+  only their dry-run footer, so an empty account and a full one differed by the
+  absence of lines. These are the last thing between a failed teardown and a bill.
+- **`task local-up` built a cluster with no CNI on a fresh clone.** `cilium-local.yaml`
+  is gitignored, `local-up` had no render step, and the fallback emitted the string
+  `placeholder` — which the precondition in `modules/talos` does not match, because it
+  looks for `CILIUM-MANIFEST-PLACEHOLDER`. Three call sites checked that sentinel and
+  none ever wrote it, so the guard could not fire and an 11-byte inlineManifest shipped
+  as the CNI. It only failed for someone who had never rendered, i.e. every new reader.
+  `local-up` now renders when the file is missing, and the fallback emits the sentinel
+  the guard actually looks for.
+- **Every local verification dialled a port that is never published.** `local-status`
+  and `scripts/dev/test-talos-local.sh` hardcoded `127.0.0.1:50000`, the container-side
+  port, while the host base is `talos_api_port_base` (45000). Both now derive from that
+  base. The two checks that hid the defect above — etcd quorum and Talos health — fail
+  the run instead of warning and ending on a green banner.
+- **`scripts/setup.sh` did not install `helm`**, which `README` claimed it did and which
+  `render-bootstrap-manifests.sh` needs. It installs it now, and reports a missing `nc`,
+  required by the local provider and the SSH tunnels.
+- **Six `envs/*.tfvars.example` could not be planned as written**: `bastion_ssh_keys`
+  held a bare string against a `map(list(string))` variable.
+- Both READMEs announced `v0.4.0+` and pointed at an empty `[Unreleased]`, at the 1.0.0
+  tag itself; and the WSL2 note gave a port default of 41000 against an actual 45000.
+
+## [1.0.0 — withdrawn] — 2026-07-31
+
+> This tag was cut before the three use cases above had ever been exercised on the
+> three providers. It has been deleted and 1.0.0 re-cut on 2026-08-13. Its
+> contents are kept here because they are part of what 1.0.0 now ships.
+
 
 **Premier socle stable : multi-provider, multi-cluster, automatisé, idempotent.**
 Fleet réelle 3 providers (management + edges) déployée, opérée (upgrade rolling

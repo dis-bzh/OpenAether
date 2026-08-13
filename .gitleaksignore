@@ -11,3 +11,10 @@
 00a81a496120ab4627b02f481b5d9a8da46f1a1b:apps/base/linkerd/linkerd-control-plane.yaml:private-key:466
 00a81a496120ab4627b02f481b5d9a8da46f1a1b:apps/base/linkerd/linkerd-control-plane.yaml:private-key:781
 00a81a496120ab4627b02f481b5d9a8da46f1a1b:apps/base/linkerd/linkerd-control-plane.yaml:private-key:1946
+
+# A fabricated `ghp_` token, in the fixture list of the script that asserts the
+# gitleaks rules still match — a value it must contain to test for it. Never
+# valid, never issued. The script now assembles the token from two halves so no
+# later commit carries it whole; this pins the one commit that introduced it,
+# which a full-history scan re-reads forever.
+48f097bd1ed192718daa8a7a2882338fa786dda5:scripts/dev/check-gitleaks-rules.sh:github-pat:25

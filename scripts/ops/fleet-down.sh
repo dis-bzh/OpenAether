@@ -70,7 +70,10 @@ if [ ! -r "$KUBECONFIG" ] || ! kubectl cluster-info >/dev/null 2>&1; then
     • kubeconfig lost? regenerate it:
         cd infrastructure/opentofu/cluster && tofu output -raw kubeconfig > kubeconfig
         (or  talosctl -e <tunnel> -n <cp-ip> kubeconfig ./kubeconfig --force)
-    • children already deleted / never created? re-run with --force-no-edges
+    • children already deleted, or a bootstrap that never reached Kubernetes
+      (so no CAPI controller ever ran)? re-run asserting there is none:
+        task fleet-down PROVIDER=<provider> -- --force-no-edges --yes
+      The bare -- is not optional: without it Task keeps the flags itself.
     • when in doubt: inventory on the provider side FIRST (look for the child
       clusters' prefix among VMs, LBs, networks) — see docs/backlog.md
 EOT
@@ -109,7 +112,7 @@ EOT
   fi
 fi
 
-# ----------------------------------------------------------- 2. le management
+# -------------------------------------------------------- 2. the management
 info "Step 2/3 — management cluster ($ROLE / $PROVIDER)"
 if [ "$ASSUME_YES" -eq 0 ]; then
   read -rp "Destroy the $ROLE-$PROVIDER management? [y/N] " a
@@ -126,9 +129,10 @@ ENVN="$(grep -E '^[[:space:]]*environment' "$CLUSTER_DIR/envs/$ROLE-$PROVIDER.tf
 cat <<EOT
   S3 buckets (state, artifacts, backups) — destroying them also removes any
   possibility of restoring:
-    s3-${CN:-<projet>}-${PROVIDER}-tfstate-${ENVN:-<env>}      (+ -backup)
-    s3-${CN:-<projet>}-${PROVIDER}-${ROLE}-${ENVN:-<env>}      (+ -backup)
-    s3-${CN:-<projet>}-*-backups-${ENVN:-<env>}                (restic, all providers)
+    (each of the first two also has a "-backup" twin)
+    s3-${CN:-<project>}-${PROVIDER}-tfstate-${ENVN:-<env>}
+    s3-${CN:-<project>}-${PROVIDER}-${ROLE}-${ENVN:-<env>}
+    s3-${CN:-<project>}-*-backups-${ENVN:-<env>}   (restic, all providers)
   Talos images (reusable — keeping them avoids a rebuild, ~1 h on Outscale):
     task talos-image PROVIDER=$PROVIDER  re-applies; the talos-image root has
     its own state (bucket s3-${CN:-<project>}-${PROVIDER}-talos-image).

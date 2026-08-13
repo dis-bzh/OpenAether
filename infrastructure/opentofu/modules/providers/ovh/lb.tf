@@ -22,7 +22,9 @@ resource "openstack_lb_listener_v2" "k8s_api" {
   protocol        = "TCP"
   protocol_port   = 6443
   loadbalancer_id = openstack_lb_loadbalancer_v2.k8s[0].id
-  allowed_cidrs   = concat(var.admin_ip, ["10.0.0.0/24"])
+  # sort(): Octavia returns this list sorted and the provider treats it as
+  # ordered, so an unsorted config diffs against its own state on every plan.
+  allowed_cidrs = sort(concat(var.admin_ip, ["10.0.0.0/24"]))
 }
 
 resource "openstack_lb_pool_v2" "k8s_api" {

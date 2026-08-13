@@ -19,6 +19,12 @@ resource "proxmox_virtual_environment_vm" "control_plane" {
   node_name = element(var.node_names, count.index)
   tags      = ["talos", "control-plane", var.cluster_name]
 
+  # Boot image = initial medium only; talosctl upgrade owns the live version.
+  # See provider-contract.md § "Node image drift".
+  lifecycle {
+    ignore_changes = [disk[0].file_id]
+  }
+
   cpu {
     cores = var.cpu_cores
     type  = "host"
@@ -69,6 +75,12 @@ resource "proxmox_virtual_environment_vm" "worker" {
   name      = "${var.cluster_name}-worker-${count.index}"
   node_name = element(var.node_names, count.index)
   tags      = ["talos", "worker", var.cluster_name]
+
+  # Boot image = initial medium only; talosctl upgrade owns the live version.
+  # See provider-contract.md § "Node image drift".
+  lifecycle {
+    ignore_changes = [disk[0].file_id]
+  }
 
   cpu {
     cores = var.cpu_cores

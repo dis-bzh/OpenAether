@@ -1,4 +1,26 @@
+# Both hook types, so `pre-commit install` alone installs the commit-msg gates.
+# Without this the message hooks are silently absent from a fresh clone.
+default_install_hook_types: [pre-commit, commit-msg]
+
 repos:
+  # Conventional Commits: the subject decides the CHANGELOG entry, so a subject
+  # that does not parse is a release note nobody wrote. Same tool as CI.
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: cc981fcb065527b6de0033b0cbf0432e69781901  # v4.9.1
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]
+
+  # A model is not an author and cannot certify origin: CONTRIBUTING.md asks for
+  # `Assisted-by:` instead. Rule adopted 2026-08; older commits are not rewritten.
+  - repo: local
+    hooks:
+      - id: no-tool-authorship-trailer
+        name: no Co-Authored-By / Signed-off-by from a tool
+        language: system
+        stages: [commit-msg]
+        entry: scripts/dev/check-commit-trailers.sh
+
   # General file hygiene
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: cef0300fd0fc4d2a87a85fa2093c6b283ea36f4b  # v5.0.0

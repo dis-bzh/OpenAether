@@ -60,17 +60,22 @@ node_distribution = {
 admin_ip = ["YOUR_IP/32"]
 
 bastion_ssh_keys = {
-  ovh = "ssh-ed25519 AAAA... user@host"
+  ovh = ["ssh-ed25519 AAAA... user@host"]
 }
 
 git_repo_url     = "https://github.com/dis-bzh/OpenAether-apps.git"
+# Pin the platform: a commit on a branch would otherwise reach a running
+# cluster within the reconcile interval. refs/heads/<branch> to test.
+git_ref          = "refs/tags/1.0.0"
 
 # --- Backup / DR object stores ------------------------------------------------
 # This failover cluster runs when your primary provider is DOWN, so its PRIMARY
 # state lives on OVH (reachable), and it replicates BACK to the primary once it
-# recovers. Derived buckets: state -> s3-openaether-ovh-tfstate-prod + -backup;
-# kube/talos -> s3-openaether-ovh-management-prod (+ -backup). Export BACKUP_AWS_*
-# with the primary provider's creds for the replica.
+# recovers. Export BACKUP_AWS_* with the primary provider's creds for the
+# replica. Derived buckets (parts come from this file, each with a "-backup"
+# twin):
+#   state            -> s3-<cluster_name>-ovh-tfstate-<environment>
+#   kube/talosconfig -> s3-<cluster_name>-ovh-management-<environment>
 s3_primary_endpoint = "https://s3.gra.io.cloud.ovh.net" # failover state on OVH (your primary is down)
 s3_primary_region   = "gra"
 s3_replica_endpoint = "https://s3.fr-par.scw.cloud"     # replicate back to Scaleway on recovery

@@ -19,10 +19,13 @@ environment     = "prod"
 cluster_role    = "management"
 talos_bootstrap = true
 # talos_version / kubernetes_version: leave unset to inherit the tracked
-# defaults from cluster/variables.tf. image_id below is a fixed OVH image
-# UUID though (unlike Scaleway's name-derived lookup) — rebuild it via
-# `task talos-image PROVIDER=ovh` before bumping talos_version in practice,
-# or the two silently point at different Talos versions.
+# defaults from cluster/variables.tf. image_id below is a fixed OVH image UUID (unlike
+# Scaleway's name-derived lookup), and it is the medium a node INSTALLS
+# from — not the version it runs. Bumping talos_version alone changes the
+# installer in the machine config, which `rolling-replace --upgrade` then
+# applies to running nodes; rebuild the image via
+# `task talos-image PROVIDER=ovh` when you want NEW nodes to start there
+# too. The two differing is expected, not a mistake.
 
 node_distribution = {
   ovh = {
@@ -63,10 +66,15 @@ bastion_ssh_keys = {
 }
 
 git_repo_url     = "https://github.com/dis-bzh/OpenAether-apps.git"
+# Pin the platform: a commit on a branch would otherwise reach a running
+# cluster within the reconcile interval. refs/heads/<branch> to test.
+git_ref          = "refs/tags/1.0.0"
 
 # --- Backup / DR object stores (OVH S3-compatible Object Storage) -------------
-# Derived buckets: state -> s3-openaether-ovh-tfstate-prod (+ -backup),
-#                  kube/talos -> s3-openaether-ovh-management-prod (+ -backup).
+# Derived buckets (you don't set them) — parts come from this file,
+# and each has a "-backup" twin:
+#   state            -> s3-<cluster_name>-ovh-tfstate-<environment>
+#   kube/talosconfig -> s3-<cluster_name>-ovh-management-<environment>
 # PRIMARY = OVH (AWS_*). REPLICA = the "-backup" store; in prod point it at a
 # DIFFERENT provider (e.g. Scaleway) + export BACKUP_AWS_* for it.
 s3_primary_endpoint = "https://s3.gra.io.cloud.ovh.net"

@@ -1,0 +1,53 @@
+# ==============================================================================
+# Emulated cloud (Feint) — Outscale. NOT a deployable cluster.
+#
+# Drives `tofu plan` on this root against a local emulator, with no account and
+# no credentials: `task feint-plan PROVIDER=outscale`. See docs/emulated-cloud.md
+# for what that proves and what it does not.
+#
+# Every value here is fake by construction — this file is public, and nothing in
+# it may ever name a real environment. admin_ip is RFC 5737 TEST-NET-3.
+#
+# image_id is deliberately unset: that runs data.outscale_images, whose
+# `images[0]` shape modules/providers/outscale/main.tf flagged as never
+# validated. Exercising it is the point of this lane, and Feint 0.7.0 is what
+# made it possible — before that the provider segfaulted on a catalogue with no
+# BlockDeviceMappings. image_name therefore names a CATALOGUE image, not our
+# Talos one: 0.7.0 applies the image_names filter, and no fixed catalogue can
+# hold an image a build pipeline publishes. So this proves the shape, not the
+# name resolution.
+#
+# bastion_image_id stays pinned: its data source filters on ami-b29cea33,
+# hardcoded in the module, which no emulator catalogue holds.
+# ==============================================================================
+
+cluster_name    = "feint-outscale"
+environment     = "dev"
+cluster_role    = "workload"
+talos_bootstrap = false
+
+node_distribution = {
+  outscale = {
+    control_planes     = 1
+    workers            = 1
+    region             = "eu-west-2"
+    instance_type      = "tinav6.c1r1p2"
+    availability_zones = ["eu-west-2a"]
+    image_id           = null
+    image_name         = "Ubuntu-24.04-2025.01"
+    bastion_image_id   = "ami-00000001"
+  }
+}
+
+admin_ip = ["203.0.113.0/32"]
+
+bastion_ssh_keys = {
+  outscale = ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIr6pEFlAFO3YU0DNW/r8SkpjdbptN9ockkO2BtIolSD feint@emulated"]
+}
+
+# Never reached: the plan lane runs with a local backend and no apply. Declared
+# only because these four have no default.
+s3_primary_endpoint = "http://127.0.0.1:4599"
+s3_primary_region   = "eu-west-2"
+s3_replica_endpoint = "http://127.0.0.1:4599"
+s3_replica_region   = "eu-west-2"

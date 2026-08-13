@@ -41,9 +41,15 @@ resource "openstack_networking_port_v2" "control_plane" {
 }
 
 resource "openstack_compute_instance_v2" "control_plane" {
-  count             = var.control_plane_count
-  name              = "${var.cluster_name}-cp-${count.index}"
-  image_id          = local.resolved_image_id
+  count    = var.control_plane_count
+  name     = "${var.cluster_name}-cp-${count.index}"
+  image_id = local.resolved_image_id
+
+  # Boot image = initial medium only; talosctl upgrade owns the live version.
+  # See provider-contract.md § "Node image drift".
+  lifecycle {
+    ignore_changes = [image_id]
+  }
   flavor_name       = var.flavor_name
   region            = var.region
   availability_zone = element(var.availability_zones, count.index)
@@ -58,9 +64,15 @@ resource "openstack_compute_instance_v2" "control_plane" {
 }
 
 resource "openstack_compute_instance_v2" "worker" {
-  count             = var.worker_count
-  name              = "${var.cluster_name}-worker-${count.index}"
-  image_id          = local.resolved_image_id
+  count    = var.worker_count
+  name     = "${var.cluster_name}-worker-${count.index}"
+  image_id = local.resolved_image_id
+
+  # Boot image = initial medium only; talosctl upgrade owns the live version.
+  # See provider-contract.md § "Node image drift".
+  lifecycle {
+    ignore_changes = [image_id]
+  }
   flavor_name       = var.flavor_name
   region            = var.region
   availability_zone = element(var.availability_zones, count.index)
