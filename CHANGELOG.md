@@ -116,6 +116,15 @@ a real machine and three real clouds rather than trusting CI. They share a shape
 worth naming: **a check that could not fail**, or one asserting something other
 than what its name promised. None of them was visible from a green pipeline.
 
+- **The manifest renderer had a second, undeclared input: helm itself.** The
+  Cilium chart version is pinned, but helm 3 and helm 4 emit different YAML for
+  it — helm 4 prunes empty values, so helm 3 adds three empty config keys and an
+  empty `--k8s-api-server-urls=` argument. Rendering on the other major silently
+  produced a different artifact, which CI then rejected with a diff that looked
+  like drift. The script now refuses to render under a helm major it was not
+  written for, and says which one to install. The vendored manifest is the one
+  the three clouds actually ran; CI's pin moved to match it, rather than the
+  artifact being re-rendered into something never deployed.
 - **`task security` could not pass on a machine this repo had set up.** It calls
   `checkov` directly, but only CI ever had it — a pinned action — and
   `scripts/setup.sh` never installed it, so the step died as "executable file not

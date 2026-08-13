@@ -42,6 +42,21 @@ CILIUM_VERSION="${CILIUM_VERSION:-1.20.0}"
 FLUX_VERSION="${FLUX_VERSION:-v2.9.3}"
 FLUX_URL="https://github.com/fluxcd/flux2/releases/download/${FLUX_VERSION}/install.yaml"
 
+# The chart version is pinned, but the RENDERER is a second input nobody had
+# declared: helm 3 and helm 4 emit different YAML for the same chart — helm 4
+# prunes empty values, so helm 3 adds three empty config keys and an empty
+# `--k8s-api-server-urls=`. Rendering on the other major silently produces a
+# different artifact, which CI then rejects. Keep this equal to HELM_VERSION in
+# .github/workflows/ci.yml.
+HELM_MAJOR_EXPECTED="${HELM_MAJOR_EXPECTED:-4}"
+helm_major="$(helm version --template '{{.Version}}' 2>/dev/null | sed -E 's/^v?([0-9]+).*/\1/')"
+if [[ -n "$helm_major" && "$helm_major" != "$HELM_MAJOR_EXPECTED" ]]; then
+  echo "✗ helm major ${helm_major} — this artifact is rendered with helm ${HELM_MAJOR_EXPECTED}." >&2
+  echo "  Rendering here would produce a file CI rejects. Install helm ${HELM_MAJOR_EXPECTED}," >&2
+  echo "  or set HELM_MAJOR_EXPECTED=${helm_major} here AND in .github/workflows/ci.yml." >&2
+  exit 1
+fi
+
 # ─────────────────────────────────────────────────────────────
 # --check: anti-drift guardrail
 #
