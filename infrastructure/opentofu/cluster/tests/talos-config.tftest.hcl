@@ -38,19 +38,19 @@ override_resource {
 }
 override_resource {
   target = module.scw.scaleway_lb_ip.app
-  values = { id = "11111111-1111-1111-1111-111111111111", ip_address = "1.1.1.1" }
+  values = { id = "11111111-1111-1111-1111-111111111111", ip_address = "192.0.2.1" }
 }
 override_resource {
   target = module.scw.scaleway_lb_ip.k8s
-  values = { id = "22222222-2222-2222-2222-222222222222", ip_address = "2.2.2.2" }
+  values = { id = "22222222-2222-2222-2222-222222222222", ip_address = "192.0.2.2" }
 }
 override_resource {
   target = module.scw.scaleway_instance_ip.bastion
-  values = { id = "33333333-3333-3333-3333-333333333333", address = "3.3.3.3" }
+  values = { id = "33333333-3333-3333-3333-333333333333", address = "192.0.2.3" }
 }
 override_resource {
   target = module.scw.scaleway_vpc_public_gateway_ip.this
-  values = { address = "4.4.4.4" }
+  values = { address = "192.0.2.4" }
 }
 override_resource {
   target = module.scw.scaleway_vpc_public_gateway.this

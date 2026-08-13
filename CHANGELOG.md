@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A node could not be fully drained, and one replica was the reason.** 1.0.0
+  admits that a rolling upgrade reboots nodes with pods still aboard. The cause
+  was ours and singular: `istiod` ran one replica under a PodDisruptionBudget
+  requiring one available, so it could never be evicted. Six other budgets read
+  as zero on that cluster and are correct — CNPG guards each cluster's primary
+  until a switchover, Longhorn blocks while volumes are attached, OpenBao asks
+  for 2 of 3 raft replicas. Measured after the fix, on a fresh Scaleway cluster
+  running the full stack: `kubectl drain` on a worker completed, exit 0, **zero
+  non-DaemonSet pods left on the node**, the only wait being OpenBao taking
+  eleven five-second retries while its quorum settled elsewhere. The 1.0.0 note
+  was true when it was written and is no longer.
+- **`scripts/setup.sh` still could not finish on a clean machine.** 1.0.0 claims
+  it installs the tools and reports what it cannot; a bare `ubuntu:24.04` says
+  otherwise. Three faults, each the same shape as the one that entry describes:
+  `curl` was missing from the prerequisite list while being used ten lines below
+  it, so the script died at exit 127 with nothing installed; `nc` was reported
+  rather than installed, though `task local-up` needs it; and the pre-commit
+  prompt called `read` on a closed stdin, which returns 1, which `set -e` turned
+  into an abort one line before "Environment ready" — so the script could never
+  complete anywhere it runs unattended. Verified in a bare container: exit 0,
+  nine tools out of nine, and `checkov -d infrastructure/opentofu` passing 20
+  checks with 0 failures, which had only ever been run in CI.
+
+  The 1.0.0 validation of this path was weaker than it was written to be: the
+  container used then already had `curl`.
+
 ## [1.0.0] — 2026-08-13
 
 Written in English: this file is documentation, and the repository's rule is that

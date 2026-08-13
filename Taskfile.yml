@@ -77,6 +77,9 @@ tasks:
       # script's --set vs a HelmRelease's values:) in two repos, hence silent
       # drift. It cost two children on 2026-07-26 (ipam.mode lost).
       - python3 scripts/ops/check-cilium-parity.py
+      # Same reasoning one level up: the skills are duplicated across the two
+      # repositories, so something has to notice when they stop matching.
+      - ./scripts/dev/check-skill-parity.sh
       - task: apps-validate-dag
 
   apps-validate-dag:
@@ -177,7 +180,8 @@ tasks:
     vars:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
       # renovate: datasource=github-releases depName=siderolabs/talos
-      VERSION: '{{.VERSION | default "v1.13.7"}}'
+      VERSION:
+        sh: ./scripts/internal/talos-version.sh {{.ROLE}}-{{.PROVIDER}}.tfvars
       ENSURE: '{{.ENSURE | default ""}}'
     cmds:
       - './scripts/bootstrap/talos-image.sh {{.PROVIDER}} {{.VERSION}}{{if .ENSURE}} --ensure{{end}}'
@@ -192,7 +196,8 @@ tasks:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
       # renovate: datasource=github-releases depName=siderolabs/talos
-      VERSION: '{{.VERSION | default "v1.13.7"}}'
+      VERSION:
+        sh: ./scripts/internal/talos-version.sh {{.ROLE}}-{{.PROVIDER}}.tfvars
     cmds:
       # Everything a later phase needs, checked BEFORE anything bills. The SSH
       # key was verified in bootstrap-phase2, which runs after `infra` — so a
@@ -277,6 +282,16 @@ tasks:
       TF_VAR_outscale_secret_key_id:
         sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale sk || true'
     cmds:
+      - |
+        # A `tofu apply` with no terminal asks for approval, reads EOF, and dies as
+        # "error asking for approval: EOF" — exit 201, naming nothing you can act
+        # on. Say what to set instead. NOT auto-approved for you: an apply that
+        # replaces nodes should not confirm itself because nobody was watching.
+        if [ ! -t 0 ] && [[ "${TF_CLI_ARGS_apply:-}" != *-auto-approve* ]]; then
+          echo "✗ no terminal, and tofu apply needs approval — it would fail on EOF." >&2
+          echo "  Re-run with: TF_CLI_ARGS_apply=-auto-approve task {{.TASK}} ..." >&2
+          exit 1
+        fi
       - ../../../scripts/internal/ensure-buckets.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars
       - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
       - |
@@ -341,6 +356,13 @@ tasks:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
     env: *provider-env
     cmds:
+      - |
+        # Same as `infra`: a destroy with no terminal dies on EOF, not on a message.
+        if [ ! -t 0 ] && [[ "${TF_CLI_ARGS_destroy:-}" != *-auto-approve* ]]; then
+          echo "✗ no terminal, and tofu destroy needs approval — it would fail on EOF." >&2
+          echo "  Re-run with: TF_CLI_ARGS_destroy=-auto-approve task destroy ..." >&2
+          exit 1
+        fi
       - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
       # machine_secrets carries prevent_destroy (the PKI is the cluster's root
       # of trust) — untrack it first so `tofu destroy` doesn't refuse.

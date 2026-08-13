@@ -99,14 +99,17 @@ infrastructure/opentofu/cluster/.talos-tunnels.pids
 infrastructure/opentofu/.talos-bastion-known-hosts
 infrastructure/opentofu/cluster/.talos-bastion-known-hosts
 
-# Claude Code session artifacts (local state, pas du contenu projet)
-# … sauf le hook SessionStart partagé, qui doit être versionné pour s'appliquer
-# à toutes les sessions Claude Code on the web.
+# Claude Code session artifacts (local state, not project content)
+# … except the shared SessionStart hook, which has to be versioned so it applies
+# to every Claude Code on the web session.
 .claude/*
 !.claude/settings.json
 !.claude/hooks
 .claude/hooks/*
 !.claude/hooks/session-start.sh
+# … and the skills, which are project instructions, not local state. Duplicated
+# in OpenAether-apps on purpose; `task apps-validate` fails if they diverge.
+!.claude/skills
 
 # Extracted kubeconfigs + escrow (never commit)
 *.kubeconfig

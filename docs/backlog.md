@@ -78,19 +78,6 @@ is an entry that gets picked up and put back down. **Decide:** replaces
 **Closes:** when a question has to be settled first — a task-shaped entry
 invites someone to build what nobody decided.
 
-- [ ] **Single-replica workloads declare PDBs that make a node undrainable.** On
-      a full stack, seven PodDisruptionBudgets report zero allowed disruptions;
-      `istio-system/istiod`, at 1/1 replica with `minAvailable: 1`, is the one
-      that blocks first. A budget that forbids every eviction means the node can
-      never be drained, so no rolling operation finishes: `talosctl upgrade`'s
-      own drain dies on it, and `rolling-replace` only gets past it by warning
-      and carrying on. The manifests are in OpenAether-apps, not here.
-      **Decide:** two replicas, or `maxUnavailable: 1`, component by component —
-      a single-replica component asking for `minAvailable: 1` is asking never to
-      be moved, which is not what any of these mean to say.
-      **Closes:** `kubectl get pdb -A` with nothing at 0 allowed disruptions on a
-      full stack, and a worker that drains clean. Rung: real cloud.
-
 - [ ] **The first apply after a `talos_version` bump always fails.** Reproduced
       on OVH and Outscale, identically: the plan proposes a couple of
       adds/destroys alongside the config changes, then apply reports "Provider
@@ -146,14 +133,25 @@ invites someone to build what nobody decided.
       where the other before-you-spend checks live. Cheap, and it closes a gap
       that only shows itself on a real cluster.
 
-- [ ] **The Outscale image lane cannot replace an existing image.** Building
-      v1.13.8 over the v1.13.4 already in that account failed with `Unable to
-      delete Snapshot — 409 ResourceConflict (9094)`: the AMI still references
-      the snapshot, so the snapshot cannot go first. Deregister the image before
-      deleting the snapshot, or create the new pair before destroying the old
-      (`create_before_destroy`). Until then Outscale is stuck on whatever image
-      it already has — it is three patch versions behind the other providers,
-      and nothing said so.
+- [ ] **The Outscale image lane cannot replace an image, and it is not an
+      ordering problem.** Rebuilding fails with "409 ResourceConflict — Unable to
+      delete Snapshot". Measured 2026-08-13, with the apply's own trace: the new
+      snapshot imports fine (2m48s, not the hour this module's comment warns
+      about), then the **deposed old snapshot** is destroyed while the **old OMI
+      still references it** — the OMI is never deregistered first, and the apply
+      dies before even creating the new one.
+      `create_before_destroy` on both resources was tried and does NOT fix it: it
+      changes when the new pair appears, not the fact that nothing deregisters the
+      old image. Reverted rather than left in as a fix that is not one.
+      **Decide:** whether the lane deregisters the OMI itself (a destroy-time step
+      that waits for it to disappear) or whether replacing an image is documented
+      as a two-step manual operation.
+      **Closes:** `task talos-image PROVIDER=outscale` replacing an existing image
+      in one run, exit 0. Rung: real cloud — it reproduces in about seven minutes,
+      so this is cheap to iterate on.
+      Noted alongside: `purge-orphans/outscale.py` reported "account is clean"
+      while a duplicate snapshot from the failed run was sitting there. It does
+      not look at snapshots or images.
 
 - [ ] **Outscale cannot run the HA topology under its default quota.** 3 CP +
       3 workers of `tinav5.c2r7p2` is 42 GB against a 40 GB RAM quota, so the
@@ -163,17 +161,6 @@ invites someone to build what nobody decided.
       raise the quota, or write the reduced topology (3 CP + 1 worker, 28 GB)
       into the example and the matrix so nobody plans around a case that cannot
       run.
-
-- [ ] **A Talos version upgrade does not complete on OVH.** Attempted live
-      2026-08-12, v1.13.7 → v1.13.8 on a 3+3 HA cluster. Two causes were found
-      and fixed — `rolling-replace` replaced nothing (`-target` narrows a plan,
-      it forces nothing, and an image change is ForceNew on Scaleway only), and
-      the installer reference had no real test. A third is open: with the
-      explicit replace the VM WAS rebuilt from the v1.13.8 image, and the node
-      never rejoined the cluster. Availability was never the problem — 1300+
-      probes through the load balancer, zero failures — so this is about the
-      node coming back, not about downtime. Reproduce on a fresh cluster, watch
-      one node end to end, and only then let the release notes mention upgrades.
 
 - [ ] **`talos_machine_bootstrap` still needs a human after an interrupted
       apply.** The comment and the missing timeout are fixed; the behaviour is
@@ -186,14 +173,6 @@ invites someone to build what nobody decided.
       AlreadyExists reads as success, or gating `count` on a data source that
       detects an already-bootstrapped etcd — both are design changes, not
       release-week edits. Decide, then do one.
-
-- [ ] **The tag path has never been exercised, and the examples point into the
-      void.** `OpenAether-apps` carries no tag at all — not even 1.0.0. The
-      twelve `envs/*.tfvars.example` pin `git_ref = refs/tags/…` against it, so
-      a newcomer copying an example gets a `GitRepository` that can never
-      resolve. The real tfvars carry no `git_ref` line and fall back to
-      `refs/heads/main`, which is why no deployment ever hit it. Tag apps, point
-      the examples at that tag, and prove it on a real cluster.
 
 - [ ] **Two checks in `test-talos-local.sh` are still warnings** — schedulable
       workers Ready, and Flux controllers running. Same shape as the CNI check
@@ -367,10 +346,6 @@ Not work. Conditions. Do not re-investigate them from a desk.
       lever avoids it — only a hypervisor reset, which the recovery already
       prescribes. Detection is covered by `NodeUnreachable`. The root cause
       needs the incident to recur WITH the serial console attached.
-
-- [ ] **Outscale RAM quota (40 GB) vs an HA management (44 GB).** The overrun is
-      tolerated at creation, then every further VM is refused silently.
-      `task preflight-quotas` catches it; raising the quota is your call.
 
 - [~] **`talos_cluster_health` times out on healthy clusters.** OVH and Outscale
       only — Scaleway passed a full apply on 2026-07-29, so the entry's old

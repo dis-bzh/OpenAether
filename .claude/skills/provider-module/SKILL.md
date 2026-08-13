@@ -1,0 +1,45 @@
+---
+name: provider-module
+description: Adding or changing a cloud/on-premise provider module in OpenAether-infra (scw, ovh, outscale, proxmox). Use when touching modules/providers/**, adding a provider, or debugging why one behaves differently from another.
+---
+
+# Provider modules
+
+The contract is
+[`modules/providers/provider-contract.md`](../../../infrastructure/opentofu/modules/providers/provider-contract.md).
+Implement it; do not restate it here. The rest of the stack — `modules/talos`,
+`cluster/` — is provider-agnostic and must not change to accommodate a provider.
+
+## What differs between providers, and has bitten
+
+- **ForceNew is not portable.** Changing an instance's image replaces the VM on
+  Scaleway and rebuilds the disk in place on OpenStack. A "rolling replace" that
+  assumes one behaviour silently does nothing on the other.
+- **Node naming has no common source.** These are `metal` images, so Talos has no
+  cloud metadata and took its name from DHCP — which is why a reboot renamed
+  nodes. Names are pinned in a `HostnameConfig` document now; a new provider
+  inherits that and must not reintroduce a platform-specific name.
+- **Ordered list attributes.** Octavia returns `allowed_cidrs` sorted; sending it
+  unsorted made every plan propose the same no-op update, so OVH was never
+  idempotent. When an attribute is a list, ask what order the API returns.
+- **Quotas are a design input.** Outscale's 40 GB RAM quota does not fit 3+3, so
+  the documented HA topology is unreachable there. `task preflight-quotas` exists
+  to say so before the bill, not after.
+
+## The image lane
+
+`task talos-image PROVIDER=<p>` builds and publishes. Scaleway resolves by
+**name**, OVH and Outscale pin an **id** in `envs/*.tfvars`. The version comes
+from `scripts/internal/talos-version.sh` — one source, because two drifted once
+and `task up` built an image the cluster then refused to find.
+
+A boot image is the medium a node **installs from**, not the version it runs:
+node resources ignore that attribute on purpose. Re-imaging is deliberate, via
+`rolling-replace` with an explicit `-replace`.
+
+## Done means exercised
+
+`CONTRIBUTING.md`'s three rungs, and a module change is not done at the mocked
+one. Two faults in `rolling-replace` were invisible until a *second* provider ran
+it, and a third until workers were rolled and not just control planes. If you
+only ran one provider or one node role, say which.
