@@ -116,6 +116,11 @@ a real machine and three real clouds rather than trusting CI. They share a shape
 worth naming: **a check that could not fail**, or one asserting something other
 than what its name promised. None of them was visible from a green pipeline.
 
+- **The manifests CI job could never have passed.** `--check` compared
+  `cilium-local.yaml` too, which is gitignored on purpose — rendered on demand by
+  `task local-up`, never committed — so on a fresh checkout it read a file that
+  was not there and died. It skips absent artifacts now, saying which and why:
+  nothing committed means nothing to drift from.
 - **The manifest renderer had a second, undeclared input: helm itself.** The
   Cilium chart version is pinned, but helm 3 and helm 4 emit different YAML for
   it — helm 4 prunes empty values, so helm 3 adds three empty config keys and an

@@ -83,6 +83,14 @@ if [[ "${1:-}" == "--check" ]]; then
   norm() { sed -e 's/[[:space:]]*$//' "$1"; }
   drift=0
   for f in cilium.yaml cilium-local.yaml; do
+    # cilium-local.yaml is gitignored on purpose — it is rendered on demand by
+    # `task local-up`, never committed. On a fresh checkout (CI) it is absent, and
+    # comparing against it made this check die on every run instead of passing.
+    # Nothing committed means nothing to drift from.
+    if [[ ! -f "${MANIFESTS_DIR}/${f}" ]]; then
+      echo "  ↷ ${f} — not committed (gitignored); nothing to compare"
+      continue
+    fi
     if ! diff -q <(norm "${MANIFESTS_DIR}/${f}") <(norm "${tmp}/${f}") >/dev/null 2>&1; then
       echo "  ❌ ${f} differs from the render (excerpt):"
       diff <(norm "${MANIFESTS_DIR}/${f}") <(norm "${tmp}/${f}") | head -20 | sed 's/^/      /'
