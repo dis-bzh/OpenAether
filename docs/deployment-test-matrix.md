@@ -8,7 +8,7 @@
 > of the file.
 >
 > ✅ apply-tested · 🎭 emulated (Feint: real provider, real HTTP, no account) ·
-> 🧪 unit-tested only (mocked) · ⬜ untested. Reviewed 2026-07-28.
+> 🧪 unit-tested only (mocked) · ⬜ untested. Reviewed 2026-08-13.
 
 ## Mental model
 
@@ -96,7 +96,7 @@ Two orthogonal layers of knobs:
 
 | ID | Role | CP/W | k8s_lb_mode | Uniquely exercises | Status |
 |---|---|---|---|---|---|
-| `OSC-mgmt-ha` | mgmt | 3+2 | managed | LB returns a **DNS name**, not an IP; outscale SSH user. | ✅ |
+| `OSC-mgmt-ha` | mgmt | 3+1 | managed | LB returns a **DNS name**, not an IP; outscale SSH user. 3+3 does not fit the 40 GB RAM quota, so HA here means the control plane only. | ✅ *(2026-08-13, incl. Kubernetes and Talos upgrades in place)* |
 | `OSC-work-ha` | workload | 3+3 | managed | Workload role; BSU volumes if paired with storage. | ⬜ |
 | `OSC-vip-reject` | — | any | vip | Negative test: validation must reject `vip`. | 🧪 |
 
