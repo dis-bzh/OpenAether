@@ -304,7 +304,7 @@ else
   fail "3.4 PSA restricted on the PKI foundation" "pki-root=$PKI_ENFORCE, vault=$VAULT_ENFORCE (expected restricted)"
 fi
 
-# 3.5 PSA au moins baseline partout
+# 3.5 Pod Security Admission: at least `baseline`, on every managed namespace
 MANAGED_NS=$(kubectl get ns -l openaether.io/managed=true -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo "")
 MISSING_PSA=0
 for ns in $MANAGED_NS; do

@@ -17,8 +17,10 @@ terraform {
       version = ">= 1.53.0"
     }
     outscale = {
-      source  = "outscale/outscale"
-      version = ">= 0.12.0"
+      source = "outscale/outscale"
+      # 1.x for the api{} block (endpoint + region), which replaces the
+      # deprecated top-level arguments and is what the emulator lane redirects.
+      version = ">= 1.7.0"
     }
     proxmox = {
       source  = "bpg/proxmox"

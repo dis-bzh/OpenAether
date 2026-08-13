@@ -57,14 +57,19 @@ node_distribution = {
 admin_ip = ["YOUR_IP/32"]
 
 bastion_ssh_keys = {
-  outscale = "ssh-ed25519 AAAA... user@host"
+  outscale = ["ssh-ed25519 AAAA... user@host"]
 }
 
 git_repo_url     = "https://github.com/dis-bzh/OpenAether-apps.git"
+# Pin the platform: a commit on a branch would otherwise reach a running
+# cluster within the reconcile interval. refs/heads/<branch> to test.
+git_ref          = "refs/tags/1.0.0"
 
 # --- Backup / DR object stores (Outscale OOS, S3-compatible) ------------------
-# Derived buckets: state -> s3-openaether-outscale-tfstate-prod (+ -backup),
-#                  kube/talos -> s3-openaether-outscale-management-prod (+ -backup).
+# Derived buckets (you don't set them) — parts come from this file,
+# and each has a "-backup" twin:
+#   state            -> s3-<cluster_name>-outscale-tfstate-<environment>
+#   kube/talosconfig -> s3-<cluster_name>-outscale-management-<environment>
 # Replicate BACK to your primary provider once it recovers (export BACKUP_AWS_*).
 s3_primary_endpoint = "https://oos.eu-west-2.outscale.com"
 s3_primary_region   = "eu-west-2"

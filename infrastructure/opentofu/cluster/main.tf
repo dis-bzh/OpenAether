@@ -2,8 +2,32 @@
 # Providers
 # ==============================================================================
 
+# Emulated-cloud lane (docs/emulated-cloud.md). Well-formed but meaningless
+# credentials: Feint checks their shape and never their value, and pinning them
+# is what stops a provider from finding real ones elsewhere.
+locals {
+  emulated = var.emulator_api_url != ""
+  emulator_creds = {
+    scw_access_key = "SCWXXXXXXXXXXXXXXXXX"
+    scw_secret_key = "11111111-1111-1111-1111-111111111111"
+    scw_project_id = "11111111-1111-1111-1111-111111111111"
+    osc_access_key = "AAAAAAAAAAAAAAAAAAAA"
+    osc_secret_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+  }
+}
+
 provider "talos" {}
-provider "scaleway" {}
+
+# Scaleway takes everything from the SCW_* environment for a real deploy. Under
+# the emulator every field is pinned instead: an unset credential does not fail,
+# it falls back to ~/.config/scw/config.yaml and drives a paying account.
+provider "scaleway" {
+  api_url         = local.emulated ? var.emulator_api_url : null
+  access_key      = local.emulated ? local.emulator_creds.scw_access_key : null
+  secret_key      = local.emulated ? local.emulator_creds.scw_secret_key : null
+  project_id      = local.emulated ? local.emulator_creds.scw_project_id : null
+  organization_id = local.emulated ? local.emulator_creds.scw_project_id : null
+}
 
 # Only the OVH module uses OpenStack. When OVH is not the active provider we feed
 # a placeholder auth_url so a Scaleway/Outscale-only apply doesn't require OVH
@@ -16,9 +40,23 @@ provider "openstack" {
 # resolved S3/API keys) so auth doesn't depend on the exact OSC_* env var names.
 # Empty/null when not deploying Outscale → no effect on Scaleway/OVH applies.
 provider "outscale" {
-  access_key_id = var.outscale_access_key_id != "" ? var.outscale_access_key_id : null
-  secret_key_id = var.outscale_secret_key_id != "" ? var.outscale_secret_key_id : null
-  region        = local.active_provider == "outscale" ? local.osc_dist.region : null
+  access_key_id = local.emulated ? local.emulator_creds.osc_access_key : (var.outscale_access_key_id != "" ? var.outscale_access_key_id : null)
+  secret_key_id = local.emulated ? local.emulator_creds.osc_secret_key : (var.outscale_secret_key_id != "" ? var.outscale_secret_key_id : null)
+
+  # region and the api{} block are mutually exclusive: the top-level argument is
+  # deprecated in favour of the block, and setting both warns on every command.
+  region = local.emulated ? null : (local.active_provider == "outscale" ? local.osc_dist.region : null)
+
+  # `endpoint` carries the whole API path, version segment included. Without it
+  # the provider retries with backoff for six minutes and reports a timeout,
+  # which reads like a slow server rather than a misdirected client.
+  dynamic "api" {
+    for_each = local.emulated ? [1] : []
+    content {
+      endpoint = "${var.emulator_api_url}/api/v1"
+      region   = local.osc_dist.region
+    }
+  }
 }
 
 # Proxmox (bpg) reads creds from the environment for a real Proxmox deploy:
@@ -379,7 +417,7 @@ locals {
   flux_bootstrap_manifest = var.flux_bootstrap_manifest != null ? var.flux_bootstrap_manifest : templatefile("${path.module}/bootstrap-manifests/flux-bootstrap.yaml.tftpl", {
     namespace    = var.flux_namespace
     git_repo_url = var.git_repo_url
-    git_branch   = "main"
+    git_ref      = var.git_ref
     cluster_role = var.cluster_role
     cluster_id   = local.cluster_id
     # Destination for Longhorn volume backups. The full URL is assembled HERE:
@@ -489,11 +527,21 @@ module "talos" {
   # Dedicated worker data volumes (encrypted UserVolumeConfig). Empty on local.
   worker_storage = var.worker_storage
 
-  # terraform_data.talos_tunnels only exists when auto_tunnels=true (count=0
-  # otherwise) — depending on it is then a no-op, not a hard requirement, so
-  # this list works identically for both the documented two-phase flow and
-  # the experimental single-apply path.
-  depends_on = [module.scw, module.ovh, module.outscale, module.proxmox, terraform_data.talos_tunnels]
+  # The provider modules are DELIBERATELY not listed here. A module-level
+  # depends_on makes every resource in this module depend on every resource in
+  # those — which made per-node targeting impossible: `rolling-replace` could not
+  # re-apply one node's machine config without dragging the whole provider module
+  # into the plan, and with a Talos version bump leaving every instance ForceNew
+  # that is a parallel replacement of all three control planes. Measured
+  # 2026-08-12: it took a healthy cluster's etcd down.
+  #
+  # Ordering does not depend on it. The supported flow is two phases — `task
+  # infra` builds the VMs with talos_bootstrap=false, which counts these
+  # resources out entirely — and modules/talos then waits on its own
+  # talos_port_ready_* guards before touching a node. terraform_data.talos_tunnels
+  # stays, and only exists when auto_tunnels=true, so it orders the experimental
+  # single-apply path and is a no-op otherwise.
+  depends_on = [terraform_data.talos_tunnels]
 }
 
 # ==============================================================================

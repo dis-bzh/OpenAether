@@ -1,0 +1,81 @@
+name: Something did not behave
+description: >-
+  A deploy, a task or a manifest that did not do what it says.
+  Reports from outside are welcome and outrank our own list.
+labels: [report]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Our own work lives in [`docs/backlog.md`](../blob/main/docs/backlog.md),
+        not here — issues are for what **you** hit. Which means the useful thing
+        is not a diagnosis but what you ran and what it printed: the diagnosis is
+        often wrong at the time an issue is opened, and the report outlives it.
+
+        Never paste a real IP, a cloud account id, a bucket name or a token. This
+        repository is public and has had to purge its history once for exactly
+        that. `203.0.113.4` and `<account-id>` say everything we need.
+
+  - type: input
+    id: what
+    attributes:
+      label: What you ran
+      description: The command, copied rather than described.
+      placeholder: task up ROLE=management PROVIDER=scaleway
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: What it printed
+      description: Verbatim, redacted. Include the error even if it looks unhelpful — it usually names the resource.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options:
+        - scaleway
+        - ovh
+        - outscale
+        - proxmox
+        - local Docker
+        - emulated (Feint)
+        - none / not provider-specific
+    validations:
+      required: true
+
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions
+      description: "`tofu version`, `talosctl version --client`, and the commit you are on."
+      render: text
+    validations:
+      required: true
+
+  - type: dropdown
+    id: rung
+    attributes:
+      label: How far it got
+      description: >-
+        Which lane, in the sense of CONTRIBUTING.md. It tells us what we can
+        reproduce without a cloud account.
+      options:
+        - "mocked — task test"
+        - "emulated — task feint-plan / feint-apply, no credentials"
+        - "local Docker — task local-up"
+        - "real cloud — a real account, real money"
+    validations:
+      required: true

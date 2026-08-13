@@ -77,3 +77,11 @@ output "cluster_health" {
   description = "State of the Talos health verification: 'skipped' (skip_health_check) or 'verified'."
   value       = var.skip_health_check ? "skipped" : (length(data.talos_cluster_health.this) > 0 ? "verified" : "n/a")
 }
+
+# The Talos version a node actually runs is decided by this installer, not by
+# the image its VM boots from — which is why an image-only bump looks applied
+# and changes nothing.
+output "installer_image" {
+  description = "Installer image the machine config pins; this is what a node upgrades to"
+  value       = local.installer_image
+}

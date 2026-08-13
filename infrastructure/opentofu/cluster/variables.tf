@@ -103,7 +103,7 @@ variable "talos_version" {
   description = "Talos Linux version"
   type        = string
   # renovate: datasource=github-releases depName=siderolabs/talos
-  default = "v1.13.7"
+  default = "v1.13.8"
 }
 
 variable "kubernetes_version" {
@@ -248,6 +248,28 @@ variable "git_repo_url" {
   default     = "https://github.com/dis-bzh/OpenAether-apps.git"
 }
 
+# A release of this repo has to identify a release of the platform it deploys.
+# This was hardcoded to the `main` branch: a commit in OpenAether-apps could then
+# change a running cluster within the reconcile interval, and no version of this
+# repo named a deployable system. `refs/tags/…` by default, and a branch stays
+# available for testing — which is also how two managements avoid sharing
+# apps/clusters (see OpenAether-apps/README.md).
+# The DEFAULT tracks a branch and the EXAMPLES pin a tag, deliberately in that
+# order. A tag default makes the repository undeployable between releases —
+# you cannot test the ref mechanism until the tag exists, and after it exists
+# main still deploys the previous platform. Development tracks main; a user
+# copies an example and gets a pinned pair.
+variable "git_ref" {
+  description = "Git ref OpenAether-apps is tracked at, fully qualified: refs/heads/<branch> to develop, refs/tags/<version> to deploy"
+  type        = string
+  default     = "refs/heads/main"
+
+  validation {
+    condition     = can(regex("^refs/(heads|tags)/.+$", var.git_ref))
+    error_message = "git_ref must be fully qualified: refs/tags/<version> or refs/heads/<branch>."
+  }
+}
+
 variable "flux_namespace" {
   description = "Namespace for Flux installation"
   type        = string
@@ -326,4 +348,22 @@ variable "outscale_secret_key_id" {
   type        = string
   default     = ""
   sensitive   = true
+}
+
+# ==============================================================================
+# Emulated cloud (Feint) — see docs/emulated-cloud.md
+# ==============================================================================
+
+variable "emulator_api_url" {
+  description = "Base URL of a local Feint emulator to point the Scaleway and Outscale APIs at (e.g. http://127.0.0.1:4599). Empty = the real cloud."
+  type        = string
+  default     = ""
+
+  # Loopback or nothing. A remote value here would not be a misconfiguration but
+  # an apply against somebody's account, which is the one failure this switch
+  # must make impossible.
+  validation {
+    condition     = var.emulator_api_url == "" || can(regex("^http://(127\\.0\\.0\\.1|localhost|\\[::1\\]):[0-9]+$", var.emulator_api_url))
+    error_message = "emulator_api_url must be empty or a loopback URL (http://127.0.0.1:<port>): it exists to reach a local emulator, never a remote endpoint."
+  }
 }

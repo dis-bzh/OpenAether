@@ -256,7 +256,7 @@ export BACKUP_AWS_SECRET_ACCESS_KEY=...
 
 ```bash
 # 1. Decrypt a backed-up artifact (same passphrase as the tfstate):
-aws s3 cp s3://s3-openaether-scaleway-management-prod/backups/kubeconfig.gpg - \
+aws s3 cp s3://s3-<project>-scaleway-management-<env>/backups/kubeconfig.gpg - \
   --endpoint-url https://s3.fr-par.scw.cloud --region fr-par | \
   gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 3 \
       -d -o kubeconfig 3< <(printf '%s' "$TF_VAR_encryption_passphrase")
@@ -265,8 +265,8 @@ aws s3 cp s3://s3-openaether-scaleway-management-prod/backups/kubeconfig.gpg - \
 # 2. Recover the tfstate from the -backup store (primary provider down):
 #    re-init against the replica bucket, then operate normally.
 tofu init -reconfigure \
-  -backend-config="bucket=s3-openaether-scaleway-tfstate-prod-backup" \
-  -backend-config="key=openaether.tfstate" \
+  -backend-config="bucket=s3-<project>-scaleway-tfstate-<env>-backup" \
+  -backend-config="key=<cluster_name>.tfstate" \
   -backend-config="region=<replica-region>" \
   -backend-config="endpoint=<replica-endpoint>"
 ```

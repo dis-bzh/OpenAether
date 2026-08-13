@@ -1,12 +1,30 @@
 #!/usr/bin/env bash
 # OpenAether — rolling node replacement (zero-downtime ForceNew apply)
 #
-# `instance_type` and the Talos image are ForceNew: a plain `tofu apply` replaces
-# every node IN PARALLEL → the 3 control planes reboot at once → etcd loses
-# quorum. This script does one node at a time: cordon+drain → targeted apply →
-# wait for etcd/Longhorn → uncordon.
+# `instance_type` and the Talos image change what a node must boot, and a plain
+# `tofu apply` acts on every node AT ONCE → the 3 control planes go together →
+# etcd loses quorum. This script does one node at a time: cordon+drain →
+# targeted apply → wait for etcd/Longhorn → uncordon.
 #
-# Two non-obvious points:
+# Each node takes TWO applies: the instance first, then its Talos config once the
+# new VM exists. The graph does not order those — modules/talos reads each node's
+# address from IPAM, not from the instance — so in a single apply tofu configured
+# the OLD VM a second before destroying it, and the replacement came up in
+# maintenance mode. Every "kubelet not healthy after 600s" traced back to that.
+#
+# Before each node it PLANS and counts what would be destroyed, and refuses if
+# that exceeds the resources it targets. "One node at a time" used to be an
+# intention nothing checked: on 2026-08-12 one extra -target pulled a whole
+# provider module in and a per-node apply replaced all three control planes
+# together. The count is now the check.
+#
+# Four non-obvious points:
+#   * `-replace` on the INSTANCE is ESSENTIAL, and `-target` is not enough:
+#     -target narrows the plan, it forces nothing. Whether an image change is
+#     ForceNew is provider-specific — true on Scaleway, false on OpenStack,
+#     where image_id updates in place. Without the explicit replace, a Talos
+#     version bump on OVH rewrote the attribute and left the VM booted on the
+#     old image: state said v1.13.8, every node reported v1.13.7 (2026-08-12).
 #   * `-replace` on talos_machine_configuration_apply is ESSENTIAL — it never
 #     references the instance ID, so a replaced VM yields no diff and would stay
 #     in maintenance mode, unconfigured.
@@ -16,11 +34,15 @@
 # Order: workers first, then control planes strictly one at a time, gated on
 # etcd back to 3/3. Stops on the first failed gate.
 #
-# ⚠️ Exercised live on Scaleway only (see deployment-test-matrix.md). On Proxmox
+# ⚠️ Exercised live on Scaleway, OVH and Outscale (--upgrade on all three;
+# replacement only on Scaleway). Never on Proxmox. On Proxmox
 # the worker data disk is inline on the VM: replacing a worker WIPES it and
 # Longhorn rebuilds from the surviving replicas — check they are healthy first.
 #
-# Usage: rolling-replace.sh <provider> [--workers-only|--cp-only] [--dry-run] [--yes]
+# Usage: rolling-replace.sh <provider> [--workers-only|--cp-only] [--upgrade]
+#                          [--dry-run] [--yes]
+#   --upgrade: `talosctl upgrade` in place (version changes) instead of
+#   replacing the VM. Reads the target from talos_version in the tfvars.
 #   Needs: tofu init, AWS_* creds, open Talos tunnels, ./talosconfig + ./kubeconfig.
 # ==============================================================================
 set -euo pipefail
@@ -31,11 +53,13 @@ shift || true
 SCOPE="all"        # all | workers | cp
 DRY_RUN=0
 ASSUME_YES=0
+UPGRADE=0         # --upgrade: in-place `talosctl upgrade`, no VM replacement
 for arg in "$@"; do
   case "$arg" in
     --workers-only) SCOPE="workers" ;;
     --cp-only)      SCOPE="cp" ;;
     --dry-run)      DRY_RUN=1 ;;
+    --upgrade)      UPGRADE=1 ;;
     --yes|-y)       ASSUME_YES=1 ;;
     *) echo "✗ unknown flag: $arg" >&2; exit 2 ;;
   esac
@@ -95,6 +119,15 @@ ENVN="$(grep -E '^[[:space:]]*environment[[:space:]]*=' "$TFVARS" | head -1 | se
 [[ -n "$CN" && -n "$ENVN" ]] || die "could not read cluster_name/environment from $TFVARS"
 NODE_PREFIX="${CN}-${ENVN}"
 
+# --upgrade needs the installer image for the version this tree declares. Read it
+# from the same tfvars everything else comes from; TALOS_IMAGE overrides for a
+# custom schematic (Image Factory) whose id is not derivable from a version.
+if [[ $UPGRADE -eq 1 && -z "${TALOS_IMAGE:-}" ]]; then
+  TV="$(grep -E '^[[:space:]]*talos_version[[:space:]]*=' "$TFVARS" | head -1 | sed -E 's/^[^=]*=[[:space:]]*"?([^"#]*)"?.*/\1/' | tr -d '[:space:]')"
+  [[ -n "$TV" ]] || die "--upgrade: no talos_version in ${TFVARS}. Pin it, or pass TALOS_IMAGE=ghcr.io/siderolabs/installer:vX.Y.Z"
+  TALOS_IMAGE="ghcr.io/siderolabs/installer:${TV}"
+fi
+
 mapfile -t CP_IPS < <(jq -r '.control_plane_private_ips.value[]? // empty' <<<"$OUTPUTS")
 mapfile -t WK_IPS < <(jq -r '.worker_private_ips.value[]? // empty' <<<"$OUTPUTS")
 [[ ${#CP_IPS[@]} -gt 0 ]] || die "no control_plane_private_ips in tofu output — is the infra deployed?"
@@ -109,6 +142,16 @@ talos_ep() { # <type> <index>
     cp)     echo "127.0.0.1:$((50000 + $2))" ;;
     worker) echo "127.0.0.1:$((50100 + $2))" ;;
   esac
+}
+
+# Kubernetes node name for a private IP. Node NAMES are provider-specific; the
+# InternalIP is not, and it is what the tofu state gives us.
+k8s_node_for_ip() { # <private-ip>
+  local name
+  name="$("${KCTL[@]}" get nodes -o jsonpath="{range .items[*]}{.metadata.name}{' '}{range .status.addresses[?(@.type=='InternalIP')]}{.address}{end}{'\n'}{end}" 2>/dev/null \
+          | awk -v ip="$1" '$2 == ip { print $1; exit }')"
+  [[ -n "$name" ]] || return 1
+  printf '%s\n' "$name"
 }
 
 # ==============================================================================
@@ -138,11 +181,33 @@ healthy_peer_cp() { # <exclude_index>
 # `talosctl etcd remove-member` takes the hex MEMBER ID, not the node name. The
 # `etcd members` table is: NODE  ID  HOSTNAME  PEER_URLS  CLIENT_URLS  LEARNER —
 # so we resolve name→ID by matching HOSTNAME (col 3) and reading ID (col 2).
-etcd_remove_member() { # <node_name> <exclude_index>
-  local node="$1" excl="$2" peer ep ip mid
+# Cordon + drain, tolerant of a drain that cannot finish. A PDB with zero allowed
+# disruptions (a single-replica workload declaring minAvailable: 1) makes a node
+# permanently undrainable, so a drain that must succeed can never roll such a
+# cluster. We report it and let the operator decide; talosctl's own drain does
+# not, which is why --upgrade runs it with --drain=false and calls this instead.
+cordon_drain() { # <node_name>
+  local node="$1"
+  info "Cordon + drain ${node}…"
+  "${KCTL[@]}" cordon "$node" || die "cordon failed for ${node}"
+  if ! "${KCTL[@]}" drain "$node" \
+        --ignore-daemonsets --delete-emptydir-data --timeout="$DRAIN_TIMEOUT"; then
+    warn "drain hit its timeout (${DRAIN_TIMEOUT}); some pods may be stuck (PDBs?)."
+    [[ $ASSUME_YES -eq 1 ]] || { read -rp "Continue with ${node} anyway? [y/N] " a; [[ "$a" == [yY] ]] || die "aborted by operator"; }
+  fi
+}
+
+etcd_remove_member() { # <node_name> <node_ip> <exclude_index>
+  local node="$1" node_ip="$2" excl="$3" peer ep ip mid
   peer="$(healthy_peer_cp "$excl")" || die "no healthy peer CP to evict etcd member ${node} — refusing to proceed (quorum risk)"
   read -r ep ip <<<"$peer"
-  mid="$(talosctl -e "$ep" -n "$ip" etcd members 2>/dev/null | awk -v h="$node" '$3==h {print $2; exit}')"
+  # Match the peer URL first, the hostname only as a fallback. An etcd member
+  # keeps the name it joined under, so a node renamed since does not match by
+  # name — and the lookup would report "already absent" for a member that is
+  # still there, leaving it to be destroyed without ever being evicted.
+  mid="$(talosctl -e "$ep" -n "$ip" etcd members 2>/dev/null \
+         | awk -v mip="$node_ip" -v h="$node" \
+               'index($4, "//" mip ":") > 0 || $3 == h {print $2; exit}')"
   if [[ -z "$mid" ]]; then
     ok "etcd member ${node} already absent (nothing to evict)"; return 0
   fi
@@ -229,10 +294,18 @@ replace_node() { # <type: cp|worker> <index>
   local t="$1" i="$2"
   local node_name node_ip ep cfg_addr tf_t
   if [[ "$t" == "cp" ]]; then
-    node_name="${NODE_PREFIX}-cp-${i}"; node_ip="${CP_IPS[$i]}"; tf_t="control_plane"
+    node_ip="${CP_IPS[$i]}"; tf_t="control_plane"
   else
-    node_name="${NODE_PREFIX}-worker-${i}"; node_ip="${WK_IPS[$i]}"; tf_t="worker"
+    node_ip="${WK_IPS[$i]}"; tf_t="worker"
   fi
+  # Ask the cluster what this node is called instead of assuming the naming
+  # convention. Scaleway and OVH get their hostname from the machine config
+  # (<cluster>-<env>-cp-N); on Outscale Talos keeps the platform hostname, so
+  # the nodes are ip-10-0-0-53 and every `kubectl cordon` here failed on "node
+  # not found" — the dry-run printed the invented names and looked fine.
+  # The private IP is the one identity all providers agree on.
+  node_name="$(k8s_node_for_ip "$node_ip")" \
+    || die "no Kubernetes node has internal IP ${node_ip} — is the cluster the one this state describes?"
   ep="$(talos_ep "$t" "$i")"
   cfg_addr="module.talos.talos_machine_configuration_apply.${tf_t}[${i}]"
 
@@ -242,48 +315,175 @@ replace_node() { # <type: cp|worker> <index>
   [[ ${#targets[@]} -gt 0 ]] \
     || die "no state resources match module.${MOD}[0].*.${tf_t}[${i}] — wrong PROVIDER, or state not initialized?"
 
+  # -target only NARROWS the plan; it does not force anything to be replaced.
+  # The header of this script assumes a Talos image change is ForceNew, which is
+  # true on Scaleway and false on OpenStack: there image_id updates in place, so
+  # a version bump rewrote the attribute and left the VM booted on the old image
+  # — state claiming v1.13.8 while every node reported v1.13.7 (2026-08-12).
+  # Name the instance and replace it explicitly. NOT the port: recreating that
+  # would hand the node a new private IP, which is its identity.
+  local inst_addr
+  inst_addr="$(printf '%s\n' "${targets[@]#-target=}" | grep -E '\.(scaleway_instance_server|openstack_compute_instance_v2|outscale_vm|proxmox_virtual_environment_vm)\.' | head -1)"
+  [[ -n "$inst_addr" ]] \
+    || die "no compute instance among the targets for ${node_name} — new provider whose instance resource this script does not know?"
+
+  # The machine config lives under module.talos, and node_targets only collects
+  # module.<provider>[0].* — so -target excluded it and the -replace naming it
+  # below was silently dropped: tofu said "some changes requested in the
+  # configuration may have been ignored" and carried on, the fresh VM booted into
+  # maintenance mode, and the health gate waited 600s for a kubelet that was
+  # never coming. Seen identically on OVH and Scaleway, 2026-08-12.
+  #
+  # Safe to target only because cluster/main.tf no longer gives module.talos a
+  # module-level depends_on over the provider modules; with it, this single line
+  # pulled every instance into the plan. Check the blast radius with --dry-run
+  # and a plan before trusting it on a cluster you care about.
+  targets+=("-target=${cfg_addr}")
+
+  # And the port-ready guard the config apply depends on. Its triggers_replace is
+  # the node ENDPOINT, which is unchanged by a replacement (same private IP), so
+  # it is never re-created on its own — and being in module.talos it was outside
+  # -target too. Without it the config apply fired against a node that had not
+  # finished booting and reported "Creation complete after 0s" having done
+  # nothing; the health gate then waited 600s for a kubelet that never started.
+  # Absent from state when skip_port_ready_wait is set, hence the lookup.
+  local guard_addr=""
+  if tofu state list 2>/dev/null | grep -qxF "module.talos.terraform_data.talos_port_ready_${tf_t}[${i}]"; then
+    guard_addr="module.talos.terraform_data.talos_port_ready_${tf_t}[${i}]"
+    targets+=("-target=${guard_addr}")
+  fi
+
   hr
   info "Node ${node_name}  (ip ${node_ip}, talos ${ep})"
 
   if [[ $DRY_RUN -eq 1 ]]; then
+    if [[ $UPGRADE -eq 1 ]]; then
+      echo "  would: talosctl upgrade -e ${ep} -n ${node_ip} --image ${TALOS_IMAGE} --wait"
+      echo "         (Talos cordons and drains the node itself, and refuses a CP that would cost etcd its quorum)"
+      echo "  would: wait Talos health @ ${ep}, node Ready, $( [[ $t == cp ]] && echo 'etcd 3/3, ' )Longhorn healthy"
+      return 0
+    fi
     echo "  would: kubectl cordon ${node_name}"
     echo "  would: kubectl drain ${node_name} --ignore-daemonsets --delete-emptydir-data --timeout=${DRAIN_TIMEOUT}"
     [[ $t == cp ]] && echo "  would: talosctl etcd remove-member ${node_name} (via a healthy peer CP)"
     echo "  would: tofu apply ${targets[*]} \\"
-    echo "                    -replace='${cfg_addr}' \\"
+    echo "                    -replace='${inst_addr}' -replace='${cfg_addr}'${guard_addr:+ -replace=\'${guard_addr}\'} \\"
     echo "                    -var-file='${TFVARS}' -var talos_bootstrap=true -auto-approve"
     echo "  would: wait Talos health @ ${ep}, node Ready, $( [[ $t == cp ]] && echo 'etcd 3/3, ' )Longhorn healthy"
     echo "  would: kubectl uncordon ${node_name}"
     return 0
   fi
 
+  # ── in-place upgrade: what Talos actually supports ──────────────────────────
+  # `talosctl upgrade` writes the new system partition and reboots into it. The
+  # node keeps its identity, its disk and its etcd membership, so none of the
+  # replacement machinery below applies: no config to re-apply, no maintenance
+  # mode, no stale etcd member to evict, and no orphan Kubernetes node object
+  # from a kubelet that registered under a temporary hostname.
+  #
+  # Talos cordons and drains the node itself (--drain, on by default) and
+  # refuses to upgrade a control plane if that would cost etcd its quorum. The
+  # gates further down still run: they are ours to keep, and they are what makes
+  # this one node at a time.
+  if [[ $UPGRADE -eq 1 ]]; then
+    # Re-runnable: a node already on the target version is left alone. Without
+    # this, resuming an interrupted roll reboots the nodes it already did.
+    local running
+    running="$(talosctl version -e "$ep" -n "$node_ip" --short 2>/dev/null \
+               | awk '/Server/{f=1} f && /Tag:/{print $2; exit}')"
+    if [[ "$running" == "${TALOS_IMAGE##*:}" ]]; then
+      ok "${node_name} already runs ${running} — skipping"
+      return 0
+    fi
+    # The endpoint must be a CONTROL PLANE, even when the target is a worker.
+    # talosctl fetches a kubeconfig from the endpoint to drain the node, and a
+    # worker answers "kubeconfig is only available on control plane nodes" — so
+    # the install succeeds and the command still exits non-zero. -n keeps naming
+    # the node to act on; apid proxies.
+    local up_ep="$ep"
+    if [[ "$t" != "cp" ]]; then
+      local cp_peer
+      cp_peer="$(healthy_peer_cp -1)" || die "no healthy control plane to drive the upgrade of ${node_name}"
+      read -r up_ep _ <<<"$cp_peer"
+    fi
+    cordon_drain "$node_name"
+    info "talosctl upgrade ${node_name} ${running:-?} → ${TALOS_IMAGE}"
+    # --drain=false: we just drained, tolerantly. Talos's own drain is all-or-
+    # nothing and dies on the first PDB that forbids eviction.
+    talosctl upgrade -e "$up_ep" -n "$node_ip" --image "$TALOS_IMAGE" --wait --drain=false \
+      || die "upgrade failed on ${node_name} — the node kept its disk and membership; investigate before retrying"
+    ok "${node_name} upgraded, waiting for it to come back"
+  else
+
   # 1. cordon + drain (evacuate workloads, trigger Longhorn rebuild / app failover)
-  info "Cordon + drain ${node_name}…"
-  "${KCTL[@]}" cordon "$node_name" || die "cordon failed for ${node_name}"
-  if ! "${KCTL[@]}" drain "$node_name" \
-        --ignore-daemonsets --delete-emptydir-data --timeout="$DRAIN_TIMEOUT"; then
-    warn "drain hit its timeout (${DRAIN_TIMEOUT}); some pods may be stuck (PDBs?)."
-    [[ $ASSUME_YES -eq 1 ]] || { read -rp "Continue replacing ${node_name} anyway? [y/N] " a; [[ "$a" == [yY] ]] || die "aborted by operator"; }
-  fi
+  cordon_drain "$node_name"
 
   # 1b. control plane: evict the stale etcd member BEFORE destroying the VM, while
   # the remaining peers still hold quorum. (tofu destroy = ungraceful leave.)
   if [[ "$t" == "cp" ]]; then
-    etcd_remove_member "$node_name" "$i"
+    etcd_remove_member "$node_name" "$node_ip" "$i"
   fi
 
-  # 2. targeted recreate of THIS node only + forced Talos config re-apply
-  info "tofu apply (targeted) — recreate ${node_name} + reattach NIC/IP + re-apply Talos config…"
-  info "targets: ${targets[*]#-target=}"
+  # 2. Count the blast radius BEFORE applying. "One node at a time" was an
+  # intention this script never checked: on 2026-08-12 a single extra -target
+  # pulled the whole provider module into the plan and one "per-node" apply
+  # replaced all three control planes together, taking etcd down. A targeted
+  # plan must not destroy more than the resources it targets.
+  info "Planning ${node_name} and counting what it would destroy…"
+  local doomed
+  doomed="$(tofu plan "${targets[@]}" -replace="$inst_addr" -replace="$cfg_addr" \
+              ${guard_addr:+-replace="$guard_addr"} \
+              -var-file="$TFVARS" -var talos_bootstrap=true -no-color 2>/dev/null \
+            | sed -nE 's/^Plan: [0-9]+ to add, [0-9]+ to change, ([0-9]+) to destroy\./\1/p' | tail -1)"
+  [[ -n "$doomed" ]] || die "could not read a plan for ${node_name} — refusing to apply blind"
+  if (( doomed > ${#targets[@]} )); then
+    die "plan destroys ${doomed} resources for ONE node (it targets ${#targets[@]}) — refusing.
+  Something outside this node is being pulled in; a module-level depends_on has
+  done exactly that before. Inspect with:
+    tofu plan ${targets[*]} -replace='${inst_addr}' -replace='${cfg_addr}' -var-file='${TFVARS}' -var talos_bootstrap=true"
+  fi
+  ok "plan destroys ${doomed} resource(s), targets ${#targets[@]} — proceeding"
+
+  # 3. TWO applies, and the split is the whole point.
+  #
+  # modules/talos takes each node's address from the provider module's IPAM
+  # resource, never from its instance, so nothing in the graph says "configure
+  # the node after you have rebuilt it". In one apply tofu is free to order it
+  # the other way round, and it does: observed 2026-08-13, the config applied to
+  # the OLD VM one second before that VM was destroyed, and the replacement then
+  # booted into maintenance mode with no config at all — which is what every
+  # "kubelet not healthy after 600s" of the last two days actually was.
+  #
+  # The ordering has to come from here. First the instance, alone. Then the
+  # guard and the config, against a node that now exists.
+  local -a infra_targets=()
+  local t
+  for t in "${targets[@]}"; do
+    [[ "$t" == "-target=${cfg_addr}" || "$t" == "-target=${guard_addr}" ]] || infra_targets+=("$t")
+  done
+
+  info "tofu apply 1/2 — recreate ${node_name} (instance, NIC/IP)…"
+  info "targets: ${infra_targets[*]#-target=}"
   tofu apply \
-    "${targets[@]}" \
-    -replace="$cfg_addr" \
+    "${infra_targets[@]}" \
+    -replace="$inst_addr" \
     -var-file="$TFVARS" \
     -var talos_bootstrap=true \
     -auto-approve \
-    || die "tofu apply failed for ${node_name} — cluster left with ${node_name} cordoned; investigate before retrying"
+    || die "tofu apply (instance) failed for ${node_name} — cluster left with ${node_name} cordoned; investigate before retrying"
 
-  # 3. Talos services up on the fresh VM (-e tunnel connects, -n real IP = identity)
+  info "tofu apply 2/2 — wait for the new node, then apply its Talos config…"
+  tofu apply \
+    -target="$cfg_addr" ${guard_addr:+-target="$guard_addr"} \
+    -replace="$cfg_addr" ${guard_addr:+-replace="$guard_addr"} \
+    -var-file="$TFVARS" \
+    -var talos_bootstrap=true \
+    -auto-approve \
+    || die "tofu apply (config) failed for ${node_name} — the VM exists but is unconfigured (maintenance mode); re-run to resume"
+
+  fi  # end of the replacement path
+
+  # 4. Talos services up on the fresh VM (-e tunnel connects, -n real IP = identity)
   info "Waiting for Talos to come up on ${node_name} (${ep} → ${node_ip})…"
   local td=$(( SECONDS + NODE_READY_TIMEOUT ))
   until talosctl -e "$ep" -n "$node_ip" service kubelet 2>/dev/null | grep -qE 'HEALTH[[:space:]]+OK'; do
@@ -292,20 +492,20 @@ replace_node() { # <type: cp|worker> <index>
   done
   ok "Talos services up on ${node_name}"
 
-  # 4. node Ready in k8s
+  # 5. node Ready in k8s
   wait_node_ready "$node_name" || die "node ${node_name} not Ready in time — STOP"
 
-  # 5. for control planes: etcd must be back to full membership before the next CP
+  # 6. for control planes: etcd must be back to full membership before the next CP
   if [[ "$t" == "cp" ]]; then
     wait_etcd_healthy "${#CP_IPS[@]}" || die "etcd did not return to ${#CP_IPS[@]}/${#CP_IPS[@]} healthy — STOP (do NOT replace another CP)"
   fi
 
-  # 6. Longhorn rebuild complete (no degraded/faulted)
+  # 7. Longhorn rebuild complete (no degraded/faulted)
   wait_longhorn_healthy || die "Longhorn not healthy after replacing ${node_name} — STOP"
 
-  # 7. back into rotation
+  # 8. back into rotation
   "${KCTL[@]}" uncordon "$node_name" || warn "uncordon failed for ${node_name} (re-run manually)"
-  ok "Node ${node_name} replaced and back in rotation"
+  ok "Node ${node_name} $([[ $UPGRADE -eq 1 ]] && echo upgraded || echo replaced) and back in rotation"
 }
 
 # ==============================================================================
@@ -317,8 +517,14 @@ info "Pre-flight health check…"
 if [[ $DRY_RUN -eq 0 ]]; then
   wait_etcd_healthy "${#CP_IPS[@]}" || die "etcd is not ${#CP_IPS[@]}/${#CP_IPS[@]} healthy — refusing to start a rolling replace on an unhealthy cluster"
   "${KCTL[@]}" get nodes >/dev/null 2>&1 || die "kubectl cannot reach the API via ${KUBECONFIG_FILE}"
-  not_ready="$("${KCTL[@]}" get nodes --no-headers 2>/dev/null | awk '$2!="Ready"{c++} END{print c+0}')"
+  # "Ready,SchedulingDisabled" is Ready. Matching the column exactly counted a
+  # merely cordoned node as unhealthy — and a cordoned node is the state THIS
+  # script leaves behind when it stops mid-node, so the check blocked its own
+  # retry until someone uncordoned by hand.
+  not_ready="$("${KCTL[@]}" get nodes --no-headers 2>/dev/null | awk '$2 !~ /^Ready/{c++} END{print c+0}')"
   [[ "$not_ready" == "0" ]] || die "${not_ready} node(s) not Ready — stabilize the cluster first"
+  cordoned="$("${KCTL[@]}" get nodes --no-headers 2>/dev/null | awk '$2 ~ /SchedulingDisabled/{printf "%s ", $1}')"
+  [[ -z "$cordoned" ]] || warn "already cordoned (interrupted run?): ${cordoned}— uncordon by hand any node this run does not touch."
   ok "Cluster healthy — proceeding"
 else
   ok "dry-run — skipping live pre-flight"

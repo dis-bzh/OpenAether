@@ -10,6 +10,7 @@ vars:
     infrastructure/opentofu/modules
     infrastructure/opentofu/talos-image
     infrastructure/opentofu-local
+    infrastructure/opentofu-feint
 
 tasks:
   default:
@@ -33,6 +34,10 @@ tasks:
       # it installed. `task lint` now matches what pre-commit checks.
       - yamllint -c infrastructure/.yamllint .github/ .pre-commit-config.yaml Taskfile.yml .checkov.yaml
       - tflint --chdir=infrastructure/opentofu --recursive
+      # The detector CLAUDE.md asks for and the repository did not have.
+      # English is canonical; French belongs in *.fr.md, and .languageignore
+      # lists what is French on purpose, one reason per entry.
+      - ./scripts/dev/check-language.sh
 
   fmt:
     desc: Format OpenTofu code
@@ -55,10 +60,14 @@ tasks:
     # Since that cache is the normal state of a working tree, a check meant to
     # run offline never ran (observed 2026-07-28). A dedicated data dir isolates
     # it from the backend cache while still caching the providers between runs.
+    # Shared with `test`, which needs the same isolation for the same reason.
     env:
       TF_DATA_DIR: .terraform-validate
     cmds:
-      - tofu init -backend=false
+      # -upgrade because .terraform.lock.hcl is gitignored — a pure local cache,
+      # yet shared with the deploy lane. Without it, every existing clone breaks
+      # the moment a version constraint moves, naming a command this never runs.
+      - tofu init -backend=false -upgrade
       - tofu validate
 
   apps-validate:
@@ -74,7 +83,7 @@ tasks:
     internal: true
     dir: ../OpenAether-apps
     cmds:
-      # --validate : dependsOn inconnus, cycles, spec.path morts, catalogue.
+      # --validate : unknown dependsOn, cycles, dead spec.path, catalogue.
       # --check    : a profile freezes the list of EXCLUDED Kustomizations, so
       #   adding a brick to the DAG makes every generated profile stale. Without
       #   this check the brick is inherited from ../base without being picked and
@@ -104,16 +113,52 @@ tasks:
         trivy config infrastructure/ --skip-files "**/bootstrap-manifests/cilium*.yaml"
         --skip-files "**/bootstrap-manifests/flux-install.yaml"
       # Same scope as CI (whole opentofu tree, not just cluster).
-      - checkov -d infrastructure/opentofu --config-file .checkov.yaml
-      - gitleaks detect --source . --no-git
+      # Fail with the remedy, not with exit 127. checkov only ever existed in CI
+      # (a pinned action), so this step died as "executable file not found" on
+      # any machine prepared by scripts/setup.sh — which now installs it.
+      - |
+        command -v checkov >/dev/null 2>&1 || {
+          echo "✗ checkov not installed — run ./scripts/setup.sh, or: pipx install checkov" >&2
+          exit 1
+        }
+        checkov -d infrastructure/opentofu --config-file .checkov.yaml
+      # Only what git can see. Scanning the raw tree flagged .env.sh and the
+      # *.kubeconfig files — gitignored on purpose — so this gate could never be
+      # green on an operator's machine, only on a bare CI runner.
+      # `gitleaks dir` takes ONE path: hand it a file list and it silently
+      # scans the whole tree instead, which is how that went unnoticed.
+      - |
+        tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+        git ls-files --cached --others --exclude-standard -z \
+          | tar --null -T - -cf - | tar -xf - -C "$tmp"
+        cd "$tmp" && gitleaks dir . --redact --no-banner
+      # Default rules only, above — the env-data rules in .gitleaks-envdata.toml
+      # are scoped to what a PR adds (the `leaks` CI job), because this tree's
+      # test fixtures use synthetic-but-routable quads. This asserts they still
+      # match; two of them once matched nothing and passed.
+      - ./scripts/dev/check-gitleaks-rules.sh
 
   test:
     desc: Run OpenTofu tests (cluster root)
     dir: infrastructure/opentofu/cluster
+    # Same isolation as `validate`, and for the same reason — the comment there
+    # claimed this task already matched it, but only the init flag was copied,
+    # not TF_DATA_DIR. So every tree that had once deployed failed here on the
+    # S3 backend recorded in .terraform/, green on a fresh CI runner only.
+    env:
+      TF_DATA_DIR: .terraform-validate
+      # The mocked lane must not need a credential file. These lived in the CI
+      # job only, so locally `tofu test` failed on a required root variable
+      # unless you had sourced .env.sh — which is exactly what this rung is
+      # supposed to prove you don't need. Values are inert placeholders.
+      TF_VAR_encryption_passphrase: test-mock-passphrase-for-validation-only
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: mock
+      AWS_SECRET_ACCESS_KEY: mock
     cmds:
-      # Self-sufficient from a cold shell/CI runner (matches `validate`'s own
-      # init step) — `tofu test` needs providers/modules resolved first.
-      - tofu init -backend=false
+      # Self-sufficient from a cold shell/CI runner — `tofu test` needs the
+      # providers and modules resolved first. -upgrade: see `validate`.
+      - tofu init -backend=false -upgrade
       - tofu test
 
   cluster-security:
@@ -149,6 +194,39 @@ tasks:
       # renovate: datasource=github-releases depName=siderolabs/talos
       VERSION: '{{.VERSION | default "v1.13.7"}}'
     cmds:
+      # Everything a later phase needs, checked BEFORE anything bills. The SSH
+      # key was verified in bootstrap-phase2, which runs after `infra` — so a
+      # missing key left a full cluster running and the run reported failure.
+      - |
+        KEY="{{.KEY}}"; KEY="${KEY/#\~/$HOME}"
+        [ -f "$KEY" ] || {
+          echo "✗ SSH key not found: $KEY" >&2
+          echo "  It is needed by bootstrap-phase2, AFTER infra would have created" >&2
+          echo "  billable resources — so this stops here. Pass KEY=/path/to/key." >&2
+          exit 1
+        }
+        TFVARS="infrastructure/opentofu/cluster/envs/{{.ROLE}}-{{.PROVIDER}}.tfvars"
+        [ -f "$TFVARS" ] || {
+          echo "✗ no env file: $TFVARS" >&2
+          echo "  Create it from the example, then edit it:" >&2
+          echo "    cp $TFVARS.example $TFVARS" >&2
+          exit 1
+        }
+        # The two keys are a PAIR and nothing else says so: bastion_ssh_keys is
+        # the public half, injected by cloud-init; KEY is the private half the
+        # tunnel authenticates with. A mismatch fails in phase 2 — after the
+        # bill — with an SSH error naming neither file. Skipped silently when
+        # the public half cannot be derived (a passphrase-protected key), because
+        # refusing to deploy over a check we could not run is worse.
+        PUB="$(ssh-keygen -y -f "$KEY" 2>/dev/null | awk '{print $2}')" || true
+        if [ -n "$PUB" ] && ! grep -qF "$PUB" "$TFVARS"; then
+          echo "✗ $KEY is not the private half of any key in bastion_ssh_keys." >&2
+          echo "  The bastion would be built without it and phase 2 could not" >&2
+          echo "  connect — after infra had spent. Add its public half:" >&2
+          echo "    ssh-keygen -y -f $KEY" >&2
+          echo "  to bastion_ssh_keys in $TFVARS, or pass the matching KEY=." >&2
+          exit 1
+        fi
       - task: talos-image
         vars:
           PROVIDER: "{{.PROVIDER}}"
@@ -240,7 +318,7 @@ tasks:
       Replace nodes one at a time (drain→targeted apply→wait) with NO downtime. Use after a ForceNew change
       (instance_type / Talos image) instead of infra, which replaces all nodes in parallel and breaks etcd
       quorum. Management clusters only (see scripts/ops/rolling-replace.sh). Targets are derived from `tofu
-      state list` — provider-agnostic, but only exercised live on Scaleway (dry-run first elsewhere).
+      state list` — provider-agnostic; --upgrade exercised live on Scaleway, OVH and Outscale.
       Usage: task rolling-replace PROVIDER=scaleway|ovh|outscale|proxmox [KEY=~/.ssh/key]
       [-- --workers-only|--cp-only|--dry-run]
     dir: infrastructure/opentofu/cluster
@@ -406,6 +484,85 @@ tasks:
       - echo "KUBECONFIG and TALOSCONFIG written to infrastructure/opentofu/cluster/"
 
   # ===========================================================================
+  # Emulated cloud (Feint) — no account, no credentials. docs/emulated-cloud.md
+  # ===========================================================================
+
+  feint-up:
+    desc: "Start the local Scaleway/Outscale API emulator (installs the pinned binary if absent)"
+    # Task vars are NOT environment variables: without this,
+    # `task feint-plan FEINT_ENDPOINT=https://api.scaleway.com` set a var the
+    # script never read, the loopback guard never saw it, and the negative
+    # test in docs/release-checklist.md passed without testing anything.
+    env:
+      FEINT_ENDPOINT: '{{.FEINT_ENDPOINT | default "http://127.0.0.1:4599"}}'
+    cmds:
+      - ./scripts/dev/feint.sh start
+
+  feint-down:
+    desc: "Stop the emulator and drop everything it created"
+    # Task vars are NOT environment variables: without this,
+    # `task feint-plan FEINT_ENDPOINT=https://api.scaleway.com` set a var the
+    # script never read, the loopback guard never saw it, and the negative
+    # test in docs/release-checklist.md passed without testing anything.
+    env:
+      FEINT_ENDPOINT: '{{.FEINT_ENDPOINT | default "http://127.0.0.1:4599"}}'
+    cmds:
+      - ./scripts/dev/feint.sh stop
+
+  feint-plan:
+    desc: "Plan the REAL cluster root against the emulator. Usage: task feint-plan PROVIDER=scaleway|outscale"
+    vars:
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    # Task vars are NOT environment variables: without this,
+    # `task feint-plan FEINT_ENDPOINT=https://api.scaleway.com` set a var the
+    # script never read, the loopback guard never saw it, and the negative
+    # test in docs/release-checklist.md passed without testing anything.
+    env:
+      FEINT_ENDPOINT: '{{.FEINT_ENDPOINT | default "http://127.0.0.1:4599"}}'
+    cmds:
+      - ./scripts/dev/feint.sh plan {{.PROVIDER}}
+
+  feint-apply:
+    desc: "Full apply/destroy cycle on the reduced fixture. Usage: task feint-apply PROVIDER=scaleway|outscale"
+    vars:
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    # Task vars are NOT environment variables: without this,
+    # `task feint-plan FEINT_ENDPOINT=https://api.scaleway.com` set a var the
+    # script never read, the loopback guard never saw it, and the negative
+    # test in docs/release-checklist.md passed without testing anything.
+    env:
+      FEINT_ENDPOINT: '{{.FEINT_ENDPOINT | default "http://127.0.0.1:4599"}}'
+    cmds:
+      - ./scripts/dev/feint.sh apply {{.PROVIDER}}
+
+  feint-record:
+    desc: >-
+      Rank the operations our module calls that the emulator does not serve. Usage: task feint-record
+      PROVIDER=scaleway|outscale
+    vars:
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    # Task vars are NOT environment variables: without this,
+    # `task feint-plan FEINT_ENDPOINT=https://api.scaleway.com` set a var the
+    # script never read, the loopback guard never saw it, and the negative
+    # test in docs/release-checklist.md passed without testing anything.
+    env:
+      FEINT_ENDPOINT: '{{.FEINT_ENDPOINT | default "http://127.0.0.1:4599"}}'
+    cmds:
+      - ./scripts/dev/feint.sh record {{.PROVIDER}}
+
+  feint-test:
+    desc: "Both providers, both lanes (plan on the real root + apply/destroy on the fixture)"
+    cmds:
+      - task: feint-up
+      - for: [scaleway, outscale]
+        task: feint-plan
+        vars: {PROVIDER: "{{.ITEM}}"}
+      - for: [scaleway, outscale]
+        task: feint-apply
+        vars: {PROVIDER: "{{.ITEM}}"}
+      - task: feint-down
+
+  # ===========================================================================
   # Local Testing (Docker / WSL2)
   # ===========================================================================
 
@@ -422,12 +579,23 @@ tasks:
       # Fail fast on a Hyper-V port reservation: Docker Desktop only reports it
       # as an opaque 500, five retries and a 90s timeout later.
       - ./scripts/dev/check-host-ports.sh {{.TALOS_API_PORT_BASE}}
+      # cilium-local.yaml is gitignored, so a fresh clone has none — render it
+      # rather than boot a cluster with no CNI. Mirrors what `up` does for the
+      # cloud manifest.
+      - |
+        CILIUM=infrastructure/opentofu/cluster/bootstrap-manifests/cilium-local.yaml
+        if [ ! -s "$CILIUM" ] || grep -q "CILIUM-MANIFEST-PLACEHOLDER" "$CILIUM"; then
+          ./scripts/bootstrap/render-bootstrap-manifests.sh --local
+        fi
       - |
         cd infrastructure/opentofu-local
         tofu init -upgrade > /dev/null 2>&1 || tofu init > /dev/null
       - |
+        # The fallback emits the sentinel the precondition in modules/talos looks
+        # for. It used to emit 'placeholder', which that check does not match —
+        # so a missing manifest sailed through and shipped an 11-byte inlineManifest.
         export TF_VAR_cilium_manifest="$(cat infrastructure/opentofu/cluster/bootstrap-manifests/cilium-local.yaml \
-          2>/dev/null || echo 'placeholder')"
+          2>/dev/null || echo 'CILIUM-MANIFEST-PLACEHOLDER')"
         tofu -chdir=infrastructure/opentofu-local apply -var talos_bootstrap=true \
           -var talos_api_port_base={{.TALOS_API_PORT_BASE}} -auto-approve
 
@@ -437,12 +605,18 @@ tasks:
       - ./scripts/dev/test-talos-local.sh
 
   local-status:
-    desc: "Check local cluster health (3 CP + 2 workers)"
+    desc: "Check local cluster health (3 CP + 3 workers)"
+    vars:
+      TALOS_API_PORT_BASE: '{{.TALOS_API_PORT_BASE | default "45000"}}'
     cmds:
+      # The endpoint is derived from the same base local-up publishes. It used to
+      # be hardcoded to 50000 — the container-internal port, never a host one —
+      # so this whole target failed against a healthy cluster.
       - |
         export KUBECONFIG=infrastructure/opentofu-local/kubeconfig
         export TALOSCONFIG=infrastructure/opentofu-local/talosconfig
-        echo "=== etcd quorum ===" && talosctl --nodes 10.5.0.10 --endpoints 127.0.0.1:50000 etcd members || true
+        echo "=== etcd quorum ===" && talosctl --nodes 10.5.0.10 \
+          --endpoints 127.0.0.1:{{.TALOS_API_PORT_BASE}} etcd members || true
         echo "=== Kubernetes nodes ===" && kubectl get nodes -o wide || true
         echo "=== kube-system pods ===" && kubectl get pods -n kube-system || true
         echo "=== Flux Kustomizations ===" && flux get kustomizations 2>/dev/null || echo "Flux not deployed yet"

@@ -20,7 +20,7 @@ ne sont PAS couverts par le premier seul).
 OpenAether déploie **un cluster Talos** sur **n'importe quel provider** (Proxmox ou
 cloud Scaleway/OVH/Outscale) avec pour **seul socle figé : CNI (Cilium) + Flux**.
 Par-dessus, on **pioche modulairement** dans les manifests communs d'`OpenAether-apps`
-selon les dépendances voulues (mesh ou non, Zitadel sans OpenBao, Harbor + OpenBao,
+selon les dépendances voulues (mesh ou non, Zitadel sans OpenBao, observability sans mesh,
 etc.). Les manifests **applicatifs métier** restent dans chaque repo d'app (ex.
 `seestar-fits`) et dépassent ce projet.
 
@@ -75,6 +75,20 @@ fait » : passer le détecteur.
 par la chaîne littérale française de leur en-tête. La traduire a rendu `--check`
 aveugle **en silence** (il annonçait « 0 profil » au lieu de 1). Avant de
 traduire une chaîne, vérifier qu'aucun code ne la compare.
+
+## Contribution assistée par IA
+
+Règles reprises de `CONTRIBUTING.md` (lui-même adapté du CONTRIBUTING de Feint) —
+deux qui changent l'écriture des commits :
+
+- **Trailer `Assisted-by: Claude Code (<modèle>)`**, jamais `Co-Authored-By` ni
+  `Signed-off-by` pour un outil : ces deux-là revendiquent la paternité ou
+  certifient l'origine, ce qu'un modèle ne peut pas faire. Refusé par le hook
+  `commit-msg` et par la CI.
+- **Apporter la preuve, pas l'intention** : une modif de module provider n'est
+  pas finie tant que quelque chose de réel ne l'a pas exercée. Trois barreaux
+  (`task test` mocké → `task feint-*` émulé → cloud réel) ; dire lequel on a
+  atteint et lequel on a sauté. « Ça devrait passer » n'est pas un barreau.
 
 ## Concision et refacto
 

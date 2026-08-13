@@ -28,7 +28,15 @@ def get(u):
     return json.load(urllib.request.urlopen(urllib.request.Request(u, headers=H), timeout=60))
 
 
+# Counted so a clean project SAYS it is clean. This script is the last thing
+# standing between a failed teardown and a bill, and it used to report that by
+# printing nothing at all — which reads like a finding, not like an all-clear.
+TOTAL = 0
+
+
 def delete(u, label):
+    global TOTAL
+    TOTAL += 1
     if not APPLY:
         print("  [dry-run]", label)
         return
@@ -83,4 +91,9 @@ for g in get(net + '/v2.0/security-groups')['security_groups']:
     if g['name'] != 'default' and g.get('project_id') == os.environ['OS_PROJECT_ID']:
         delete(net + f"/v2.0/security-groups/{g['id']}", f"SG {g['name']}")
 
-print("\n(dry-run — re-run with --apply to delete)" if not APPLY else "\npurge complete")
+if TOTAL == 0:
+    print("Nothing to purge — the project is clean.")
+elif not APPLY:
+    print(f"\n{TOTAL} resource(s) targeted. Re-run with --apply to delete them.")
+else:
+    print("\npurge complete")

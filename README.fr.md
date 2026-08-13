@@ -9,8 +9,8 @@
 
 ## Version
 
-**v0.4.0+** — socle Talos modulaire multi-provider (cf. `CLAUDE.md` et
-`CHANGELOG.md [Unreleased]`).
+**1.0.1** — socle Talos modulaire multi-provider (cf. `CHANGELOG.md`). Déploie
+le tag `OpenAether-apps` correspondant : une version identifie un système.
 
 Management validé de bout en bout sur **Scaleway, OVH et Outscale** ; local
 Docker validé (3 CP + 3 workers) ; Proxmox code-complet mais **jamais appliqué
@@ -126,7 +126,7 @@ task local-down      # destruction (conteneurs + volumes + state)
 
 ⚠️ **Sous Windows/WSL2** : Hyper-V réserve des blocs de ports au-dessus de
 49152, et ces blocs bougent au redémarrage. La base des ports hôte est donc
-paramétrable (`talos_api_port_base`, défaut 41000). Diagnostiquer avec
+paramétrable (`talos_api_port_base`, défaut 45000). Diagnostiquer avec
 `netsh.exe int ipv4 show excludedportrange protocol=tcp`.
 
 ### Cluster de management (cloud)
@@ -137,6 +137,8 @@ source .env.sh
 cp infrastructure/opentofu/cluster/envs/management-scaleway.tfvars.example \
    infrastructure/opentofu/cluster/envs/management-scaleway.tfvars
 # Éditer : admin_ip, bastion_ssh_keys, image_name/image_id, s3_primary_*/s3_replica_*
+# Et git_repo_url + git_ref si tu utilises ton propre fork d'OpenAether-apps —
+# les défauts pointent sur le nôtre, et son apps/clusters n'est pas le tien.
 
 task preflight-quotas PROVIDER=ovh          # vérifier les quotas d'abord
 task talos-image PROVIDER=scaleway          # une fois par version d'image
@@ -164,6 +166,24 @@ python3 scripts/ops/purge-orphans/ovh.py    # dry-run : vérifier qu'il ne reste
 cluster **autogéré** ne peut pas terminer sa propre suppression
 (cf. `docs/capi-bootstrap.fr.md`).
 
+### Cloud émulé (Feint — sans compte cloud, sans credentials)
+
+Pointe les **vrais** providers Scaleway et Outscale vers un émulateur local de
+leurs APIs. Un cran au-dessus du `tofu test` mocké : vrai HTTP, vrai décodage,
+aucune facture.
+
+```bash
+task feint-up                        # démarre l'émulateur (binaire épinglé, checksum vérifié)
+task feint-plan   PROVIDER=scaleway  # plan du VRAI root cluster, zéro credential
+task feint-apply  PROVIDER=outscale  # cycle apply/destroy sur la fixture réduite
+task feint-record PROVIDER=scaleway  # classe les opérations qu'on appelle et qu'aucun pack ne sert
+task feint-down
+```
+
+⚠️ Ça ne prouve **pas** qu'un déploiement réel fonctionne — l'émulateur n'a ni
+inventaire, ni load balancer, ni quotas. Cf.
+[docs/emulated-cloud.fr.md](docs/emulated-cloud.fr.md).
+
 ### Contrôles statiques (sans cloud ni Docker)
 
 ```bash
@@ -179,7 +199,9 @@ task security            # contrôles de durcissement
 | [docs/admin-access.fr.md](docs/admin-access.fr.md) | Parcours jour-1 : escrow, PKI offline, accès UIs, tests navigateur |
 | [docs/capi-bootstrap.fr.md](docs/capi-bootstrap.fr.md) | Amorcer un management par CAPI et le rendre autogéré |
 | [docs/deployment-test-matrix.fr.md](docs/deployment-test-matrix.fr.md) | Ce qui est validé, où, et comment |
-| [docs/backlog.md](docs/backlog.md) | **Source de vérité** : état courant, dette, améliorations |
+| [docs/emulated-cloud.fr.md](docs/emulated-cloud.fr.md) | Tester Scaleway/Outscale contre un émulateur local — et les limites de l'exercice |
+| [docs/release-checklist.md](docs/release-checklist.md) | Ce qu'il faut lancer avant de taguer, dans l'ordre qui échoue le moins cher |
+| [docs/backlog.md](docs/backlog.md) | **Source de vérité** : état courant, dette, améliorations (anglais seulement) |
 
 ## Sécurité
 
@@ -207,7 +229,8 @@ task security            # contrôles de durcissement
 
 ## Licence
 
-**OpenAether** est distribué sous
-[GNU Affero General Public License v3.0 (AGPLv3)](LICENSE).
+**OpenAether** est distribué sous [licence Apache 2.0](LICENSE). Le projet était
+sous AGPLv3 jusqu'aux versions 0.x ; le changement est un assouplissement, donc ce que
+vous déteniez déjà sous AGPLv3 le reste.
 
 Source : **https://github.com/dis-bzh/OpenAether-infra**

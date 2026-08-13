@@ -139,3 +139,29 @@ tofu output image_id 2>/dev/null || true
 [ "$P" = proxmox ] && tofu output image_file_id 2>/dev/null
 echo "  (Scaleway: cluster looks up by image_name; OVH/Outscale: put image_id in the cluster envs/*.tfvars;"
 echo "   Proxmox: talos_image_file_id defaults to the same convention — usually no override needed)"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# On OVH and Outscale the cluster does NOT look the image up: it takes the id
+# from envs/*.tfvars, copied here by hand. Nothing compared the two, so a
+# rebuilt image left a stale id behind and `task up` — which runs this script
+# first, learns the right id, prints it, then deploys with the wrong one —
+# failed at server creation with "Can not find requested image", after the
+# network and the bastion had been created. Refuse instead, before the spend.
+# ──────────────────────────────────────────────────────────────────────────────
+if [ "$P" = ovh ] || [ "$P" = outscale ]; then
+  WANT="$(tofu output -raw image_id 2>/dev/null || true)"
+  ENVS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../infrastructure/opentofu/cluster/envs" && pwd)"
+  stale=0
+  for f in "$ENVS"/*-"$P".tfvars; do
+    [ -e "$f" ] || continue
+    HAVE="$(grep -oE 'image_id[[:space:]]*=[[:space:]]*"[^"]+"' "$f" \
+            | grep -v bastion_image_id | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
+    [ -n "$WANT" ] && [ -n "$HAVE" ] && [ "$WANT" != "$HAVE" ] || continue
+    echo "✗ $(basename "$f") pins image_id = $HAVE" >&2
+    echo "  but the image this lane just resolved is $WANT." >&2
+    echo "  Deploying would fail at server creation, after the bill. Update it:" >&2
+    echo "    sed -i 's|$HAVE|$WANT|' $f" >&2
+    stale=1
+  done
+  [ "$stale" -eq 0 ] || exit 1
+fi
