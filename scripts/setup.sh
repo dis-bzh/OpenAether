@@ -44,6 +44,10 @@ install_tofu() {
         # minimal image has none of them: it aborted here, and set -e meant
         # nothing at all got installed — not even the tools further down.
         local need=()
+        # curl belongs here too: it is used ten lines down, and a bare ubuntu:24.04
+        # has none of these. Listing only two of the three left the same abort this
+        # comment describes — exit 127, nothing installed.
+        command -v curl &> /dev/null || need+=(curl ca-certificates)
         command -v unzip &> /dev/null || need+=(unzip)
         { command -v gpg &> /dev/null || command -v cosign &> /dev/null; } || need+=(gnupg)
         if [ ${#need[@]} -gt 0 ]; then
@@ -279,15 +283,30 @@ fi
 
 # 9. Check nc — the local Docker provider and talos-tunnels.sh poll ports with it.
 if ! check_cmd nc; then
-    echo -e "${RED}⚠ nc (netcat) is missing — 'task local-up' and the SSH tunnels poll ports with it.${NC}"
-    echo "   Debian/Ubuntu: sudo apt-get install -y netcat-openbsd"
+    # Installed, not just reported: `task local-up` and the tunnels need it, and
+    # this script installs everything else they need.
+    if command -v apt-get &> /dev/null; then
+        echo "Installing netcat..."
+        $SUDO apt-get update && $SUDO apt-get install -y netcat-openbsd
+    else
+        echo -e "${RED}⚠ nc (netcat) is missing — 'task local-up' and the SSH tunnels poll ports with it.${NC}"
+        echo "   Install netcat-openbsd (or equivalent), then re-run ./scripts/setup.sh"
+    fi
 fi
 
 # 10. Check pre-commit (optional but recommended)
 if ! check_cmd pre-commit; then
     echo -e "${RED}⚠ pre-commit is not installed (recommended for DevSecOps)${NC}"
-    read -p "Install pre-commit? (y/N) " -n 1 -r
-    echo
+    # `read` on a closed stdin returns 1, and `set -e` turned that into an abort
+    # one line before "Environment ready" — so this script could not finish
+    # anywhere it runs unattended: a container, CI, a fresh machine over ssh.
+    if [ -t 0 ]; then
+        read -p "Install pre-commit? (y/N) " -n 1 -r
+        echo
+    else
+        REPLY=y
+        echo "   no terminal — installing it rather than stopping here."
+    fi
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         install_precommit
         echo "Run 'pre-commit install' in the repo root to activate hooks."

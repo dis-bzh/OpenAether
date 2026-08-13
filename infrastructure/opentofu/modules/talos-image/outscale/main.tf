@@ -119,6 +119,7 @@ resource "outscale_snapshot" "talos" {
   }
 
   depends_on = [terraform_data.build_and_upload]
+
 }
 
 # Register a bootable OMI from the imported snapshot. The cluster references it by
@@ -140,6 +141,7 @@ resource "outscale_image" "talos" {
       delete_on_vm_deletion = true
     }
   }
+
 }
 
 # Purge of the staging `.raw`, once the OMI is registered.
