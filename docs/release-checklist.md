@@ -243,7 +243,48 @@ task up ROLE=management PROVIDER=outscale
       resources that were merely still being deleted — Outscale removes load
       balancers asynchronously. Re-run before concluding anything.
 
-## 7. Cross-repo and CAPI, if you are exercising the optional layer
+## 7. Upgrades — Kubernetes and Talos, on a cluster that has to stay up
+
+§§1-6 prove a cluster can be built. They prove nothing about keeping one, which
+is the half 1.0.0 shipped unverified. Run this on the reference provider at
+minimum, on an HA topology, with a one-second probe so "no interruption" is a
+number rather than an impression:
+
+```bash
+while :; do kubectl get --raw=/readyz --request-timeout=2s >/dev/null 2>&1 \
+  && echo ok || echo FAIL; sleep 1; done | tee probe.log
+```
+
+Point it at the endpoint in the kubeconfig, not at a tunnel to one node — a
+tunnel measures that node, and the node you are upgrading is expected to go away.
+
+**Check the version pair before moving either.** Talos supports a range of
+Kubernetes versions, not all of them (1.13 covers 1.31-1.36). The starting pair,
+the ending pair, and the intermediate state all have to sit inside it, because
+one moves before the other. Nothing enforces this yet — see the backlog.
+
+**Talos, in place.** `rolling-replace.sh --upgrade` calls `talosctl upgrade`,
+which keeps the node's disk, identity and etcd membership, drains it itself, and
+refuses a control-plane upgrade that would cost etcd its quorum. One node at a
+time, health-gated between each. Re-runnable: a node already on the target
+version is skipped.
+
+```bash
+task rolling-replace PROVIDER=scaleway KEY=~/.ssh/<key> -- --cp-only --upgrade
+task rolling-replace PROVIDER=scaleway KEY=~/.ssh/<key> -- --workers-only --upgrade
+```
+
+**What to watch, beyond "it came back".** After each node: its name is unchanged
+(`kubectl get nodes` — a `talos-xxxxx` entry means the hostname did not hold and
+the next reboot will orphan another node object), the node count has not grown,
+etcd still reports every member, and the probe's FAIL count has not moved much.
+
+**Then plan again.** A clean upgrade leaves `tofu plan` at zero destroys. If it
+wants to replace nodes, the boot image and the running version have disagreed —
+that plan would take the cluster down, so stop and read
+`modules/providers/provider-contract.md` § "Node image drift".
+
+## 8. Cross-repo and CAPI, if you are exercising the optional layer
 
 - [ ] a management with CAPI picked, then one child through `apps/clusters`
       (rename `example-scaleway.yaml.example` — **it does not build as shipped**,
@@ -254,7 +295,7 @@ task up ROLE=management PROVIDER=outscale
       thing from this section, restore something from a backup and write down
       what the runbook got wrong.
 
-## 8. Release mechanics
+## 9. Release mechanics
 
 Only once everything above is green.
 
@@ -266,7 +307,7 @@ Only once everything above is green.
 - [ ] `git describe --tags` clean on both
 - [ ] the twelve `envs/*.tfvars.example` still pin `refs/tags/1.0.1`
 
-## 9. Before communicating
+## 10. Before communicating
 
 - [ ] clone the repo **as a stranger would** — no local state, no `.env.sh` —
       and do §1 and §2 one more time

@@ -42,6 +42,13 @@ cluster reconciles.
 
 ### Changed
 
+- **`rolling-replace.sh` can now upgrade in place (`--upgrade`).** Replacing a VM
+  to change its Talos version throws away everything that made the node itself:
+  its disk, its identity, its etcd membership. `talosctl upgrade` keeps all three,
+  cordons and drains on its own, and refuses a control-plane upgrade that would
+  cost etcd its quorum. The script's own gates still run, still one node at a
+  time, and a node already on the target version is skipped rather than rebooted.
+  Replacement stays the default for anything that is not a version change.
 - **Relicensed from AGPLv3 to Apache 2.0.** The copyleft was deterring the one
   thing this project wants — people running it. Apache 2.0 matches Feint, which
   OpenAether now depends on for its emulated lane. A relaxation, so anything
@@ -78,6 +85,32 @@ a real machine and three real clouds rather than trusting CI. They share a shape
 worth naming: **a check that could not fail**, or one asserting something other
 than what its name promised. None of them was visible from a green pipeline.
 
+- **`task test` deleted the operator's cluster credentials.** The suite mocks
+  every cloud provider but not `local`, so `local_file.kubeconfig` and
+  `local_file.talosconfig` were genuinely written into the module directory —
+  mock content over a live cluster's files — and genuinely removed when the run
+  tore down. It cost access to a cluster mid-upgrade while validating this
+  release. `local` is mocked too now, and the files come through a run
+  byte-identical.
+- **A reboot could rename a node, and a Talos upgrade did.** Our images are
+  `metal` builds, so Talos has no cloud metadata to take a name from: the names
+  came from DHCP, and the generated config falls back to `auto: stable` when a
+  lease arrives without one. `talosctl upgrade` on a control plane brought it back
+  as `talos-8g3-a2w` — a second Kubernetes node object, the old one left NotReady,
+  and the etcd member renamed with it. The orphan is not cosmetic:
+  `data.talos_cluster_health` cannot pass while a node is NotReady, so `tofu plan`
+  itself wedges. Both roles now carry a `HostnameConfig` document with a static
+  name, which outranks DHCP and holds across reboots on every provider.
+- **After an in-place upgrade, the next `tofu apply` would have destroyed the
+  cluster.** `talosctl upgrade` changes the running version without touching the
+  cloud resource, so bumping `talos_version` leaves the instance's image id stale
+  — and that attribute is ForceNew on Scaleway, a disk-wiping rebuild on
+  OpenStack. Planned against a freshly upgraded cluster, it proposed replacing all
+  three control planes at once: six destroys, and etcd quorum with them. Node
+  resources now ignore that attribute, since the boot image is the install medium
+  and not the running version; the same plan then showed zero destroys. Deliberate
+  re-imaging is unchanged — `rolling-replace` passes an explicit `-replace`, one
+  node at a time.
 - **`./scripts/setup.sh` installed nothing at all on a clean machine.** Three
   prerequisites hidden behind one another, each turned into a total abort by
   `set -euo pipefail`: OpenTofu's installer refuses without `unzip` and without

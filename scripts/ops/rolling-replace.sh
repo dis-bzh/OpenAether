@@ -49,11 +49,13 @@ shift || true
 SCOPE="all"        # all | workers | cp
 DRY_RUN=0
 ASSUME_YES=0
+UPGRADE=0         # --upgrade: in-place `talosctl upgrade`, no VM replacement
 for arg in "$@"; do
   case "$arg" in
     --workers-only) SCOPE="workers" ;;
     --cp-only)      SCOPE="cp" ;;
     --dry-run)      DRY_RUN=1 ;;
+    --upgrade)      UPGRADE=1 ;;
     --yes|-y)       ASSUME_YES=1 ;;
     *) echo "✗ unknown flag: $arg" >&2; exit 2 ;;
   esac
@@ -113,6 +115,15 @@ ENVN="$(grep -E '^[[:space:]]*environment[[:space:]]*=' "$TFVARS" | head -1 | se
 [[ -n "$CN" && -n "$ENVN" ]] || die "could not read cluster_name/environment from $TFVARS"
 NODE_PREFIX="${CN}-${ENVN}"
 
+# --upgrade needs the installer image for the version this tree declares. Read it
+# from the same tfvars everything else comes from; TALOS_IMAGE overrides for a
+# custom schematic (Image Factory) whose id is not derivable from a version.
+if [[ $UPGRADE -eq 1 && -z "${TALOS_IMAGE:-}" ]]; then
+  TV="$(grep -E '^[[:space:]]*talos_version[[:space:]]*=' "$TFVARS" | head -1 | sed -E 's/^[^=]*=[[:space:]]*"?([^"#]*)"?.*/\1/' | tr -d '[:space:]')"
+  [[ -n "$TV" ]] || die "--upgrade: no talos_version in ${TFVARS}. Pin it, or pass TALOS_IMAGE=ghcr.io/siderolabs/installer:vX.Y.Z"
+  TALOS_IMAGE="ghcr.io/siderolabs/installer:${TV}"
+fi
+
 mapfile -t CP_IPS < <(jq -r '.control_plane_private_ips.value[]? // empty' <<<"$OUTPUTS")
 mapfile -t WK_IPS < <(jq -r '.worker_private_ips.value[]? // empty' <<<"$OUTPUTS")
 [[ ${#CP_IPS[@]} -gt 0 ]] || die "no control_plane_private_ips in tofu output — is the infra deployed?"
@@ -166,11 +177,17 @@ healthy_peer_cp() { # <exclude_index>
 # `talosctl etcd remove-member` takes the hex MEMBER ID, not the node name. The
 # `etcd members` table is: NODE  ID  HOSTNAME  PEER_URLS  CLIENT_URLS  LEARNER —
 # so we resolve name→ID by matching HOSTNAME (col 3) and reading ID (col 2).
-etcd_remove_member() { # <node_name> <exclude_index>
-  local node="$1" excl="$2" peer ep ip mid
+etcd_remove_member() { # <node_name> <node_ip> <exclude_index>
+  local node="$1" node_ip="$2" excl="$3" peer ep ip mid
   peer="$(healthy_peer_cp "$excl")" || die "no healthy peer CP to evict etcd member ${node} — refusing to proceed (quorum risk)"
   read -r ep ip <<<"$peer"
-  mid="$(talosctl -e "$ep" -n "$ip" etcd members 2>/dev/null | awk -v h="$node" '$3==h {print $2; exit}')"
+  # Match the peer URL first, the hostname only as a fallback. An etcd member
+  # keeps the name it joined under, so a node renamed since does not match by
+  # name — and the lookup would report "already absent" for a member that is
+  # still there, leaving it to be destroyed without ever being evicted.
+  mid="$(talosctl -e "$ep" -n "$ip" etcd members 2>/dev/null \
+         | awk -v mip="$node_ip" -v h="$node" \
+               'index($4, "//" mip ":") > 0 || $3 == h {print $2; exit}')"
   if [[ -z "$mid" ]]; then
     ok "etcd member ${node} already absent (nothing to evict)"; return 0
   fi
@@ -320,6 +337,12 @@ replace_node() { # <type: cp|worker> <index>
   info "Node ${node_name}  (ip ${node_ip}, talos ${ep})"
 
   if [[ $DRY_RUN -eq 1 ]]; then
+    if [[ $UPGRADE -eq 1 ]]; then
+      echo "  would: talosctl upgrade -e ${ep} -n ${node_ip} --image ${TALOS_IMAGE} --wait"
+      echo "         (Talos cordons and drains the node itself, and refuses a CP that would cost etcd its quorum)"
+      echo "  would: wait Talos health @ ${ep}, node Ready, $( [[ $t == cp ]] && echo 'etcd 3/3, ' )Longhorn healthy"
+      return 0
+    fi
     echo "  would: kubectl cordon ${node_name}"
     echo "  would: kubectl drain ${node_name} --ignore-daemonsets --delete-emptydir-data --timeout=${DRAIN_TIMEOUT}"
     [[ $t == cp ]] && echo "  would: talosctl etcd remove-member ${node_name} (via a healthy peer CP)"
@@ -330,6 +353,33 @@ replace_node() { # <type: cp|worker> <index>
     echo "  would: kubectl uncordon ${node_name}"
     return 0
   fi
+
+  # ── in-place upgrade: what Talos actually supports ──────────────────────────
+  # `talosctl upgrade` writes the new system partition and reboots into it. The
+  # node keeps its identity, its disk and its etcd membership, so none of the
+  # replacement machinery below applies: no config to re-apply, no maintenance
+  # mode, no stale etcd member to evict, and no orphan Kubernetes node object
+  # from a kubelet that registered under a temporary hostname.
+  #
+  # Talos cordons and drains the node itself (--drain, on by default) and
+  # refuses to upgrade a control plane if that would cost etcd its quorum. The
+  # gates further down still run: they are ours to keep, and they are what makes
+  # this one node at a time.
+  if [[ $UPGRADE -eq 1 ]]; then
+    # Re-runnable: a node already on the target version is left alone. Without
+    # this, resuming an interrupted roll reboots the nodes it already did.
+    local running
+    running="$(talosctl version -e "$ep" -n "$node_ip" --short 2>/dev/null \
+               | awk '/Server/{f=1} f && /Tag:/{print $2; exit}')"
+    if [[ "$running" == "${TALOS_IMAGE##*:}" ]]; then
+      ok "${node_name} already runs ${running} — skipping"
+      return 0
+    fi
+    info "talosctl upgrade ${node_name} ${running:-?} → ${TALOS_IMAGE}"
+    talosctl upgrade -e "$ep" -n "$node_ip" --image "$TALOS_IMAGE" --wait \
+      || die "upgrade failed on ${node_name} — the node kept its disk and membership; investigate before retrying"
+    ok "${node_name} upgraded, waiting for it to come back"
+  else
 
   # 1. cordon + drain (evacuate workloads, trigger Longhorn rebuild / app failover)
   info "Cordon + drain ${node_name}…"
@@ -343,7 +393,7 @@ replace_node() { # <type: cp|worker> <index>
   # 1b. control plane: evict the stale etcd member BEFORE destroying the VM, while
   # the remaining peers still hold quorum. (tofu destroy = ungraceful leave.)
   if [[ "$t" == "cp" ]]; then
-    etcd_remove_member "$node_name" "$i"
+    etcd_remove_member "$node_name" "$node_ip" "$i"
   fi
 
   # 2. Count the blast radius BEFORE applying. "One node at a time" was an
@@ -403,6 +453,8 @@ replace_node() { # <type: cp|worker> <index>
     -auto-approve \
     || die "tofu apply (config) failed for ${node_name} — the VM exists but is unconfigured (maintenance mode); re-run to resume"
 
+  fi  # end of the replacement path
+
   # 4. Talos services up on the fresh VM (-e tunnel connects, -n real IP = identity)
   info "Waiting for Talos to come up on ${node_name} (${ep} → ${node_ip})…"
   local td=$(( SECONDS + NODE_READY_TIMEOUT ))
@@ -425,7 +477,7 @@ replace_node() { # <type: cp|worker> <index>
 
   # 8. back into rotation
   "${KCTL[@]}" uncordon "$node_name" || warn "uncordon failed for ${node_name} (re-run manually)"
-  ok "Node ${node_name} replaced and back in rotation"
+  ok "Node ${node_name} $([[ $UPGRADE -eq 1 ]] && echo upgraded || echo replaced) and back in rotation"
 }
 
 # ==============================================================================
