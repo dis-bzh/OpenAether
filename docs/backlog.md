@@ -75,6 +75,18 @@ invites someone to build what nobody decided.
       **Closes:** `kubectl get pdb -A` with nothing at 0 allowed disruptions on a
       full stack, and a worker that drains clean. Rung: real cloud.
 
+- [ ] **The first apply after a `talos_version` bump always fails.** Reproduced
+      on OVH and Outscale, identically: the plan proposes a couple of
+      adds/destroys alongside the config changes, then apply reports "Provider
+      produced inconsistent final plan" once per machine config. Re-running
+      succeeds and the second plan is smaller, so the current instruction is
+      "run it twice" — which is the kind of advice that hides a bug rather than
+      naming it. Most likely the port-ready `terraform_data` guards replace in
+      the same graph walk that re-renders the machine configs, so the value
+      applied differs from the one planned.
+      **Closes:** one apply after a version bump, exit 0, no retry. Rung: real
+      cloud (it does not reproduce against mocks).
+
 - [ ] **Report boot-image drift, now that nothing else will.** Node resources
       ignore their image attribute, because otherwise a `talosctl upgrade` leaves
       the plan wanting to replace every node at once (see

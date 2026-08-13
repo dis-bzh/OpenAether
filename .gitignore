@@ -61,6 +61,11 @@ worker.yaml
 *.tfstate.*
 *.tfvars
 !*.tfvars.example
+# ...and anything derived from one. `*.tfvars` does not match
+# `management-ovh.tfvars.bak`, so an ordinary `cp` before an edit put real
+# IPs and account ids one `git add -A` away from a public repository.
+*.tfvars.*
+!*.tfvars.example
 *.tfplan
 plan
 

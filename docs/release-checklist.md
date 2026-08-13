@@ -267,6 +267,11 @@ Kubernetes versions, not all of them (1.13 covers 1.31-1.36). The starting pair,
 the ending pair, and the intermediate state all have to sit inside it, because
 one moves before the other. Nothing enforces this yet — see the backlog.
 
+**Expect to apply twice.** Bumping `talos_version` and applying puts the new
+installer in the machine configs — nothing reboots yet. That first apply fails on
+both OVH and Outscale with "Provider produced inconsistent final plan", once per
+machine config; running it again succeeds. It is in the backlog, not fixed.
+
 **Talos, in place.** `rolling-replace.sh --upgrade` calls `talosctl upgrade`,
 which keeps the node's disk, identity and etcd membership, drains it itself, and
 refuses a control-plane upgrade that would cost etcd its quorum. One node at a
