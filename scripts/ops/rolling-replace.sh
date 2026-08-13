@@ -180,6 +180,22 @@ healthy_peer_cp() { # <exclude_index>
 # `talosctl etcd remove-member` takes the hex MEMBER ID, not the node name. The
 # `etcd members` table is: NODE  ID  HOSTNAME  PEER_URLS  CLIENT_URLS  LEARNER —
 # so we resolve name→ID by matching HOSTNAME (col 3) and reading ID (col 2).
+# Cordon + drain, tolerant of a drain that cannot finish. A PDB with zero allowed
+# disruptions (a single-replica workload declaring minAvailable: 1) makes a node
+# permanently undrainable, so a drain that must succeed can never roll such a
+# cluster. We report it and let the operator decide; talosctl's own drain does
+# not, which is why --upgrade runs it with --drain=false and calls this instead.
+cordon_drain() { # <node_name>
+  local node="$1"
+  info "Cordon + drain ${node}…"
+  "${KCTL[@]}" cordon "$node" || die "cordon failed for ${node}"
+  if ! "${KCTL[@]}" drain "$node" \
+        --ignore-daemonsets --delete-emptydir-data --timeout="$DRAIN_TIMEOUT"; then
+    warn "drain hit its timeout (${DRAIN_TIMEOUT}); some pods may be stuck (PDBs?)."
+    [[ $ASSUME_YES -eq 1 ]] || { read -rp "Continue with ${node} anyway? [y/N] " a; [[ "$a" == [yY] ]] || die "aborted by operator"; }
+  fi
+}
+
 etcd_remove_member() { # <node_name> <node_ip> <exclude_index>
   local node="$1" node_ip="$2" excl="$3" peer ep ip mid
   peer="$(healthy_peer_cp "$excl")" || die "no healthy peer CP to evict etcd member ${node} — refusing to proceed (quorum risk)"
@@ -378,20 +394,28 @@ replace_node() { # <type: cp|worker> <index>
       ok "${node_name} already runs ${running} — skipping"
       return 0
     fi
+    # The endpoint must be a CONTROL PLANE, even when the target is a worker.
+    # talosctl fetches a kubeconfig from the endpoint to drain the node, and a
+    # worker answers "kubeconfig is only available on control plane nodes" — so
+    # the install succeeds and the command still exits non-zero. -n keeps naming
+    # the node to act on; apid proxies.
+    local up_ep="$ep"
+    if [[ "$t" != "cp" ]]; then
+      local cp_peer
+      cp_peer="$(healthy_peer_cp -1)" || die "no healthy control plane to drive the upgrade of ${node_name}"
+      read -r up_ep _ <<<"$cp_peer"
+    fi
+    cordon_drain "$node_name"
     info "talosctl upgrade ${node_name} ${running:-?} → ${TALOS_IMAGE}"
-    talosctl upgrade -e "$ep" -n "$node_ip" --image "$TALOS_IMAGE" --wait \
+    # --drain=false: we just drained, tolerantly. Talos's own drain is all-or-
+    # nothing and dies on the first PDB that forbids eviction.
+    talosctl upgrade -e "$up_ep" -n "$node_ip" --image "$TALOS_IMAGE" --wait --drain=false \
       || die "upgrade failed on ${node_name} — the node kept its disk and membership; investigate before retrying"
     ok "${node_name} upgraded, waiting for it to come back"
   else
 
   # 1. cordon + drain (evacuate workloads, trigger Longhorn rebuild / app failover)
-  info "Cordon + drain ${node_name}…"
-  "${KCTL[@]}" cordon "$node_name" || die "cordon failed for ${node_name}"
-  if ! "${KCTL[@]}" drain "$node_name" \
-        --ignore-daemonsets --delete-emptydir-data --timeout="$DRAIN_TIMEOUT"; then
-    warn "drain hit its timeout (${DRAIN_TIMEOUT}); some pods may be stuck (PDBs?)."
-    [[ $ASSUME_YES -eq 1 ]] || { read -rp "Continue replacing ${node_name} anyway? [y/N] " a; [[ "$a" == [yY] ]] || die "aborted by operator"; }
-  fi
+  cordon_drain "$node_name"
 
   # 1b. control plane: evict the stale etcd member BEFORE destroying the VM, while
   # the remaining peers still hold quorum. (tofu destroy = ungraceful leave.)
@@ -492,8 +516,14 @@ info "Pre-flight health check…"
 if [[ $DRY_RUN -eq 0 ]]; then
   wait_etcd_healthy "${#CP_IPS[@]}" || die "etcd is not ${#CP_IPS[@]}/${#CP_IPS[@]} healthy — refusing to start a rolling replace on an unhealthy cluster"
   "${KCTL[@]}" get nodes >/dev/null 2>&1 || die "kubectl cannot reach the API via ${KUBECONFIG_FILE}"
-  not_ready="$("${KCTL[@]}" get nodes --no-headers 2>/dev/null | awk '$2!="Ready"{c++} END{print c+0}')"
+  # "Ready,SchedulingDisabled" is Ready. Matching the column exactly counted a
+  # merely cordoned node as unhealthy — and a cordoned node is the state THIS
+  # script leaves behind when it stops mid-node, so the check blocked its own
+  # retry until someone uncordoned by hand.
+  not_ready="$("${KCTL[@]}" get nodes --no-headers 2>/dev/null | awk '$2 !~ /^Ready/{c++} END{print c+0}')"
   [[ "$not_ready" == "0" ]] || die "${not_ready} node(s) not Ready — stabilize the cluster first"
+  cordoned="$("${KCTL[@]}" get nodes --no-headers 2>/dev/null | awk '$2 ~ /SchedulingDisabled/{printf "%s ", $1}')"
+  [[ -z "$cordoned" ]] || warn "already cordoned (interrupted run?): ${cordoned}— uncordon by hand any node this run does not touch."
   ok "Cluster healthy — proceeding"
 else
   ok "dry-run — skipping live pre-flight"

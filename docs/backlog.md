@@ -62,6 +62,19 @@ is an entry that gets picked up and put back down. **Decide:** replaces
 **Closes:** when a question has to be settled first — a task-shaped entry
 invites someone to build what nobody decided.
 
+- [ ] **Single-replica workloads declare PDBs that make a node undrainable.** On
+      a full stack, seven PodDisruptionBudgets report zero allowed disruptions;
+      `istio-system/istiod`, at 1/1 replica with `minAvailable: 1`, is the one
+      that blocks first. A budget that forbids every eviction means the node can
+      never be drained, so no rolling operation finishes: `talosctl upgrade`'s
+      own drain dies on it, and `rolling-replace` only gets past it by warning
+      and carrying on. The manifests are in OpenAether-apps, not here.
+      **Decide:** two replicas, or `maxUnavailable: 1`, component by component —
+      a single-replica component asking for `minAvailable: 1` is asking never to
+      be moved, which is not what any of these mean to say.
+      **Closes:** `kubectl get pdb -A` with nothing at 0 allowed disruptions on a
+      full stack, and a worker that drains clean. Rung: real cloud.
+
 - [ ] **Report boot-image drift, now that nothing else will.** Node resources
       ignore their image attribute, because otherwise a `talosctl upgrade` leaves
       the plan wanting to replace every node at once (see
