@@ -38,7 +38,10 @@
 # the worker data disk is inline on the VM: replacing a worker WIPES it and
 # Longhorn rebuilds from the surviving replicas — check they are healthy first.
 #
-# Usage: rolling-replace.sh <provider> [--workers-only|--cp-only] [--dry-run] [--yes]
+# Usage: rolling-replace.sh <provider> [--workers-only|--cp-only] [--upgrade]
+#                          [--dry-run] [--yes]
+#   --upgrade: `talosctl upgrade` in place (version changes) instead of
+#   replacing the VM. Reads the target from talos_version in the tfvars.
 #   Needs: tofu init, AWS_* creds, open Talos tunnels, ./talosconfig + ./kubeconfig.
 # ==============================================================================
 set -euo pipefail
