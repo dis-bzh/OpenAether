@@ -201,14 +201,18 @@ task up ROLE=management PROVIDER=ovh
       covers it now; this is the run that proves the check, not the fix.
       → 79 destroyed, then "No changes, 0 destroyed". No LB survived.
 - [x] `python3 scripts/ops/purge-orphans/ovh.py` clean on the first pass → yes
-- [~] **the Talos upgrade does not complete on OVH.** Covered here because this
-      is where it was attempted; see the backlog entry. `rolling-replace` is
-      fixed (it replaced nothing: `-target` narrows a plan, it forces nothing,
-      and an image change is only ForceNew on Scaleway) and the API stayed up
-      throughout — 1300+ calls through the load balancer, zero failures. But the
-      replaced node never rejoined, and the run was stopped rather than pushed
-      further on a billed cluster. Do not claim a zero-downtime Talos upgrade
-      for 1.1.0 on OVH.
+- [x] **upgrades, end to end** — Kubernetes 1.36.2 → 1.36.3, then Talos 1.13.7
+      → 1.13.8 in place on all six nodes via `rolling-replace --upgrade`. Every
+      node came back under its own name; 3 failed samples out of 1150 on a
+      one-second probe through the Octavia LB; `tofu plan` clean afterwards.
+      This is the run that found the three defects in that script (worker
+      endpoint, undrainable node, preflight blocking its own retry) — none of
+      them reachable from Scaleway, which had only ever rolled control planes.
+      Replacing a node to change its version is what did not work here before,
+      and is no longer how a version change is done.
+- [x] **idempotency** — was never true on OVH: the Octavia listener's
+      `allowed_cidrs` came back sorted and diffed against an unsorted config on
+      every single plan. Sorted now; "No changes" on a freshly deployed cluster.
 - [ ] **`OVH-vip`** if budget allows — `k8s_lb_mode=vip` has never been applied
       on OVH, and Neutron's `allowed_address_pairs` is a different mechanism from
       Scaleway's anti-spoofing
