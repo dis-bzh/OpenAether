@@ -85,6 +85,13 @@ a real machine and three real clouds rather than trusting CI. They share a shape
 worth naming: **a check that could not fail**, or one asserting something other
 than what its name promised. None of them was visible from a green pipeline.
 
+- **`task security` could not pass on a machine this repo had set up.** It calls
+  `checkov` directly, but only CI ever had it — a pinned action — and
+  `scripts/setup.sh` never installed it, so the step died as "executable file not
+  found in $PATH" for anyone following §0 of the release checklist. setup.sh
+  installs it now, and the task fails with the remedy instead of exit 127. The
+  install path itself is unverified: the machine this was found on has neither
+  pipx nor pip nor passwordless sudo.
 - **A backup of a tfvars was not ignored.** `*.tfvars` does not match
   `management-ovh.tfvars.bak`, so copying an env file before editing it — which
   is what anyone does — left real IPs, image ids and account data untracked but

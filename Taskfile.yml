@@ -113,7 +113,15 @@ tasks:
         trivy config infrastructure/ --skip-files "**/bootstrap-manifests/cilium*.yaml"
         --skip-files "**/bootstrap-manifests/flux-install.yaml"
       # Same scope as CI (whole opentofu tree, not just cluster).
-      - checkov -d infrastructure/opentofu --config-file .checkov.yaml
+      # Fail with the remedy, not with exit 127. checkov only ever existed in CI
+      # (a pinned action), so this step died as "executable file not found" on
+      # any machine prepared by scripts/setup.sh — which now installs it.
+      - |
+        command -v checkov >/dev/null 2>&1 || {
+          echo "✗ checkov not installed — run ./scripts/setup.sh, or: pipx install checkov" >&2
+          exit 1
+        }
+        checkov -d infrastructure/opentofu --config-file .checkov.yaml
       # Only what git can see. Scanning the raw tree flagged .env.sh and the
       # *.kubeconfig files — gitignored on purpose — so this gate could never be
       # green on an operator's machine, only on a bare CI runner.

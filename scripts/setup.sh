@@ -99,6 +99,25 @@ install_yamllint() {
     fi
 }
 
+install_checkov() {
+    echo "Installing checkov..."
+    # `task security` calls checkov directly, but only CI ever had it (a pinned
+    # action), so the task could not pass on a machine set up by this script.
+    # `pip3` is not always a binary even where Python is: prefer pipx, fall back
+    # to `python3 -m pip`, and say so rather than leaving `task security` to die
+    # with "executable file not found".
+    if command -v pipx &> /dev/null; then
+        pipx install checkov
+    elif python3 -m pip --version &> /dev/null; then
+        python3 -m pip install --user checkov
+    elif command -v apt-get &> /dev/null; then
+        $SUDO apt-get update && $SUDO apt-get install -y pipx && pipx install checkov
+    else
+        echo "⚠️  Could not install checkov automatically — 'task security' will stop"
+        echo "   at the checkov step. Install it manually: pipx install checkov"
+    fi
+}
+
 install_task() {
     echo "Installing Task..."
     if [ -w /usr/local/bin ]; then
@@ -231,6 +250,11 @@ fi
 # 5. Check Task
 if ! check_cmd task; then
     install_task
+fi
+
+# 5b. Check checkov (`task security` runs it directly; only CI ever had it)
+if ! check_cmd checkov; then
+    install_checkov
 fi
 
 # 6. Check Talos image + backup tools (used by `task talos-image` and the S3 backups)
