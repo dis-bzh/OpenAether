@@ -286,6 +286,25 @@ data "talos_machine_configuration" "control_plane" {
         },
         local.apiserver_vip_certsans
       )
+    }),
+    # Our images are `metal` builds, so Talos has no cloud metadata to name the
+    # node from: the name came from DHCP, and the generated config falls back to
+    # `auto: stable` when a lease arrives without one. That is how a control
+    # plane rebooted by `talosctl upgrade` came back as talos-xxxxx and orphaned
+    # its own node object. A static hostname outranks DHCP and holds across
+    # reboots, identically on every provider.
+    # Two documents, not one: since Talos 1.12 the name lives in HostnameConfig
+    # rather than machine.network.hostname, and `auto` and `hostname` are
+    # mutually exclusive — so the generated document has to go first.
+    yamlencode({
+      apiVersion = "v1alpha1"
+      kind       = "HostnameConfig"
+      "$patch"   = "delete"
+    }),
+    yamlencode({
+      apiVersion = "v1alpha1"
+      kind       = "HostnameConfig"
+      hostname   = "${var.cluster_name}-cp-${count.index}"
     })
   ]
 
@@ -377,6 +396,17 @@ data "talos_machine_configuration" "worker" {
           disabled = true
         }
       }
+    }),
+    # Same reason as the control planes — see the HostnameConfig note there.
+    yamlencode({
+      apiVersion = "v1alpha1"
+      kind       = "HostnameConfig"
+      "$patch"   = "delete"
+    }),
+    yamlencode({
+      apiVersion = "v1alpha1"
+      kind       = "HostnameConfig"
+      hostname   = "${var.cluster_name}-worker-${count.index}"
     })
   ], local.worker_user_volume_patches)
 }
