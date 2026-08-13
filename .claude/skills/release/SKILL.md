@@ -5,8 +5,9 @@ description: How to cut an OpenAether release — what has to be proven first, t
 
 # Cutting a release
 
-The authority is [`docs/release-checklist.md`](../../../docs/release-checklist.md):
-run it, do not summarise it. This is only what the checklist cannot tell you.
+The authority is `docs/release-checklist.md` in OpenAether-infra — run it, do
+not summarise it. It is not linked relatively here because this skill is shared
+with OpenAether-apps, which has no such file. This is only what the checklist cannot tell you.
 
 ## A version number is a claim
 

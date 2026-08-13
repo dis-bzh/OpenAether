@@ -48,6 +48,23 @@ if ! diff -q "$MANIFEST" "$SIBLING/.claude/skills/SHARED" >/dev/null 2>&1; then
   echo "  ✗ the SHARED manifests themselves differ"; drift=1
 fi
 
+# A shared skill must also be VALID where it is copied: a relative link to a file
+# only one repository has passes a byte-for-byte comparison and is still broken on
+# the other side. That happened to docs/release-checklist.md.
+while IFS= read -r name; do
+  [[ -n "$name" && "$name" != \#* ]] || continue
+  for side in "$HERE" "$SIBLING"; do
+    f="$side/.claude/skills/$name/SKILL.md"
+    [[ -f "$f" ]] || continue
+    while read -r target; do
+      [[ -n "$target" ]] || continue
+      [[ -e "$(dirname "$f")/${target%%#*}" ]] || {
+        echo "  ✗ $name links $target, which does not exist in $(basename "$side")"; drift=1; }
+    done < <(grep -oE '\]\([^)#][^)]*\)' "$f" | sed -E 's/^\]\(//; s/\)$//' \
+             | grep -vE '^(https?:|mailto:)')
+  done
+done < "$MANIFEST"
+
 if [[ $drift -eq 1 ]]; then
   echo "✗ skills have drifted. They are duplicated on purpose — change both." >&2
   exit 1
