@@ -12,6 +12,22 @@ explanation belongs in the commit that ruled it out.
 
 ## Where we stand
 
+2026-08-13: **the three clouds each ran deploy → idempotency → Kubernetes upgrade
+→ Talos upgrade, and all three passed.** Scaleway 3+3, OVH 3+3, Outscale 3+1;
+every node upgraded in place with `rolling-replace --upgrade` rather than
+replaced, every node back under its own name, `tofu plan` clean afterwards on
+each. Torn down, no orphans anywhere. What that cost, in defects nobody could see
+from a green pipeline: a reboot renamed nodes on every provider (the images are
+`metal` builds, the names came from DHCP); a routine apply after an upgrade
+proposed replacing all three control planes at once; `task test` deleted the
+operator's kubeconfig; OVH was never idempotent; a worker could never be upgraded
+in place; no node could be fully drained; and a tfvars backup was not gitignored.
+The upgrade path itself is the headline — 1.0.0 shipped it unverified.
+
+Still open and deliberately not fixed for 1.1.0: the PodDisruptionBudgets that
+make a node undrainable (OpenAether-apps), the two applies a version bump needs,
+and the Outscale image lane that cannot replace an image. All below.
+
 Alerting exists and is proven end to end: 19 rules, a real alert delivered to
 Slack from a Scaleway cluster, and a `Watchdog` whose silence is the signal.
 etcd, Cilium, Flux and cert-manager are scraped.

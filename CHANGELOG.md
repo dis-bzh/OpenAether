@@ -85,6 +85,25 @@ a real machine and three real clouds rather than trusting CI. They share a shape
 worth naming: **a check that could not fail**, or one asserting something other
 than what its name promised. None of them was visible from a green pipeline.
 
+- **A backup of a tfvars was not ignored.** `*.tfvars` does not match
+  `management-ovh.tfvars.bak`, so copying an env file before editing it — which
+  is what anyone does — left real IPs, image ids and account data untracked but
+  visible in a public repository. Found by doing exactly that while validating
+  this release. `*.tfvars.*` now covers the derived forms.
+- **The k8s listener on OVH diffed against its own state on every plan.**
+  Octavia returns `allowed_cidrs` sorted, the provider treats the attribute as
+  ordered, and the config sent it unsorted: OVH was never idempotent. The values
+  were always identical; only the order was not.
+- **A worker could never be upgraded in place, and no node could be drained.**
+  `talosctl upgrade` fetches a kubeconfig from the endpoint it is talking to in
+  order to drain, and a worker does not serve one — the install completed, the
+  command failed, the node never rebooted into the new version. Behind that, a
+  second wall: seven PodDisruptionBudgets allow zero disruptions, so the drain
+  could not finish either. The endpoint is always a control plane now, and the
+  drain is ours — the one that reports a stuck eviction and lets the operator
+  decide — with `talosctl --drain=false`. The budgets belong to OpenAether-apps
+  and are in the backlog. Both faults were invisible from Scaleway, which had
+  only ever rolled control planes.
 - **`task test` deleted the operator's cluster credentials.** The suite mocks
   every cloud provider but not `local`, so `local_file.kubeconfig` and
   `local_file.talosconfig` were genuinely written into the module directory —

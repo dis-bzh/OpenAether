@@ -310,7 +310,7 @@ tasks:
       Replace nodes one at a time (drain→targeted apply→wait) with NO downtime. Use after a ForceNew change
       (instance_type / Talos image) instead of infra, which replaces all nodes in parallel and breaks etcd
       quorum. Management clusters only (see scripts/ops/rolling-replace.sh). Targets are derived from `tofu
-      state list` — provider-agnostic, but only exercised live on Scaleway (dry-run first elsewhere).
+      state list` — provider-agnostic; --upgrade exercised live on Scaleway, OVH and Outscale.
       Usage: task rolling-replace PROVIDER=scaleway|ovh|outscale|proxmox [KEY=~/.ssh/key]
       [-- --workers-only|--cp-only|--dry-run]
     dir: infrastructure/opentofu/cluster

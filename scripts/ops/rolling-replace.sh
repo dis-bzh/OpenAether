@@ -34,7 +34,8 @@
 # Order: workers first, then control planes strictly one at a time, gated on
 # etcd back to 3/3. Stops on the first failed gate.
 #
-# ⚠️ Exercised live on Scaleway only (see deployment-test-matrix.md). On Proxmox
+# ⚠️ Exercised live on Scaleway, OVH and Outscale (--upgrade on all three;
+# replacement only on Scaleway). Never on Proxmox. On Proxmox
 # the worker data disk is inline on the VM: replacing a worker WIPES it and
 # Longhorn rebuilds from the surviving replicas — check they are healthy first.
 #

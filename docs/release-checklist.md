@@ -242,6 +242,17 @@ task up ROLE=management PROVIDER=outscale
       building a second failed (see the backlog: the lane cannot replace an
       image while its AMI still references the snapshot). One image has no
       ordering to get wrong.
+- [x] **upgrades, end to end** — Kubernetes 1.36.2 → 1.36.3, then Talos 1.13.4 →
+      1.13.8 in place on all four nodes. The one multi-patch jump of the three
+      providers, and the only one whose nodes used to be named `ip-10-0-0-x`:
+      they come up as `openaether-dev-*` now, like everywhere else. 60 failed
+      samples out of 1160 on a one-second probe, in gaps of at most 9s each —
+      the load balancer re-pooling around each apiserver restart, not a
+      control-plane outage. `tofu plan` clean afterwards.
+      The image lane still cannot rebuild here (409 on the snapshot, backlog), so
+      this ran `task infra` + `task bootstrap-phase2` directly, on the OMI already
+      pinned in the tfvars. That is now a supported way round: the boot image is
+      the install medium, and `--upgrade` never needs a new one.
 - [x] teardown + `purge-orphans/outscale.py` clean → 57 destroyed, account clean.
       Careful reading it: run straight after `fleet-down`, the purge listed five
       resources that were merely still being deleted — Outscale removes load
