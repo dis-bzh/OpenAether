@@ -29,7 +29,13 @@ locals {
 resource "outscale_vm" "control_plane" {
   count    = var.control_plane_count
   image_id = local.resolved_image_id
-  vm_type  = var.instance_type
+
+  # Boot image = initial medium only; talosctl upgrade owns the live version.
+  # See provider-contract.md § "Node image drift".
+  lifecycle {
+    ignore_changes = [image_id]
+  }
+  vm_type = var.instance_type
 
   subnet_id = outscale_subnet.private.subnet_id
 
@@ -54,7 +60,13 @@ resource "outscale_vm" "control_plane" {
 resource "outscale_vm" "worker" {
   count    = var.worker_count
   image_id = local.resolved_image_id
-  vm_type  = var.instance_type
+
+  # Boot image = initial medium only; talosctl upgrade owns the live version.
+  # See provider-contract.md § "Node image drift".
+  lifecycle {
+    ignore_changes = [image_id]
+  }
+  vm_type = var.instance_type
 
   subnet_id = outscale_subnet.private.subnet_id
 

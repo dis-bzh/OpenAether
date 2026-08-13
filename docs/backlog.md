@@ -62,6 +62,38 @@ is an entry that gets picked up and put back down. **Decide:** replaces
 **Closes:** when a question has to be settled first — a task-shaped entry
 invites someone to build what nobody decided.
 
+- [ ] **Report boot-image drift, now that nothing else will.** Node resources
+      ignore their image attribute, because otherwise a `talosctl upgrade` leaves
+      the plan wanting to replace every node at once (see
+      `modules/providers/provider-contract.md` § "Node image drift"). The cost is
+      that a *deliberate* image change — a new schematic, different extensions —
+      is now invisible to `tofu plan`, and only `rolling-replace --replace` will
+      carry it. A preflight that compares each node's recorded image id against
+      the one the tfvars now resolve to, and says so, would give that back
+      without re-arming the footgun.
+      **Closes:** a preflight that prints the drift on a cluster whose tfvars
+      point at a newer image, and prints nothing on one that matches. Rung:
+      real cloud (the image data source needs a live account).
+
+- [ ] **Make the upgrade declarative once `talos_machine` ships in a stable
+      provider.** The `siderolabs/talos` provider grew a `talos_machine`
+      resource whose `image` argument "upgrades if running version differs", with
+      `drain_on_upgrade` cordoning and uncordoning the node itself, and an
+      `ignore_kubernetes_upgrade_drift` opt-in. None of it is in 0.11.0, the
+      version we pin and the newest published stable — it lives in the
+      0.12.0-alpha line. When 0.12 stabilises, that resource replaces the
+      hand-rolled orchestration for version changes entirely, and
+      `rolling-replace` shrinks back to what only it can do: instance_type,
+      disk and zone changes that genuinely require a new VM.
+
+- [ ] **Kubernetes upgrades bypass `talosctl upgrade-k8s`.** We move
+      `kubernetes_version` in the machine config and let Talos reconcile. It
+      works — measured 2026-08-13, 1.36.2 → 1.36.3 on a live HA cluster — but it
+      skips the orchestrator Talos provides for exactly this, which sequences the
+      control plane components and the kubelets behind health checks. Our run
+      lost 3 probe seconds while an apiserver restarted; that is the gap
+      `upgrade-k8s` exists to close.
+
 - [ ] **Nothing checks that talos_version and kubernetes_version are a supported
       pair.** Talos supports a window of Kubernetes releases — 1.13 covers 1.31
       to 1.36 ([support matrix](https://docs.siderolabs.com/talos/v1.13/getting-started/support-matrix))

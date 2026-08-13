@@ -47,10 +47,16 @@ data "scaleway_instance_image" "worker" {
 # Talos image WITHOUT downtime, use `task rolling-replace` (drains + replaces one
 # node at a time, gated on etcd/Longhorn reconvergence). See scripts/ops/rolling-replace.sh.
 resource "scaleway_instance_server" "control_plane" {
-  count      = var.control_plane_count
-  name       = "${var.cluster_name}-cp-${count.index}"
-  type       = var.instance_type
-  image      = coalesce(var.image_id, try(data.scaleway_instance_image.talos[count.index].id, null))
+  count = var.control_plane_count
+  name  = "${var.cluster_name}-cp-${count.index}"
+  type  = var.instance_type
+  image = coalesce(var.image_id, try(data.scaleway_instance_image.talos[count.index].id, null))
+
+  # Boot image = initial medium only; talosctl upgrade owns the live version.
+  # See provider-contract.md § "Node image drift".
+  lifecycle {
+    ignore_changes = [image]
+  }
   zone       = element(var.additional_zones, count.index)
   project_id = var.project_id
 
@@ -68,10 +74,16 @@ resource "scaleway_instance_server" "control_plane" {
 }
 
 resource "scaleway_instance_server" "worker" {
-  count      = var.worker_count
-  name       = "${var.cluster_name}-worker-${count.index}"
-  type       = var.instance_type
-  image      = coalesce(var.image_id, try(data.scaleway_instance_image.worker[count.index].id, null))
+  count = var.worker_count
+  name  = "${var.cluster_name}-worker-${count.index}"
+  type  = var.instance_type
+  image = coalesce(var.image_id, try(data.scaleway_instance_image.worker[count.index].id, null))
+
+  # Boot image = initial medium only; talosctl upgrade owns the live version.
+  # See provider-contract.md § "Node image drift".
+  lifecycle {
+    ignore_changes = [image]
+  }
   zone       = element(var.additional_zones, count.index)
   project_id = var.project_id
 
