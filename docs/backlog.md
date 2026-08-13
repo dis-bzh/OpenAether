@@ -62,6 +62,17 @@ is an entry that gets picked up and put back down. **Decide:** replaces
 **Closes:** when a question has to be settled first — a task-shaped entry
 invites someone to build what nobody decided.
 
+- [ ] **Nothing checks that talos_version and kubernetes_version are a supported
+      pair.** Talos supports a window of Kubernetes releases — 1.13 covers 1.31
+      to 1.36 ([support matrix](https://docs.siderolabs.com/talos/v1.13/getting-started/support-matrix))
+      — and the two variables are bumped INDEPENDENTLY by Renovate. The day
+      Kubernetes 1.37 lands while talos_version is still on 1.13, the plan will
+      be perfectly valid and the cluster will not come up, with nothing pointing
+      at the pair. Encode the window (a map from Talos minor to the Kubernetes
+      minors it accepts) and fail at plan time, or check it in preflight-quotas
+      where the other before-you-spend checks live. Cheap, and it closes a gap
+      that only shows itself on a real cluster.
+
 - [ ] **The Outscale image lane cannot replace an existing image.** Building
       v1.13.8 over the v1.13.4 already in that account failed with `Unable to
       delete Snapshot — 409 ResourceConflict (9094)`: the AMI still references
