@@ -137,14 +137,15 @@ invites someone to build what nobody decided.
       confirmed by the operator) and the drain **still** could not evict the
       leftover **replicas** `grafana-db-1` and `zitadel-db-1`, nor
       `kube-state-metrics`. Five of six nodes upgraded; the sixth stopped.
-      The remaining cause is a budget arithmetic problem, not a switchover one:
-      `grafana-db` runs **two** instances, so evicting either leaves one, and a
-      budget that wants both can never be satisfied on a three-worker cluster —
-      no node holding an instance is ever drainable.
-      **Decide:** three instances for `grafana-db` (matching `zitadel-db`), or
-      make `nodeMaintenanceWindow` actually drop the PDBs on this CNPG version, or
-      both. `kube-state-metrics` blocked the same drain and is not CNPG at all —
-      it needs its own look, and it has appeared in every blocked drain so far.
+      The remaining cause is TIMING, not arithmetic — a first reading of this run
+      blamed the instance count and was wrong. A demoted primary restarts to
+      rejoin as a replica, and while it is not ready the cluster has one healthy
+      instance for a budget that wants one, so `currentHealthy <= desiredHealthy`
+      and the PDB refuses every eviction, that pod's included. The switchover
+      waited for the primary to move and not for the cluster to be whole again;
+      it now waits for `readyInstances == instances`.
+      `kube-state-metrics` blocked the same drain and is not CNPG at all — it has
+      appeared in every blocked drain so far and needs its own look.
 
       Earlier on 2026-08-14, before the switchover existed: **documented as a
       manual step**

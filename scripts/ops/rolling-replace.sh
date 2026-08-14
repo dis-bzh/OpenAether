@@ -228,7 +228,7 @@ cnpg_maintenance() { # <true|false>
 # Anti-affinity does not replace this. It keeps two primaries off one node, which
 # is worth having, but with three workers some node always hosts one.
 cnpg_switchover_away() { # <node_name>
-  local node="$1" ns name primary primary_node cand cand_node
+  local node="$1" ns name primary primary_node cand cand_node inst ready
   command -v kubectl-cnpg >/dev/null 2>&1 || {
     warn "kubectl-cnpg not installed — cannot switch a CNPG primary off ${node}."
     warn "  ./scripts/internal/install-kubectl-cnpg.sh, or see docs/upgrade.md."
@@ -263,8 +263,26 @@ cnpg_switchover_away() { # <node_name>
       done
       if [[ $waited -ge 300 ]]; then
         warn "${ns}/${name}: still reports ${primary} as primary after 300s"
+        continue
+      fi
+      ok "${ns}/${name}: primary moved off ${node}"
+      # And WAIT for the cluster to be whole again. The demoted primary restarts
+      # to rejoin as a replica, and while it is not ready the cluster has one
+      # healthy instance for a budget that wants one — so `currentHealthy <=
+      # desiredHealthy` and the PDB refuses every eviction, including that very
+      # pod's. That is what still blocked worker-2 on 2026-08-14 after both
+      # switchovers had succeeded: not arithmetic, timing.
+      waited=0
+      while [[ $waited -lt 600 ]]; do
+        read -r inst ready < <("${KCTL[@]}" -n "$ns" get cluster "$name" \
+          -o jsonpath='{.status.instances} {.status.readyInstances}' 2>/dev/null || echo "0 0")
+        [[ -n "$inst" && "$ready" == "$inst" ]] && break
+        sleep 10; waited=$((waited + 10))
+      done
+      if [[ $waited -ge 600 ]]; then
+        warn "${ns}/${name}: only ${ready:-?}/${inst:-?} instances ready after the switchover — the drain will likely block."
       else
-        ok "${ns}/${name}: primary moved off ${node}"
+        ok "${ns}/${name}: ${ready}/${inst} instances ready again"
       fi
     done
 }
