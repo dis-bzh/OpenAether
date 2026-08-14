@@ -276,7 +276,11 @@ cnpg_switchover_away() { # <node_name>
       while [[ $waited -lt 600 ]]; do
         read -r inst ready < <("${KCTL[@]}" -n "$ns" get cluster "$name" \
           -o jsonpath='{.status.instances} {.status.readyInstances}' 2>/dev/null || echo "0 0")
-        [[ -n "$inst" && "$ready" == "$inst" ]] && break
+        # Both must be REAL numbers above zero. `0/0` matched "ready == inst" and
+        # reported the cluster whole while the status was simply not populated
+        # yet — a check passing on absent data, which is the defect this whole
+        # session kept finding in other people's code.
+        [[ "$inst" =~ ^[1-9][0-9]*$ && "$ready" == "$inst" ]] && break
         sleep 10; waited=$((waited + 10))
       done
       if [[ $waited -ge 600 ]]; then
@@ -315,8 +319,17 @@ wait_pdb_headroom() { # <node_name>
             -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)" ]]; then
         blocked+="${ns}/${name} "
       fi
+      # `currentHealthy < expectedPods` is the whole discriminator, measured on a
+      # live cluster 2026-08-14. Some budgets sit at zero BY DESIGN and waiting on
+      # them never ends: a CNPG `*-primary` guards the one pod that must not be
+      # evicted, and Longhorn mints one `instance-manager-*` per node with
+      # minAvailable 1. Those read 1/1/1 — as healthy as they will ever be.
+      # The ones worth waiting for read short: openbao 2 of 3, grafana 0 of 2,
+      # vmselect 1 of 2 — pods still coming back from the node we just rolled.
     done < <({ "${KCTL[@]}" get pdb -A -o json 2>/dev/null || echo '{"items":[]}'; } |
-      jq -r '.items[] | select((.status.disruptionsAllowed // 0) == 0)
+      jq -r '.items[]
+             | select((.status.disruptionsAllowed // 0) == 0)
+             | select((.status.currentHealthy // 0) < (.status.expectedPods // 0))
              | [ .metadata.namespace, .metadata.name,
                  ((.spec.selector.matchLabels // {}) | to_entries
                   | map("\(.key)=\(.value)") | join(",")) ] | @tsv')
