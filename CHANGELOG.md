@@ -147,6 +147,14 @@ lane holds one version per provider, so nothing can move backwards yet.
   300, and **refuses to reboot a node it could not drain**, naming the pods that
   blocked. A half-rolled cluster is recoverable — this script skips nodes already
   on the target version — a database cut off mid-write is not.
+
+  What the roll then stops on is **documented, not fixed**: a CNPG primary cannot
+  be evicted, only switched over, so `upgrade.md` gains that manual step and the
+  refusal message points at it. The preferred answer — pod anti-affinity, so one
+  node never holds two primaries and CNPG vacates a cordoned node itself — rests
+  on an assumption this run gives no evidence for (both primaries sat still for
+  900s on a cordoned node with `nodeMaintenanceWindow` already set), and is in
+  `backlog.md` as an experiment to run before anything is built on it.
 - **`rolling-replace` could not run unattended, and lied about what it does.** It
   stops at a confirmation prompt (`--yes` exists; nothing passed it), and that
   prompt announced "DESTROY and recreate" and "system disks are wiped" for
