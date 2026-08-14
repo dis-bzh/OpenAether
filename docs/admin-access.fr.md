@@ -20,8 +20,12 @@ Trois secrets dans Bitwarden EU, puis effacés des sorties locales :
 Le Job bootstrap affiche le CSR. Le signer **hors ligne** avec la root CA, puis :
 
 ```bash
+# https, et skip-verify : le listener porte la paire auto-signée du cluster.
+# Ceci indiquait `http://` jusqu'au 2026-08-14 et répondait « Client sent an HTTP
+# request to an HTTPS server » — la commande telle qu'écrite ne pouvait pas
+# fonctionner.
 kubectl --kubeconfig $KC exec -i openbao-0 -n foundation-vault -- \
-  env BAO_ADDR=http://127.0.0.1:8200 BAO_TOKEN=<root_token> \
+  env BAO_ADDR=https://127.0.0.1:8200 BAO_SKIP_VERIFY=true BAO_TOKEN=<root_token> \
   bao write pki/intermediate/set-signed certificate=@- < intermediate-signed.pem
 ```
 
@@ -29,6 +33,16 @@ kubectl --kubeconfig $KC exec -i openbao-0 -n foundation-vault -- \
 Runbook : `OpenAether-apps/apps/base/foundation/vault/pki-root-offline-runbook.md`.
 
 ## 3. Semer les destinations de backup
+
+**`scripts/ops/seed-openbao.sh <provider>` fait tout ceci**, en write-if-absent :
+un re-run ne peut donc pas faire tourner `backup/restic` et rendre indéchiffrable
+chaque backup existant. Utilisez-le ; les commandes ci-dessous sont ce qu'il
+exécute, et pourquoi.
+
+Ce n'est pas du confort : sans `backup/s3-primary` seul, six Kustomizations
+restent not-Ready et le DAG ne converge jamais — mesuré sur Scaleway le
+2026-08-14, où les 35 sont passées Ready dans les deux minutes suivant le
+seeding. Un déploiement n'est pas terminé tant que ceci n'a pas tourné.
 
 Les buckets doivent **préexister** (restic ne les crée pas), sur des providers
 différents en production.

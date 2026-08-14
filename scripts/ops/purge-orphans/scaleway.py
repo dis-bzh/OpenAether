@@ -99,3 +99,8 @@ if total == 0:
     print("Nothing to purge — the project is clean.")
 elif not APPLY:
     print(f"\n{total} resource(s) targeted. Re-run with --apply to delete them.")
+    # Exit NON-ZERO. This printed its findings and exited 0, so every caller
+    # reading the exit code — staging.yml's "Confirm the provider is clean", and
+    # a driver script on 2026-08-14 — got a clean verdict while ten Scaleway
+    # resources were billing. A check that cannot fail is not a check.
+    sys.exit(1)

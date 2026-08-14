@@ -20,8 +20,11 @@ Three secrets into Bitwarden EU, then wiped from local output:
 The bootstrap Job prints the CSR. Sign it **offline** with the root CA, then:
 
 ```bash
+# https, and skip-verify: the listener holds the cluster's own self-signed pair.
+# This said `http://` until 2026-08-14 and answered "Client sent an HTTP request
+# to an HTTPS server" — the command as written could never have worked.
 kubectl --kubeconfig $KC exec -i openbao-0 -n foundation-vault -- \
-  env BAO_ADDR=http://127.0.0.1:8200 BAO_TOKEN=<root_token> \
+  env BAO_ADDR=https://127.0.0.1:8200 BAO_SKIP_VERIFY=true BAO_TOKEN=<root_token> \
   bao write pki/intermediate/set-signed certificate=@- < intermediate-signed.pem
 ```
 
@@ -29,6 +32,15 @@ kubectl --kubeconfig $KC exec -i openbao-0 -n foundation-vault -- \
 Runbook: `OpenAether-apps/apps/base/foundation/vault/pki-root-offline-runbook.md`.
 
 ## 3. Seed the backup destinations
+
+**`scripts/ops/seed-openbao.sh <provider>` does all of this**, write-if-absent so
+a re-run cannot rotate `backup/restic` and orphan every existing backup. Use it;
+the commands below are what it runs and why.
+
+This is not optional polish: without `backup/s3-primary` alone, six Kustomizations
+stay not-Ready and the DAG never converges — measured on Scaleway 2026-08-14,
+where all 35 went Ready within two minutes of seeding. A deploy is not finished
+until this has run.
 
 Buckets must **pre-exist** (restic does not create them), on different providers
 in production.

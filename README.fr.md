@@ -9,7 +9,7 @@
 
 ## Version
 
-**1.0.1** — socle Talos modulaire multi-provider (cf. `CHANGELOG.md`). Déploie
+**1.1.0** — socle Talos modulaire multi-provider (cf. `CHANGELOG.md`). Déploie
 le tag `OpenAether-apps` correspondant : une version identifie un système.
 
 Management validé de bout en bout sur **Scaleway, OVH et Outscale** ; local

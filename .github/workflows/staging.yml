@@ -107,6 +107,11 @@ jobs:
       # TF_INPUT=0 and no tty that same apply just aborts, so this job could
       # never have deployed anything. Same mechanism fleet-down uses for destroy.
       TF_CLI_ARGS_apply: -auto-approve
+      # And the destroy needs its OWN variable. Only `apply` was set here, so the
+      # teardown step — the one thing that must never be skipped — would have hit
+      # `task destroy`'s no-terminal guard and left the cluster billing. Measured
+      # locally on 2026-08-14, on exactly that guard.
+      TF_CLI_ARGS_destroy: -auto-approve
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
@@ -198,6 +203,17 @@ jobs:
         id: deploy
         run: task up ROLE="$ROLE" PROVIDER="$PROVIDER"
 
+      # A deploy is not finished when OpenTofu is. Without the Day-1 backup and
+      # observability secrets, six Kustomizations never leave not-Ready and the
+      # DAG never converges — so a lane that skipped this could only ever have
+      # asserted a convergence the product does not deliver on its own.
+      # Write-if-absent: safe to re-run, and it will not rotate backup/restic.
+      - name: Seed the Day-1 secrets
+        env:
+          OA_SLACK_WEBHOOK_URL: ${{ secrets.STAGING_SLACK_WEBHOOK_URL }}
+          OA_DEADMANSSWITCH_URL: ${{ secrets.STAGING_DEADMANSSWITCH_URL }}
+        run: ./scripts/ops/seed-openbao.sh "$PROVIDER" "$ROLE"
+
       - name: Verify
         run: ./scripts/dev/staging-verify.sh "$PROVIDER" "$ROLE"
 
@@ -219,6 +235,9 @@ jobs:
         if: always() && !(inputs.keep && github.event_name == 'workflow_dispatch')
         run: task fleet-down PROVIDER="$PROVIDER" ROLE="$ROLE" -- --yes
 
+      # This asserts now. The purge scripts printed what they found and exited 0
+      # regardless, so this step passed while ten Scaleway resources were billing
+      # (2026-08-14). A dry run that finds anything exits 1.
       - name: Confirm the provider is clean
         if: always() && !(inputs.keep && github.event_name == 'workflow_dispatch')
         run: python3 "scripts/ops/purge-orphans/${PROVIDER}.py"

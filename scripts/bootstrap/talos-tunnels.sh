@@ -166,6 +166,29 @@ until ssh -o UserKnownHostsFile="$BASTION_KH" -o StrictHostKeyChecking=accept-ne
   sleep 10
 done
 
+# WAIT for the ports close_tunnels just freed. `kill` is asynchronous: the old
+# ssh has not released its listener when the new one tries to bind, so the new
+# one dies on ExitOnForwardFailure while the old one is still listening — and the
+# `nc -z` count below then reads that dying forward as "up". A Scaleway deploy
+# reported 4/6 that way on 2026-08-14 and failed with a healthy bastion.
+# The ports are fixed (50000+i / 50100+i), so this also catches another provider
+# holding them on the same machine — that one will not clear, and says so.
+__ports=()
+for __i in "${!CPS[@]}"; do __ports+=("$((50000 + __i))"); done
+for __i in "${!WKS[@]}"; do __ports+=("$((50100 + __i))"); done
+for _ in $(seq 1 20); do
+  __busy=()
+  for __p in "${__ports[@]}"; do nc -z 127.0.0.1 "$__p" 2>/dev/null && __busy+=("$__p"); done
+  [[ ${#__busy[@]} -eq 0 ]] && break
+  sleep 1
+done
+if [[ ${#__busy[@]} -gt 0 ]]; then
+  echo "✗ ports still in use after 20s: ${__busy[*]}" >&2
+  echo "  Something outside this run holds them — another provider's tunnels on" >&2
+  echo "  this machine, most likely. Close them:  $0 close" >&2
+  exit 1
+fi
+
 echo "▶ Opening tunnels via ${BUSER}@${BASTION} (key: $KEY)"
 i=0; for ip in "${CPS[@]}"; do open_one "$((50000 + i))" "$ip"; i=$((i + 1)); done
 i=0; for ip in "${WKS[@]}"; do open_one "$((50100 + i))" "$ip"; i=$((i + 1)); done

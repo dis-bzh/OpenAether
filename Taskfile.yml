@@ -179,12 +179,20 @@ tasks:
       PROVIDER=scaleway|ovh|outscale|proxmox [VERSION=v1.13.4] [ENSURE=1]
     vars:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+      # ROLE was never defaulted here, so the lookup below asked for
+      # `-scaleway.tfvars`, a file that cannot exist, and silently fell back to
+      # cluster/variables.tf — this task never read a cluster's own pin.
+      ROLE: '{{.ROLE | default "management"}}'
+      # A task-level `vars:` entry SHADOWS the value passed on the command line,
+      # so `task talos-image VERSION=v1.13.7` built v1.13.8 and said nothing.
+      # Resolve the fallback under its own name and let VERSION win explicitly.
       # renovate: datasource=github-releases depName=siderolabs/talos
-      VERSION:
+      PINNED_VERSION:
         sh: ./scripts/internal/talos-version.sh {{.ROLE}}-{{.PROVIDER}}.tfvars
+      IMAGE_VERSION: '{{.VERSION | default .PINNED_VERSION}}'
       ENSURE: '{{.ENSURE | default ""}}'
     cmds:
-      - './scripts/bootstrap/talos-image.sh {{.PROVIDER}} {{.VERSION}}{{if .ENSURE}} --ensure{{end}}'
+      - './scripts/bootstrap/talos-image.sh {{.PROVIDER}} {{.IMAGE_VERSION}}{{if .ENSURE}} --ensure{{end}}'
 
   up:
     desc: >-

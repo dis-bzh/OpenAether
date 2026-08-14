@@ -7,9 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [Unreleased] — 1.1.0, not 1.0.1
+
+Drafted as 1.0.1 while it was three fixes. It is not: it adds an unattended
+credentialed lane covering deploy, idempotency and upgrade on three providers, a
+runbook the repository did not have, two new `task` entry points, and — from
+`claude/plumber-cicd-audit`, still on its branch — a CI-security audit of the
+pipeline itself. New capability, backwards compatible: **1.1.0**.
+
+Rollback stays out of it and is written down as 1.2.0 (`backlog.md`): the image
+lane holds one version per provider, so nothing can move backwards yet.
 
 ### Added
+
+- **`scripts/ops/seed-openbao.sh` — the Day-1 step a deploy is not finished
+  without.** `admin-access.md` § 3 listed it as manual `bao kv put` calls and
+  nothing automated or checked it, so a fresh cluster stopped six Kustomizations
+  short of converging and looked healthy anyway. Write-if-absent, so a re-run
+  cannot rotate `backup/restic` and make every existing backup undecryptable; it
+  waits for OpenBao to be initialised, unsealed **and** for the KV engine to be
+  mounted, because each of those was a separate way of being early. The doc's own
+  command could never have worked either — it said `BAO_ADDR=http://…` against a
+  listener that answers HTTPS.
 
 - **The credentialed lane now covers what it claims, and can actually start.**
   `staging.yml` was merged with no `staging` environment and none of its secrets,
@@ -27,10 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that defect green). `check-staging-secrets.sh` reads the required names out of
   the workflow rather than restating them, and names what is missing.
 - **`docs/upgrade.md`** (+ `.fr.md`), the runbook this repository did not have.
-  The procedure existed in a file called "release checklist 1.0.1" and in
-  `.claude/skills/` — readable by a release manager and by an assistant, not by
-  an operator upgrading on a Tuesday. §7 of the checklist now points at it and
-  keeps only what a release adds.
+  The procedure existed in the release checklist and in `.claude/skills/` —
+  readable by a release manager and by an assistant, not by an operator upgrading
+  on a Tuesday. §7 of the checklist now points at it and keeps only what a
+  release adds.
 - **`task plan ... STRICT=1`** — `-detailed-exitcode`, so "the configuration
   converged" is an assertion instead of something read off a screen.
 
@@ -77,6 +96,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   out of eleven** reachable, `tflint 0.64.0` and `checkov 3.3.11` among them.
   What that run does *not* prove is which shell profile `ensurepath` lands in on
   a given distribution — hence the printed line, which does not depend on it.
+- **`task talos-image VERSION=…` silently ignored the version it was given.** Its
+  own `desc` documents the argument; passing `VERSION=v1.13.7` built v1.13.8 and
+  said nothing. Two causes stacked: a task-level `vars:` entry shadows the value
+  passed on the command line, and `ROLE` was never defaulted in this task, so the
+  fallback looked up `-scaleway.tfvars` — a filename that cannot exist — and fell
+  through to `cluster/variables.tf`. The consequence was that this task could
+  never read a cluster's own pin, only the repository-wide default. Found on
+  2026-08-14 by reading the log of a real run that had been told v1.13.7.
+- **`staging-verify.sh` asserted node readiness with no wait**, so it failed a
+  healthy Scaleway cluster with "2 node(s) not Ready" — `task up` returns when
+  OpenTofu is done, which is before the last workers join and Cilium finishes
+  rolling. Bounded wait now: a node that never joins still fails the run, five
+  minutes later instead of instantly. Also found by running it.
 - **Three stale claims, one of them published.** `release-checklist.md` said
   nothing enforced the Talos↔Kubernetes pair, months after `versions-guard.tf`
   did; the backlog still listed it as open; and the guard's own error message
@@ -84,11 +116,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exist. The published 1.0.0 release note claimed a node could not be drained
   because of "seven PodDisruptionBudgets" — one, and fixed; corrected in place
   with the correction marked rather than quietly rewritten.
-- **The first apply after a version bump has a name now.** Not "most likely the
-  port-ready guards" — it is upstream `siderolabs/terraform-provider-talos` #352
-  on `.machine_configuration_hash`, and the fix ships only in the 0.12.0
-  pre-release line. Which also explains why running it twice works. Still open,
-  with the decision written down instead of a guess.
+- **The first apply after a version bump no longer fails.** It was upstream
+  `siderolabs/terraform-provider-talos` #352 on `.machine_configuration_hash`:
+  when the rendered config is only known during apply, the provider keeps the old
+  hash in the plan and recomputes it at apply. Fixed upstream in the 0.12.0
+  pre-release line only, and we pin 0.11.0 — so `modules/talos` now REPLACES the
+  two `talos_machine_configuration_apply` resources on a version change instead
+  of updating them (`replace_triggered_by`). A create has no prior value to be
+  inconsistent with, the destroy is a no-op, and nodes still reboot only in
+  `rolling-replace`. It also turned out to reproduce on **Scaleway**, which the
+  backlog had recorded as OVH/Outscale only. Measured twice on Scaleway
+  2026-08-14: the failing apply, then `Plan: 8 to add, 0 to change, 6 to destroy`
+  and exit 0 — and again on a clean run, from a converged state, with no error.
+- **Four defects in the checks that were supposed to catch all of this**, each
+  found by running them: `staging-verify.sh` asserted node readiness with no
+  wait; it reconciled a `kustomization/flux-system` this stack does not create;
+  it read the READY column by position from a table whose column count changes
+  once a revision is filled, so it could only pass while nothing worked; and
+  `seed-openbao.sh` exited 1 with **no output at all** because a failing command
+  substitution under `set -e` aborts at the assignment, before the check that
+  would have explained it.
+- **`rolling-replace` could not run unattended, and lied about what it does.** It
+  stops at a confirmation prompt (`--yes` exists; nothing passed it), and that
+  prompt announced "DESTROY and recreate" and "system disks are wiped" for
+  `--upgrade`, which destroys nothing and wipes nothing.
+- **`purge-orphans` exited 0 whether or not it found anything**, so
+  `staging.yml`'s "Confirm the provider is clean" step could never fail — it
+  passed while ten Scaleway resources were billing. A dry run that finds
+  something exits 1 now, measured in all three directions. `staging.yml` was also
+  setting only `TF_CLI_ARGS_apply`, so its teardown — the step that must never be
+  skipped — would have hit `task destroy`'s no-terminal guard and left the
+  cluster running.
 - **A node could not be fully drained, and one replica was the reason.** 1.0.0
   admits that a rolling upgrade reboots nodes with pods still aboard. The cause
   was ours and singular: `istiod` ran one replica under a PodDisruptionBudget

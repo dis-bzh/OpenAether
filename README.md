@@ -9,7 +9,7 @@
 
 ## Version
 
-**1.0.1** — modular multi-provider Talos foundation (see `CHANGELOG.md`).
+**1.1.0** — modular multi-provider Talos foundation (see `CHANGELOG.md`).
 Deploys the matching `OpenAether-apps` tag: one version identifies one system.
 
 Management validated end-to-end on **Scaleway, OVH and Outscale**; local Docker

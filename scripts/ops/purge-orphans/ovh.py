@@ -95,5 +95,8 @@ if TOTAL == 0:
     print("Nothing to purge — the project is clean.")
 elif not APPLY:
     print(f"\n{TOTAL} resource(s) targeted. Re-run with --apply to delete them.")
+    # Non-zero: see the note in scaleway.py. Callers read this exit code as
+    # "the provider is clean", and it used to say yes regardless.
+    sys.exit(1)
 else:
     print("\npurge complete")

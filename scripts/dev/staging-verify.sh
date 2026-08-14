@@ -26,9 +26,23 @@ ok()   { echo "✓ $*"; }
 kubectl get --raw='/readyz' >/dev/null || fail "apiserver is not ready"
 ok "apiserver ready"
 
-NOT_READY="$(kubectl get nodes --no-headers | grep -cvw Ready || true)"
-[ "$NOT_READY" -eq 0 ] || fail "$NOT_READY node(s) not Ready"
-ok "$(kubectl get nodes --no-headers | wc -l) node(s) Ready"
+# Bounded wait, not an instant assertion. `task up` returns when OpenTofu is
+# done, which is BEFORE the last workers finish joining and Cilium finishes
+# rolling — measured 2026-08-14 on Scaleway, where this failed the run with "2
+# node(s) not Ready" on a cluster that was healthy a minute later. The bound is
+# what keeps it a check: a node that never joins still fails, it just fails after
+# five minutes instead of instantly.
+for _ in $(seq 1 30); do
+  NOT_READY="$(kubectl get nodes --no-headers 2>/dev/null | grep -cvw Ready || true)"
+  TOTAL="$(kubectl get nodes --no-headers 2>/dev/null | wc -l)"
+  [ "${NOT_READY:-1}" -eq 0 ] && [ "${TOTAL:-0}" -gt 0 ] && break
+  sleep 10
+done
+if [ "${NOT_READY:-1}" -ne 0 ] || [ "${TOTAL:-0}" -eq 0 ]; then
+  kubectl get nodes >&2 || true
+  fail "${NOT_READY} node(s) still not Ready after 5 minutes"
+fi
+ok "$TOTAL node(s) Ready"
 
 # --- The CNI is real ----------------------------------------------------------
 # Named rather than counted: an empty selector counts zero and passes.
@@ -38,19 +52,50 @@ CILIUM="$(kubectl -n kube-system get pods -l k8s-app=cilium \
 ok "Cilium running on $CILIUM node(s)"
 
 # --- Flux converged -----------------------------------------------------------
-# `flux get` prints a table; anything whose Ready column is not True after the
-# wait is a brick that did not come up, and the run says which.
+# Two defects lived here, both found the first time this ran on a real cluster
+# (2026-08-14, Scaleway):
+#
+#   1. It reconciled `kustomization/flux-system`, which this stack does not
+#      create — the root is the one the bootstrap manifest installs, named after
+#      the project. Reconciling an object that does not exist fails every time,
+#      so this check could never have passed anywhere.
+#   2. It then demanded that every Kustomization be Ready at once, seconds after
+#      bootstrap. The DAG is 35 deep and serialises on `dependsOn`; three minutes
+#      in, `namespaces` was still reconciling and everything else was correctly
+#      waiting for it. That is a healthy cluster, failed by an impatient check.
+#
+# So: wait for the DAG, bounded, and report what is still not Ready when the
+# budget runs out. FLUX_READY_TIMEOUT is in seconds.
 flux check >/dev/null 2>&1 || fail "flux check failed"
-if ! flux reconcile kustomization flux-system --with-source --timeout=5m >/dev/null 2>&1; then
-  flux get kustomizations -A >&2
-  fail "the root Kustomization did not reconcile"
-fi
-STALLED="$(flux get kustomizations -A --no-header 2>/dev/null | awk '$4 != "True"' || true)"
-if [ -n "$STALLED" ]; then
-  echo "$STALLED" >&2
-  fail "Kustomizations not Ready"
-fi
-ok "every Flux Kustomization Ready"
+
+# Read the Ready CONDITION, not a column of `flux get`. That table has six
+# columns once REVISION is filled and five while it is empty, so `$4` names READY
+# only BEFORE a Kustomization applies and SUSPENDED after — a positional check
+# that can only pass while nothing works. Third defect in this file found by
+# running it (2026-08-14).
+kustomization_status() {
+  kubectl get kustomizations.kustomize.toolkit.fluxcd.io -A \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' \
+    2>/dev/null
+}
+
+FLUX_READY_TIMEOUT="${FLUX_READY_TIMEOUT:-1500}"
+deadline=$((SECONDS + FLUX_READY_TIMEOUT))
+while :; do
+  STATUS="$(kustomization_status)"
+  TOTAL_K="$(printf '%s\n' "$STATUS" | grep -c . || true)"
+  # An empty list must not read as converged: zero Kustomizations means Flux has
+  # not created them yet, which is the opposite of done.
+  STALLED="$(printf '%s\n' "$STATUS" | awk -F'\t' 'NF && $2 != "True" {print $1}')"
+  [ "$TOTAL_K" -gt 0 ] && [ -z "$STALLED" ] && break
+  if [ "$SECONDS" -ge "$deadline" ]; then
+    echo "still not Ready after ${FLUX_READY_TIMEOUT}s:" >&2
+    printf '%s\n' "$STALLED" | sed 's/^/  /' >&2
+    fail "$(printf '%s\n' "$STALLED" | grep -c .) of ${TOTAL_K} Kustomizations not Ready"
+  fi
+  sleep 15
+done
+ok "all $TOTAL_K Flux Kustomizations Ready"
 
 # --- Regression: the storage-admin UI stays unpublished -----------------------
 # 1.0.1 took httproute-longhorn.yaml out of the default build because the UI has

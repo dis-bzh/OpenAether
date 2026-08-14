@@ -1,8 +1,8 @@
-# Release checklist — 1.0.1
+# Release checklist — 1.1.0
 
 English only, like `backlog.md`: rewritten each release, and two copies would drift.
 
-What to run before tagging 1.0.1 and telling anyone about it. Ordered by what
+What to run before tagging 1.1.0 and telling anyone about it. Ordered by what
 fails cheapest. **Stop at the first red** — every later step assumes the earlier
 ones held.
 
@@ -34,7 +34,7 @@ a clone does not — that is exactly how the CNI defect survived.
 ```bash
 cd $(mktemp -d)
 git clone https://github.com/dis-bzh/OpenAether-infra
-cd OpenAether-infra && git checkout <the 1.0.1 candidate>
+cd OpenAether-infra && git checkout <the 1.1.0 candidate>
 ./scripts/setup.sh
 ```
 
@@ -300,10 +300,10 @@ Only once everything above is green.
 - [ ] `docs/deployment-test-matrix.md` updated with what you actually ran —
       including the ones that failed
 - [ ] `docs/backlog.md` — drop what is now done, add what this shook out
-- [ ] **`OpenAether-apps` tagged `1.0.1` first**, then `OpenAether-infra`
+- [ ] **`OpenAether-apps` tagged `1.1.0` first**, then `OpenAether-infra`
 - [ ] a GitHub Release on each (there are none today, on any tag)
 - [ ] `git describe --tags` clean on both
-- [ ] the twelve `envs/*.tfvars.example` still pin `refs/tags/1.0.1`
+- [ ] the twelve `envs/*.tfvars.example` still pin `refs/tags/1.1.0`
 
 ## 10. Before communicating
 

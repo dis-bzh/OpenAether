@@ -104,6 +104,58 @@ is an entry that gets picked up and put back down. **Decide:** replaces
 **Closes:** when a question has to be settled first — a task-shaped entry
 invites someone to build what nobody decided.
 
+- [ ] **The infrastructure survives a rolling Talos upgrade; the databases do
+      not.** Measured on Scaleway 2026-08-14, on a clean unattended run that
+      reached this point with no intervention: deploy, Day-1 seeding, 35/35
+      Kustomizations Ready, idempotency, Kubernetes 1.36.2→1.36.3, Talos
+      1.13.7→1.13.8 in place on all six nodes, 13 probe FAILs in 1299 samples,
+      `tofu plan` empty afterwards — and then **8 of 35 Kustomizations not Ready**,
+      blocked on `cnpg` and `storage-backup-target`.
+      The CNPG instance pods sit on `local-path-retain`, which is the right call
+      and is argued in `apps/base/cnpg/cluster.yaml` (CNPG replicates itself;
+      Longhorn underneath is an anti-pattern). The problem is that after their
+      node reboots the pods stay `Completed` and the operator does not bring them
+      back: `grafana-db` reported "Waiting for the instances to become active"
+      and `zitadel-db` sat in "Switchover in progress" for over twenty minutes,
+      on nodes that were Ready again.
+      So a rolling upgrade is zero-downtime for the API and NOT for the platform's
+      own databases, which nothing said until an unattended run asserted
+      convergence twice — before and after.
+      **Decide:** whether `rolling-replace --upgrade` must drain differently (a
+      CNPG-aware switchover before the node it hosts the primary on), or whether
+      the operator needs a nudge, or whether this is an upstream CNPG behaviour
+      to report. Then it closes on a clean run where the post-upgrade check
+      reaches 35/35. Rung: real cloud, and it reproduces every time.
+
+- [ ] **`fleet-down` leaves the bastion SSH tunnels open.** Six were still
+      listening after a teardown on 2026-08-14, pointing at a cluster that no
+      longer existed. `talos-tunnels.sh open` now waits for the ports rather than
+      racing them, so the next deploy recovers — but a teardown that leaves
+      processes behind is a teardown that is not finished.
+      **Closes:** `task fleet-down` followed by zero matching `ssh -L 5000x`
+      processes. Rung: real cloud.
+
+- [ ] **The image lane holds one version per provider, and an upgrade needs two.
+      Target 1.2.0.** `talos-image/` has a single image resource behind a single
+      `talos-image.tfstate` per provider, so moving `talos_version` REPLACES the
+      published image rather than adding one. Three consequences, found while
+      setting up the 2026-08-14 real-cloud runs: deploying at N-1 to test an
+      upgrade destroys the N image first; on Outscale that replacement is the
+      known 409; and **the state and the account disagree about what exists**.
+      Measured on Scaleway 2026-08-14: the lane's state holds v1.13.8, yet a
+      v1.13.7 image is still in the account and a cluster pinned to it deployed
+      fine — an orphan from an earlier pin that the state no longer tracks. So two
+      versions can coexist, but only by accident, and only until a forward build
+      destroys the one the state does track.
+      Rollback is the part that makes this 1.2.0 rather than a nicety: `--upgrade`
+      moves forward, nothing moves back, and the ability to move back is currently
+      luck. Keying the image resources by version
+      (`for_each` over a set of versions to keep, with a retention of two) makes
+      both the upgrade test and the rollback possible, and would let the Outscale
+      lane add before it removes.
+      **Closes:** two versions published simultaneously on one provider, then a
+      node rolled BACK to the older one and rejoining healthy. Rung: real cloud.
+
 - [ ] **The unattended lane has no credentials, so it proves nothing yet.**
       `scripts/dev/check-staging-secrets.sh` prints the 17 `gh secret set`
       commands. The three `STAGING_TFVARS_B64_*` must each pin `talos_version`
@@ -282,21 +334,6 @@ invites someone to build what nobody decided.
       **Closes:** the same `split("-", cluster_name)[0]` derivation, plus a note
       in the release checklist — an existing deployment's buckets do not rename
       themselves, so this needs a migration line, not just a code change.
-
-- [ ] **`clusterctl-inventory` brick is dead on an operator-only CAPI install.**
-      Found live 2026-07-30 (Scaleway management, full profile): the classic
-      `Provider` CRD (`clusterctl.cluster.x-k8s.io/v1alpha3`) it writes to
-      never gets installed — `cluster-api-operator` only installs its own
-      `operator.cluster.x-k8s.io` CRDs (CoreProvider, InfrastructureProvider…),
-      not the old imperative `clusterctl init` inventory. Non-blocking (no
-      other Kustomization depends on it, confirmed) but permanently
-      `ReconciliationFailed`. Either find how to get the classic CRD installed
-      alongside the operator, or drop the brick if `clusterctl move` support
-      isn't actually needed.
-      **Decide:** keep it and find how the classic CRD gets installed beside the
-      operator, or drop it — the answer belongs in the brick, or in the commit
-      that removes it. Then closes on a real management apply leaving no
-      Kustomization `ReconciliationFailed`.
 
 - [ ] **Log in to a UI through the gateway.** The transport is DONE (2026-07-29,
       Scaleway): `https://longhorn.openaether.local` answers **HTTP 200** through

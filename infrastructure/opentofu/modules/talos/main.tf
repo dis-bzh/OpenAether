@@ -466,6 +466,13 @@ resource "terraform_data" "talos_port_ready_worker" {
   }
 }
 
+# Carries nothing but the version pair, and exists only to be referenced by the
+# two `replace_triggered_by` below. See the comment on them.
+resource "terraform_data" "machine_config_version" {
+  count = local.do_apply ? 1 : 0
+  input = "${var.talos_version}/${var.kubernetes_version}"
+}
+
 resource "talos_machine_configuration_apply" "control_plane" {
   count = local.do_apply ? var.control_plane_count : 0
 
@@ -476,6 +483,22 @@ resource "talos_machine_configuration_apply" "control_plane" {
 
   timeouts = {
     create = "15m"
+  }
+
+  lifecycle {
+    # REPLACE on a version change instead of updating in place. Updating is what
+    # trips siderolabs/terraform-provider-talos#352: when the rendered config is
+    # only known during apply, the provider keeps the OLD
+    # `machine_configuration_hash` in the plan and recomputes it at apply, and
+    # OpenTofu rejects the difference — "Provider produced inconsistent final
+    # plan", once per machine config, on every provider. A create has no prior
+    # value to be inconsistent with.
+    # Replacing costs nothing here: this resource's destroy is a no-op (a config
+    # cannot be un-applied) and its create re-sends the same config the update
+    # would have. Nodes reboot in `rolling-replace --upgrade`, never here.
+    # Fixed upstream in the 0.12.0 pre-release line only; we pin 0.11.0, the
+    # newest stable. Remove this when 0.12 stabilises.
+    replace_triggered_by = [terraform_data.machine_config_version[0]]
   }
 
   depends_on = [terraform_data.talos_port_ready_cp]
@@ -491,6 +514,11 @@ resource "talos_machine_configuration_apply" "worker" {
 
   timeouts = {
     create = "15m"
+  }
+
+  lifecycle {
+    # Same reason as the control plane above: upstream #352.
+    replace_triggered_by = [terraform_data.machine_config_version[0]]
   }
 
   depends_on = [terraform_data.talos_port_ready_worker]

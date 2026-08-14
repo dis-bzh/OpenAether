@@ -77,10 +77,17 @@ KUBECONFIG=mgmt-capi.kubeconfig clusterctl describe cluster mgmt-capi -n capi-cl
 
 ## Pièges, tous rencontrés en réel
 
-**`clusterctl move` refuse une cible équipée par notre opérateur.** L'opérateur
-et clusterctl tiennent des inventaires différents, et l'opérateur ne remplit pas
-celui de clusterctl. Corrigé par la brique `clusterctl-inventory`. ⚠️ `--dry-run`
-ne fait pas ce contrôle : il passe, seul le move réel échoue.
+**`clusterctl move` refuse une cible équipée par notre opérateur, et ce n'est pas
+corrigé.** L'opérateur et clusterctl tiennent des inventaires différents, et
+l'opérateur ne remplit pas celui de clusterctl. Une brique `clusterctl-inventory`
+revendiquait ce correctif sans jamais le livrer : elle écrit des objets
+`Provider` (`clusterctl.cluster.x-k8s.io/v1alpha3`), un CRD que
+`cluster-api-operator` n'installe pas — la brique restait donc en
+`ReconciliationFailed` permanent, une Kustomization rouge dans chaque
+déploiement management, pour rien. Retirée le 2026-08-14 plutôt que laissée comme
+un correctif qui n'en était pas un. Pivoter un management sur lui-même exige
+d'installer cet inventaire autrement d'abord.
+⚠️ `--dry-run` ne fait pas ce contrôle : il passe, seul le move réel échoue.
 
 **Les Machines ne se relient jamais à leurs nœuds** (`still provisioning the
 node`) — **corrigé le 2026-07-28**. Talos ne pose pas de `spec.providerID`, donc

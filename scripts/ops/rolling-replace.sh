@@ -532,9 +532,20 @@ fi
 
 if [[ $DRY_RUN -eq 0 && $ASSUME_YES -eq 0 ]]; then
   hr
-  warn "This will DESTROY and recreate node instances one at a time on ${PROVIDER}."
-  warn "System disks are wiped (OS only); Longhorn data disks are preserved."
-  read -rp "Proceed with rolling replacement? [y/N] " a; [[ "$a" == [yY] ]] || die "aborted by operator"
+  # The prompt described the REPLACE path in both modes. `--upgrade` destroys
+  # nothing and wipes nothing — it reboots each node into a new Talos version and
+  # keeps its disk, identity and etcd membership — so the warning was frightening
+  # and wrong for half the runs that reach it.
+  if [[ $UPGRADE -eq 1 ]]; then
+    warn "This will upgrade Talos IN PLACE, one node at a time, on ${PROVIDER}."
+    warn "No instance is destroyed and no disk is wiped; each node reboots once."
+    read -rp "Proceed with the rolling upgrade? [y/N] " a
+  else
+    warn "This will DESTROY and recreate node instances one at a time on ${PROVIDER}."
+    warn "System disks are wiped (OS only); Longhorn data disks are preserved."
+    read -rp "Proceed with rolling replacement? [y/N] " a
+  fi
+  [[ "$a" == [yY] ]] || die "aborted by operator"
 fi
 
 # Workers first (heavy stateful load), then control planes (etcd-gated).

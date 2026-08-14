@@ -168,8 +168,11 @@ if [ "$TALOS_FROM" != "$TALOS_TO" ]; then
 
   # One node at a time, health-gated between each; control planes first because
   # a worker's upgrade needs a healthy control plane to drain against.
-  task rolling-replace PROVIDER="$PROVIDER" KEY="$KEY" -- --cp-only --upgrade
-  task rolling-replace PROVIDER="$PROVIDER" KEY="$KEY" -- --workers-only --upgrade
+  # --yes: there is no terminal here, and without it rolling-replace stops at its
+  # confirmation prompt and exits 1 — which is how an unattended lane discovers
+  # that a script it depends on was only ever run by hand.
+  task rolling-replace PROVIDER="$PROVIDER" KEY="$KEY" -- --cp-only --upgrade --yes
+  task rolling-replace PROVIDER="$PROVIDER" KEY="$KEY" -- --workers-only --upgrade --yes
 
   RUNNING="$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.osImage}{"\n"}{end}' |
     grep -cv "$TALOS_TO" || true)"
