@@ -131,7 +131,23 @@ invites someone to build what nobody decided.
       What made this destructive is fixed: the roll used to warn and reboot the
       node anyway, and now refuses. So the failure is loud and the databases
       survive — but the roll stops.
-      Decided 2026-08-14 for 1.1.0: **documented as a manual step**
+      **Switching the primary away is implemented and works — and is not enough.**
+      Run 8, Scaleway 2026-08-14: the roll moved both primaries off `worker-2`
+      (`grafana-db-1 → grafana-db-2`, `zitadel-db-1 → zitadel-db-3`, both
+      confirmed by the operator) and the drain **still** could not evict the
+      leftover **replicas** `grafana-db-1` and `zitadel-db-1`, nor
+      `kube-state-metrics`. Five of six nodes upgraded; the sixth stopped.
+      The remaining cause is a budget arithmetic problem, not a switchover one:
+      `grafana-db` runs **two** instances, so evicting either leaves one, and a
+      budget that wants both can never be satisfied on a three-worker cluster —
+      no node holding an instance is ever drainable.
+      **Decide:** three instances for `grafana-db` (matching `zitadel-db`), or
+      make `nodeMaintenanceWindow` actually drop the PDBs on this CNPG version, or
+      both. `kube-state-metrics` blocked the same drain and is not CNPG at all —
+      it needs its own look, and it has appeared in every blocked drain so far.
+
+      Earlier on 2026-08-14, before the switchover existed: **documented as a
+      manual step**
       (`upgrade.md` § "The roll stops on a node holding a database primary"), so
       the release can move. The roll refuses and says which pod; the operator
       switches the primary over and re-runs, and already-upgraded nodes are
