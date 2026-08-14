@@ -287,9 +287,54 @@ cnpg_switchover_away() { # <node_name>
     done
 }
 
+# Wait until the cluster says it can afford to lose a pod on this node.
+#
+# Between nodes the roll gates on etcd and Longhorn and on NOTHING else, so it
+# arrived at the next node while the previous one's quorum workloads were still
+# rejoining — and their budgets correctly refused the eviction. Three runs, three
+# different pods, one shape: CNPG replicas and kube-state-metrics (run 8),
+# `openbao-1` on a raft budget wanting 2 of 3 (run 9), with no CNPG primary
+# involved at all. Fixing them one at a time was chasing symptoms.
+#
+# `disruptionsAllowed` is the cluster stating the thing directly. Only budgets
+# that actually cover a pod ON THIS NODE matter: one stuck elsewhere is not our
+# business and waiting on it would be a hang with no cause.
+PDB_TIMEOUT="${PDB_TIMEOUT:-600}"   # seconds
+wait_pdb_headroom() { # <node_name>
+  local node="$1" waited=0 blocked ns name sel
+  info "Waiting for every budget covering ${node} to allow a disruption…"
+  while [[ $waited -lt $PDB_TIMEOUT ]]; do
+    blocked=""
+    while IFS=$'\t' read -r ns name sel; do
+      [[ -n "$ns" && -n "$name" ]] || continue
+      # Empty means matchLabels was absent — a matchExpressions-only budget,
+      # which none of ours uses. Skip rather than guess; the drain is the judge.
+      [[ -n "$sel" ]] || continue
+      if [[ -n "$("${KCTL[@]}" -n "$ns" get pods -l "$sel" \
+            --field-selector "spec.nodeName=${node}" \
+            -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)" ]]; then
+        blocked+="${ns}/${name} "
+      fi
+    done < <({ "${KCTL[@]}" get pdb -A -o json 2>/dev/null || echo '{"items":[]}'; } |
+      jq -r '.items[] | select((.status.disruptionsAllowed // 0) == 0)
+             | [ .metadata.namespace, .metadata.name,
+                 ((.spec.selector.matchLabels // {}) | to_entries
+                  | map("\(.key)=\(.value)") | join(",")) ] | @tsv')
+    if [[ -z "$blocked" ]]; then
+      ok "every budget covering ${node} allows a disruption"
+      return 0
+    fi
+    sleep 10; waited=$((waited + 10))
+  done
+  # Not fatal here: the drain that follows is, and it names the pods. This gate
+  # exists to stop arriving early, not to become a second place to fail.
+  warn "after ${PDB_TIMEOUT}s these budgets still allow nothing on ${node}: ${blocked}"
+}
+
 cordon_drain() { # <node_name>
   local node="$1"
   cnpg_switchover_away "$node"
+  wait_pdb_headroom "$node"
   info "Cordon + drain ${node}…"
   "${KCTL[@]}" cordon "$node" || die "cordon failed for ${node}"
   if ! "${KCTL[@]}" drain "$node" \
