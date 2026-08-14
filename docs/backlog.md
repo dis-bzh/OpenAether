@@ -137,7 +137,20 @@ invites someone to build what nobody decided.
       confirmed by the operator) and the drain **still** could not evict the
       leftover **replicas** `grafana-db-1` and `zitadel-db-1`, nor
       `kube-state-metrics`. Five of six nodes upgraded; the sixth stopped.
-      The remaining cause is TIMING, not arithmetic — a first reading of this run
+      **It generalises beyond CNPG, and that is the real shape.** Run 9 blocked on
+      `openbao-1` instead — a raft PDB wanting 2 of 3 — with no CNPG primary on
+      the node at all. Run 8 blocked on CNPG replicas and `kube-state-metrics`.
+      The pattern is the same every time: the roll gates on etcd and Longhorn
+      between nodes and on **nothing else**, so it reaches the next node while the
+      previous one's quorum workloads are still rejoining, and their budgets
+      correctly refuse the next eviction.
+      The fix that covers all of them at once is one gate, not one per workload:
+      before draining, wait until **every** PodDisruptionBudget reports
+      `status.disruptionsAllowed >= 1`. That is the cluster saying, in its own
+      words, that it can afford to lose a pod. Start there next session.
+
+      The CNPG-specific cause below is real and fixed, and was not sufficient:
+      TIMING, not arithmetic — a first reading of run 8
       blamed the instance count and was wrong. A demoted primary restarts to
       rejoin as a replica, and while it is not ready the cluster has one healthy
       instance for a budget that wants one, so `currentHealthy <= desiredHealthy`
