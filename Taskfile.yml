@@ -311,6 +311,32 @@ tasks:
       - task: _backup-state
         vars: {PROVIDER: "{{.PROVIDER}}"}
 
+  plan:
+    desc: >-
+      Plan a cluster root without applying. STRICT=1 makes a non-empty plan an ERROR (exit 2) — that is the
+      "converged" assertion an idempotency or post-upgrade check needs. Usage: task plan
+      ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox] [STRICT=1]
+    dir: infrastructure/opentofu/cluster
+    vars:
+      ROLE: '{{.ROLE | default "management"}}'
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    env: *provider-env
+    cmds:
+      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
+      - |
+        # Same talos_bootstrap resolution as `infra`: passing the phase-1 value to
+        # an already-bootstrapped cluster zeroes the node counts and the plan then
+        # describes a teardown nobody asked for.
+        if tofu state list 2>/dev/null | grep -q 'module.talos.talos_machine_bootstrap'; then
+          TB=true
+        else
+          TB=false
+        fi
+        # -detailed-exitcode: 0 = no changes, 2 = changes, 1 = error. Task fails on
+        # any non-zero, which is what turns "the plan is empty" into an assertion.
+        tofu plan {{if eq .STRICT "1"}}-detailed-exitcode{{end}} \
+          -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=$TB
+
   bootstrap-phase2:
     desc: >-
       Phase 2: open SSH tunnels (from state) + bootstrap Talos. Usage: task bootstrap-phase2

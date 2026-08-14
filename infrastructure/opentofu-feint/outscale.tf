@@ -51,12 +51,18 @@ resource "outscale_subnet" "public" {
 
 # --- Egress: internet service for the public subnet, NAT for the private one ---
 
-# No tags block, and it is not a modelling choice: the emulator's CreateTags
-# knows four identifier prefixes — vpc-, subnet-, i-, key- — so tagging an
-# igw- or an rtb- is refused with "the resource does not exist" on a resource
-# it has just created. The production module does tag these; see the backlog.
+# Tagged on purpose, and on more kinds than the module strictly needs: Feint's
+# CreateTags knew four identifier prefixes against sixteen it minted, so ten
+# taggable kinds answered "the resource does not exist" about resources it had
+# just created (stephrobert/feint#99, fixed in 0.7.1). These blocks are what
+# keeps that regression visible here rather than on a real account.
 resource "outscale_internet_service" "this" {
   count = local.outscale_active
+
+  tags {
+    key   = "Name"
+    value = "${var.cluster_name}-igw"
+  }
 }
 
 resource "outscale_internet_service_link" "this" {
@@ -67,6 +73,11 @@ resource "outscale_internet_service_link" "this" {
 
 resource "outscale_public_ip" "nat" {
   count = local.outscale_active
+
+  tags {
+    key   = "Name"
+    value = "${var.cluster_name}-nat-ip"
+  }
 }
 
 # A bare internet service only NATs a machine that owns a public IP, so the
@@ -78,12 +89,21 @@ resource "outscale_nat_service" "this" {
   public_ip_id = outscale_public_ip.nat[0].public_ip_id
 
   depends_on = [outscale_internet_service_link.this, outscale_route_table_link.public]
+
+  tags {
+    key   = "Name"
+    value = "${var.cluster_name}-nat"
+  }
 }
 
 resource "outscale_route_table" "public" {
   count  = local.outscale_active
   net_id = outscale_net.this[0].net_id
-  # Untagged for the same reason as the internet service above.
+
+  tags {
+    key   = "Name"
+    value = "${var.cluster_name}-public-rt"
+  }
 }
 
 resource "outscale_route" "public_internet" {
@@ -102,7 +122,11 @@ resource "outscale_route_table_link" "public" {
 resource "outscale_route_table" "private" {
   count  = local.outscale_active
   net_id = outscale_net.this[0].net_id
-  # Untagged for the same reason as the internet service above.
+
+  tags {
+    key   = "Name"
+    value = "${var.cluster_name}-private-rt"
+  }
 }
 
 resource "outscale_route" "private_nat" {
@@ -125,6 +149,11 @@ resource "outscale_security_group" "this" {
   description         = "OpenAether cluster nodes - least-privilege inbound"
   security_group_name = "${var.cluster_name}-cluster-sg"
   net_id              = outscale_net.this[0].net_id
+
+  tags {
+    key   = "Name"
+    value = "${var.cluster_name}-cluster-sg"
+  }
 }
 
 resource "outscale_security_group_rule" "k8s_api" {
@@ -163,6 +192,11 @@ resource "outscale_security_group" "bastion" {
   description         = "OpenAether bastion - SSH from admin only"
   security_group_name = "${var.cluster_name}-bastion-sg"
   net_id              = outscale_net.this[0].net_id
+
+  tags {
+    key   = "Name"
+    value = "${var.cluster_name}-bastion-sg"
+  }
 }
 
 resource "outscale_security_group_rule" "bastion_ssh" {
@@ -189,6 +223,11 @@ resource "outscale_volume" "worker_data" {
   count          = local.outscale_active
   subregion_name = "eu-west-2a"
   size           = 10
+
+  tags {
+    key   = "Name"
+    value = "${var.cluster_name}-worker-data"
+  }
 }
 
 resource "outscale_vm" "control_plane" {

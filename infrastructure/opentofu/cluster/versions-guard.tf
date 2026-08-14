@@ -31,7 +31,7 @@ resource "terraform_data" "version_pair_guard" {
         local.k8s_minor_num >= local.k8s_supported.min &&
         local.k8s_minor_num <= local.k8s_supported.max
       )
-      error_message = "talos_version ${var.talos_version} and kubernetes_version ${var.kubernetes_version} are not a supported pair. Talos ${local.talos_minor_key} either supports a different Kubernetes range, or is not in modules/talos/versions-guard.tf yet — check https://docs.siderolabs.com/talos/v1.13/getting-started/support-matrix and extend the map rather than widening it blindly."
+      error_message = "talos_version ${var.talos_version} and kubernetes_version ${var.kubernetes_version} are not a supported pair. Talos ${local.talos_minor_key} either supports a different Kubernetes range, or is not in cluster/versions-guard.tf yet — check https://docs.siderolabs.com/talos/v1.13/getting-started/support-matrix and extend the map rather than widening it blindly."
     }
   }
 }
