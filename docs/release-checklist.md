@@ -263,48 +263,24 @@ task up ROLE=management PROVIDER=outscale
 ## 7. Upgrades — Kubernetes and Talos, on a cluster that has to stay up
 
 §§1-6 prove a cluster can be built. They prove nothing about keeping one, which
-is the half 1.0.0 shipped unverified. Run this on the reference provider at
-minimum, on an HA topology, with a one-second probe so "no interruption" is a
-number rather than an impression:
+is the half 1.0.0 shipped unverified.
 
-```bash
-while :; do kubectl get --raw=/readyz --request-timeout=2s >/dev/null 2>&1 \
-  && echo ok || echo FAIL; sleep 1; done | tee probe.log
-```
+The procedure itself is [`upgrade.md`](upgrade.md) — it is not release-specific
+and does not belong here twice. What a *release* adds to it:
 
-Point it at the endpoint in the kubeconfig, not at a tunnel to one node — a
-tunnel measures that node, and the node you are upgrading is expected to go away.
+- [ ] run it on an **HA** topology, on the reference provider at minimum, with
+      the one-second probe up throughout — "no interruption" has to be a number
+- [ ] run it on **OVH or Outscale** too, not only Scaleway: the known first-apply
+      failure (upstream #352) reproduces there and nowhere else
+- [ ] every node upgraded **in place**, none replaced, every one back under its
+      own name
+- [ ] `task plan ... STRICT=1` exits 0 afterwards
+- [ ] whatever it shook out is in `backlog.md` before the tag, including what you
+      chose not to fix
 
-**Check the version pair before moving either.** Talos supports a range of
-Kubernetes versions, not all of them (1.13 covers 1.31-1.36). The starting pair,
-the ending pair, and the intermediate state all have to sit inside it, because
-one moves before the other. Nothing enforces this yet — see the backlog.
-
-**Expect to apply twice.** Bumping `talos_version` and applying puts the new
-installer in the machine configs — nothing reboots yet. That first apply fails on
-both OVH and Outscale with "Provider produced inconsistent final plan", once per
-machine config; running it again succeeds. It is in the backlog, not fixed.
-
-**Talos, in place.** `rolling-replace.sh --upgrade` calls `talosctl upgrade`,
-which keeps the node's disk, identity and etcd membership, drains it itself, and
-refuses a control-plane upgrade that would cost etcd its quorum. One node at a
-time, health-gated between each. Re-runnable: a node already on the target
-version is skipped.
-
-```bash
-task rolling-replace PROVIDER=scaleway KEY=~/.ssh/<key> -- --cp-only --upgrade
-task rolling-replace PROVIDER=scaleway KEY=~/.ssh/<key> -- --workers-only --upgrade
-```
-
-**What to watch, beyond "it came back".** After each node: its name is unchanged
-(`kubectl get nodes` — a `talos-xxxxx` entry means the hostname did not hold and
-the next reboot will orphan another node object), the node count has not grown,
-etcd still reports every member, and the probe's FAIL count has not moved much.
-
-**Then plan again.** A clean upgrade leaves `tofu plan` at zero destroys. If it
-wants to replace nodes, the boot image and the running version have disagreed —
-that plan would take the cluster down, so stop and read
-`modules/providers/provider-contract.md` § "Node image drift".
+`scripts/dev/staging-upgrade.sh` does all of the above unattended and does not
+retry the failing apply, on purpose. If the weekly `staging` run is green on the
+three providers, this section is already answered — say so and move on.
 
 ## 8. Cross-repo and CAPI, if you are exercising the optional layer
 

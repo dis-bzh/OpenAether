@@ -9,8 +9,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The credentialed lane now covers what it claims, and can actually start.**
+  `staging.yml` was merged with no `staging` environment and none of its secrets,
+  so it had never executed once — indistinguishable, from the outside, from a
+  lane that passes. It also only ever exercised Scaleway (the cron passed no
+  input and fell through to the default) and stopped at deploy → verify →
+  destroy, which is the half 1.0.0 had already proven. It now picks all three
+  providers on the schedule and one on dispatch, takes one tfvars secret **per
+  provider** instead of writing the same blob into every provider's env file,
+  installs the bastion key `task up` refuses to start without, and runs two new
+  stages: `staging-idempotency.sh` (a second bring-up must leave an empty plan,
+  the same nodes with the same creation timestamps, and a working kubeconfig)
+  and `staging-upgrade.sh` (Kubernetes then Talos in place, a 1s readyz probe
+  throughout, and **no retry** of the apply known to fail — a retry would turn
+  that defect green). `check-staging-secrets.sh` reads the required names out of
+  the workflow rather than restating them, and names what is missing.
+- **`docs/upgrade.md`** (+ `.fr.md`), the runbook this repository did not have.
+  The procedure existed in a file called "release checklist 1.0.1" and in
+  `.claude/skills/` — readable by a release manager and by an assistant, not by
+  an operator upgrading on a Tuesday. §7 of the checklist now points at it and
+  keeps only what a release adds.
+- **`task plan ... STRICT=1`** — `-detailed-exitcode`, so "the configuration
+  converged" is an assertion instead of something read off a screen.
+
+### Changed
+
+- **Feint 0.7.3.** Both issues this repository filed are served: `CreateTags`
+  answering that a resource the emulator had just created did not exist (#99,
+  fixed 0.7.1) and a whole Scaleway product falling through to net/http's
+  plain-text 404, which the SDK discarded for its content type (#74, fixed
+  0.7.3 — `/lb/v1/` and `/vpc-gw/v2/` answer `501` in Scaleway's own dialect
+  now). The emulated fixture puts the tags back on six kinds rather than the
+  three it had removed, because a table that fell behind once deserves more than
+  the row that caught it. `task feint-test` green, both providers, both lanes;
+  `task feint-record` re-measured and unchanged in substance — the same three
+  operations nobody serves.
+
 ### Fixed
 
+- **Task was the one tool nobody pinned, and it took `main` red.** CI installed
+  it with `arduino/setup-task`, which asks the releases API for the version
+  **unauthenticated**, from a runner IP shared with every other GitHub customer:
+  on 2026-08-13 that failed with "API rate limit exceeded" and nothing was wrong
+  in the code. Handing the action a token would have fixed the symptom and left
+  the rest — this repository pins and checksum-verifies helm, gitleaks, feint and
+  tflint, while `setup.sh` piped an unpinned `https://taskfile.dev/install.sh`
+  into `sh`. Both are gone, replaced by `scripts/internal/install-task.sh`: one
+  pinned version, the project's own checksums file, no third party, and the same
+  installer on a runner and on a workstation. `staging.yml` lost the step
+  entirely — `setup.sh` was installing Task on the next line anyway.
+- **`task setup` still did not leave a machine able to run `task lint` or
+  `task security`.** Re-measured in a bare `ubuntu:24.04` while validating the
+  change above, which is the only reason it was found: **tflint** was never
+  installed by `setup.sh` at all, though `task lint` calls it — so the first
+  command a contributor runs failed on a machine this script had just called
+  ready. And **checkov** was installed and unreachable: pipx puts it in
+  `~/.local/bin`, which is not on PATH on a fresh Ubuntu, so `task security` died
+  with "executable file not found" about a tool that was present. pipx warns
+  about this; nothing acted on it. tflint now comes from
+  `scripts/internal/install-tflint.sh` — pinned, checksum-verified, and the same
+  file the CI job and the session-start hook use instead of the three separate
+  hand-written copies they had. The checkov path now runs `pipx ensurepath`,
+  exports the directory for the rest of the script, and prints the one line the
+  reader needs. Re-measured in the same bare container: exit 0, **eleven tools
+  out of eleven** reachable, `tflint 0.64.0` and `checkov 3.3.11` among them.
+  What that run does *not* prove is which shell profile `ensurepath` lands in on
+  a given distribution — hence the printed line, which does not depend on it.
+- **Three stale claims, one of them published.** `release-checklist.md` said
+  nothing enforced the Talos↔Kubernetes pair, months after `versions-guard.tf`
+  did; the backlog still listed it as open; and the guard's own error message
+  sent the reader to `modules/talos/versions-guard.tf`, a path that does not
+  exist. The published 1.0.0 release note claimed a node could not be drained
+  because of "seven PodDisruptionBudgets" — one, and fixed; corrected in place
+  with the correction marked rather than quietly rewritten.
+- **The first apply after a version bump has a name now.** Not "most likely the
+  port-ready guards" — it is upstream `siderolabs/terraform-provider-talos` #352
+  on `.machine_configuration_hash`, and the fix ships only in the 0.12.0
+  pre-release line. Which also explains why running it twice works. Still open,
+  with the decision written down instead of a guess.
 - **A node could not be fully drained, and one replica was the reason.** 1.0.0
   admits that a rolling upgrade reboots nodes with pods still aboard. The cause
   was ours and singular: `istiod` ran one replica under a PodDisruptionBudget
