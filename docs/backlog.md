@@ -131,14 +131,25 @@ invites someone to build what nobody decided.
       What made this destructive is fixed: the roll used to warn and reboot the
       node anyway, and now refuses. So the failure is loud and the databases
       survive — but the roll stops.
-      **Decide:** switch the primary away before draining (CNPG's own verb — the
-      `kubectl cnpg` plugin patches `status.targetPrimary`; doing it with plain
-      kubectl means writing that subresource ourselves), or spread the primaries
-      so one node never holds two, or accept a documented manual step. Note a
-      third pod blocked the same drain, `kube-state-metrics`, which is not CNPG
-      and needs its own look.
-      **Closes:** a clean run where the post-upgrade check reaches 35/35. Rung:
-      real cloud, and it reproduces every time.
+      Decided 2026-08-14 for 1.1.0: **documented as a manual step**
+      (`upgrade.md` § "The roll stops on a node holding a database primary"), so
+      the release can move. The roll refuses and says which pod; the operator
+      switches the primary over and re-runs, and already-upgraded nodes are
+      skipped. Nothing speculative shipped.
+
+      **Verify first, then implement:** the preferred answer is pod
+      anti-affinity on the CNPG instances — one node would never hold two
+      primaries, and CNPG might vacate a cordoned node by itself. That second
+      half is an ASSUMPTION and this run gives no evidence for it: the primaries
+      stayed put for 900s on a cordoned node with `nodeMaintenanceWindow` on.
+      Measure it before building on it — cordon a node holding a primary, with
+      `enablePodAntiAffinity` set, and watch whether CNPG switches over on its
+      own. If it does, the manual step goes away; if it does not, the remaining
+      option is `kubectl cnpg promote` and its plugin dependency.
+      Note a third pod blocked the same drain, `kube-state-metrics`, which is not
+      CNPG at all and needs its own look.
+      **Closes:** that cordon experiment, answered either way, then a clean run
+      where the post-upgrade check reaches 35/35. Rung: real cloud.
 
 - [ ] **`fleet-down` leaves the bastion SSH tunnels open.** Six were still
       listening after a teardown on 2026-08-14, pointing at a cluster that no

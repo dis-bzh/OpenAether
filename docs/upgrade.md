@@ -71,6 +71,35 @@ cost etcd its quorum. One node at a time, health-gated between each, and
 re-runnable: a node already on the target version is skipped. Control planes
 first — a worker needs a healthy control plane to drain against.
 
+### The roll stops on a node holding a database primary. That is correct.
+
+`rolling-replace` refuses to reboot a node it could not drain, and a CNPG primary
+**cannot be evicted**: its PodDisruptionBudget forbids it until a switchover has
+happened, and on `local-path-retain` the instance could not move to another node
+anyway. The roll sets `nodeMaintenanceWindow` on every CNPG Cluster for its
+duration, which is necessary and not sufficient — measured on Scaleway
+2026-08-14, where one worker held *two* primaries.
+
+So this is a manual step today. When the roll stops naming a `*-db-N` pod:
+
+```bash
+# 1. which instance is primary, and where
+kubectl get cluster -A -o custom-columns=NS:.metadata.namespace,\
+NAME:.metadata.name,PRIMARY:.status.currentPrimary
+kubectl get pod <primary> -n <ns> -o jsonpath='{.spec.nodeName}{"\n"}'
+
+# 2. switch it to a healthy replica on a DIFFERENT node
+kubectl cnpg promote <cluster> <replica> -n <ns>     # kubectl-cnpg plugin
+
+# 3. re-run the SAME command — nodes already on the target version are skipped
+task rolling-replace PROVIDER=<p> KEY=~/.ssh/<key> -- --workers-only --upgrade
+```
+
+Do not force past the refusal. The version this replaced warned and rebooted the
+node anyway, which left `zitadel-db` stuck mid-switchover and `grafana-db` with
+no active instance. Whether pod anti-affinity would let CNPG vacate a cordoned
+node on its own — and remove this step — is an open question in `backlog.md`.
+
 ⚠️ **The first apply after a `talos_version` bump fails on OVH and Outscale**
 with "Provider produced inconsistent final plan", once per machine config.
 Nothing is left half-applied; re-run it. This is upstream

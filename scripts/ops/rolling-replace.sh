@@ -230,7 +230,11 @@ cordon_drain() { # <node_name>
     if [[ $ASSUME_YES -eq 1 ]]; then
       "${KCTL[@]}" get pods --field-selector "spec.nodeName=${node}" -A \
         -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name --no-headers 2>/dev/null | head -20 >&2 || true
-      die "${node} could not be drained within ${DRAIN_TIMEOUT} — refusing to reboot it under workloads that would not move. Raise DRAIN_TIMEOUT, or fix the budget that blocks."
+      die "${node} could not be drained within ${DRAIN_TIMEOUT} — refusing to reboot it under workloads that would not move.
+  A CNPG primary (a *-db-N pod above) cannot be evicted, only switched over:
+  docs/upgrade.md § 'The roll stops on a node holding a database primary'.
+  Switch it to a replica on another node, then re-run this same command — nodes
+  already on the target version are skipped."
     fi
     read -rp "Continue with ${node} anyway? [y/N] " a; [[ "$a" == [yY] ]] || die "aborted by operator"
   fi

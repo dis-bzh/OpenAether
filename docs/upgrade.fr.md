@@ -77,6 +77,37 @@ de santé entre chacun, et rejouable : un nœud déjà sur la version cible est
 sauté. Les control planes d'abord — un worker a besoin d'un control plane sain
 pour se drainer.
 
+### Le roll s'arrête sur un nœud portant un primaire de base. C'est correct.
+
+`rolling-replace` refuse de redémarrer un nœud qu'il n'a pas pu drainer, et un
+primaire CNPG **ne peut pas être évincé** : sa PodDisruptionBudget l'interdit
+jusqu'à un switchover, et sur `local-path-retain` l'instance ne pourrait de toute
+façon pas aller sur un autre nœud. Le roll place chaque Cluster CNPG en
+`nodeMaintenanceWindow` pour sa durée, ce qui est nécessaire et pas suffisant —
+mesuré sur Scaleway le 2026-08-14, où un worker portait *deux* primaires.
+
+C'est donc une étape manuelle aujourd'hui. Quand le roll s'arrête en nommant un
+pod `*-db-N` :
+
+```bash
+# 1. quelle instance est primaire, et où
+kubectl get cluster -A -o custom-columns=NS:.metadata.namespace,\
+NAME:.metadata.name,PRIMARY:.status.currentPrimary
+kubectl get pod <primaire> -n <ns> -o jsonpath='{.spec.nodeName}{"\n"}'
+
+# 2. la basculer vers un réplica sain d'un AUTRE nœud
+kubectl cnpg promote <cluster> <replica> -n <ns>     # plugin kubectl-cnpg
+
+# 3. relancer la MÊME commande — les nœuds déjà à la version cible sont sautés
+task rolling-replace PROVIDER=<p> KEY=~/.ssh/<clé> -- --workers-only --upgrade
+```
+
+Ne pas passer en force. La version que ceci remplace avertissait puis redémarrait
+le nœud quand même, ce qui a laissé `zitadel-db` bloqué en switchover et
+`grafana-db` sans instance active. Savoir si une anti-affinité de pods
+permettrait à CNPG de quitter seul un nœud cordoné — et de supprimer cette
+étape — est une question ouverte dans `backlog.md`.
+
 ⚠️ **Le premier apply après un bump de `talos_version` échoue sur OVH et
 Outscale** avec « Provider produced inconsistent final plan », une fois par
 machine config. Rien n'est laissé à moitié appliqué ; relancer. C'est l'issue
