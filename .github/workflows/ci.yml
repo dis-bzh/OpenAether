@@ -99,14 +99,21 @@ jobs:
           # renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
           tofu_version: "1.12.5"
 
+      # Same installer as setup.sh and the session-start hook, for the same reason
+      # as Task below: one pinned version, verified against the project's own
+      # checksums, and no third-party action between us and the binary.
       - name: Setup TFLint
-        uses: terraform-linters/setup-tflint@6e1e0642c0289bd619021bf6b34e3c08ed1e005a  # v6
-        with:
-          # renovate: datasource=github-releases depName=terraform-linters/tflint
-          tflint_version: v0.64.0
+        run: ./scripts/internal/install-tflint.sh
 
+      # Not `arduino/setup-task`: that action asks the releases API for the
+      # version, UNAUTHENTICATED, from a runner IP shared with every other GitHub
+      # customer — which is what took `main` red on 2026-08-13 with nothing wrong
+      # in the code. Passing it a token would have hidden the second half: this
+      # repository pins and checksums helm, gitleaks, feint and tflint, and Task
+      # was the one tool coming from a third party by name. Same installer as
+      # `scripts/setup.sh`, so a runner and a workstation cannot disagree.
       - name: Setup Task
-        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+        run: ./scripts/internal/install-task.sh
 
       - name: Install yamllint
         run: pip install yamllint
@@ -150,7 +157,7 @@ jobs:
           rm -rf "${asset}" linux-amd64
 
       - name: Setup Task
-        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+        run: ./scripts/internal/install-task.sh
 
       - name: task render-check
         run: task render-check
@@ -174,7 +181,7 @@ jobs:
           tofu_version: "1.12.5"
 
       - name: Setup Task
-        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+        run: ./scripts/internal/install-task.sh
 
       - name: task validate
         run: task validate ROOT=${{ matrix.root }}
@@ -199,7 +206,7 @@ jobs:
           tofu_version: "1.12.5"
 
       - name: Setup Task
-        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+        run: ./scripts/internal/install-task.sh
 
       - name: task test
         run: task test
@@ -231,7 +238,7 @@ jobs:
           tofu_version: "1.12.5"
 
       - name: Setup Task
-        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+        run: ./scripts/internal/install-task.sh
 
       - name: Install Feint (pinned + checksum-verified)
         run: |

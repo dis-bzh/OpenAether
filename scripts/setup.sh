@@ -119,20 +119,27 @@ install_checkov() {
     else
         echo "⚠️  Could not install checkov automatically — 'task security' will stop"
         echo "   at the checkov step. Install it manually: pipx install checkov"
+        return
+    fi
+
+    # Installed is not the same as reachable. pipx and `pip --user` both land in
+    # ~/.local/bin, which is not on PATH on a fresh Ubuntu — so `task security`
+    # still died with "executable file not found" on a machine where checkov was
+    # present. pipx says so in a warning nobody reads; this makes it true instead.
+    if ! command -v checkov &> /dev/null && [ -x "$HOME/.local/bin/checkov" ]; then
+        command -v pipx &> /dev/null && pipx ensurepath >/dev/null 2>&1 || true
+        export PATH="$HOME/.local/bin:$PATH"
+        echo "⚠️  checkov is in ~/.local/bin, which was not on your PATH."
+        echo "   Added for the rest of this script and to your shell profile;"
+        echo "   open a new shell, or: export PATH=\"\$HOME/.local/bin:\$PATH\""
     fi
 }
 
 install_task() {
-    echo "Installing Task..."
-    if [ -w /usr/local/bin ]; then
-        sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
-    elif command -v sudo &> /dev/null; then
-        $SUDO sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
-    else
-        mkdir -p ~/.local/bin
-        sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b ~/.local/bin
-        echo "NOTE: task installed to ~/.local/bin. Ensure it's in your PATH."
-    fi
+    # One installer, shared with CI, pinned and checksum-verified. This used to
+    # pipe an unpinned https://taskfile.dev/install.sh into sh — the only tool
+    # here that was neither pinned nor verified.
+    "$(dirname "${BASH_SOURCE[0]}")/internal/install-task.sh"
 }
 
 install_awscli_bundle() {
@@ -256,7 +263,14 @@ if ! check_cmd task; then
     install_task
 fi
 
-# 5b. Check checkov (`task security` runs it directly; only CI ever had it)
+# 5b. Check tflint — `task lint` calls it, and this script did not install it, so
+# the first command a contributor runs failed on a machine we had just called
+# ready. Found 2026-08-14 in a bare ubuntu:24.04.
+if ! check_cmd tflint; then
+    "$(dirname "${BASH_SOURCE[0]}")/internal/install-tflint.sh"
+fi
+
+# 5c. Check checkov (`task security` runs it directly; only CI ever had it)
 if ! check_cmd checkov; then
     install_checkov
 fi

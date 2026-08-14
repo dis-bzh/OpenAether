@@ -26,6 +26,11 @@ on:
         description: Leave the cluster up after the run (for manual inspection)
         type: boolean
         default: false
+      stages:
+        description: How far to go — deploy only, or also prove it can be kept
+        type: choice
+        options: [deploy, deploy+idempotency, full]
+        default: full
   schedule:
     # Weekly, Monday 03:17 UTC. Off the hour so it does not pile up with
     # everything else the runners fire at :00.
@@ -42,18 +47,59 @@ permissions:
   contents: read
 
 jobs:
-  deploy:
-    name: "Deploy, verify, destroy (${{ inputs.provider || 'scaleway' }})"
+  # A dispatch exercises the one provider a maintainer picked; the weekly run
+  # exercises all three. Without this the cron fell through to `inputs.provider
+  # || 'scaleway'` and OVH and Outscale had no unattended coverage at all — the
+  # two providers where the known upgrade defect actually reproduces.
+  scope:
+    name: What this run covers
     runs-on: ubuntu-latest
-    timeout-minutes: 90
-    # The Environment is what holds the secrets, and what lets you require an
-    # approval before the job starts. Configure `staging` with required
-    # reviewers in Settings → Environments; without that, a scheduled run can
-    # spend money with nobody looking.
+    timeout-minutes: 5
+    outputs:
+      providers: ${{ steps.pick.outputs.providers }}
+      stages: ${{ steps.pick.outputs.stages }}
+    steps:
+      - id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          PROVIDER: ${{ inputs.provider }}
+          STAGES: ${{ inputs.stages }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "schedule" ]; then
+            echo 'providers=["scaleway","ovh","outscale"]' >> "$GITHUB_OUTPUT"
+            echo 'stages=full' >> "$GITHUB_OUTPUT"
+          else
+            echo "providers=[\"${PROVIDER}\"]" >> "$GITHUB_OUTPUT"
+            echo "stages=${STAGES}" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    name: "Deploy, prove, destroy (${{ matrix.provider }})"
+    needs: scope
+    runs-on: ubuntu-latest
+    # Deploy is ~25 min; idempotency adds a second bring-up; the upgrade adds an
+    # image build, two applies and one reboot per node. 90 was sized for the
+    # first of the three.
+    timeout-minutes: 210
+    strategy:
+      # Never fail-fast: a provider dying must not cancel the others mid-apply,
+      # which is precisely how billed resources get orphaned.
+      fail-fast: false
+      matrix:
+        provider: ${{ fromJSON(needs.scope.outputs.providers) }}
+    # The Environment holds the secrets and gates who can reach them. It exists,
+    # and its deployment branch policy is `main` only — no other branch can get
+    # the cloud credentials, which is the protection that matters in a public
+    # repository. Deliberately NO required reviewer: an approval gate would block
+    # the weekly run, and an unattended lane nobody approves is a lane that never
+    # runs. What keeps the spend bounded instead is the `if: always()` teardown
+    # below and the `reap` job, which runs even when this job never got there.
     environment: staging
     env:
-      PROVIDER: ${{ inputs.provider || 'scaleway' }}
+      PROVIDER: ${{ matrix.provider }}
       ROLE: ${{ inputs.role || 'management' }}
+      STAGES: ${{ needs.scope.outputs.stages }}
       TF_IN_AUTOMATION: "1"
       TF_INPUT: "0"
       # `task infra` and `bootstrap-phase2` apply WITHOUT -auto-approve, on
@@ -70,9 +116,9 @@ jobs:
           # renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
           tofu_version: "1.12.5"
 
-      - name: Setup Task
-        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
-
+      # No separate Task step here: setup.sh installs it, through the same pinned
+      # installer CI uses. There used to be one, and it ran an unauthenticated
+      # releases-API call before the step that would have installed Task anyway.
       - name: Setup toolchain
         run: ./scripts/setup.sh
 
@@ -110,15 +156,39 @@ jobs:
           } >> "$GITHUB_ENV"
 
       # The tfvars is environment data and stays out of git — the whole point of
-      # the split. It is a base64 blob in the Environment, one secret per
-      # provider, built from the matching envs/*.tfvars.example.
+      # the split. One base64 secret PER PROVIDER, built from the matching
+      # envs/*.tfvars.example: a single shared blob would write Scaleway's
+      # addresses into OVH's env file the moment this ran as a matrix.
+      #
+      # Each one is expected to pin talos_version / kubernetes_version one patch
+      # BELOW cluster/variables.tf, which is what gives the upgrade stage
+      # something real to move. See scripts/dev/staging-upgrade.sh.
       - name: Materialise the tfvars
         env:
-          TFVARS_B64: ${{ secrets.STAGING_TFVARS_B64 }}
+          TFVARS_B64_SCALEWAY: ${{ secrets.STAGING_TFVARS_B64_SCALEWAY }}
+          TFVARS_B64_OVH: ${{ secrets.STAGING_TFVARS_B64_OVH }}
+          TFVARS_B64_OUTSCALE: ${{ secrets.STAGING_TFVARS_B64_OUTSCALE }}
         run: |
-          test -n "$TFVARS_B64" || { echo "::error::STAGING_TFVARS_B64 is empty"; exit 1; }
-          printf '%s' "$TFVARS_B64" | base64 -d \
+          set -euo pipefail
+          var="TFVARS_B64_$(echo "$PROVIDER" | tr '[:lower:]' '[:upper:]')"
+          blob="${!var:-}"
+          test -n "$blob" || { echo "::error::secret STAGING_${var} is empty"; exit 1; }
+          printf '%s' "$blob" | base64 -d \
             > "infrastructure/opentofu/cluster/envs/${ROLE}-${PROVIDER}.tfvars"
+
+      # `task up` refuses before it bills if the key is missing, and every later
+      # stage needs it too (bootstrap-phase2, the tunnels, rolling-replace). Its
+      # public half belongs in the tfvars above, or the bastion will not take it.
+      - name: Install the bastion SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_PRIVATE_KEY" || { echo "::error::STAGING_SSH_PRIVATE_KEY is empty"; exit 1; }
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keygen -y -f ~/.ssh/id_ed25519 > /dev/null
 
       - name: Preflight quotas
         continue-on-error: true
@@ -130,6 +200,16 @@ jobs:
 
       - name: Verify
         run: ./scripts/dev/staging-verify.sh "$PROVIDER" "$ROLE"
+
+      # Building a cluster and keeping one are different claims. These two
+      # stages are the second; 1.0.0 shipped having proven only the first.
+      - name: Idempotency — a second bring-up must change nothing
+        if: env.STAGES != 'deploy'
+        run: ./scripts/dev/staging-idempotency.sh "$PROVIDER" "$ROLE"
+
+      - name: Upgrade — Kubernetes then Talos, in place, with a probe running
+        if: env.STAGES == 'full'
+        run: ./scripts/dev/staging-upgrade.sh "$PROVIDER" "$ROLE"
 
       # `if: always()` is the load-bearing line in this file. A failed apply is
       # precisely the case that leaves billed resources standing, so the teardown

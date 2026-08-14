@@ -12,6 +12,25 @@ explanation belongs in the commit that ruled it out.
 
 ## Where we stand
 
+2026-08-14: **everything below was proven by a human running commands. Nothing
+re-proves it.** `.github/workflows/staging.yml` is the answer to that and it has
+never executed: it was merged 2026-08-13 with no `staging` environment and none
+of its 17 secrets set, so its first scheduled fire would have died on an empty
+blob — and a workflow that has never run looks exactly like one that passes.
+Fixed today, except the part only a human can do: the environment exists
+(deployment branch policy `main` only, no approval gate, so the weekly run is
+not blocked), the lane now covers all three providers on the cron instead of
+Scaleway alone, and it gained an idempotency stage and an upgrade stage that
+does not retry the known failing apply. `scripts/dev/check-staging-secrets.sh`
+names what is still missing; until someone runs those `gh secret set` commands,
+the unattended lane is code, not coverage.
+
+Also today: the first-apply-after-a-version-bump failure is no longer a
+hypothesis. It is upstream #352 on `.machine_configuration_hash`, fixed in the
+0.12.0 pre-release line only — see the entry below. Feint moved to 0.7.3, which
+served both issues we filed (#74, #99); the emulated fixture tags six kinds now
+and `task feint-test` is green on both providers, both lanes.
+
 2026-08-13: **the three clouds each ran deploy → idempotency → Kubernetes upgrade
 → Talos upgrade, and all three passed.** Scaleway 3+3, OVH 3+3, Outscale 3+1;
 every node upgraded in place with `rolling-replace --upgrade` rather than
@@ -85,17 +104,40 @@ is an entry that gets picked up and put back down. **Decide:** replaces
 **Closes:** when a question has to be settled first — a task-shaped entry
 invites someone to build what nobody decided.
 
-- [ ] **The first apply after a `talos_version` bump always fails.** Reproduced
-      on OVH and Outscale, identically: the plan proposes a couple of
-      adds/destroys alongside the config changes, then apply reports "Provider
-      produced inconsistent final plan" once per machine config. Re-running
-      succeeds and the second plan is smaller, so the current instruction is
-      "run it twice" — which is the kind of advice that hides a bug rather than
-      naming it. Most likely the port-ready `terraform_data` guards replace in
-      the same graph walk that re-renders the machine configs, so the value
-      applied differs from the one planned.
+- [ ] **The unattended lane has no credentials, so it proves nothing yet.**
+      `scripts/dev/check-staging-secrets.sh` prints the 17 `gh secret set`
+      commands. The three `STAGING_TFVARS_B64_*` must each pin `talos_version`
+      and `kubernetes_version` **one patch below** `cluster/variables.tf` — that
+      gap is the only thing the upgrade stage has to move, and it refuses to run
+      rather than pass on an empty one.
+      **Closes:** `check-staging-secrets.sh` green, then one `workflow_dispatch`
+      per provider, green, `stages=full`. Rung: real cloud — that is the point
+      of the lane.
+
+- [ ] **The first apply after a `talos_version` bump always fails, and it is an
+      upstream bug we cannot take the fix for.** Reproduced on OVH and Outscale:
+      apply reports "Provider produced inconsistent final plan" once per machine
+      config, and re-running succeeds. Identified 2026-08-14 — it is
+      `siderolabs/terraform-provider-talos` **#352**, on
+      `.machine_configuration_hash`: when `machine_configuration_input` is
+      unknown at plan time (the data source reads "during apply"), the provider
+      keeps the OLD hash in the plan and recomputes it at apply, and OpenTofu
+      rejects the change. That also explains why the second run works — the first
+      apply resolves whatever was unknown, so the data source becomes readable at
+      plan time and nothing is deferred.
+      Fixed upstream by PR #359 (commit `024ce5a`, 2026-06-04), which ships in
+      **0.12.0-alpha.3 and later only**. 0.11.0 is still the newest stable and is
+      what `cluster/versions.tf` pins, so there is no patch to move to — the same
+      0.12 dependency as the declarative-upgrade entry below.
+      **Decide:** wait for 0.12 stable, or force a replace instead of an update
+      (`replace_triggered_by` on a `terraform_data` carrying the version pair —
+      a create plans the hash as unknown, so there is no prior value to be
+      inconsistent with). The second is untested and must not be committed as a
+      fix before it is.
       **Closes:** one apply after a version bump, exit 0, no retry. Rung: real
-      cloud (it does not reproduce against mocks).
+      cloud — it needs the data source to be deferred, which neither mocks nor
+      the container lane can produce. `staging.yml`'s upgrade stage is where it
+      will show, and it does not retry, on purpose.
 
 - [ ] **Report boot-image drift, now that nothing else will.** Node resources
       ignore their image attribute, because otherwise a `talosctl upgrade` leaves
@@ -128,17 +170,6 @@ invites someone to build what nobody decided.
       control plane components and the kubelets behind health checks. Our run
       lost 3 probe seconds while an apiserver restarted; that is the gap
       `upgrade-k8s` exists to close.
-
-- [ ] **Nothing checks that talos_version and kubernetes_version are a supported
-      pair.** Talos supports a window of Kubernetes releases — 1.13 covers 1.31
-      to 1.36 ([support matrix](https://docs.siderolabs.com/talos/v1.13/getting-started/support-matrix))
-      — and the two variables are bumped INDEPENDENTLY by Renovate. The day
-      Kubernetes 1.37 lands while talos_version is still on 1.13, the plan will
-      be perfectly valid and the cluster will not come up, with nothing pointing
-      at the pair. Encode the window (a map from Talos minor to the Kubernetes
-      minors it accepts) and fail at plan time, or check it in preflight-quotas
-      where the other before-you-spend checks live. Cheap, and it closes a gap
-      that only shows itself on a real cluster.
 
 - [ ] **The Outscale image lane cannot replace an image, and it is not an
       ordering problem.** Rebuilding fails with "409 ResourceConflict — Unable to
@@ -292,21 +323,9 @@ invites someone to build what nobody decided.
       scrapes. Any cluster running Flux 2.8 does — the local Docker root
       qualifies, no cloud needed.
 
-- [ ] **`CreateTags` says a resource the emulator just created does not exist.**
-      `taggable` (`internal/providers/outscale/tags.go`) knows four prefixes —
-      `vpc-`, `subnet-`, `i-`, `key-` — against sixteen the pack mints, so ten
-      taggable kinds answer `5063 InvalidResource` on ids it returns from its own
-      `Read*`. Not cosmetic: the provider fails the apply (`Unable to create
-      tags`), the resource is tainted, and the next apply fails identically — the
-      configuration cannot converge. Reproduced on 0.7.0 with a two-resource
-      OpenTofu config. Our fixture works around it by leaving the internet
-      service and route tables untagged. Reported as `stephrobert/feint#99`.
-      **Closes:** that issue served, then `task feint-apply PROVIDER=outscale`
-      green with the tags put back on the fixture. Emulated.
-
 - [ ] **A full emulated apply of the cluster root needs two routes, and two
-      decisions reversed.** Measured on 0.6.0 and again on 0.7.0, identical both
-      times (`task feint-record`). Genuinely missing: Scaleway LB (SW-5 `#17`)
+      decisions reversed.** Measured on 0.6.0, 0.7.0 and 0.7.3, identical all
+      three times (`task feint-record`). Genuinely missing: Scaleway LB (SW-5 `#17`)
       and public gateway (SW-6 `#18`). Declined *with a stated reason*, which is
       a different conversation: `ipam BookIP` (SW-4 `#11`) because addresses come
       from the subnet plan rather than a client reservation, and Outscale

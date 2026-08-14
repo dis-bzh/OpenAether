@@ -65,12 +65,16 @@ actuel, reproductible avec les commandes ci-dessus :
 | Provider | Appelé, servi par personne | Appels | Manquant, ou décliné ? |
 |---|---|---|---|
 | Scaleway | `POST /ipam/v1/regions/fr-par/ips` (501) | 2 | Décliné — le `GET` sur le même chemin répond 200 |
-| Scaleway | `/lb/v1/zones/fr-par-1/ips` (404) | 2 | Manquant |
-| Scaleway | `/vpc-gw/v2/zones/fr-par-1/ips` (404) | 1 | Manquant |
+| Scaleway | `/lb/v1/zones/fr-par-1/ips` (501) | 2 | Manquant |
+| Scaleway | `/vpc-gw/v2/zones/fr-par-1/ips` (501) | 1 | Manquant |
 | Outscale | `/api/v1/CreateLoadBalancer` (404) | 2 | Décliné |
 
-Identique en 0.6.0 et 0.7.0 : aucune des deux n'a bougé quoi que ce soit
-qu'appellent nos modules. La distinction de la dernière colonne est tout
+Les mêmes trois opérations en 0.6.0, 0.7.0 et 0.7.3 : aucune version n'a bougé
+quoi que ce soit qu'appellent nos modules. Ce qui a bougé, c'est la *forme* du
+refus — les deux manques Scaleway répondaient un `404` en texte brut jusqu'à la
+0.7.3, que le SDK jetait pour son content type, si bien que l'appelant voyait
+`404 Not Found` et pas de corps. Ils répondent maintenant `501` dans le dialecte
+de Scaleway (notre issue #74). La distinction de la dernière colonne est tout
 l'intérêt de rejouer la mesure — une route manquante est un trou que quelqu'un
 peut combler, un decline est une réponse.
 
@@ -112,20 +116,25 @@ régressions de câblage avant de dépenser.
 
 ## Manques connus
 
-Épinglé sur **Feint 0.7.0** (`scripts/dev/feint.sh`). Ce que cette voie ne peut
+Épinglé sur **Feint 0.7.3** (`scripts/dev/feint.sh`). Ce que cette voie ne peut
 toujours pas porter, tout consigné dans [`backlog.md`](backlog.md) :
 
 | Non exercé | Pourquoi |
 |---|---|
 | Load balancers Outscale | `CreateLoadBalancer` est **décliné volontairement**, pas manquant : un load balancer est un plan de données que l'émulateur n'a pas, en créer un rendrait un nom DNS ne résolvant nulle part. `ReadLoadBalancers` répond une liste vide. Celui-là ne bougera pas. |
 | Réservations IPAM Scaleway | Décliné aussi, avec une raison : les adresses viennent du plan de sous-réseau où le NIC est placé, donc `BookIP` distribuerait une adresse qu'aucun runtime ne configure. `scaleway_ipam_ip` est donc hors de portée ici. |
-| LB et public gateway Scaleway | Réellement absents — ni servis ni déclinés. Les deux vrais manques que nos modules rencontrent. |
+| LB et public gateway Scaleway | Réellement absents. Les deux vrais manques que nos modules rencontrent. Depuis la 0.7.3 ils refusent au moins lisiblement — `501` dans le dialecte du SDK au lieu du `404` en texte brut de net/http, que le SDK Scaleway jetait pour son content type (notre issue #74). |
 | Type de volume racine Scaleway | Aucun `root_volume { volume_type }` n'est écrivable : le provider 2.79+ refuse `b_ssd`, et `sbs_volume` planifie éternellement car l'émulateur l'écrase. L'honorer enverrait le provider sur `block/v1`, non monté. Mesuré ici, c'est devenu la limite documentée en amont et son issue #8. |
 | Résolution d'image par nom | Le catalogue est fixe, et la 0.7.0 applique le filtre `image_names` : un nom publié par un pipeline de build ne correspond à rien — des deux côtés. Les tfvars Scaleway épinglent `image_id` ; ceux d'Outscale pointent `image_name` sur une entrée du catalogue, ce qui exerce la recherche sans prétendre résoudre notre propre image. |
-| Tags sur route tables et internet services | `CreateTags` ne connaît que quatre préfixes d'identifiant (`vpc-`, `subnet-`, `i-`, `key-`) : taguer un `igw-` ou un `rtb-` est refusé sur une ressource qu'il vient de créer. Le module de production tague les deux. |
 
-Deux choses ont quitté cette liste. `outscale_volume_link` en 0.6.0, qui a monté
-le filtre `LinkVolumeVmIds` dont dépend son attente. Et `data.outscale_images`
-en 0.7.0, qui ne fait plus segfaulter le provider — la voie Outscale résout donc
-son image par la data source plutôt que par un id épinglé, ce qui exerce la
-forme `images[0]` que le module portait comme une hypothèse non vérifiée.
+Trois choses ont quitté cette liste. `outscale_volume_link` en 0.6.0, qui a monté
+le filtre `LinkVolumeVmIds` dont dépend son attente. `data.outscale_images` en
+0.7.0, qui ne fait plus segfaulter le provider — la voie Outscale résout donc son
+image par la data source plutôt que par un id épinglé, ce qui exerce la forme
+`images[0]` que le module portait comme une hypothèse non vérifiée. Et
+`CreateTags` en 0.7.1 (notre issue #99) : la table de préfixes en tenait quatre
+contre seize que le pack frappait, si bien que taguer un `igw-` ou un `rtb-`
+était refusé sur une ressource que l'émulateur venait de créer. La fixture tague
+maintenant six types plutôt que de remettre les trois qu'elle avait retirés — une
+table qui a pris du retard une fois mérite d'être exercée sur plus que la ligne
+qui l'a attrapée.
