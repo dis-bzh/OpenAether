@@ -77,17 +77,24 @@ de santé entre chacun, et rejouable : un nœud déjà sur la version cible est
 sauté. Les control planes d'abord — un worker a besoin d'un control plane sain
 pour se drainer.
 
-### Le roll s'arrête sur un nœud portant un primaire de base. C'est correct.
+### Les primaires de bases s'écartent tout seuls
 
-`rolling-replace` refuse de redémarrer un nœud qu'il n'a pas pu drainer, et un
-primaire CNPG **ne peut pas être évincé** : sa PodDisruptionBudget l'interdit
+Un primaire CNPG **ne peut pas être évincé** : sa PodDisruptionBudget l'interdit
 jusqu'à un switchover, et sur `local-path-retain` l'instance ne pourrait de toute
-façon pas aller sur un autre nœud. Le roll place chaque Cluster CNPG en
-`nodeMaintenanceWindow` pour sa durée, ce qui est nécessaire et pas suffisant —
-mesuré sur Scaleway le 2026-08-14, où un worker portait *deux* primaires.
+façon pas aller sur un autre nœud. Poser `nodeMaintenanceWindow` est nécessaire
+et pas suffisant — mesuré sur Scaleway le 2026-08-14, où un drain est resté 900 s
+sur un primaire avec la maintenance déjà activée.
 
-C'est donc une étape manuelle aujourd'hui. Quand le roll s'arrête en nommant un
-pod `*-db-N` :
+Avant de drainer un nœud, le roll **en écarte donc tout primaire** vers un
+réplica sain d'un autre nœud (`kubectl cnpg promote`, installé par `task setup`),
+attend que l'opérateur confirme la bascule, puis seulement cordonne et draine.
+Une anti-affinité de pods reste utile par-dessus — elle évite deux primaires sur
+un même nœud — mais ne remplace pas ceci : avec trois workers, un nœud porte
+toujours un primaire.
+
+S'il n'existe aucun réplica sain ailleurs, le roll le dit et le drain échoue
+plutôt que de redémarrer le nœud sous un primaire vivant. C'est ce cas-là qui se
+traite à la main :
 
 ```bash
 # 1. quelle instance est primaire, et où

@@ -71,16 +71,23 @@ cost etcd its quorum. One node at a time, health-gated between each, and
 re-runnable: a node already on the target version is skipped. Control planes
 first — a worker needs a healthy control plane to drain against.
 
-### The roll stops on a node holding a database primary. That is correct.
+### Database primaries move out of the way on their own
 
-`rolling-replace` refuses to reboot a node it could not drain, and a CNPG primary
-**cannot be evicted**: its PodDisruptionBudget forbids it until a switchover has
-happened, and on `local-path-retain` the instance could not move to another node
-anyway. The roll sets `nodeMaintenanceWindow` on every CNPG Cluster for its
-duration, which is necessary and not sufficient — measured on Scaleway
-2026-08-14, where one worker held *two* primaries.
+A CNPG primary **cannot be evicted**: its PodDisruptionBudget forbids it until a
+switchover has happened, and on `local-path-retain` the instance could not move
+to another node anyway. Setting `nodeMaintenanceWindow` is necessary and not
+sufficient — measured on Scaleway 2026-08-14, where a drain sat on a primary for
+the full 900s with maintenance already on.
 
-So this is a manual step today. When the roll stops naming a `*-db-N` pod:
+So before draining a node, the roll **switches any primary off it** to a ready
+replica elsewhere (`kubectl cnpg promote`, installed by `task setup`), waits for
+the operator to confirm the move, and only then cordons and drains. Pod
+anti-affinity is worth having on top — it keeps two primaries off one node — but
+it does not replace this: with three workers, some node always hosts a primary.
+
+If no ready replica exists on another node, the roll says so and the drain then
+fails rather than rebooting the node under a live primary. That is the case to
+handle by hand:
 
 ```bash
 # 1. which instance is primary, and where

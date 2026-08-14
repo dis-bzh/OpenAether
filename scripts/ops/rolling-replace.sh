@@ -216,8 +216,62 @@ cnpg_maintenance() { # <true|false>
     done
 }
 
+# Move any CNPG primary OFF the node we are about to drain.
+#
+# A primary cannot be evicted — its PodDisruptionBudget forbids it until a
+# switchover has happened — and on node-local storage it could not move anyway.
+# `nodeMaintenanceWindow` is necessary and not sufficient: measured on Scaleway
+# 2026-08-14, the drain sat on `grafana-db-1` for the full 900s with maintenance
+# already on. Switching over first is CNPG's own verb for this, and it is what
+# turns the roll from "stops and waits for a human" into something that finishes.
+#
+# Anti-affinity does not replace this. It keeps two primaries off one node, which
+# is worth having, but with three workers some node always hosts one.
+cnpg_switchover_away() { # <node_name>
+  local node="$1" ns name primary primary_node cand cand_node
+  command -v kubectl-cnpg >/dev/null 2>&1 || {
+    warn "kubectl-cnpg not installed — cannot switch a CNPG primary off ${node}."
+    warn "  ./scripts/internal/install-kubectl-cnpg.sh, or see docs/upgrade.md."
+    return 0
+  }
+  { "${KCTL[@]}" get clusters.postgresql.cnpg.io -A \
+      -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.status.currentPrimary}{"\n"}{end}' 2>/dev/null || true; } |
+    while read -r ns name primary; do
+      [[ -n "$ns" && -n "$name" && -n "$primary" ]] || continue
+      primary_node="$("${KCTL[@]}" -n "$ns" get pod "$primary" -o jsonpath='{.spec.nodeName}' 2>/dev/null || true)"
+      [[ "$primary_node" == "$node" ]] || continue
+      # A READY replica, on any other node. Promoting to one that is not ready
+      # would trade a stuck drain for a broken database.
+      cand=""
+      while read -r p n r; do
+        [[ "$r" == "True" && -n "$n" && "$n" != "$node" && "$p" != "$primary" ]] || continue
+        cand="$p"; cand_node="$n"; break
+      done < <("${KCTL[@]}" -n "$ns" get pods -l "cnpg.io/cluster=${name}" \
+        -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.nodeName}{" "}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null || true)
+      if [[ -z "$cand" ]]; then
+        warn "${ns}/${name}: primary ${primary} is on ${node} and no ready replica sits elsewhere — the drain will block."
+        continue
+      fi
+      info "${ns}/${name}: switching primary ${primary} → ${cand} (on ${cand_node})"
+      kubectl-cnpg --kubeconfig "$KUBECONFIG_FILE" promote "$name" "$cand" -n "$ns" >/dev/null 2>&1 ||
+        { warn "${ns}/${name}: promote failed"; continue; }
+      # Wait for the operator to actually move it; the promote only asks.
+      local waited=0
+      while [[ $waited -lt 300 ]]; do
+        [[ "$("${KCTL[@]}" -n "$ns" get cluster "$name" -o jsonpath='{.status.currentPrimary}' 2>/dev/null)" != "$primary" ]] && break
+        sleep 10; waited=$((waited + 10))
+      done
+      if [[ $waited -ge 300 ]]; then
+        warn "${ns}/${name}: still reports ${primary} as primary after 300s"
+      else
+        ok "${ns}/${name}: primary moved off ${node}"
+      fi
+    done
+}
+
 cordon_drain() { # <node_name>
   local node="$1"
+  cnpg_switchover_away "$node"
   info "Cordon + drain ${node}…"
   "${KCTL[@]}" cordon "$node" || die "cordon failed for ${node}"
   if ! "${KCTL[@]}" drain "$node" \
