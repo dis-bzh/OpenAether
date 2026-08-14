@@ -86,7 +86,10 @@ fi
 TFVARS="envs/management-${PROVIDER}.tfvars"
 TALOSCONFIG_FILE="${TALOSCONFIG:-./talosconfig}"
 KUBECONFIG_FILE="${KUBECONFIG:-./kubeconfig}"
-DRAIN_TIMEOUT="${DRAIN_TIMEOUT:-300s}"
+# 300s was not enough for a database switchover, and the run continued anyway.
+# A switchover is a legitimate reason to wait; a drain that never finishes is now
+# fatal, so the budget has to be generous enough to tell the two apart.
+DRAIN_TIMEOUT="${DRAIN_TIMEOUT:-900s}"
 NODE_READY_TIMEOUT="${NODE_READY_TIMEOUT:-600}"   # seconds
 ETCD_TIMEOUT="${ETCD_TIMEOUT:-300}"               # seconds
 LONGHORN_TIMEOUT="${LONGHORN_TIMEOUT:-600}"       # seconds
@@ -186,6 +189,33 @@ healthy_peer_cp() { # <exclude_index>
 # permanently undrainable, so a drain that must succeed can never roll such a
 # cluster. We report it and let the operator decide; talosctl's own drain does
 # not, which is why --upgrade runs it with --drain=false and calls this instead.
+# CNPG guards its primary with a PodDisruptionBudget that forbids eviction until
+# a switchover has happened, and a plain `kubectl drain` does not trigger one —
+# so the drain simply times out. Telling the operator a node maintenance is in
+# progress is the documented way to say "you may move these": it relaxes the
+# budget and lets the instance be recreated, reusing its PVC.
+#
+# Without this the roll drained for five minutes, gave up, and rebooted the node
+# under a live primary — three times in one run on 2026-08-14, which left
+# `zitadel-db` stuck in "Switchover in progress" and `grafana-db` with no active
+# instance, and took eight Kustomizations down behind them.
+cnpg_maintenance() { # <true|false>
+  local on="$1" ns name
+  # `|| true`: a cluster without the CNPG CRD is a normal cluster, and under
+  # `pipefail` the failing get would otherwise kill the whole roll.
+  { "${KCTL[@]}" get clusters.postgresql.cnpg.io -A \
+    -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null || true; } |
+    while read -r ns name; do
+      [[ -n "$ns" && -n "$name" ]] || continue
+      if "${KCTL[@]}" -n "$ns" patch cluster.postgresql.cnpg.io "$name" --type merge \
+        -p "{\"spec\":{\"nodeMaintenanceWindow\":{\"inProgress\":${on},\"reusePVC\":true}}}" >/dev/null 2>&1; then
+        info "CNPG ${ns}/${name}: nodeMaintenanceWindow.inProgress=${on}"
+      else
+        warn "could not set nodeMaintenanceWindow=${on} on ${ns}/${name}"
+      fi
+    done
+}
+
 cordon_drain() { # <node_name>
   local node="$1"
   info "Cordon + drain ${node}…"
@@ -193,7 +223,16 @@ cordon_drain() { # <node_name>
   if ! "${KCTL[@]}" drain "$node" \
         --ignore-daemonsets --delete-emptydir-data --timeout="$DRAIN_TIMEOUT"; then
     warn "drain hit its timeout (${DRAIN_TIMEOUT}); some pods may be stuck (PDBs?)."
-    [[ $ASSUME_YES -eq 1 ]] || { read -rp "Continue with ${node} anyway? [y/N] " a; [[ "$a" == [yY] ]] || die "aborted by operator"; }
+    # Unattended, this used to answer its own question and carry on. Rebooting a
+    # node whose pods REFUSED to move is how a database gets cut off mid-write;
+    # a half-rolled cluster is recoverable (this script skips nodes already on
+    # the target version), a corrupted one is not. Fail, and name what blocked.
+    if [[ $ASSUME_YES -eq 1 ]]; then
+      "${KCTL[@]}" get pods --field-selector "spec.nodeName=${node}" -A \
+        -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name --no-headers 2>/dev/null | head -20 >&2 || true
+      die "${node} could not be drained within ${DRAIN_TIMEOUT} — refusing to reboot it under workloads that would not move. Raise DRAIN_TIMEOUT, or fix the budget that blocks."
+    fi
+    read -rp "Continue with ${node} anyway? [y/N] " a; [[ "$a" == [yY] ]] || die "aborted by operator"
   fi
 }
 
@@ -546,6 +585,14 @@ if [[ $DRY_RUN -eq 0 && $ASSUME_YES -eq 0 ]]; then
     read -rp "Proceed with rolling replacement? [y/N] " a
   fi
   [[ "$a" == [yY] ]] || die "aborted by operator"
+fi
+
+# Tell CNPG a maintenance is on for the whole roll, and take it back off however
+# this ends — including on failure, where leaving the budgets relaxed would be
+# worse than the drain that failed.
+if [[ $DRY_RUN -eq 0 ]]; then
+  cnpg_maintenance true
+  trap 'cnpg_maintenance false' EXIT
 fi
 
 # Workers first (heavy stateful load), then control planes (etcd-gated).

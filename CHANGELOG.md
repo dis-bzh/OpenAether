@@ -136,6 +136,17 @@ lane holds one version per provider, so nothing can move backwards yet.
   `seed-openbao.sh` exited 1 with **no output at all** because a failing command
   substitution under `set -e` aborts at the assignment, before the check that
   would have explained it.
+- **A rolling upgrade rebooted nodes out from under workloads that refused to
+  move.** `cordon_drain` gave the drain 300 seconds, and on timeout — with
+  `--yes`, i.e. every unattended run — answered its own prompt and carried on.
+  Measured on Scaleway 2026-08-14: three nodes in one run, each rebooted while a
+  CNPG primary was still on it, leaving `zitadel-db` in "Switchover in progress"
+  and `grafana-db` with no active instance, and eight Kustomizations not-Ready
+  behind them. The roll now tells CNPG a node maintenance is in progress for its
+  duration (and takes it back off however the run ends), waits 900s rather than
+  300, and **refuses to reboot a node it could not drain**, naming the pods that
+  blocked. A half-rolled cluster is recoverable — this script skips nodes already
+  on the target version — a database cut off mid-write is not.
 - **`rolling-replace` could not run unattended, and lied about what it does.** It
   stops at a confirmation prompt (`--yes` exists; nothing passed it), and that
   prompt announced "DESTROY and recreate" and "system disks are wiped" for

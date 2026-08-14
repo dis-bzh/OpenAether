@@ -121,11 +121,24 @@ invites someone to build what nobody decided.
       So a rolling upgrade is zero-downtime for the API and NOT for the platform's
       own databases, which nothing said until an unattended run asserted
       convergence twice — before and after.
-      **Decide:** whether `rolling-replace --upgrade` must drain differently (a
-      CNPG-aware switchover before the node it hosts the primary on), or whether
-      the operator needs a nudge, or whether this is an upstream CNPG behaviour
-      to report. Then it closes on a clean run where the post-upgrade check
-      reaches 35/35. Rung: real cloud, and it reproduces every time.
+      Diagnosed to the pod on 2026-08-14, second run: `kubectl drain` **evicts**,
+      and a CNPG primary cannot be evicted — its PodDisruptionBudget forbids it
+      until a switchover has happened, and with `local-path-retain` the instance
+      could not move to another node even if it were allowed to. Setting
+      `nodeMaintenanceWindow.inProgress=true` on every Cluster for the roll (now
+      done) is not enough: the drain still timed out at 900s on `grafana-db-1`
+      **and** `zitadel-db-1`, both primaries, both on the same worker.
+      What made this destructive is fixed: the roll used to warn and reboot the
+      node anyway, and now refuses. So the failure is loud and the databases
+      survive — but the roll stops.
+      **Decide:** switch the primary away before draining (CNPG's own verb — the
+      `kubectl cnpg` plugin patches `status.targetPrimary`; doing it with plain
+      kubectl means writing that subresource ourselves), or spread the primaries
+      so one node never holds two, or accept a documented manual step. Note a
+      third pod blocked the same drain, `kube-state-metrics`, which is not CNPG
+      and needs its own look.
+      **Closes:** a clean run where the post-upgrade check reaches 35/35. Rung:
+      real cloud, and it reproduces every time.
 
 - [ ] **`fleet-down` leaves the bastion SSH tunnels open.** Six were still
       listening after a teardown on 2026-08-14, pointing at a cluster that no
