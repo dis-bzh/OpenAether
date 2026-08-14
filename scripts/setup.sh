@@ -270,6 +270,13 @@ if ! check_cmd tflint; then
     "$(dirname "${BASH_SOURCE[0]}")/internal/install-tflint.sh"
 fi
 
+# 5b-bis. kubectl-cnpg — docs/upgrade.md tells the operator to switch a CNPG
+# primary over before its node can be drained, and named a plugin nothing
+# installed. A documented step that needs a tool nobody has is not a step.
+if ! check_cmd kubectl-cnpg; then
+    "$(dirname "${BASH_SOURCE[0]}")/internal/install-kubectl-cnpg.sh"
+fi
+
 # 5c. Check checkov (`task security` runs it directly; only CI ever had it)
 if ! check_cmd checkov; then
     install_checkov

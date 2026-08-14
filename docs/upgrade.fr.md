@@ -95,8 +95,11 @@ kubectl get cluster -A -o custom-columns=NS:.metadata.namespace,\
 NAME:.metadata.name,PRIMARY:.status.currentPrimary
 kubectl get pod <primaire> -n <ns> -o jsonpath='{.spec.nodeName}{"\n"}'
 
-# 2. la basculer vers un réplica sain d'un AUTRE nœud
-kubectl cnpg promote <cluster> <replica> -n <ns>     # plugin kubectl-cnpg
+# 2. la basculer vers un réplica sain d'un AUTRE nœud.
+#    `task setup` installe le plugin (scripts/internal/install-kubectl-cnpg.sh,
+#    épinglé sur la mineure de l'opérateur) ; cette ligne le nommait avant que
+#    quoi que ce soit ne l'installe.
+kubectl cnpg promote <cluster> <replica> -n <ns>
 
 # 3. relancer la MÊME commande — les nœuds déjà à la version cible sont sautés
 task rolling-replace PROVIDER=<p> KEY=~/.ssh/<clé> -- --workers-only --upgrade

@@ -88,8 +88,10 @@ kubectl get cluster -A -o custom-columns=NS:.metadata.namespace,\
 NAME:.metadata.name,PRIMARY:.status.currentPrimary
 kubectl get pod <primary> -n <ns> -o jsonpath='{.spec.nodeName}{"\n"}'
 
-# 2. switch it to a healthy replica on a DIFFERENT node
-kubectl cnpg promote <cluster> <replica> -n <ns>     # kubectl-cnpg plugin
+# 2. switch it to a healthy replica on a DIFFERENT node.
+#    `task setup` installs the plugin (scripts/internal/install-kubectl-cnpg.sh,
+#    pinned to the operator's minor); this line named it before anything did.
+kubectl cnpg promote <cluster> <replica> -n <ns>
 
 # 3. re-run the SAME command — nodes already on the target version are skipped
 task rolling-replace PROVIDER=<p> KEY=~/.ssh/<key> -- --workers-only --upgrade
