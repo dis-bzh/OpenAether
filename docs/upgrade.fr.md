@@ -77,46 +77,55 @@ de santé entre chacun, et rejouable : un nœud déjà sur la version cible est
 sauté. Les control planes d'abord — un worker a besoin d'un control plane sain
 pour se drainer.
 
-### Les primaires de bases s'écartent tout seuls
+### Ce qui bloque vraiment un drain, et les deux portes qui le débloquent
 
-Un primaire CNPG **ne peut pas être évincé** : sa PodDisruptionBudget l'interdit
-jusqu'à un switchover, et sur `local-path-retain` l'instance ne pourrait de toute
-façon pas aller sur un autre nœud. Poser `nodeMaintenanceWindow` est nécessaire
-et pas suffisant — mesuré sur Scaleway le 2026-08-14, où un drain est resté 900 s
-sur un primaire avec la maintenance déjà activée.
+**Un primaire CNPG est inévinçable tant qu'il est primaire.** L'opérateur publie
+une budget `<cluster>-primary` à `disruptionsAllowed=0 / currentHealthy=1 /
+expectedPods=1`, et `nodeMaintenanceWindow` ne la relâche pas — mesuré sur
+Scaleway le 2026-08-15 : fenêtre activée, CNPG supprime la budget des *réplicas*
+et conserve celle du primaire. C'est tout le drain de 900 s.
 
-Avant de drainer un nœud, le roll **en écarte donc tout primaire** vers un
-réplica sain d'un autre nœud (`kubectl cnpg promote`, installé par `task setup`),
-attend que l'opérateur confirme la bascule, puis seulement cordonne et draine.
-Une anti-affinité de pods reste utile par-dessus — elle évite deux primaires sur
-un même nœud — mais ne remplace pas ceci : avec trois workers, un nœud porte
-toujours un primaire.
+Le roll pose donc **`spec.enablePDB: false`** sur chaque cluster CNPG pendant
+qu'il déroule, et le remet à `true` en sortie. Les deux budgets disparaissent,
+primaire compris ; le webhook de l'opérateur recommande lui-même ce réglage
+plutôt que la fenêtre de maintenance. Le primaire est alors évincé comme
+n'importe quel pod et CNPG bascule sur un réplica — un failover non planifié,
+c'est-à-dire exactement ce que le redémarrage du nœud allait provoquer quelques
+secondes plus tard. La fenêtre de maintenance reste posée à côté : c'est elle qui
+dit à l'opérateur de réutiliser le PVC au lieu de reprovisionner une instance
+que le stockage local ne pourrait pas déplacer.
 
-S'il n'existe aucun réplica sain ailleurs, le roll le dit et le drain échoue
-plutôt que de redémarrer le nœud sous un primaire vivant. C'est ce cas-là qui se
-traite à la main :
+**Tout ce qui a une forme de quorum bloque aussi.** Trois exécutions le
+2026-08-14 se sont arrêtées sur trois pods différents — réplicas CNPG,
+`kube-state-metrics`, puis `openbao-1` sur une budget raft voulant 2 sur 3 —
+sans aucun primaire CNPG dans le dernier cas. Toujours la même forme : le roll
+arrivait au nœud suivant pendant que les charges à quorum du précédent
+rejoignaient encore. Avant de cordonner, il attend donc que **chaque budget
+couvrant un pod de ce nœud rapporte `disruptionsAllowed >= 1`**.
+
+Il n'attend que les budgets qui peuvent encore se rétablir
+(`currentHealthy < expectedPods`). Certaines sont à zéro par construction —
+`<cluster>-primary`, les `instance-manager-*` de Longhorn, un
+`kube-state-metrics` à un seul réplica — et les attendre, c'est attendre
+indéfiniment.
+
+Si un drain dépasse quand même son délai, le roll **refuse** et nomme les pods,
+au lieu de redémarrer le nœud sous eux. Ne pas passer en force : la version que
+ceci remplace avertissait puis redémarrait quand même, ce qui a laissé
+`zitadel-db` bloqué en switchover et `grafana-db` sans instance active. Relancer
+la même commande une fois le pod sain — les nœuds déjà à la version cible sont
+sautés.
 
 ```bash
-# 1. quelle instance est primaire, et où
-kubectl get cluster -A -o custom-columns=NS:.metadata.namespace,\
-NAME:.metadata.name,PRIMARY:.status.currentPrimary
-kubectl get pod <primaire> -n <ns> -o jsonpath='{.spec.nodeName}{"\n"}'
+# ce qui refuse, sur le nœud que le roll a nommé
+kubectl get pdb -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,\
+ALLOWED:.status.disruptionsAllowed,HEALTHY:.status.currentHealthy,EXPECTED:.status.expectedPods
 
-# 2. la basculer vers un réplica sain d'un AUTRE nœud.
-#    `task setup` installe le plugin (scripts/internal/install-kubectl-cnpg.sh,
-#    épinglé sur la mineure de l'opérateur) ; cette ligne le nommait avant que
-#    quoi que ce soit ne l'installe.
-kubectl cnpg promote <cluster> <replica> -n <ns>
-
-# 3. relancer la MÊME commande — les nœuds déjà à la version cible sont sautés
-task rolling-replace PROVIDER=<p> KEY=~/.ssh/<clé> -- --workers-only --upgrade
+# état CNPG — le nom qualifié est obligatoire : sur un cluster portant CAPI,
+# `kubectl get cluster` désigne clusters.cluster.x-k8s.io, pas celui-ci.
+kubectl get clusters.postgresql.cnpg.io -A -o custom-columns=NS:.metadata.namespace,\
+NAME:.metadata.name,PRIMARY:.status.currentPrimary,READY:.status.readyInstances
 ```
-
-Ne pas passer en force. La version que ceci remplace avertissait puis redémarrait
-le nœud quand même, ce qui a laissé `zitadel-db` bloqué en switchover et
-`grafana-db` sans instance active. Savoir si une anti-affinité de pods
-permettrait à CNPG de quitter seul un nœud cordoné — et de supprimer cette
-étape — est une question ouverte dans `backlog.md`.
 
 ⚠️ **Le premier apply après un bump de `talos_version` échoue sur OVH et
 Outscale** avec « Provider produced inconsistent final plan », une fois par

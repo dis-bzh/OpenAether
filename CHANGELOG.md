@@ -79,6 +79,53 @@ lane holds one version per provider, so nothing can move backwards yet.
 
 ### Fixed
 
+- **OVH workers raced the subnet, and the race just kept winning.** A worker
+  boots on the private network by uuid, which creates no dependency on the
+  SUBNET; Nova refuses that with 400 "Network <id> requires a subnet in order to
+  boot instances on" and the deploy dies after the network, the LB and the
+  control planes have been created. Both workers failed that way on 2026-08-15.
+  The control planes were never exposed to it — they hang off explicit ports,
+  and a port declares `fixed_ip.subnet_id`. `bastion.tf` documents this exact
+  trap for its own port; the workers were the one place referencing the network
+  directly, and nobody had given them the same guard.
+
+- **The pinned `image_id` made an unattended upgrade impossible on OVH and
+  Outscale.** Both providers already resolve the image by name when `image_id`
+  is null, exactly like Scaleway — but `talos-image.sh` told readers to paste
+  the id into `envs/*.tfvars`, which is a hand-copy on every version bump. The
+  guard that compares the pin to the published image now offers deleting the pin
+  first. Two defects in that guard came out with it: `grep -o 'image_id…'`
+  strips the `bastion_` prefix before the filter downstream can see it, so with
+  no Talos pin left the bastion's own image was read as the pin and OVH refused
+  to deploy over "pins image_id = Ubuntu 26.04"; and anchoring the match then
+  made it match nothing on a file with no pin, which under `set -e` with
+  `pipefail` killed the script inside the command substitution, before the
+  emptiness test on the next line — exit 1, no output at all.
+
+- **The Outscale image lane was not blocked by a 409. Its state disagreed with
+  itself.** Two objects deposed by a `create_before_destroy` experiment that was
+  reverted stayed behind: a v1.13.4 snapshot and its builder. Every plan that
+  changed the version then failed on a graph Cycle, so the lane could publish
+  nothing. Worse, the registered OMI was still the v1.13.4 one while the current
+  snapshot beside it had moved to v1.13.8 — an apply interrupted between the two
+  — so the account held no image matching the name the lane claimed to publish.
+  A destroy plan was clean, so the lane was torn down and rebuilt; the account
+  now reports zero snapshots and zero images before the rebuild, orphan
+  included. This is a repair, not a fix: the underlying single-image-per-provider
+  design is the 1.2.0 entry in `backlog.md`.
+
+- **`check-language.sh` could not see what a script prints.** It read comments
+  and Markdown only, on the argument that a French word in a string literal is
+  not a translation defect. True of a literal nobody reads, false of the ones an
+  operator does: it called this repository clean while an Outscale image build
+  announced "Purge du staging" on every run. Printed strings are scanned now,
+  with `$(...)` and `${...}` stripped first so `du -h "$SNAP"` inside an English
+  message stays a command. The word list also had holes wide enough for a whole
+  sentence — "et ne pourrait ni" contained none of its words, and sixteen
+  `# Groupe NN` headers in the sibling repository survived the first widening.
+  Between the two changes: 3 lines here, 52 in `OpenAether-apps`. `distinct` was
+  tried and pulled back out — an ordinary English word, seven false positives.
+
 - **Task was the one tool nobody pinned, and it took `main` red.** CI installed
   it with `arduino/setup-task`, which asks the releases API for the version
   **unauthenticated**, from a runner IP shared with every other GitHub customer:

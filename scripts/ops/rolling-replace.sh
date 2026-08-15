@@ -206,97 +206,59 @@ healthy_peer_cp() { # <exclude_index>
 # under a live primary — three times in one run on 2026-08-14, which left
 # `zitadel-db` stuck in "Switchover in progress" and `grafana-db` with no active
 # instance, and took eight Kustomizations down behind them.
+# MEASURED on Scaleway 2026-08-15, because "necessary and not sufficient" was
+# still not saying WHICH budget refused. With the maintenance window ON, CNPG
+# deletes the replica budget and KEEPS `<cluster>-primary` at
+# disruptionsAllowed=0 / currentHealthy=1 / expectedPods=1. The primary is
+# therefore unevictable on any node, by design, for as long as it is primary —
+# which is the 900s drain, exactly.
+#
+# `spec.enablePDB: false` deletes BOTH, primary included; the operator's own
+# webhook recommends it over the maintenance window on every patch. Turning it
+# off for the roll lets the drain evict the primary and CNPG fail over to a
+# replica — an unplanned failover, which is what a planned node reboot is going
+# to cause anyway a few seconds later.
+#
+# The maintenance window stays alongside it: it is what tells the operator to
+# reuse the PVC rather than reprovision the instance elsewhere, which on
+# node-local storage it could not do.
 cnpg_maintenance() { # <true|false>
-  local on="$1" ns name
+  local on="$1" ns name pdb
+  # enablePDB is the INVERSE of "maintenance in progress": budgets off while we
+  # roll, back on when we are done.
+  [[ "$on" == "true" ]] && pdb=false || pdb=true
   # `|| true`: a cluster without the CNPG CRD is a normal cluster, and under
   # `pipefail` the failing get would otherwise kill the whole roll.
   { "${KCTL[@]}" get clusters.postgresql.cnpg.io -A \
     -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null || true; } |
     while read -r ns name; do
       [[ -n "$ns" && -n "$name" ]] || continue
-      if "${KCTL[@]}" -n "$ns" patch cluster.postgresql.cnpg.io "$name" --type merge \
-        -p "{\"spec\":{\"nodeMaintenanceWindow\":{\"inProgress\":${on},\"reusePVC\":true}}}" >/dev/null 2>&1; then
-        info "CNPG ${ns}/${name}: nodeMaintenanceWindow.inProgress=${on}"
+      if "${KCTL[@]}" -n "$ns" patch clusters.postgresql.cnpg.io "$name" --type merge \
+        -p "{\"spec\":{\"enablePDB\":${pdb},\"nodeMaintenanceWindow\":{\"inProgress\":${on},\"reusePVC\":true}}}" >/dev/null 2>&1; then
+        info "CNPG ${ns}/${name}: enablePDB=${pdb}, nodeMaintenanceWindow.inProgress=${on}"
       else
-        warn "could not set nodeMaintenanceWindow=${on} on ${ns}/${name}"
+        warn "could not set enablePDB=${pdb} / nodeMaintenanceWindow=${on} on ${ns}/${name}"
       fi
     done
 }
 
-# Move any CNPG primary OFF the node we are about to drain.
+# The CNPG primary used to be switched off the node here, with `kubectl cnpg
+# promote`. Removed on 2026-08-15, for two measured reasons:
 #
-# A primary cannot be evicted — its PodDisruptionBudget forbids it until a
-# switchover has happened — and on node-local storage it could not move anyway.
-# `nodeMaintenanceWindow` is necessary and not sufficient: measured on Scaleway
-# 2026-08-14, the drain sat on `grafana-db-1` for the full 900s with maintenance
-# already on. Switching over first is CNPG's own verb for this, and it is what
-# turns the roll from "stops and waits for a human" into something that finishes.
+#   * it never ran. Both of its readbacks used `kubectl get cluster`, and on a
+#     cluster carrying CAPI that name resolves to clusters.cluster.x-k8s.io, not
+#     clusters.postgresql.cnpg.io. The confirmation compared an empty string to
+#     the old primary, found them different and declared the primary moved
+#     within a second; the "wait until the cluster is whole again" loop could
+#     never see a number and always ran its full 600s. The roll then drained a
+#     node whose primary had not moved.
+#   * the promote itself does nothing here. `kubectl-cnpg promote` (plugin
+#     1.23.6, operator 1.23.1) exits 0 and prints "will be promoted", and
+#     `status.targetPrimary` does not change. Unexplained; backlog.
 #
-# Anti-affinity does not replace this. It keeps two primaries off one node, which
-# is worth having, but with three workers some node always hosts one.
-cnpg_switchover_away() { # <node_name>
-  local node="$1" ns name primary primary_node cand cand_node inst ready
-  command -v kubectl-cnpg >/dev/null 2>&1 || {
-    warn "kubectl-cnpg not installed — cannot switch a CNPG primary off ${node}."
-    warn "  ./scripts/internal/install-kubectl-cnpg.sh, or see docs/upgrade.md."
-    return 0
-  }
-  { "${KCTL[@]}" get clusters.postgresql.cnpg.io -A \
-      -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.status.currentPrimary}{"\n"}{end}' 2>/dev/null || true; } |
-    while read -r ns name primary; do
-      [[ -n "$ns" && -n "$name" && -n "$primary" ]] || continue
-      primary_node="$("${KCTL[@]}" -n "$ns" get pod "$primary" -o jsonpath='{.spec.nodeName}' 2>/dev/null || true)"
-      [[ "$primary_node" == "$node" ]] || continue
-      # A READY replica, on any other node. Promoting to one that is not ready
-      # would trade a stuck drain for a broken database.
-      cand=""
-      while read -r p n r; do
-        [[ "$r" == "True" && -n "$n" && "$n" != "$node" && "$p" != "$primary" ]] || continue
-        cand="$p"; cand_node="$n"; break
-      done < <("${KCTL[@]}" -n "$ns" get pods -l "cnpg.io/cluster=${name}" \
-        -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.nodeName}{" "}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null || true)
-      if [[ -z "$cand" ]]; then
-        warn "${ns}/${name}: primary ${primary} is on ${node} and no ready replica sits elsewhere — the drain will block."
-        continue
-      fi
-      info "${ns}/${name}: switching primary ${primary} → ${cand} (on ${cand_node})"
-      kubectl-cnpg --kubeconfig "$KUBECONFIG_FILE" promote "$name" "$cand" -n "$ns" >/dev/null 2>&1 ||
-        { warn "${ns}/${name}: promote failed"; continue; }
-      # Wait for the operator to actually move it; the promote only asks.
-      local waited=0
-      while [[ $waited -lt 300 ]]; do
-        [[ "$("${KCTL[@]}" -n "$ns" get cluster "$name" -o jsonpath='{.status.currentPrimary}' 2>/dev/null)" != "$primary" ]] && break
-        sleep 10; waited=$((waited + 10))
-      done
-      if [[ $waited -ge 300 ]]; then
-        warn "${ns}/${name}: still reports ${primary} as primary after 300s"
-        continue
-      fi
-      ok "${ns}/${name}: primary moved off ${node}"
-      # And WAIT for the cluster to be whole again. The demoted primary restarts
-      # to rejoin as a replica, and while it is not ready the cluster has one
-      # healthy instance for a budget that wants one — so `currentHealthy <=
-      # desiredHealthy` and the PDB refuses every eviction, including that very
-      # pod's. That is what still blocked worker-2 on 2026-08-14 after both
-      # switchovers had succeeded: not arithmetic, timing.
-      waited=0
-      while [[ $waited -lt 600 ]]; do
-        read -r inst ready < <("${KCTL[@]}" -n "$ns" get cluster "$name" \
-          -o jsonpath='{.status.instances} {.status.readyInstances}' 2>/dev/null || echo "0 0")
-        # Both must be REAL numbers above zero. `0/0` matched "ready == inst" and
-        # reported the cluster whole while the status was simply not populated
-        # yet — a check passing on absent data, which is the defect this whole
-        # session kept finding in other people's code.
-        [[ "$inst" =~ ^[1-9][0-9]*$ && "$ready" == "$inst" ]] && break
-        sleep 10; waited=$((waited + 10))
-      done
-      if [[ $waited -ge 600 ]]; then
-        warn "${ns}/${name}: only ${ready:-?}/${inst:-?} instances ready after the switchover — the drain will likely block."
-      else
-        ok "${ns}/${name}: ${ready}/${inst} instances ready again"
-      fi
-    done
-}
+# `spec.enablePDB: false` in cnpg_maintenance above removes the budget that made
+# the primary unevictable, which is what the switchover was for. Nothing here
+# needs the plugin any more.
 
 # Wait until the cluster says it can afford to lose a pod on this node.
 #
@@ -353,7 +315,6 @@ wait_pdb_headroom() { # <node_name>
 
 cordon_drain() { # <node_name>
   local node="$1"
-  cnpg_switchover_away "$node"
   wait_pdb_headroom "$node"
   info "Cordon + drain ${node}…"
   "${KCTL[@]}" cordon "$node" || die "cordon failed for ${node}"
