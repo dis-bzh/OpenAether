@@ -12,6 +12,37 @@ explanation belongs in the commit that ruled it out.
 
 ## Where we stand
 
+2026-08-15: **the three clouds ran side by side for the first time** — one git
+worktree and one tunnel port block each. The Talos tunnels used a fixed block of
+local ports, so a three-provider validation had to be three sequential runs;
+`TALOS_TUNNEL_OFFSET` is what made a day of findings affordable, and it is
+proven by Scaleway on 50000+i, OVH on 50200+i and Outscale on 50400+i at the
+same moment.
+
+Deploy → Day-1 seed → 35/35 Kustomizations → idempotency: green and unattended
+on Scaleway and OVH, ~25 minutes each. Kubernetes 1.36.2→1.36.3 and Talos
+1.13.7→1.13.8 applied in **one** apply on both, with no "inconsistent final
+plan" anywhere — upstream #352 does not reproduce since the
+`replace_triggered_by` workaround, which closes that entry.
+
+The Talos node roll is where the day went, and the fix shipped for it last
+session **never ran**: both of its readbacks used `kubectl get cluster`, which
+on a cluster carrying CAPI resolves to `clusters.cluster.x-k8s.io`, not CNPG. It
+compared an empty string, declared the primary moved a second after asking, and
+drained a node whose primary had not moved. Behind it, three more:
+`nodeMaintenanceWindow` keeps the `<cluster>-primary` budget at zero (measured —
+`spec.enablePDB: false` is what removes it); Flux owns those objects and put
+them back ten minutes into the roll, so the roll now suspends the owning
+Kustomization and `staging-verify.sh` fails if one is left suspended; and
+`kube-state-metrics` blocked every drain it met because `minAvailable: 1` on a
+one-replica Deployment forbids eviction for ever — it was meant to have two
+replicas and the values used the wrong key, which Helm ignored in silence.
+
+Two environment truths came with them, and they are prerequisites rather than
+bugs: a rolling upgrade needs one node's worth of spare capacity (Scaleway at
+72/47/27% of CPU requests drained clean, OVH at 78/99/100% did not), and Outscale
+at 3 CP + 1 worker deploys but cannot host the platform at all.
+
 2026-08-14: **everything below was proven by a human running commands. Nothing
 re-proves it.** `.github/workflows/staging.yml` is the answer to that and it has
 never executed: it was merged 2026-08-13 with no `staging` environment and none
@@ -104,82 +135,98 @@ is an entry that gets picked up and put back down. **Decide:** replaces
 **Closes:** when a question has to be settled first — a task-shaped entry
 invites someone to build what nobody decided.
 
-- [ ] **The infrastructure survives a rolling Talos upgrade; the databases do
-      not.** Measured on Scaleway 2026-08-14, on a clean unattended run that
-      reached this point with no intervention: deploy, Day-1 seeding, 35/35
-      Kustomizations Ready, idempotency, Kubernetes 1.36.2→1.36.3, Talos
-      1.13.7→1.13.8 in place on all six nodes, 13 probe FAILs in 1299 samples,
-      `tofu plan` empty afterwards — and then **8 of 35 Kustomizations not Ready**,
-      blocked on `cnpg` and `storage-backup-target`.
-      The CNPG instance pods sit on `local-path-retain`, which is the right call
-      and is argued in `apps/base/cnpg/cluster.yaml` (CNPG replicates itself;
-      Longhorn underneath is an anti-pattern). The problem is that after their
-      node reboots the pods stay `Completed` and the operator does not bring them
-      back: `grafana-db` reported "Waiting for the instances to become active"
-      and `zitadel-db` sat in "Switchover in progress" for over twenty minutes,
-      on nodes that were Ready again.
-      So a rolling upgrade is zero-downtime for the API and NOT for the platform's
-      own databases, which nothing said until an unattended run asserted
-      convergence twice — before and after.
-      Diagnosed to the pod on 2026-08-14, second run: `kubectl drain` **evicts**,
-      and a CNPG primary cannot be evicted — its PodDisruptionBudget forbids it
-      until a switchover has happened, and with `local-path-retain` the instance
-      could not move to another node even if it were allowed to. Setting
-      `nodeMaintenanceWindow.inProgress=true` on every Cluster for the roll (now
-      done) is not enough: the drain still timed out at 900s on `grafana-db-1`
-      **and** `zitadel-db-1`, both primaries, both on the same worker.
-      What made this destructive is fixed: the roll used to warn and reboot the
-      node anyway, and now refuses. So the failure is loud and the databases
-      survive — but the roll stops.
-      **Switching the primary away is implemented and works — and is not enough.**
-      Run 8, Scaleway 2026-08-14: the roll moved both primaries off `worker-2`
-      (`grafana-db-1 → grafana-db-2`, `zitadel-db-1 → zitadel-db-3`, both
-      confirmed by the operator) and the drain **still** could not evict the
-      leftover **replicas** `grafana-db-1` and `zitadel-db-1`, nor
-      `kube-state-metrics`. Five of six nodes upgraded; the sixth stopped.
-      **It generalises beyond CNPG, and that is the real shape.** Run 9 blocked on
-      `openbao-1` instead — a raft PDB wanting 2 of 3 — with no CNPG primary on
-      the node at all. Run 8 blocked on CNPG replicas and `kube-state-metrics`.
-      The pattern is the same every time: the roll gates on etcd and Longhorn
-      between nodes and on **nothing else**, so it reaches the next node while the
-      previous one's quorum workloads are still rejoining, and their budgets
-      correctly refuse the next eviction.
-      The fix that covers all of them at once is one gate, not one per workload:
-      before draining, wait until **every** PodDisruptionBudget reports
-      `status.disruptionsAllowed >= 1`. That is the cluster saying, in its own
-      words, that it can afford to lose a pod. Start there next session.
+- [ ] **`task up` cannot add a node to a cluster it already bootstrapped.** Its
+      `infra` step applies with `talos_bootstrap=true` once the cluster is
+      bootstrapped (correctly — forcing false zeroes the counts), so it waits for
+      the NEW node's Talos API through a tunnel that `task up` only opens on the
+      NEXT step. Measured on Outscale and OVH 2026-08-15 scaling 1→3 and 3→4
+      workers: the apply retries for its full 900s and gives up. The workaround
+      is ugly and works — let the apply fail, open the tunnels once the state
+      holds the new node, re-run — but it means the documented "re-run to resume"
+      is untrue for any change that adds a node, and it would bite a cold shell
+      re-running `task up` on an existing cluster too, since nothing has the
+      tunnels open then either.
+      **Decide:** open the tunnels before `infra` when the state is already
+      bootstrapped, or split the apply so node creation and Talos configuration
+      are separate phases again.
+      **Closes:** `workers = N+1` in a tfvars, one `task up`, exit 0, N+1 nodes
+      Ready. Rung: real cloud.
 
-      The CNPG-specific cause below is real and fixed, and was not sufficient:
-      TIMING, not arithmetic — a first reading of run 8
-      blamed the instance count and was wrong. A demoted primary restarts to
-      rejoin as a replica, and while it is not ready the cluster has one healthy
-      instance for a budget that wants one, so `currentHealthy <= desiredHealthy`
-      and the PDB refuses every eviction, that pod's included. The switchover
-      waited for the primary to move and not for the cluster to be whole again;
-      it now waits for `readyInstances == instances`.
-      `kube-state-metrics` blocked the same drain and is not CNPG at all — it has
-      appeared in every blocked drain so far and needs its own look.
+- [ ] **`kubectl cnpg promote` does nothing here, and says it worked.** Plugin
+      1.23.6 against a 1.23.1 operator: exit 0, "Node X in cluster Y will be
+      promoted" on stdout, and `status.targetPrimary` unchanged. Measured three
+      times on Scaleway 2026-08-15, on a healthy cluster and on one stuck
+      mid-switchover. The operator does accept target changes — it sets them
+      itself when a primary is evicted — so this is not a permissions problem.
+      Nothing depends on it any more (the roll uses `enablePDB`), but the plugin
+      is still what a human reaches for, and a tool that reports success while
+      doing nothing is worse than one that is absent.
+      **Closes:** a promote that moves `targetPrimary`, or the version pin that
+      makes it move, or the instruction not to use it. Rung: real cloud.
 
-      Earlier on 2026-08-14, before the switchover existed: **documented as a
-      manual step**
-      (`upgrade.md` § "The roll stops on a node holding a database primary"), so
-      the release can move. The roll refuses and says which pod; the operator
-      switches the primary over and re-runs, and already-upgraded nodes are
-      skipped. Nothing speculative shipped.
+- [ ] **A stuck CNPG switchover has no automatic way out.** Same run: draining
+      two workers in sequence left `zitadel-db` with the old primary demoted and
+      "waiting for the switchover to finish" while the target replica waited for
+      WAL only a running primary would produce. Deadlock, 15 minutes, no
+      progress; the third instance was healthy and ready the whole time.
+      Restarting the operator did nothing. Deleting the target's pod resolved it
+      in about a minute.
+      **Decide:** whether the roll should wait for `readyInstances == instances`
+      between nodes (it would have prevented this — the second drain started
+      while the first node's instances were still rejoining) or whether this is
+      a CNPG problem to report upstream. The first is cheap and belongs to the
+      roll either way.
+      **Closes:** two consecutive worker drains with the databases healthy at the
+      end, no pod deleted by hand. Rung: real cloud.
 
-      **Verify first, then implement:** the preferred answer is pod
-      anti-affinity on the CNPG instances — one node would never hold two
-      primaries, and CNPG might vacate a cordoned node by itself. That second
-      half is an ASSUMPTION and this run gives no evidence for it: the primaries
-      stayed put for 900s on a cordoned node with `nodeMaintenanceWindow` on.
-      Measure it before building on it — cordon a node holding a primary, with
-      `enablePodAntiAffinity` set, and watch whether CNPG switches over on its
-      own. If it does, the manual step goes away; if it does not, the remaining
-      option is `kubectl cnpg promote` and its plugin dependency.
-      Note a third pod blocked the same drain, `kube-state-metrics`, which is not
-      CNPG at all and needs its own look.
-      **Closes:** that cordon experiment, answered either way, then a clean run
-      where the post-upgrade check reaches 35/35. Rung: real cloud.
+- [ ] **The OpenBao bootstrap jobs fail terminally and nothing retries them.**
+      Both of them, on Outscale 2026-08-15: `openbao-init` hit its
+      `activeDeadlineSeconds: 600` while the StatefulSet was still waiting to be
+      scheduled, and `openbao-vault-bootstrap` then hit its 1800s while OpenBao
+      was still sealed behind the first failure. `backoffLimit` does not help —
+      a deadline is terminal. The unsealer waits for ever on a Secret that will
+      never exist, the KV engine is never mounted, and the Flux DAG stops at
+      seeding on a cluster where everything else is healthy. Deleting each Job so
+      Flux recreates it fixed both in about two minutes.
+      A deadline that is generous enough for the slowest cluster is not a fix
+      either: it only moves the cliff. The job should wait for its dependency
+      before starting its own clock, or something should notice a Failed Job.
+      **Decide:** which of those two.
+      **Closes:** a fresh deploy whose OpenBao is slow to schedule and still
+      converges, unattended. Rung: real cloud.
+
+- [ ] **Nothing states the minimum a cluster needs to be upgradable.** Two
+      measurements, 2026-08-15: OVH's three `b3-8` workers sat at 78/99/100% of
+      CPU requests and no node could be drained — the evicted pods had nowhere to
+      go, so their budgets never recovered and the drain waited out its full 900s
+      with no eviction error to show for it. Outscale at 3 CP + 1 worker deploys
+      and then cannot host the platform: OpenBao's three replicas never schedule
+      (the control planes are tainted, one worker is not enough), so the DAG stops
+      at seeding. `upgrade.md` now says a roll needs one node's worth of spare
+      capacity; the examples and `deployment-test-matrix.md` still do not say what
+      that means per provider.
+      **Closes:** a documented minimum per provider, and the shipped examples
+      meeting it. Rung: real cloud for the numbers, which we now have.
+
+- [ ] **Three Kyverno policies have been in Audit since they were written.**
+      `require-security-context`, `restrict-image-registries` and
+      `restrict-privileged` fire against cert-manager, the CAPI providers and
+      OpenBao's init containers on every cluster. Audit is a decision if someone
+      made it and a leak if nobody did; either way the count has never been
+      driven down, so a NEW violation is invisible among the standing ones.
+      **Decide:** exempt what is legitimately privileged by name and enforce the
+      rest, or record why these three stay in Audit.
+      **Closes:** zero unexplained violations on a fresh cluster. Rung: real
+      cloud.
+
+- [ ] **`check-language.sh` exists twice and nothing compares the copies.** The
+      infra copy and the apps copy drifted apart until 2026-08-15, when widening
+      one and not the other would have left 52 lines of French passing CI in the
+      sibling repository. `check-skill-parity.sh` does exactly this job for the
+      shared skills.
+      **Closes:** the parity check covering it, or one copy and a documented way
+      for the other repository to call it. Rung: `task test`.
+
 
 - [ ] **`fleet-down` leaves the bastion SSH tunnels open.** Six were still
       listening after a teardown on 2026-08-14, pointing at a cluster that no
@@ -219,31 +266,6 @@ invites someone to build what nobody decided.
       **Closes:** `check-staging-secrets.sh` green, then one `workflow_dispatch`
       per provider, green, `stages=full`. Rung: real cloud — that is the point
       of the lane.
-
-- [ ] **The first apply after a `talos_version` bump always fails, and it is an
-      upstream bug we cannot take the fix for.** Reproduced on OVH and Outscale:
-      apply reports "Provider produced inconsistent final plan" once per machine
-      config, and re-running succeeds. Identified 2026-08-14 — it is
-      `siderolabs/terraform-provider-talos` **#352**, on
-      `.machine_configuration_hash`: when `machine_configuration_input` is
-      unknown at plan time (the data source reads "during apply"), the provider
-      keeps the OLD hash in the plan and recomputes it at apply, and OpenTofu
-      rejects the change. That also explains why the second run works — the first
-      apply resolves whatever was unknown, so the data source becomes readable at
-      plan time and nothing is deferred.
-      Fixed upstream by PR #359 (commit `024ce5a`, 2026-06-04), which ships in
-      **0.12.0-alpha.3 and later only**. 0.11.0 is still the newest stable and is
-      what `cluster/versions.tf` pins, so there is no patch to move to — the same
-      0.12 dependency as the declarative-upgrade entry below.
-      **Decide:** wait for 0.12 stable, or force a replace instead of an update
-      (`replace_triggered_by` on a `terraform_data` carrying the version pair —
-      a create plans the hash as unknown, so there is no prior value to be
-      inconsistent with). The second is untested and must not be committed as a
-      fix before it is.
-      **Closes:** one apply after a version bump, exit 0, no retry. Rung: real
-      cloud — it needs the data source to be deferred, which neither mocks nor
-      the container lane can produce. `staging.yml`'s upgrade stage is where it
-      will show, and it does not retry, on purpose.
 
 - [ ] **Report boot-image drift, now that nothing else will.** Node resources
       ignore their image attribute, because otherwise a `talosctl upgrade` leaves
@@ -297,14 +319,19 @@ invites someone to build what nobody decided.
       while a duplicate snapshot from the failed run was sitting there. It does
       not look at snapshots or images.
 
-- [ ] **Outscale cannot run the HA topology under its default quota.** 3 CP +
-      3 workers of `tinav5.c2r7p2` is 42 GB against a 40 GB RAM quota, so the
-      documented `OSC-mgmt-ha` case is unreachable without a quota request.
-      `preflight-quotas` refuses correctly and explains why — the overrun is
-      tolerated at creation and then every later VM is silently refused. Either
-      raise the quota, or write the reduced topology (3 CP + 1 worker, 28 GB)
-      into the example and the matrix so nobody plans around a case that cannot
-      run.
+- [ ] **Outscale cannot run the HA topology under its default quota, and the
+      reduced one cannot run OpenAether.** 3 CP + 3 workers of `tinav5.c2r7p2` is
+      42 GB against a 40 GB RAM quota; `preflight-quotas` refuses correctly and
+      explains why — the overrun is tolerated at creation and every later VM is
+      then silently refused. The escape this entry used to propose, writing the
+      reduced 3 CP + 1 worker topology into the example, is now measured and
+      closed off: it deploys and then stops at seeding, because the control
+      planes are tainted and one worker cannot hold OpenBao's three replicas
+      (2026-08-15).
+      **Decide:** raise the quota, or pick a smaller flavour that fits 3+3 under
+      40 GB. There is no working topology below three workers.
+      **Closes:** `OSC-mgmt-ha` reaching 35/35 Kustomizations inside quota. Rung:
+      real cloud.
 
 - [ ] **`talos_machine_bootstrap` still needs a human after an interrupted
       apply.** The comment and the missing timeout are fixed; the behaviour is

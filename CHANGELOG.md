@@ -79,6 +79,32 @@ lane holds one version per provider, so nothing can move backwards yet.
 
 ### Fixed
 
+- **The rolling Talos upgrade blocked on database budgets, and the fix shipped
+  for it last session had never run.** Four defects, one drain:
+  - Both readbacks in the CNPG switchover used `kubectl get cluster`, which on a
+    cluster carrying CAPI resolves to `clusters.cluster.x-k8s.io`. The
+    confirmation compared an empty string against the old primary, decided they
+    differed and announced "primary moved off <node>" a second after asking —
+    while the primary had not moved. That is last session's "zitadel-db stuck at
+    0/0 instances ready": the wrong CRD, not CNPG.
+  - The switchover was not the lever anyway. With `nodeMaintenanceWindow` on,
+    CNPG deletes the replica budget and keeps `<cluster>-primary` at
+    `disruptionsAllowed=0`, so the primary is unevictable — measured by reading
+    the budgets. `spec.enablePDB: false` removes both, and the operator's own
+    webhook recommends it over the maintenance window. The promote path is gone,
+    along with its dependency on a plugin that here exits 0, prints "will be
+    promoted" and changes nothing.
+  - Flux owns those objects and reconciles every 10 minutes, which is shorter
+    than a roll: the budgets came back three nodes in and the drain blocked
+    again. The roll now suspends the owning Kustomization — found from the
+    objects' own Flux labels — and resumes it afterwards. Since a suspended
+    Kustomization keeps a stale Ready condition, `staging-verify.sh` now fails on
+    any suspended Kustomization rather than reading a frozen DAG as converged.
+  - `kube-state-metrics` blocked every drain it met, in `OpenAether-apps`: a
+    `minAvailable: 1` budget over a one-replica Deployment forbids eviction for
+    ever. It was meant to have two replicas, and the values used `replicaCount`
+    where that chart's key is `replicas` — Helm ignored it without a word.
+
 - **OVH workers raced the subnet, and the race just kept winning.** A worker
   boots on the private network by uuid, which creates no dependency on the
   SUBNET; Nova refuses that with 400 "Network <id> requires a subnet in order to
