@@ -98,7 +98,7 @@ echo "=== cnpg_deadlocked: fires on the measured shape and nothing else ==="
 # The real deadlock: currentPrimary gone, target exists but unready, a third ready.
 DEADLOCK='get clusters.postgresql.cnpg.io -A\t0\tfoundation-databases zitadel-db zitadel-db-1 zitadel-db-2\n'
 plan "${DEADLOCK}get pod zitadel-db-1\t1\tError from server (NotFound): pods \"zitadel-db-1\" not found\nget pod zitadel-db-2\t0\tFalse\nget pods -l cnpg.io/cluster=zitadel-db\t0\tzitadel-db-2 False%%zitadel-db-3 True\n"
-[ "$(cnpg_deadlocked)" = "foundation-databases zitadel-db zitadel-db-2" ] \
+[ "$(cnpg_deadlocked)" = "foundation-databases zitadel-db zitadel-db-2 zitadel-db-1" ] \
   && ok "the measured deadlock is detected, naming the target to delete" \
   || bad "deadlock not detected: got '$(cnpg_deadlocked)'"
 

@@ -430,7 +430,7 @@ cnpg_deadlocked() {
     [[ -n "$("${KCTL[@]}" -n "$ns" get pods -l "cnpg.io/cluster=${name}" \
         -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null |
         awk '$2 == "True" { print $1 }')" ]] || continue
-    echo "$ns $name $tgt"
+    echo "$ns $name $tgt $cur"
   done < <("${KCTL[@]}" get clusters.postgresql.cnpg.io -A \
     -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.status.currentPrimary}{" "}{.status.targetPrimary}{"\n"}{end}' 2>/dev/null)
 }
@@ -474,7 +474,7 @@ wait_cnpg_whole() {
       while read -r d; do
         [[ -n "$d" ]] || continue
         set -- $d
-        warn "CNPG ${1}/${2} is in the known deadlock: primary ${1} pod gone, target ${3} stuck."
+        warn "CNPG ${1}/${2} is in the known deadlock: primary ${4} pod gone, target ${3} stuck."
         warn "  Deleting ${3} to force a re-election — see docs/upgrade.md."
         if "${KCTL[@]}" -n "$1" delete pod "$3" >/dev/null 2>&1; then
           ok "deleted ${1}/${3}; waiting for the cluster to elect"
