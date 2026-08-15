@@ -192,6 +192,42 @@ Après chaque nœud, puis à la fin :
 task plan ROLE=management PROVIDER=<p> STRICT=1   # sortie 2 = non convergé
 ```
 
+## Itérer sur le roll lui-même, sans reconstruire le cluster
+
+Corriger ce script voulait dire redéployer un cluster de 85 minutes pour en
+exercer les vingt dernières. Ce n'est pas une fatalité : les deux gestes
+ci-dessous ont servi sur un cluster vivant le 2026-08-15, et
+[`scripts/dev/roll-lab.sh`](../scripts/dev/roll-lab.sh) les rend reproductibles.
+Il refuse de tourner si le tfvars ne nomme pas un environnement jetable **et** si
+le kubeconfig n'atteint pas le cluster que cet état décrit, et il annonce ce
+qu'il va changer avant de le changer.
+
+```bash
+scripts/dev/roll-lab.sh status <provider> --offset <n>   # ce qu'un resume sauterait
+scripts/dev/roll-lab.sh resume <provider> --offset <n>   # relancer le roll, en minutes
+scripts/dev/roll-lab.sh inject-cnpg-deadlock <provider> --offset <n>
+scripts/dev/roll-lab.sh cleanup <provider> --offset <n>  # décordonner ce qui est resté
+```
+
+**Resume.** Un nœud déjà sur la version cible est sauté : un roll corrigé se
+rejoue donc sur place. `resume` lance `rolling-replace.sh <p> --upgrade
+--workers-only --yes` après avoir vérifié les prérequis que le roll, lui,
+découvre trop tard — un cluster vivant, et un tunnel Talos par nœud.
+
+**Inject.** Le blocage décrit au § Une base restée en « Failing over » a coûté
+quatre rolls cloud à caractériser et se reproduit en deux minutes environ :
+cordonner le nœud qui porte le primaire d'un cluster et supprimer ce pod. Son PVC
+`local-path-retain` l'épingle au nœud cordonné, il ne peut donc pas revenir, et
+CNPG se fige. La commande vérifie avec le détecteur **du roll lui-même** et sort
+en erreur si le blocage n'est pas apparu — elle ne peut pas annoncer un succès en
+silence. `cleanup` défait tout ; CNPG se répare dès que le pod peut être
+replanifié.
+
+Moins cher encore, et c'est là qu'une correction de garde commence :
+[`scripts/dev/test-rolling-replace.sh`](../scripts/dev/test-rolling-replace.sh)
+exerce la même logique contre un kubectl bouchon, en quelques secondes et sans
+cluster.
+
 ## Remplacer un nœud plutôt que le mettre à niveau
 
 `--upgrade` ne peut pas porter un changement de disque ou de zone, ni un nouveau

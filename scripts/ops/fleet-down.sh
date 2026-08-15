@@ -46,6 +46,12 @@ FAILED=0
 info() { printf '\n▶ %s\n' "$*"; }
 ok()   { printf '✓ %s\n' "$*"; }
 warn() { printf '⚠ %s\n' "$*" >&2; }
+# This file had no `die`, and the guard added on 2026-08-15 called one. bash
+# printed "die: command not found", carried on, and destroyed the management
+# after an enumeration that had failed — the exact outcome the guard exists to
+# prevent, with the guard in place. Found by scripts/dev/test-teardown.sh on its
+# first run, which is the whole argument for that harness.
+die()  { printf '✗ %s\n' "$*" >&2; exit 1; }
 
 # ------------------------------------------------------------------ 1. edges
 #

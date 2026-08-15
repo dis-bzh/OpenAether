@@ -19,7 +19,9 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export KUBECONFIG="${KUBECONFIG:-$ROOT/infrastructure/opentofu-local/kubeconfig}"
-NS=gate-lab
+# One namespace per run: cleanup is --wait=false, so a reused namespace still
+# holds the previous run's blocking budget and fails the satisfiable case.
+NS="gate-lab-$$"
 
 PASS=0
 FAIL=0
@@ -33,11 +35,14 @@ kubectl cluster-info >/dev/null 2>&1 || {
 
 cleanup() { kubectl delete ns "$NS" --wait=false >/dev/null 2>&1 || true; }
 trap cleanup EXIT
-kubectl get ns "$NS" >/dev/null 2>&1 || kubectl create ns "$NS" >/dev/null
+kubectl create ns "$NS" >/dev/null
 
 # --- the functions under test, with a REAL kubectl -----------------------------
 eval "$(awk '
-  BEGIN { split("cnpg_installed,cnpg_pod_state,cnpg_deadlocked,wait_pdb_headroom", a, ",")
+  BEGIN { # pdb_short is what wait_pdb_headroom calls: extracting one without the other
+          # gave "pdb_short: command not found", a non-zero return, and an assertion
+          # that read it as "the gate blocked" — red for a reason that was not the code.
+          split("cnpg_installed,cnpg_pod_state,cnpg_deadlocked,pdb_short,wait_pdb_headroom", a, ",")
           for (i in a) want[a[i]] = 1 }
   /^[a-z_]+\(\) \{/ { name = $1; sub(/\(\).*/, "", name); inside = (name in want) }
   inside { print }
@@ -71,7 +76,15 @@ echo
 echo "=== wait_pdb_headroom against a real PodDisruptionBudget ==="
 kubectl -n "$NS" create deployment pause --image=registry.k8s.io/pause:3.9 --replicas=2 >/dev/null 2>&1
 kubectl -n "$NS" rollout status deployment/pause --timeout=120s >/dev/null 2>&1
-NODE="$(kubectl -n "$NS" get pods -l app=pause -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null)"
+# Wait for a SCHEDULED pod, and assert it. An empty node name makes
+# `--field-selector spec.nodeName=` an error, which the gate now correctly reads
+# as blocking — so racing the rollout here failed the gate for the wrong reason.
+for _ in $(seq 1 30); do
+  NODE="$(kubectl -n "$NS" get pods -l app=pause -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null)"
+  [ -n "$NODE" ] && break
+  sleep 2
+done
+[ -n "$NODE" ] || { echo "✗ no pause pod was scheduled — cannot test the gate" >&2; exit 1; }
 
 # A budget that is satisfiable: 2 healthy, 1 required.
 kubectl -n "$NS" apply -f - >/dev/null 2>&1 <<EOF
@@ -80,9 +93,18 @@ kind: PodDisruptionBudget
 metadata: {name: pause-ok, namespace: $NS}
 spec: {minAvailable: 1, selector: {matchLabels: {app: pause}}}
 EOF
-sleep 5
+# Establish the precondition rather than sleep and hope: a PDB's status is
+# computed asynchronously, and a budget that has not been evaluated yet reads
+# currentHealthy 0 of 2 — which is exactly the "short" shape the gate waits on.
+for _ in $(seq 1 30); do
+  [ "$(kubectl -n "$NS" get pdb pause-ok -o jsonpath='{.status.disruptionsAllowed}' 2>/dev/null)" = "1" ] && break
+  sleep 2
+done
 PDB_TIMEOUT=20
-if wait_pdb_headroom "$NODE" >/dev/null 2>&1; then
+# stdin closed: on timeout the gate falls back to an interactive prompt, and
+  # `read -rp` on a non-terminal stdin blocks for ever. Unattended is the mode
+  # under test, and this harness hung ten minutes learning that.
+  if wait_pdb_headroom "$NODE" >/dev/null 2>&1 </dev/null; then
   ok "a satisfiable budget lets the gate through"
 else
   bad "the gate blocked on a budget that allows a disruption"
@@ -104,7 +126,10 @@ EXPECTED="$(kubectl -n "$NS" get pdb pause-stuck -o jsonpath='{.status.expectedP
 if [ "${ALLOWED:-1}" = "0" ]; then
   ASSUME_YES=1
   PDB_TIMEOUT=20
-  if wait_pdb_headroom "$NODE" >/dev/null 2>&1; then
+  # stdin closed: on timeout the gate falls back to an interactive prompt, and
+  # `read -rp` on a non-terminal stdin blocks for ever. Unattended is the mode
+  # under test, and this harness hung ten minutes learning that.
+  if wait_pdb_headroom "$NODE" >/dev/null 2>&1 </dev/null; then
     bad "the gate passed a budget at disruptionsAllowed=0 (healthy=$HEALTHY expected=$EXPECTED)"
   else
     ok "a blocking budget stops the gate (healthy=$HEALTHY expected=$EXPECTED)"

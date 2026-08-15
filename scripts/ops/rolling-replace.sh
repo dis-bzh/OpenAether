@@ -246,7 +246,17 @@ healthy_peer_cp() { # <exclude_index>
 # an empty answer. Without this the `|| true` on those queries turned an
 # apiserver blip into "no databases to protect", and the roll drained into live
 # budgets.
-cnpg_installed() { "${KCTL[@]}" get crd clusters.postgresql.cnpg.io >/dev/null 2>&1; }
+# "Is CNPG installed?" must not answer no because the apiserver was busy: that
+# would make the roll skip every database gate and drain blind. A genuine
+# NotFound is no; anything else is fatal.
+cnpg_installed() {
+  local err
+  err="$("${KCTL[@]}" get crd clusters.postgresql.cnpg.io 2>&1 >/dev/null)" && return 0
+  case "$err" in
+    *NotFound* | *"not found"* | *"doesn't have a resource type"*) return 1 ;;
+    *) die "cannot tell whether the CNPG CRD exists: ${err%%$'\n'*}" ;;
+  esac
+}
 
 # The Flux Kustomization(s) owning the CNPG clusters, one "namespace name" per
 # line. Dies rather than hand back an empty guess.
@@ -437,34 +447,33 @@ cnpg_deadlocked() {
 
 # The qualified resource name is not optional — see the note above.
 CNPG_TIMEOUT="${CNPG_TIMEOUT:-600}"   # seconds
+
+# Every CNPG cluster that is NOT whole, as "<ns>/<name>(ready/instances)" tokens;
+# empty output means every one of them is. A non-zero return is a DIFFERENT
+# answer — the query failed. Written with `|| true` first time round, a blip
+# while the apiserver settles after a control-plane roll emptied the list and
+# waved the next drain through.
+cnpg_pending() {
+  local answer ns name inst ready pending=""
+  answer="$("${KCTL[@]}" get clusters.postgresql.cnpg.io -A \
+    -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.status.instances}{" "}{.status.readyInstances}{"\n"}{end}' 2>/dev/null)" || return 1
+  while read -r ns name inst ready; do
+    [[ -n "$ns" && -n "$name" ]] || continue
+    # A status that has not been populated must not read as "whole": require
+    # real numbers, the way the 0/0 check that used to pass here did not.
+    [[ "$inst" =~ ^[1-9][0-9]*$ && "$ready" == "$inst" ]] || pending+="${ns}/${name}(${ready:-?}/${inst:-?}) "
+  done <<<"$answer"
+  printf '%s' "$pending"
+}
+
 wait_cnpg_whole() {
-  local waited=0 pending ns name inst ready answer rc unstuck=0 d
+  local waited=0 pending unstuck=0 d
   # The guard its two siblings have and this one did not: on a cluster that
   # never picked the cnpg brick, the query below fails, and under `set -e` the
   # roll dies inside the first cordon_drain having cordoned nothing.
   cnpg_installed || return 0
   while [[ $waited -lt $CNPG_TIMEOUT ]]; do
-    # Same rule as the budget confirmation above: a query that FAILED is not a
-    # cluster that is whole. Written with `|| true` first time round, a blip
-    # while the apiserver settles after a control-plane roll would have emptied
-    # the list and waved the next drain through.
-    if ! answer="$("${KCTL[@]}" get clusters.postgresql.cnpg.io -A \
-      -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.status.instances}{" "}{.status.readyInstances}{"\n"}{end}' 2>/dev/null)"; then
-      rc=1
-    else
-      rc=0
-    fi
-    if [[ $rc -ne 0 ]]; then
-      pending="(apiserver did not answer)"
-    else
-      pending=""
-      while read -r ns name inst ready; do
-        [[ -n "$ns" && -n "$name" ]] || continue
-        # A status that has not been populated must not read as "whole": require
-        # real numbers, the way the 0/0 check that used to pass here did not.
-        [[ "$inst" =~ ^[1-9][0-9]*$ && "$ready" == "$inst" ]] || pending+="${ns}/${name}(${ready:-?}/${inst:-?}) "
-      done <<<"$answer"
-    fi
+    pending="$(cnpg_pending)" || pending="(apiserver did not answer)"
     [[ -z "$pending" ]] && { [[ $waited -gt 0 ]] && ok "every CNPG cluster is whole again"; return 0; }
     [[ $waited -eq 0 ]] && info "Waiting for CNPG to finish electing: ${pending}"
 
@@ -492,6 +501,30 @@ wait_cnpg_whole() {
   warn "  see docs/upgrade.md § 'A database left \"Failing over\" after the roll'."
 }
 
+# The budgets that allow nothing AND can still recover, one
+# "<ns>\t<name>\t<healthy>/<expected>\t<selector>" per line.
+#
+# `currentHealthy < expectedPods` is the whole discriminator, measured on a live
+# cluster 2026-08-14. Some budgets sit at zero BY DESIGN and waiting on them
+# never ends: a CNPG `*-primary` guards the one pod that must not be evicted, and
+# Longhorn mints one `instance-manager-*` per node with minAvailable 1. Those
+# read 1/1/1 — as healthy as they will ever be. The ones worth waiting for read
+# short: openbao 2 of 3, grafana 0 of 2, vmselect 1 of 2.
+#
+# Non-zero return = the query failed, which is not "no budget is short". This
+# used to be `|| echo '{"items":[]}'`, i.e. an apiserver blip read as headroom.
+pdb_short() {
+  local out
+  out="$("${KCTL[@]}" get pdb -A -o json 2>/dev/null)" || return 1
+  jq -r '.items[]
+         | select((.status.disruptionsAllowed // 0) == 0)
+         | select((.status.currentHealthy // 0) < (.status.expectedPods // 0))
+         | [ .metadata.namespace, .metadata.name,
+             "\(.status.currentHealthy // 0)/\(.status.expectedPods // 0)",
+             ((.spec.selector.matchLabels // {}) | to_entries
+              | map("\(.key)=\(.value)") | join(",")) ] | @tsv' <<<"$out"
+}
+
 # Wait until the cluster says it can afford to lose a pod on this node.
 #
 # Between nodes the roll gates on etcd and Longhorn and on NOTHING else, so it
@@ -506,34 +539,31 @@ wait_cnpg_whole() {
 # business and waiting on it would be a hang with no cause.
 PDB_TIMEOUT="${PDB_TIMEOUT:-600}"   # seconds
 wait_pdb_headroom() { # <node_name>
-  local node="$1" waited=0 blocked ns name sel
+  local node="$1" waited=0 blocked short ns name state sel
   info "Waiting for every budget covering ${node} to allow a disruption…"
   while [[ $waited -lt $PDB_TIMEOUT ]]; do
     blocked=""
-    while IFS=$'\t' read -r ns name sel; do
-      [[ -n "$ns" && -n "$name" ]] || continue
-      # Empty means matchLabels was absent — a matchExpressions-only budget,
-      # which none of ours uses. Skip rather than guess; the drain is the judge.
-      [[ -n "$sel" ]] || continue
-      if [[ -n "$("${KCTL[@]}" -n "$ns" get pods -l "$sel" \
-            --field-selector "spec.nodeName=${node}" \
-            -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)" ]]; then
-        blocked+="${ns}/${name} "
-      fi
-      # `currentHealthy < expectedPods` is the whole discriminator, measured on a
-      # live cluster 2026-08-14. Some budgets sit at zero BY DESIGN and waiting on
-      # them never ends: a CNPG `*-primary` guards the one pod that must not be
-      # evicted, and Longhorn mints one `instance-manager-*` per node with
-      # minAvailable 1. Those read 1/1/1 — as healthy as they will ever be.
-      # The ones worth waiting for read short: openbao 2 of 3, grafana 0 of 2,
-      # vmselect 1 of 2 — pods still coming back from the node we just rolled.
-    done < <({ "${KCTL[@]}" get pdb -A -o json 2>/dev/null || echo '{"items":[]}'; } |
-      jq -r '.items[]
-             | select((.status.disruptionsAllowed // 0) == 0)
-             | select((.status.currentHealthy // 0) < (.status.expectedPods // 0))
-             | [ .metadata.namespace, .metadata.name,
-                 ((.spec.selector.matchLabels // {}) | to_entries
-                  | map("\(.key)=\(.value)") | join(",")) ] | @tsv')
+    if ! short="$(pdb_short)"; then
+      blocked="(apiserver did not answer)"
+    else
+      while IFS=$'\t' read -r ns name state sel; do
+        [[ -n "$ns" && -n "$name" ]] || continue
+        # Empty means matchLabels was absent — a matchExpressions-only budget,
+        # which none of ours uses. Skip rather than guess; the drain is the judge.
+        [[ -n "$sel" ]] || continue
+        # A query that FAILED is not "no pod of this budget lives here". Read it
+        # as blocking: waiting is recoverable, draining on a wrong answer is not.
+        # Same rule as pdb_short above — this was the last line in the file still
+        # written the other way, and it is defect #2 of the sweep verbatim.
+        if ! on_node="$("${KCTL[@]}" -n "$ns" get pods -l "$sel" \
+              --field-selector "spec.nodeName=${node}" \
+              -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"; then
+          blocked+="${ns}/${name}(unreadable) "
+        elif [[ -n "$on_node" ]]; then
+          blocked+="${ns}/${name}(${state}) "
+        fi
+      done <<<"$short"
+    fi
     if [[ -z "$blocked" ]]; then
       ok "every budget covering ${node} allows a disruption"
       return 0
@@ -554,6 +584,100 @@ wait_pdb_headroom() { # <node_name>
   Fix what is missing, then re-run — nodes already upgraded are skipped."
   fi
   read -rp "Drain ${node} anyway? [y/N] " a; [[ "$a" == [yY] ]] || die "aborted by operator"
+}
+
+# Every worker's CPU requests, "<node> <percent>" per line, out of the Allocated
+# resources table `kubectl describe node` prints. The percentage is of that
+# node's OWN allocatable, so the sum below only means anything while the workers
+# share a flavour — which is how every provider module here builds them.
+# Non-zero return = the description failed; no worker is a different answer.
+worker_cpu_requests() {
+  local out
+  out="$("${KCTL[@]}" describe nodes -l '!node-role.kubernetes.io/control-plane' 2>/dev/null)" || return 1
+  awk '/^Name:/            { n = $2 }
+       /^  cpu +[0-9]/     { p = $3; gsub(/[()%]/, "", p); print n, p }' <<<"$out"
+}
+
+# ==============================================================================
+# Pre-roll survey — everything knowable before the first node is touched
+# ==============================================================================
+# The per-node gates each block for their own timeout before saying anything, so
+# a cluster that could not be rolled at all took wait_cnpg_whole + wait_pdb_
+# headroom + the drain to say so — 2100s on OVH 2026-08-15, to be told the three
+# workers sat at 78/99/100% of CPU requests, which was true before the roll
+# started. The same three questions have answers now. Ask them once, print every
+# finding, die once.
+#
+# Runs AFTER cnpg_maintenance: the CNPG budgets are deliberately gone by then, so
+# surveying earlier would report `<cluster>-primary` at zero and refuse a roll
+# that is fine.
+preflight_roll() {
+  local fatal=0 cap nodes=0 total=0 room node pct short ns name state sel pending
+  hr
+  info "Pre-roll survey: capacity, budgets, databases — all of it, once."
+
+  # 1. Capacity. A drain moves pods; if they have nowhere to go they stay
+  # Pending, the budgets they belong to never recover, and the drain waits out
+  # its timeout with no eviction error to show for it.
+  if ! cap="$(worker_cpu_requests)"; then
+    warn "capacity: the workers could not be described — refusing to roll blind."
+    fatal=1
+  else
+    while read -r node pct; do
+      [[ -n "$node" && "$pct" =~ ^[0-9]+$ ]] || continue
+      info "  ${node}: ${pct}% of CPU requested"
+      nodes=$((nodes + 1)); total=$((total + pct))
+    done <<<"$cap"
+    room=$(( (nodes - 1) * 100 ))
+    if [[ $nodes -eq 0 ]]; then
+      warn "capacity: no worker answered — is this the cluster the state describes?"
+      fatal=1
+    elif [[ $nodes -eq 1 ]]; then
+      warn "capacity: a single worker, so rolling it takes its workloads down with it."
+    elif [[ $total -gt $room ]]; then
+      warn "capacity: the ${nodes} workers request ${total}%, and any ${nodes} minus one of them hold ${room}%."
+      fatal=1
+    else
+      ok "capacity: ${total}% requested, ${room}% available without one worker"
+    fi
+  fi
+
+  # 2. Budgets, on the same discriminator wait_pdb_headroom waits on. Nothing has
+  # been evicted yet, so a budget already short of a pod is a pod already
+  # missing: neither the drain nor time can supply it.
+  if ! short="$(pdb_short)"; then
+    warn "budgets: the apiserver did not answer — an unanswered query is not an empty list."
+    fatal=1
+  else
+    while IFS=$'\t' read -r ns name state sel; do
+      [[ -n "$ns" && -n "$name" ]] || continue
+      warn "budgets: ${ns}/${name} allows no disruption and is short of a pod (${state})."
+      fatal=1
+    done <<<"$short"
+    [[ -n "$short" ]] || ok "budgets: every budget that could recover allows a disruption"
+  fi
+
+  # 3. Databases. One short an instance now is one the first cordon_drain spends
+  # its whole CNPG timeout on, and then drains into anyway.
+  if ! cnpg_installed; then
+    info "  no CNPG CRD — no database to gate on"
+  elif ! pending="$(cnpg_pending)"; then
+    warn "databases: the CNPG clusters could not be listed — refusing to roll blind."
+    fatal=1
+  elif [[ -n "$pending" ]]; then
+    warn "databases: not whole (ready/instances): ${pending}"
+    fatal=1
+  else
+    ok "databases: every CNPG cluster is whole"
+  fi
+
+  [[ $fatal -eq 0 ]] || die "the pre-roll survey found blocking conditions, listed above, and none
+  of them gets better by starting: left to the per-node gates each costs
+  ${CNPG_TIMEOUT}s + ${PDB_TIMEOUT}s + ${DRAIN_TIMEOUT} of waiting, per node, for the same answer.
+  Capacity is a prerequisite — add a worker or a bigger flavour (docs/upgrade.md
+  § 'The cluster has to be able to lose a node'). A short budget or a database
+  missing an instance means waiting for it to come back, then re-running."
+  ok "Pre-roll survey clean"
 }
 
 cordon_drain() { # <node_name>
@@ -584,8 +708,7 @@ cordon_drain() { # <node_name>
       # three workers sat at 78/99/100% of CPU requests, so an evicted pod had
       # nowhere to go, its budget never recovered, and the drain waited out its
       # full 900s with no eviction error to show for it.
-      "${KCTL[@]}" describe nodes -l '!node-role.kubernetes.io/control-plane' 2>/dev/null |
-        grep -E "^Name:|^  cpu " >&2 || true
+      worker_cpu_requests >&2 || true
       die "${node} could not be drained within ${DRAIN_TIMEOUT} — refusing to reboot it under workloads that would not move.
   1. Capacity: the CPU requests above are per worker. If the others are near
      100%, the evicted pods cannot be rescheduled, so their budgets never
@@ -960,6 +1083,9 @@ if [[ $DRY_RUN -eq 0 ]]; then
   # changed is a no-op; not restoring one that was is the failure that matters.
   trap 'cnpg_maintenance false' EXIT
   cnpg_maintenance true
+  # Now that the budgets are actually gone, ask everything else that is knowable
+  # before the first node is touched — see preflight_roll.
+  preflight_roll
 fi
 
 # Workers first (heavy stateful load), then control planes (etcd-gated).

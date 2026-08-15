@@ -1,0 +1,307 @@
+#!/usr/bin/env bash
+# Unit tests for the teardown gates of fleet-down.sh / edge-down.sh, against a
+# STUB kubectl.
+#
+# Teardown is where a wrong answer costs an invoice: every branch below decides
+# either "destroy the management" or "report this cluster as gone". Read an API
+# error as an empty list and the management dies while its children keep
+# billing; read it as an absence and a cluster is reported deleted while its VMs
+# run. Both happened. Neither needed a cloud to catch — they needed a fake
+# kubectl and thirty seconds.
+#
+# Same harness as test-rolling-replace.sh: a stub answering from a plan file
+# keyed on argv, able to FAIL a given query, which is the case these scripts
+# kept getting wrong. Here we run the scripts whole rather than sourcing
+# functions, because what is under test is the control flow between the gates —
+# in particular what does NOT run after one of them trips.
+#
+# Usage: test-teardown.sh
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+FLEET_DOWN="$ROOT/scripts/ops/fleet-down.sh"
+EDGE_DOWN="$ROOT/scripts/ops/edge-down.sh"
+STUB_DIR="$(mktemp -d)"
+trap 'rm -rf "$STUB_DIR"' EXIT
+
+# Captured before the stub dir goes on PATH: the sleep stub below still has to
+# yield, or the wait loops spin thousands of iterations per second.
+REAL_SLEEP="$(command -v sleep)"
+
+PASS=0
+FAIL=0
+ok()  { printf '  \033[32m✓\033[0m %s\n' "$*"; PASS=$((PASS + 1)); }
+bad() { printf '  \033[31m✗\033[0m %s\n' "$*"; FAIL=$((FAIL + 1)); }
+
+# --- the stubs ----------------------------------------------------------------
+# STUB_PLAN is a file of "match<TAB>rc<TAB>stdout" lines. The first line whose
+# match is a substring of the joined argv wins, so a narrower match goes first.
+# No line matching = rc 1, empty. One record per line, so multi-line output is
+# written with %% where a newline goes.
+cat >"$STUB_DIR/kubectl" <<'STUB'
+#!/usr/bin/env bash
+argv="$*"
+[ -n "${STUB_LOG:-}" ] && printf '%s\n' "$argv" >>"$STUB_LOG"
+[ -n "${STUB_PLAN:-}" ] && [ -f "$STUB_PLAN" ] || { exit 1; }
+while IFS=$'\t' read -r match rc out; do
+  [ -n "$match" ] || continue
+  case "$argv" in
+    *"$match"*)
+      # Like the real thing: results on stdout, diagnostics on stderr. Several
+      # of the gates below read one and not the other, which is the whole point.
+      out="${out//%%/$'\n'}"
+      if [ "${rc:-0}" = 0 ]; then
+        [ -n "$out" ] && printf '%s\n' "$out"
+      else
+        [ -n "$out" ] && printf '%s\n' "$out" >&2
+      fi
+      exit "${rc:-0}"
+      ;;
+  esac
+done <"$STUB_PLAN"
+exit 1
+STUB
+
+# Tripwires. `task destroy` is the irreversible step of fleet-down and
+# verify-provider-clean.py is what turns "objects gone" into "fully deleted";
+# both record that they ran, so a test can assert they did NOT.
+cat >"$STUB_DIR/task" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${STUB_TASK_LOG:?}"
+exit "${STUB_TASK_RC:-0}"
+STUB
+
+# Nothing here may reach OpenTofu. If it does, the test that let it must fail.
+cat >"$STUB_DIR/tofu" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${STUB_TOFU_LOG:?}"
+exit 0
+STUB
+
+cat >"$STUB_DIR/python3" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${STUB_PY_LOG:?}"
+printf '%s\n' "${STUB_PY_OUT:-stub verify output}"
+exit "${STUB_PY_RC:-0}"
+STUB
+
+cat >"$STUB_DIR/sleep" <<STUB
+#!/usr/bin/env bash
+exec "$REAL_SLEEP" 0.02
+STUB
+
+chmod +x "$STUB_DIR"/kubectl "$STUB_DIR"/task "$STUB_DIR"/tofu \
+         "$STUB_DIR"/python3 "$STUB_DIR"/sleep
+export PATH="$STUB_DIR:$PATH"
+
+export STUB_PLAN="$STUB_DIR/plan"
+export STUB_LOG="$STUB_DIR/kubectl.log"
+export STUB_TASK_LOG="$STUB_DIR/task.log"
+export STUB_TOFU_LOG="$STUB_DIR/tofu.log"
+export STUB_PY_LOG="$STUB_DIR/python3.log"
+
+# fleet-down refuses to start without a readable kubeconfig, and rightly so.
+# Its content is never parsed here: the stub kubectl answers, not a server.
+printf 'stub kubeconfig, never parsed\n' >"$STUB_DIR/kubeconfig"
+export KUBECONFIG="$STUB_DIR/kubeconfig"
+
+# An UNQUALIFIED Cluster verb: `cluster` resolves to whichever CRD is installed,
+# and with the CAPI ones gone that is CNPG's. Deleting a database instead of an
+# edge is not a recoverable typo, so no run below may issue one.
+UNQUALIFIED='^(get|delete|patch) clusters?( |$)'
+
+CLUSTER_INFO_OK='cluster-info\t0\tKubernetes control plane is running\n'
+
+plan() { printf '%b' "$1" >"$STUB_PLAN"; }
+
+run() { # <script> <args...> — captures combined output in OUT, status in RC
+  : >"$STUB_LOG"; : >"$STUB_TASK_LOG"; : >"$STUB_TOFU_LOG"; : >"$STUB_PY_LOG"
+  if OUT="$("$@" </dev/null 2>&1)"; then RC=0; else RC=$?; fi
+}
+
+# One-line output, so a failure says what it saw instead of only which line.
+flat() { printf '%s' "${OUT//$'\n'/ | }"; }
+
+expect_rc()  { if [ "$RC" = "$1" ]; then ok "$2"; else bad "$2 (exit $RC: $(flat))"; fi; }
+expect_out() { case "$OUT" in *"$1"*) ok "$2" ;; *) bad "$2 (no '$1' in: $(flat))" ;; esac; }
+refute_out() { case "$OUT" in *"$1"*) bad "$2 (found '$1' in: $(flat))" ;; *) ok "$2" ;; esac; }
+
+expect_destroyed() { # the management destroy ran
+  if [ -s "$STUB_TASK_LOG" ]; then ok "$1"; else bad "$1 (task destroy never ran)"; fi
+}
+refute_destroyed() { # …and, far more important, that it did not
+  if [ -s "$STUB_TASK_LOG" ]
+    then bad "$1 — task RAN: $(tr '\n' ';' <"$STUB_TASK_LOG")"
+    else ok "$1"
+  fi
+}
+expect_log() { # <ere> <label> — over the kubectl argv log
+  if grep -Eq "$1" "$STUB_LOG"; then ok "$2"; else bad "$2 (no /$1/ in: $(tr '\n' ';' <"$STUB_LOG"))"; fi
+}
+refute_log() {
+  if grep -Eq "$1" "$STUB_LOG"
+    then bad "$2 — matched: $(grep -Em1 "$1" "$STUB_LOG")"
+    else ok "$2"
+  fi
+}
+
+echo "=== fleet-down: an unanswered child-cluster query is not an absence ==="
+
+# THE billing defect. A failing enumeration and a childless management look
+# identical to `mapfile`, and the very next step destroys the management —
+# the only thing that could ever delete the children.
+plan "${CLUSTER_INFO_OK}get clusters.cluster.x-k8s.io -A\t1\terror: the server doesn't have a resource type \"clusters\"\n"
+run "$FLEET_DOWN" stubcloud --yes
+expect_rc 1 "a failing enumeration aborts fleet-down"
+refute_destroyed "the management destroy is NOT reached after a failed enumeration"
+refute_out "no child cluster" "a failed query is not reported as 'no child cluster'"
+refute_out "fleet-down complete" "it does not report success"
+
+# The other side of the same coin: the query worked and there is genuinely
+# nothing. This must proceed, or the fail-safe above is just a script that
+# never works.
+plan "${CLUSTER_INFO_OK}get clusters.cluster.x-k8s.io -A\t0\t\n"
+run "$FLEET_DOWN" stubcloud --yes
+expect_rc 0 "an empty-but-successful enumeration proceeds"
+expect_out "no child cluster" "it says 'no child cluster'"
+expect_destroyed "the management destroy IS reached"
+if grep -q '^destroy ' "$STUB_TASK_LOG"
+  then ok "it is 'task destroy' that ran"
+  else bad "task ran, but not destroy: $(tr '\n' ';' <"$STUB_TASK_LOG")"
+fi
+
+# Same run, checked for the CRD collision.
+expect_log 'get clusters\.cluster\.x-k8s\.io -A' "the enumeration is group-qualified"
+refute_log "$UNQUALIFIED" "no unqualified 'cluster' query in the enumeration path"
+
+echo
+echo "=== fleet-down: an unreachable management is not a childless one ==="
+
+plan 'no line matches, so cluster-info fails\t1\t\n'
+run "$FLEET_DOWN" stubcloud --yes
+expect_rc 1 "an unreachable management aborts"
+refute_destroyed "it does not destroy a management it could not query"
+expect_out "STOP" "it explains why it stopped"
+
+# The operator can assert there is no child. That is a decision, not a default.
+plan 'no line matches, so cluster-info fails\t1\t\n'
+run "$FLEET_DOWN" stubcloud --yes --force-no-edges
+expect_rc 0 "--force-no-edges lets an unreachable management be destroyed"
+expect_destroyed "the destroy is reached under --force-no-edges"
+
+echo
+echo "=== fleet-down: a child that did not go down blocks the management ==="
+
+# fleet-down runs the real edge-down.sh here, so this covers the handoff too.
+EDGE_LIST='get clusters.cluster.x-k8s.io -A\t0\tedge-a capi-clusters\n'
+plan "${CLUSTER_INFO_OK}${EDGE_LIST}get clusters.cluster.x-k8s.io edge-a\t1\terror: You must be logged in to the server (Unauthorized)\n"
+run "$FLEET_DOWN" stubcloud --yes
+expect_rc 1 "a child whose state is unknown aborts fleet-down"
+refute_destroyed "the management is not destroyed while a child is unaccounted for"
+expect_out "STOPPING before touching the management" "it names the child that blocked it"
+
+plan "${CLUSTER_INFO_OK}${EDGE_LIST}get clusters.cluster.x-k8s.io edge-a\t1\tError from server (NotFound): clusters.cluster.x-k8s.io \"edge-a\" not found\n"
+run "$FLEET_DOWN" stubcloud --yes
+expect_rc 0 "a child already absent does not block fleet-down"
+expect_destroyed "the destroy is reached once the child is accounted for"
+if [ -s "$STUB_TOFU_LOG" ]
+  then bad "something called tofu directly, bypassing the stubbed task"
+  else ok "no direct tofu call: no run here can reach a cloud"
+fi
+
+echo
+echo "=== edge-down: NotFound is absence, any other error is not ==="
+
+plan "${CLUSTER_INFO_OK}get clusters.cluster.x-k8s.io edge-b\t1\tError from server (NotFound): clusters.cluster.x-k8s.io \"edge-b\" not found\n"
+run "$EDGE_DOWN" edge-b --yes
+expect_rc 0 "NotFound exits 0"
+expect_out "already absent" "NotFound reports 'already absent'"
+
+# Same empty stdout, opposite meaning. Reporting absence here is what tells
+# fleet-down the child is gone, and the management destroy follows.
+plan "${CLUSTER_INFO_OK}get clusters.cluster.x-k8s.io edge-b\t1\terror: You must be logged in to the server (Unauthorized)\n"
+run "$EDGE_DOWN" edge-b --yes
+expect_rc 1 "an authorization error exits non-zero"
+refute_out "already absent" "an API error is NOT reported as absence"
+expect_out "cannot tell whether" "it says the state is unknown"
+refute_log '^delete ' "nothing is deleted while the state is unknown"
+
+plan "${CLUSTER_INFO_OK}get clusters.cluster.x-k8s.io edge-b\t1\tThe connection to the server was refused\n"
+run "$EDGE_DOWN" edge-b --yes
+expect_rc 1 "an unreachable API exits non-zero"
+refute_out "already absent" "an unreachable API is NOT reported as absence"
+
+echo
+echo "=== edge-down: 'fully deleted' requires a provider that was checked ==="
+
+# Shared prefix: the cluster exists, the cascade completes on the first poll.
+# The --no-headers lines come FIRST — they are the narrower match.
+GONE="${CLUSTER_INFO_OK}"
+GONE+='get clusters.cluster.x-k8s.io edge-c -n capi-clusters --no-headers\t0\t\n'
+GONE+='get machines -n capi-clusters -l cluster.x-k8s.io/cluster-name=edge-c --no-headers\t0\t\n'
+GONE+='get clusters.cluster.x-k8s.io edge-c\t0\tedge-c Provisioned\n'
+GONE+='get machines -n capi-clusters -l cluster.x-k8s.io/cluster-name=edge-c -o name\t0\tmachine.cluster.x-k8s.io/edge-c-cp-1\n'
+GONE+='delete clusters.cluster.x-k8s.io edge-c\t0\tcluster.cluster.x-k8s.io "edge-c" deleted\n'
+PROBE_MATCHES='get openstackcluster -n capi-clusters -o name\t0\topenstackcluster.infrastructure.cluster.x-k8s.io/edge-c\n'
+
+# The probe matches nothing: no API was ever asked whether the VMs are gone.
+# "fully deleted" here is the sentence that let billed resources survive.
+plan "$GONE"
+run "$EDGE_DOWN" edge-c --yes --timeout 30
+refute_out "fully deleted" "an unidentified provider is never reported 'fully deleted'"
+expect_rc 1 "an unidentified provider exits non-zero"
+expect_out "could not tell which provider" "it says why nothing was verified"
+if [ -s "$STUB_PY_LOG" ]
+  then bad "it ran the verifier without knowing which provider to verify"
+  else ok "the verifier is not run when there is no provider to run it for"
+fi
+
+# Positive control: with a provider AND a clean verification it may say it.
+# Without this, the assertion above would also pass on a script that can never
+# print 'fully deleted' at all.
+plan "${GONE}${PROBE_MATCHES}"
+STUB_PY_RC=0 run "$EDGE_DOWN" edge-c --yes --timeout 30
+expect_rc 0 "a verified-clean provider exits 0"
+expect_out "fully deleted" "a verified-clean provider IS reported 'fully deleted'"
+if grep -q 'verify-provider-clean.py edge-c openstack' "$STUB_PY_LOG"
+  then ok "the verifier is called for the probed provider"
+  else bad "the verifier was not called as expected: $(cat "$STUB_PY_LOG")"
+fi
+
+# The verifier says resources remain. Kubernetes is clean, the invoice is not.
+plan "${GONE}${PROBE_MATCHES}"
+STUB_PY_RC=1 STUB_PY_OUT='leftover load balancer' run "$EDGE_DOWN" edge-c --yes --timeout 30
+expect_rc 1 "a provider that still has resources exits non-zero"
+refute_out "fully deleted" "leftover provider resources are not reported 'fully deleted'"
+expect_out "Purge by hand" "it tells the operator to purge"
+
+# Verification skipped (no credentials): exits 0, but must not claim more than
+# it checked.
+plan "${GONE}${PROBE_MATCHES}"
+STUB_PY_RC=2 STUB_PY_OUT='no credentials in the environment' run "$EDGE_DOWN" edge-c --yes --timeout 30
+expect_rc 0 "a skipped verification still exits 0"
+refute_out "fully deleted" "a skipped verification does not claim 'fully deleted'"
+expect_out "provider NOT re-checked" "it says the provider was not re-checked"
+
+echo
+echo "=== edge-down: a refused delete and a stuck cascade both fail loudly ==="
+
+plan "${CLUSTER_INFO_OK}get clusters.cluster.x-k8s.io edge-d\t0\tedge-d Provisioned\ndelete clusters.cluster.x-k8s.io edge-d\t1\tError from server: admission webhook denied the request\n"
+run "$EDGE_DOWN" edge-d --yes --timeout 2
+expect_rc 1 "a refused delete exits non-zero"
+expect_out "REFUSED" "it says the delete was refused"
+refute_out "objects gone" "a refused delete is not reported as a finished cascade"
+
+# Nothing ever disappears: the safety net lifts finalizers and REPORTS, it does
+# not declare victory. --timeout 2 keeps this short; sleep is stubbed.
+plan "${CLUSTER_INFO_OK}get clusters.cluster.x-k8s.io edge-e\t0\tedge-e Deleting\nget machines -n capi-clusters -l cluster.x-k8s.io/cluster-name=edge-e\t0\tedge-e-cp-1 Deleting\ndelete clusters.cluster.x-k8s.io edge-e\t0\tdeleted\n"
+run "$EDGE_DOWN" edge-e --yes --timeout 2
+expect_rc 1 "a cascade that never finishes exits non-zero"
+refute_out "fully deleted" "a stuck cascade is not reported 'fully deleted'"
+expect_out "MANUAL ACTION REQUIRED" "it asks for a manual check on the provider side"
+# Same guarantee as fleet-down, in a run that deletes and patches by name.
+refute_log "$UNQUALIFIED" "no unqualified 'cluster' verb in the delete/finalizer path"
+
+echo
+printf '%s passed, %s failed\n' "$PASS" "$FAIL"
+[ "$FAIL" -eq 0 ]

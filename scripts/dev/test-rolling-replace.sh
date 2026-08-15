@@ -70,11 +70,14 @@ extract() { # <fn name>...  — pull the named functions out, with their helpers
 eval "$(cat <<'PRELUDE'
 KCTL=(kubectl)
 info() { printf '▶ %s\n' "$*"; }
-warn() { printf '⚠ %s\n' "$*"; }
-ok_()  { printf '✓ %s\n' "$*"; }
+warn() { printf '⚠ %s\n' "$*" >&2; }
+# Only the ones the extracted code interpolates into its messages.
+DRAIN_TIMEOUT=900s
+CNPG_TIMEOUT=600
+PDB_TIMEOUT=600
 PRELUDE
 )"
-eval "$(extract 'cnpg_pod_state,cnpg_deadlocked,cnpg_installed')"
+eval "$(extract 'cnpg_pod_state,cnpg_deadlocked,cnpg_installed,cnpg_pending,pdb_short,worker_cpu_requests,preflight_roll')"
 
 plan() { STUB_PLAN="$STUB_DIR/plan"; export STUB_PLAN; printf '%b' "$1" >"$STUB_PLAN"; }
 
@@ -124,6 +127,155 @@ plan 'get crd clusters.postgresql.cnpg.io\t0\tclusters.postgresql.cnpg.io\n'
 cnpg_installed && ok "CRD present → installed" || bad "expected installed"
 plan 'get crd clusters.postgresql.cnpg.io\t1\tError from server (NotFound)\n'
 cnpg_installed && bad "expected not installed" || ok "CRD absent → not installed"
+
+# ==============================================================================
+# The pre-roll survey
+# ==============================================================================
+# Fixtures, from the two clusters that measured the difference on 2026-08-15:
+# Scaleway's three workers at 72/47/27% of CPU requests drained clean, OVH's
+# three at 78/99/100% did not, and the roll took 2100s per node to say so.
+CRD='get crd clusters.postgresql.cnpg.io\t0\tclusters.postgresql.cnpg.io\n'
+NO_CRD='get crd clusters.postgresql.cnpg.io\t1\tError from server (NotFound)\n'
+
+CAP_OK='describe nodes\t0\tName: w1%%  cpu 1440m (72%)  2 (100%)%%Name: w2%%  cpu 940m (47%)  2 (100%)%%Name: w3%%  cpu 540m (27%)  2 (100%)\n'
+CAP_FULL='describe nodes\t0\tName: w1%%  cpu 1560m (78%)  2 (100%)%%Name: w2%%  cpu 1980m (99%)  2 (100%)%%Name: w3%%  cpu 2000m (100%)  2 (100%)\n'
+CAP_ONE='describe nodes\t0\tName: w1%%  cpu 900m (45%)  2 (100%)\n'
+CAP_FAIL='describe nodes\t1\tThe connection to the server was refused\n'
+
+# A budget at 0/1/1 is zero BY DESIGN (a CNPG primary, a Longhorn
+# instance-manager): as healthy as it will ever be, and not a finding.
+PDB_BYDESIGN='get pdb\t0\t{"items":[{"metadata":{"namespace":"foundation-databases","name":"zitadel-db-primary"},"spec":{"selector":{"matchLabels":{"cnpg.io/cluster":"zitadel-db"}}},"status":{"disruptionsAllowed":0,"currentHealthy":1,"expectedPods":1}}]}\n'
+PDB_SHORT='get pdb\t0\t{"items":[{"metadata":{"namespace":"observability","name":"vmselect"},"spec":{"selector":{"matchLabels":{"app":"vmselect"}}},"status":{"disruptionsAllowed":0,"currentHealthy":1,"expectedPods":2}}]}\n'
+PDB_FAIL='get pdb\t1\tError from server: etcdserver: request timed out\n'
+
+DB_WHOLE='get clusters.postgresql.cnpg.io -A\t0\tfoundation-databases zitadel-db 3 3%%observability grafana-db 2 2\n'
+DB_SHORT='get clusters.postgresql.cnpg.io -A\t0\tfoundation-databases zitadel-db 3 2\n'
+DB_BLANK='get clusters.postgresql.cnpg.io -A\t0\tfoundation-databases zitadel-db  \n'
+DB_FAIL='get clusters.postgresql.cnpg.io -A\t1\tThe connection to the server was refused\n'
+
+HEALTHY="${CRD}${CAP_OK}${PDB_BYDESIGN}${DB_WHOLE}"
+
+# preflight_roll logs through ok/hr and ends in die, so it runs in a subshell:
+# its `ok` must not be the harness's pass counter and its `die` must not take the
+# harness with it. `set -e` inside, because the real script runs under it — an
+# `rc=$?` after a failing assignment is dead code there and must be here too.
+run_preflight() {
+  ( set -e
+    ok()  { printf '✓ %s\n' "$*"; }
+    hr()  { :; }
+    die() { printf '✗ %s\n' "$*" >&2; exit 1; }
+    preflight_roll ) 2>&1
+}
+survey() { plan "$1"; if OUT="$(run_preflight)"; then RC=0; else RC=$?; fi; }
+saw() { case "$OUT" in *"$1"*) return 0 ;; *) return 1 ;; esac; }
+
+echo
+echo "=== worker_cpu_requests / pdb_short: the shared one-shot readings ==="
+
+plan "$CAP_OK"
+[ "$(worker_cpu_requests | tr '\n' ' ')" = "w1 72 w2 47 w3 27 " ] \
+  && ok "the describe table parses to one percentage per worker" \
+  || bad "parsed '$(worker_cpu_requests | tr '\n' ' ')'"
+
+plan "$CAP_FAIL"
+worker_cpu_requests >/dev/null 2>&1 && bad "a failed description returned success — no worker would read as no problem" \
+  || ok "a failed description returns non-zero, not an empty node list"
+
+plan "$PDB_BYDESIGN"
+[ -z "$(pdb_short)" ] && ok "a budget at 0 allowed / 1 healthy / 1 expected is not short" \
+  || bad "a by-design zero was reported as short — waiting on it never ends"
+
+plan "$PDB_SHORT"
+[ "$(pdb_short | cut -f1-3 | tr '\t' '/')" = "observability/vmselect/1/2" ] \
+  && ok "a budget short of a pod is reported with its counts" || bad "got '$(pdb_short)'"
+
+plan "$PDB_FAIL"
+pdb_short >/dev/null 2>&1 && bad "a failed budget query returned success" \
+  || ok "a failed budget query returns non-zero, not an empty list"
+
+echo
+echo "=== preflight_roll: one survey instead of three blocking waits ==="
+
+survey "$HEALTHY"
+[ "$RC" = 0 ] && saw "146% requested, 200% available" \
+  && ok "a cluster that can lose a worker passes, and says by how much" \
+  || bad "healthy cluster refused (rc ${RC}): ${OUT}"
+
+survey "${CRD}${CAP_FULL}${PDB_BYDESIGN}${DB_WHOLE}"
+[ "$RC" = 1 ] && saw "3 workers request 277%" \
+  && ok "78/99/100% is refused before the first node, not after 2100s" \
+  || bad "the OVH capacity shape was allowed (rc ${RC})"
+
+survey "${CRD}${CAP_ONE}${PDB_BYDESIGN}${DB_WHOLE}"
+[ "$RC" = 0 ] && saw "single worker" \
+  && ok "a single-worker cluster is warned about, not blocked (non-HA is supported)" \
+  || bad "non-HA topology refused (rc ${RC})"
+
+survey "${CRD}${CAP_OK}${PDB_SHORT}${DB_WHOLE}"
+[ "$RC" = 1 ] && saw "observability/vmselect" && saw "(1/2)" \
+  && ok "a budget that allows nothing and is short of a pod is fatal, and named" \
+  || bad "a short budget did not stop the roll (rc ${RC})"
+
+survey "${CRD}${CAP_OK}${PDB_BYDESIGN}${DB_SHORT}"
+[ "$RC" = 1 ] && saw "zitadel-db(2/3)" \
+  && ok "a database missing an instance is fatal, and named" \
+  || bad "a 2/3 CNPG cluster did not stop the roll (rc ${RC})"
+
+survey "${CRD}${CAP_OK}${PDB_BYDESIGN}${DB_BLANK}"
+[ "$RC" = 1 ] && saw "zitadel-db(?/?)" \
+  && ok "an unpopulated status is not 'whole' — the 0/0 that used to pass" \
+  || bad "a cluster with no status numbers read as whole (rc ${RC})"
+
+survey "${NO_CRD}${CAP_OK}${PDB_BYDESIGN}"
+[ "$RC" = 0 ] && saw "no CNPG CRD" \
+  && ok "no CNPG installed → no database gate, and no false finding" \
+  || bad "a cluster without CNPG was refused (rc ${RC})"
+
+echo
+echo "--- and the one that matters: a query that FAILED is not 'nothing wrong' ---"
+
+survey "${CRD}${CAP_OK}${PDB_FAIL}${DB_WHOLE}"
+[ "$RC" = 1 ] && ! saw "every budget that could recover" \
+  && ok "an unanswered budget query is fatal, and never claims headroom" \
+  || bad "an apiserver error read as 'no budget blocks' (rc ${RC})"
+
+survey "${CRD}${CAP_OK}${PDB_BYDESIGN}${DB_FAIL}"
+[ "$RC" = 1 ] && ! saw "every CNPG cluster is whole" \
+  && ok "an unanswered CNPG query is fatal, and never claims the databases are whole" \
+  || bad "an apiserver error read as 'every database is whole' (rc ${RC})"
+
+survey "${CRD}${CAP_FAIL}${PDB_BYDESIGN}${DB_WHOLE}"
+[ "$RC" = 1 ] && ! saw "available without one worker" \
+  && ok "an unanswered node description is fatal, and never claims capacity" \
+  || bad "an apiserver error read as 'there is room' (rc ${RC})"
+
+echo
+echo "--- everything at once: all findings, then exactly one death ---"
+
+survey "${CRD}${CAP_FULL}${PDB_SHORT}${DB_SHORT}"
+[ "$RC" = 1 ] && saw "277%" && saw "observability/vmselect" && saw "zitadel-db(2/3)" \
+  && ok "three separate blockers are all reported from one survey" \
+  || bad "the survey stopped at the first blocker (rc ${RC}): ${OUT}"
+[ "$(grep -c '✗' <<<"$OUT")" = 1 ] \
+  && ok "…and it dies once, at the end, not per finding" \
+  || bad "expected one ✗, got $(grep -c '✗' <<<"$OUT")"
+
+echo
+echo "--- and that it is wired in: once, after the budgets are gone, before node 1 ---"
+# Everything above tests a function the harness calls itself. The defect that
+# cost the most on 2026-08-15 was a fix that was never REACHED, so assert the
+# call site too: this is the one thing a stub kubectl cannot observe.
+SUT="$ROOT/scripts/ops/rolling-replace.sh"
+lineno() { grep -n "$1" "$SUT" | head -1 | cut -d: -f1; }
+L_MAINT="$(lineno '^  cnpg_maintenance true$')"
+L_PRE="$(lineno '^  preflight_roll$')"
+L_ROLL="$(lineno 'replace_node worker')"
+[ "$(grep -c '^  *preflight_roll$' "$SUT")" = 1 ] \
+  && ok "the survey is called exactly once" || bad "expected one call site"
+[ -n "$L_MAINT" ] && [ -n "$L_PRE" ] && [ -n "$L_ROLL" ] \
+  && [ "$L_MAINT" -lt "$L_PRE" ] && [ "$L_PRE" -lt "$L_ROLL" ] \
+  && ok "…after cnpg_maintenance took effect and before the first replace_node" \
+  || bad "call site missing or out of order (maintenance ${L_MAINT:-?}, survey ${L_PRE:-?}, roll ${L_ROLL:-?})"
 
 echo
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"

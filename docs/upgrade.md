@@ -180,6 +180,40 @@ After each node, and again at the end:
 task plan ROLE=management PROVIDER=<p> STRICT=1   # exit 2 = not converged
 ```
 
+## Iterating on the roll itself, without rebuilding the cluster
+
+Fixing this script used to mean redeploying an 85-minute cluster in order to
+exercise its last twenty minutes. It does not have to: both moves below were
+used on a live cluster on 2026-08-15, and
+[`scripts/dev/roll-lab.sh`](../scripts/dev/roll-lab.sh) is them, made repeatable.
+It refuses to run unless the tfvars name a disposable environment **and** the
+kubeconfig reaches the cluster that state describes, and it prints what it is
+about to change before changing it.
+
+```bash
+scripts/dev/roll-lab.sh status <provider> --offset <n>   # what a resume would skip
+scripts/dev/roll-lab.sh resume <provider> --offset <n>   # re-run the roll, minutes not hours
+scripts/dev/roll-lab.sh inject-cnpg-deadlock <provider> --offset <n>
+scripts/dev/roll-lab.sh cleanup <provider> --offset <n>  # uncordon what was left behind
+```
+
+**Resume.** A node already on the target version is skipped, so a fixed roll can
+be retried in place: `resume` runs `rolling-replace.sh <p> --upgrade
+--workers-only --yes` after checking the preconditions the roll itself discovers
+too late — a live cluster, and one Talos tunnel per node.
+
+**Inject.** The deadlock in § A database left "Failing over" cost four cloud
+rolls to characterise and reproduces in about two minutes: cordon the node
+holding a cluster's primary and delete that pod. Its `local-path-retain` PVC
+pins it to the cordoned node, so it cannot come back, and CNPG stalls. The
+command asserts with the roll's **own** detector and exits non-zero if the
+deadlock did not appear — it cannot quietly report a success. `cleanup` undoes
+it; CNPG heals once the pod can be scheduled again.
+
+Cheaper still, and where a gate fix belongs first:
+[`scripts/dev/test-rolling-replace.sh`](../scripts/dev/test-rolling-replace.sh)
+exercises the same logic against a stub kubectl in seconds, with no cluster.
+
 ## Replacing a node rather than upgrading it
 
 `--upgrade` cannot carry a disk or zone change, nor a new image schematic —
