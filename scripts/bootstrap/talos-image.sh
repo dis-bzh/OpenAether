@@ -159,8 +159,12 @@ if [ "$P" = ovh ] || [ "$P" = outscale ]; then
   stale=0
   for f in "$ENVS"/*-"$P".tfvars; do
     [ -e "$f" ] || continue
-    HAVE="$(grep -oE 'image_id[[:space:]]*=[[:space:]]*"[^"]+"' "$f" \
-            | grep -v bastion_image_id | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
+    # Anchored, because `grep -o 'image_id...'` strips the `bastion_` prefix
+    # before the filter downstream can see it: with no Talos pin left in the
+    # file, the bastion's own image was read as the pin and this guard refused
+    # the very configuration it recommends (measured on OVH, 2026-08-15).
+    HAVE="$(grep -E '^[[:space:]]*image_id[[:space:]]*=' "$f" \
+            | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
     [ -n "$WANT" ] && [ -n "$HAVE" ] && [ "$WANT" != "$HAVE" ] || continue
     echo "✗ $(basename "$f") pins image_id = $HAVE" >&2
     echo "  but the image this lane just resolved is $WANT." >&2
