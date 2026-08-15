@@ -14,9 +14,10 @@ environment     = "prod"
 cluster_role    = "management"
 talos_bootstrap = true
 # talos_version / kubernetes_version: leave unset to inherit the tracked
-# defaults from cluster/variables.tf. image_id below is a fixed Outscale OMI (unlike
-# Scaleway's name-derived lookup), and it is the medium a node INSTALLS
-# from — not the version it runs. Bumping talos_version alone changes the
+# defaults from cluster/variables.tf. The image is resolved by NAME from
+# talos_version (same as Scaleway) unless image_id below is set, and it is the
+# medium a node INSTALLS from — not the version it runs. Bumping talos_version
+# alone changes the
 # installer in the machine config, which `rolling-replace --upgrade` then
 # applies to running nodes; rebuild the image via
 # `task talos-image PROVIDER=outscale` when you want NEW nodes to start there

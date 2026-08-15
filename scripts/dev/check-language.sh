@@ -10,9 +10,14 @@
 #   1. It does NOT key on accents. `preflight-quotas.py` says "DEPASSEMENT" and
 #      two `ovh/*.tf` comments are accent-free French; an accent regex reports
 #      them clean, which reads as "nothing there". Words, not diacritics.
-#   2. It only reads prose — Markdown outside code fences, and comment lines in
-#      code. A French word inside a string literal or an identifier is not a
-#      translation defect, and flagging it would train people to ignore this.
+#   2. It only reads prose — Markdown outside code fences, comment lines in
+#      code, and the text of what a script PRINTS. A French word inside an
+#      identifier or a non-printed literal is not a translation defect, and
+#      flagging it would train people to ignore this.
+#      The printed strings had to be added: on 2026-08-15 this file reported the
+#      repository clean while a provisioner announced "▶ Purge du staging" to
+#      every operator who built an Outscale image. A comment is read once; that
+#      line is read every run.
 #
 # Usage: check-language.sh [path ...]        (defaults to the repository root)
 #        check-language.sh --list            list the words it looks for
@@ -24,7 +29,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # an identifier, and not a common abbreviation. That rules out the tempting ones
 # — `son`, `car`, `pas`, `on`, `or`, `sur`, `main` — every one of which is an
 # ordinary English word or appears in code.
-WORDS='le|la|les|des|une|dans|pour|avec|cette|être|est|sont|était|sera|qui|que|quand|ainsi|alors|aussi|avant|après|chaque|comme|depuis|donc|déjà|encore|entre|jamais|leur|mais|même|moins|notre|parce|peut|plutôt|puis|sans|sous|toujours|tout|toute|toutes|tous|très|vers|voici|voilà|faut|doit|doivent|ici|cela|ceci|celui|celle|nous|vous|elles|ils'
+WORDS='le|la|les|des|une|dans|pour|avec|cette|être|est|sont|était|sera|qui|que|quand|ainsi|alors|aussi|avant|après|chaque|comme|depuis|donc|déjà|encore|entre|jamais|leur|mais|même|moins|notre|parce|peut|plutôt|puis|sans|sous|toujours|tout|toute|toutes|tous|très|vers|voici|voilà|faut|doit|doivent|ici|cela|ceci|celui|celle|nous|vous|elles|ils|du|au|aux|ni|elle|leurs|afin|lorsque|selon|plusieurs|ceux|celles|ensuite|enfin|pourrait|pourraient|publique|publiques'
 
 usage() { sed -n '2,20p' "$0" | sed 's/^# \?//'; }
 case "${1:-}" in
@@ -96,13 +101,21 @@ scan_code() {
     [ -n "$f" ] || continue
     ignored "$repo" "$f" && continue
     awk -v words="$WORDS" -v file="$f" '
-      # Comment lines only: # for yaml/sh/py/tf, // and * for the hcl/go style.
-      !/^[[:space:]]*(#|\/\/|\*)/ { next }
+      # Two kinds of prose: comment lines (# for yaml/sh/py/tf, // and * for the
+      # hcl/go style) and the text a script prints.
       {
+        comment = ($0 ~ /^[[:space:]]*(#|\/\/|\*)/)
+        printed = (!comment && $0 ~ /(echo|print|printf|puts)[[:space:](]/)
+        if (!comment && !printed) next
+        text = $0
+        # In a printed line, a substitution is code, not prose: `du -h "$SNAP"`
+        # inside an otherwise English message is the `du` command, and reporting
+        # it as French is how a checker earns its way onto the ignore list.
+        if (printed) { gsub(/\$\([^)]*\)/, " ", text); gsub(/\$\{[^}]*\}/, " ", text) }
         n = split(words, w, "|")
         for (i = 1; i <= n; i++) {
           cap = toupper(substr(w[i], 1, 1)) substr(w[i], 2)
-          if ($0 ~ ("(^|[^[:alnum:]_])(" w[i] "|" cap ")([^[:alnum:]_]|$)")) {
+          if (text ~ ("(^|[^[:alnum:]_])(" w[i] "|" cap ")([^[:alnum:]_]|$)")) {
             printf "%s:%d: %s\n", file, NR, $0
             next
           }

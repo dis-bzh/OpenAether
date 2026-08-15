@@ -137,16 +137,21 @@ echo
 echo "→ image_name: $(tofu output -raw image_name 2>/dev/null || echo '?')"
 tofu output image_id 2>/dev/null || true
 [ "$P" = proxmox ] && tofu output image_file_id 2>/dev/null
-echo "  (Scaleway: cluster looks up by image_name; OVH/Outscale: put image_id in the cluster envs/*.tfvars;"
-echo "   Proxmox: talos_image_file_id defaults to the same convention — usually no override needed)"
+echo "  (All three clouds look the image up by name — leave image_id unset in the"
+echo "   cluster envs/*.tfvars and a version bump needs no edit. Proxmox:"
+echo "   talos_image_file_id follows the same convention.)"
 
 # ──────────────────────────────────────────────────────────────────────────────
-# On OVH and Outscale the cluster does NOT look the image up: it takes the id
-# from envs/*.tfvars, copied here by hand. Nothing compared the two, so a
-# rebuilt image left a stale id behind and `task up` — which runs this script
-# first, learns the right id, prints it, then deploys with the wrong one —
-# failed at server creation with "Can not find requested image", after the
-# network and the bastion had been created. Refuse instead, before the spend.
+# A pinned image_id is OPTIONAL on OVH and Outscale (null looks the name up, the
+# same way Scaleway does) and it is a trap: nothing compared the pin to the image
+# this lane publishes, so a rebuild left a stale id behind and `task up` — which
+# runs this script first, learns the right id, prints it, then deploys with the
+# wrong one — failed at server creation with "Can not find requested image",
+# after the network and the bastion had been created. Refuse before the spend.
+#
+# The remedy printed first is DELETING the pin, not updating it: updating keeps
+# the hand-copy step, which is what makes an unattended upgrade impossible on
+# these two providers (measured 2026-08-15 — the guard fired mid-run on OVH).
 # ──────────────────────────────────────────────────────────────────────────────
 if [ "$P" = ovh ] || [ "$P" = outscale ]; then
   WANT="$(tofu output -raw image_id 2>/dev/null || true)"
@@ -159,7 +164,10 @@ if [ "$P" = ovh ] || [ "$P" = outscale ]; then
     [ -n "$WANT" ] && [ -n "$HAVE" ] && [ "$WANT" != "$HAVE" ] || continue
     echo "✗ $(basename "$f") pins image_id = $HAVE" >&2
     echo "  but the image this lane just resolved is $WANT." >&2
-    echo "  Deploying would fail at server creation, after the bill. Update it:" >&2
+    echo "  Deploying would fail at server creation, after the bill." >&2
+    echo "  Preferred: drop the pin so the name resolves it, here and on every bump:" >&2
+    echo "    sed -i '/^[[:space:]]*image_id[[:space:]]*=/d' $f" >&2
+    echo "  Or, to keep pinning this exact image:" >&2
     echo "    sed -i 's|$HAVE|$WANT|' $f" >&2
     stale=1
   done

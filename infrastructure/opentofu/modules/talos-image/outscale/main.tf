@@ -11,9 +11,9 @@
 #      mode, never configured;
 #   2. reading public-ipv4  -> the public IP (1:1 NAT on the Outscale side, so
 #      invisible from the NIC) becomes a NodeAddress and enters the apid
-#      certificate SANs; without it CACPPT would fail TLS on <IP>:50000 and
-#      ("certificate is valid for 10.x, not <IP publique>") et ne pourrait ni
-#      could neither bootstrap etcd nor fetch the child's kubeconfig.
+#      certificate SANs; without it CACPPT would fail TLS on <IP>:50000
+#      ("certificate is valid for 10.x, not <public IP>") and could neither
+#      bootstrap etcd nor fetch the child's kubeconfig.
 # The OpenTofu flow (two-phase apply) is unchanged: without user-data the aws
 # image also boots into maintenance mode and gets its config over the Talos API.
 # ==============================================================================
@@ -169,7 +169,7 @@ resource "terraform_data" "purge_staging" {
     command     = <<-EOT
       set -euo pipefail
       export AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
-      echo "▶ Purge du staging : s3://${var.bucket_name}/${local.object_key}"
+      echo "▶ Purging the staging object: s3://${var.bucket_name}/${local.object_key}"
       aws s3 rm "s3://${var.bucket_name}/${local.object_key}" \
         --endpoint-url "${var.s3_endpoint}" --region "${var.region}" || true
       echo "✓ staging purged (the OMI and the snapshot remain the durable artifacts)"
