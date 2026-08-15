@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# Rung ONE: the roll's gates against a real Kubernetes, in Docker.
+#
+# Rung zero (test-rolling-replace.sh) drives them against a stub keyed on argv.
+# That proves the branching and NOT that the queries are executable: on
+# 2026-08-15 a gate passed eleven of eleven unit assertions while its jsonpath
+# was one kubectl refuses to parse, and it took a real deadlock on a paying
+# cluster to find out. check-jsonpath.sh now catches that shape offline; this
+# catches the rest — a resource name that resolves to the wrong CRD, a label
+# selector that matches nothing, a budget the gate misreads.
+#
+# What it CANNOT cover: `talosctl upgrade` itself. Talos in a container has no
+# disk and no installer, so the upgrade stays cloud-only. Of the eleven defects
+# found on 2026-08-15, exactly one needed that.
+#
+# Needs: `task local-up` (3 CP + 3 workers in Docker).
+# Usage: test-gates-local.sh
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export KUBECONFIG="${KUBECONFIG:-$ROOT/infrastructure/opentofu-local/kubeconfig}"
+NS=gate-lab
+
+PASS=0
+FAIL=0
+ok()  { printf '  \033[32m✓\033[0m %s\n' "$*"; PASS=$((PASS + 1)); }
+bad() { printf '  \033[31m✗\033[0m %s\n' "$*"; FAIL=$((FAIL + 1)); }
+
+kubectl cluster-info >/dev/null 2>&1 || {
+  echo "✗ no local cluster — run: task local-up" >&2
+  exit 1
+}
+
+cleanup() { kubectl delete ns "$NS" --wait=false >/dev/null 2>&1 || true; }
+trap cleanup EXIT
+kubectl get ns "$NS" >/dev/null 2>&1 || kubectl create ns "$NS" >/dev/null
+
+# --- the functions under test, with a REAL kubectl -----------------------------
+eval "$(awk '
+  BEGIN { split("cnpg_installed,cnpg_pod_state,cnpg_deadlocked,wait_pdb_headroom", a, ",")
+          for (i in a) want[a[i]] = 1 }
+  /^[a-z_]+\(\) \{/ { name = $1; sub(/\(\).*/, "", name); inside = (name in want) }
+  inside { print }
+  inside && /^\}/ { inside = 0 }
+' "$ROOT/scripts/ops/rolling-replace.sh")"
+KCTL=(kubectl)
+info() { :; }
+warn() { :; }
+ok_()  { :; }
+die()  { printf 'die: %s\n' "$*"; return 1; }
+ASSUME_YES=0
+DRAIN_TIMEOUT=60s
+
+echo "=== every resource name the ops scripts use resolves to what they mean ==="
+# The defect this covers: `kubectl get cluster` is ambiguous the moment CAPI is
+# installed, and resolves to clusters.cluster.x-k8s.io rather than CNPG's.
+while IFS= read -r res; do
+  [ -n "$res" ] || continue
+  out="$(kubectl get "$res" -A 2>&1 >/dev/null)"
+  case "$out" in
+    *"the server doesn't have a resource type"* | *NotFound* | "")
+      ok "$res — resolves or is legitimately absent" ;;
+    *"error parsing"* | *ambiguous*)
+      bad "$res — $out" ;;
+    *) ok "$res — resolves" ;;
+  esac
+done < <(grep -rhoE "get [a-z]+\.[a-z0-9.-]+\.io\b" "$ROOT/scripts/ops" "$ROOT/scripts/dev" 2>/dev/null |
+  sed 's/^get //' | sort -u)
+
+echo
+echo "=== wait_pdb_headroom against a real PodDisruptionBudget ==="
+kubectl -n "$NS" create deployment pause --image=registry.k8s.io/pause:3.9 --replicas=2 >/dev/null 2>&1
+kubectl -n "$NS" rollout status deployment/pause --timeout=120s >/dev/null 2>&1
+NODE="$(kubectl -n "$NS" get pods -l app=pause -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null)"
+
+# A budget that is satisfiable: 2 healthy, 1 required.
+kubectl -n "$NS" apply -f - >/dev/null 2>&1 <<EOF
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: pause-ok, namespace: $NS}
+spec: {minAvailable: 1, selector: {matchLabels: {app: pause}}}
+EOF
+sleep 5
+PDB_TIMEOUT=20
+if wait_pdb_headroom "$NODE" >/dev/null 2>&1; then
+  ok "a satisfiable budget lets the gate through"
+else
+  bad "the gate blocked on a budget that allows a disruption"
+fi
+
+# A budget that can never allow one AND is short a pod: 3 required, 2 healthy.
+# This is the shape the gate must WAIT on (currentHealthy < expectedPods).
+kubectl -n "$NS" apply -f - >/dev/null 2>&1 <<EOF
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: pause-stuck, namespace: $NS}
+spec: {minAvailable: 3, selector: {matchLabels: {app: pause}}}
+EOF
+kubectl -n "$NS" scale deployment/pause --replicas=3 >/dev/null 2>&1
+sleep 8
+ALLOWED="$(kubectl -n "$NS" get pdb pause-stuck -o jsonpath='{.status.disruptionsAllowed}' 2>/dev/null)"
+HEALTHY="$(kubectl -n "$NS" get pdb pause-stuck -o jsonpath='{.status.currentHealthy}' 2>/dev/null)"
+EXPECTED="$(kubectl -n "$NS" get pdb pause-stuck -o jsonpath='{.status.expectedPods}' 2>/dev/null)"
+if [ "${ALLOWED:-1}" = "0" ]; then
+  ASSUME_YES=1
+  PDB_TIMEOUT=20
+  if wait_pdb_headroom "$NODE" >/dev/null 2>&1; then
+    bad "the gate passed a budget at disruptionsAllowed=0 (healthy=$HEALTHY expected=$EXPECTED)"
+  else
+    ok "a blocking budget stops the gate (healthy=$HEALTHY expected=$EXPECTED)"
+  fi
+else
+  bad "could not build a blocking budget — got disruptionsAllowed=$ALLOWED, test inconclusive"
+fi
+
+echo
+echo "=== cnpg_installed answers honestly on a cluster without CNPG ==="
+if cnpg_installed; then
+  bad "claims CNPG is installed on a cluster that has no such CRD"
+else
+  ok "no CNPG CRD → not installed (so the roll skips its gates instead of dying)"
+fi
+
+echo
+printf '%s passed, %s failed\n' "$PASS" "$FAIL"
+[ "$FAIL" -eq 0 ]

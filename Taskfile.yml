@@ -149,6 +149,22 @@ tasks:
       # match; two of them once matched nothing and passed.
       - ./scripts/dev/check-gitleaks-rules.sh
 
+  check-jsonpath:
+    desc: >-
+      Parse every jsonpath the scripts use, with kubectl itself, offline. A
+      malformed expression always fails at runtime, so whatever reads it always
+      sees nothing — and nothing reads as fine. Cost three cloud rolls to find once.
+    cmds:
+      - ./scripts/dev/check-jsonpath.sh
+
+  test-gates-local:
+    desc: >-
+      Rung ONE: the roll's gates against a real Kubernetes in Docker (needs
+      `task local-up`). A stub proves the branching; only a real apiserver proves
+      the queries run. Does NOT cover `talosctl upgrade` — no disk in a container.
+    cmds:
+      - ./scripts/dev/test-gates-local.sh
+
   test-scripts:
     desc: >-
       Unit-test the shell gates against a stub kubectl. Rung ZERO: the defects
@@ -156,6 +172,9 @@ tasks:
       name resolving to the wrong CRD, an error read as an empty list, an rc
       capture `set -e` never reached. Seconds here instead of 25-90 minutes there.
     cmds:
+      # jsonpath first: a query kubectl cannot parse makes every assertion below
+      # it meaningless, and this costs milliseconds.
+      - ./scripts/dev/check-jsonpath.sh
       - ./scripts/dev/test-rolling-replace.sh
 
   test:
