@@ -27,9 +27,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # Words chosen for one property: they are French and they are not English, not
 # an identifier, and not a common abbreviation. That rules out the tempting ones
-# — `son`, `car`, `pas`, `on`, `or`, `sur`, `main` — every one of which is an
-# ordinary English word or appears in code.
-WORDS='le|la|les|des|une|dans|pour|avec|cette|être|est|sont|était|sera|qui|que|quand|ainsi|alors|aussi|avant|après|chaque|comme|depuis|donc|déjà|encore|entre|jamais|leur|mais|même|moins|notre|parce|peut|plutôt|puis|sans|sous|toujours|tout|toute|toutes|tous|très|vers|voici|voilà|faut|doit|doivent|ici|cela|ceci|celui|celle|nous|vous|elles|ils|du|au|aux|ni|elle|leurs|afin|lorsque|selon|plusieurs|ceux|celles|ensuite|enfin|pourrait|pourraient|publique|publiques'
+# — `son`, `car`, `pas`, `on`, `or`, `sur`, `main`, `distinct` — every one of
+# which is an ordinary English word or appears in code.
+#
+# The list is necessarily incomplete, and every widening has found real lines
+# that the narrower one called clean: `et ne pourrait ni` contained none of the
+# first set, and sixteen `# Groupe NN` headers survived the second. Widen it
+# again when you meet French this misses — and check the new words against BOTH
+# repositories before committing, which is what caught `distinct`.
+WORDS='le|la|les|des|une|dans|pour|avec|cette|être|est|sont|était|sera|qui|que|quand|ainsi|alors|aussi|avant|après|chaque|comme|depuis|donc|déjà|encore|entre|jamais|leur|mais|même|moins|notre|parce|peut|plutôt|puis|sans|sous|toujours|tout|toute|toutes|tous|très|vers|voici|voilà|faut|doit|doivent|ici|cela|ceci|celui|celle|nous|vous|elles|ils|du|au|aux|ni|elle|leurs|afin|lorsque|selon|plusieurs|ceux|celles|ensuite|enfin|pourrait|pourraient|publique|publiques|groupe|groupes|nom|noms|certificat|certificats|interne|internes|externe|externes|fichier|fichiers|exemple|exemples|attendu|attendue|ordinaire|ordinaires|racine|seule|seul|court|courte|observee|observée'
 
 usage() { sed -n '2,20p' "$0" | sed 's/^# \?//'; }
 case "${1:-}" in

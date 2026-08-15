@@ -83,6 +83,15 @@ resource "openstack_compute_instance_v2" "worker" {
 
   security_groups = [openstack_networking_secgroup_v2.this.name]
 
+  # ⚠️ The network reference creates NO dependency on the SUBNET, and Nova
+  # refuses to boot on a network that has none: "Network <id> requires a subnet
+  # in order to boot instances on" (400), which failed two of two workers on
+  # 2026-08-15 while the control planes came up fine — they hang off explicit
+  # ports, and a port does depend on the subnet. Same shape as the bastion port,
+  # documented in bastion.tf; the workers were never given the same guard, so
+  # this raced silently and won often enough to look correct.
+  depends_on = [openstack_networking_subnet_v2.private]
+
   # No user_data — Talos configuration applied via Talos API by modules/talos/
 
   tags = ["talos", "worker", var.cluster_name]
