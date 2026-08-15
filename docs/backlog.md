@@ -43,6 +43,28 @@ bugs: a rolling upgrade needs one node's worth of spare capacity (Scaleway at
 72/47/27% of CPU requests drained clean, OVH at 78/99/100% did not), and Outscale
 at 3 CP + 1 worker deploys but cannot host the platform at all.
 
+**Where each provider actually got to**, so nobody reads the paragraphs above as
+three green ticks:
+
+| | deploy | seed | 35/35 | idempotent | K8s+Talos upgrade |
+|---|---|---|---|---|---|
+| Scaleway | ✅ | ✅ | ✅ | ✅ | ✅ **6/6 nodes, plan empty** |
+| OVH | ✅ | ✅ | ✅ | ✅ | control planes only |
+| Outscale | ✅ | ✅ | 30–34/35 | ✅ | not attempted |
+
+Only Scaleway carries the whole claim, and it is the one to trust: 5 probe FAILs
+in 40 samples for the Kubernetes half, every node on v1.13.8/v1.36.3, `tofu plan`
+empty afterwards, 35/35 again at the end.
+
+OVH's control-plane roll finished; its worker roll never did. First for capacity,
+then — after resizing the workers to `c3-8`, which OpenStack does in place and to
+every node at once — because the cluster's Talos PKI stopped matching the state
+(entry below). Torn down rather than guessed at. Outscale reached idempotency but
+its DAG oscillates between 30 and 34 of 35 on 2 vCPU workers, so the upgrade was
+not worth attempting there.
+
+All three torn down at the end of the session.
+
 2026-08-14: **everything below was proven by a human running commands. Nothing
 re-proves it.** `.github/workflows/staging.yml` is the answer to that and it has
 never executed: it was merged 2026-08-13 with no `staging` environment and none
