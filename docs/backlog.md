@@ -43,27 +43,31 @@ bugs: a rolling upgrade needs one node's worth of spare capacity (Scaleway at
 72/47/27% of CPU requests drained clean, OVH at 78/99/100% did not), and Outscale
 at 3 CP + 1 worker deploys but cannot host the platform at all.
 
-**Where each provider actually got to**, so nobody reads the paragraphs above as
-three green ticks:
+**Where each provider actually got to.** The day ran twice: once with the fixes
+being written as the defects appeared, then a clean re-run on the corrected HEAD
+with `1.1.0-rc3` and no intervention at all. The second run is the one that
+counts, and neither provider finished it:
 
-| | deploy | seed | 35/35 | idempotent | K8s+Talos upgrade |
-|---|---|---|---|---|---|
-| Scaleway | ✅ | ✅ | ✅ | ✅ | ✅ **6/6 nodes, plan empty** |
-| OVH | ✅ | ✅ | ✅ | ✅ | control planes only |
-| Outscale | ✅ | ✅ | 30–34/35 | ✅ | not attempted |
+| | deploy | seed | 35/35 | idempotent | upgrade | post-upgrade 35/35 |
+|---|---|---|---|---|---|---|
+| Scaleway | ✅ | ✅ | ✅ | ✅ | ✅ 6/6 nodes, plan empty | ❌ **34/35** |
+| OVH | ✅ | ✅ | ✅ | ✅ | ❌ stopped at worker-1 | — |
+| Outscale (first run) | ✅ | ✅ | 30–34/35 | ✅ | not attempted | — |
 
-Only Scaleway carries the whole claim, and it is the one to trust: 5 probe FAILs
-in 40 samples for the Kubernetes half, every node on v1.13.8/v1.36.3, `tofu plan`
-empty afterwards, 35/35 again at the end.
+Scaleway's upgrade itself was faultless — 3 probe FAILs in 26 samples for
+Kubernetes, 12 in 2000 for Talos, six nodes on v1.13.8/v1.36.3, `tofu plan`
+empty. It then failed its post-upgrade check on ONE Kustomization, and the
+reason is the entry below: the installer carried no system extensions, so the
+upgrade left every node without `iscsi-tools` and Longhorn's manager
+crash-looped. Green API, green plan, dead storage — the exact shape this
+repository keeps meeting.
 
-OVH's control-plane roll finished; its worker roll never did. First for capacity,
-then — after resizing the workers to `c3-8`, which OpenStack does in place and to
-every node at once — because the cluster's Talos PKI stopped matching the state
-(entry below). Torn down rather than guessed at. Outscale reached idempotency but
-its DAG oscillates between 30 and 34 of 35 on 2 vCPU workers, so the upgrade was
-not worth attempting there.
+OVH stopped at worker-1: `enablePDB=false` was logged and the budgets were still
+there ten minutes later, so the drain retried evictions for its full 900s and the
+roll refused. Both gates saw it and only warned; both now fail instead, and the
+setting is confirmed rather than assumed.
 
-All three torn down at the end of the session.
+All clusters torn down at the end of the session.
 
 2026-08-14: **everything below was proven by a human running commands. Nothing
 re-proves it.** `.github/workflows/staging.yml` is the answer to that and it has
@@ -173,6 +177,19 @@ invites someone to build what nobody decided.
       are separate phases again.
       **Closes:** `workers = N+1` in a tfvars, one `task up`, exit 0, N+1 nodes
       Ready. Rung: real cloud.
+
+- [ ] **The installer fix is written and not proven.** The machine config now
+      names `factory.talos.dev/installer/<schematic>:<version>` so a reinstall
+      keeps the schematic's extensions, and `talos-image.sh` refuses to build
+      when the pinned id and `schematic.yaml` disagree. What is NOT established
+      is that it cures the symptom: reinstalling one worker from the Factory
+      installer at the SAME version (v1.13.8 → v1.13.8) left the node reporting
+      zero extensions and `longhorn-manager` still crash-looping, so either a
+      same-version upgrade is a no-op inside the installer or something else is
+      dropping them. The version-CHANGING case, which is the one the upgrade path
+      uses, was never tried.
+      **Closes:** a v1.13.7 → v1.13.8 roll after which `talosctl get extensions`
+      lists all three and `storage-backup-target` is Ready. Rung: real cloud.
 
 - [ ] **A cluster can end up with a Talos PKI the state no longer matches, and
       there is no way back.** OVH, 2026-08-15, after several interrupted applies
