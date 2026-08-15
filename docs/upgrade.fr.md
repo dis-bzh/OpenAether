@@ -146,6 +146,29 @@ NAME:.metadata.name,PRIMARY:.status.currentPrimary,READY:.status.readyInstances
 kubectl cnpg status <cluster> -n <ns>
 ```
 
+### Une base restée en « Failing over » après le roll
+
+Le roll se termine, l'API n'a pas bronché, et quelques minutes plus tard un
+cluster CNPG reste en `Failing over` ou `Switchover in progress` sans bouger. Vu
+deux fois le 2026-08-15, deux fois la même forme : l'ancien primaire rétrogradé
+attend la fin du switchover pendant que le réplica *cible* attend un WAL que
+seul un primaire en marche produirait. Une troisième instance peut être
+parfaitement saine pendant tout ce temps.
+
+Redémarrer l'opérateur ne change rien. Supprimer le pod de la **cible** résout
+en une minute environ : il redémarre, termine sa récupération, et le cluster
+élit :
+
+```bash
+kubectl get clusters.postgresql.cnpg.io -n <ns> <cluster> \
+  -o jsonpath='{.status.currentPrimary} -> {.status.targetPrimary}{"\n"}'
+kubectl delete pod <targetPrimary> -n <ns>
+```
+
+`kubectl cnpg promote` n'est pas la réponse ici : avec le plugin que ce dépôt
+épingle, il sort 0, affiche « will be promoted » et laisse `targetPrimary`
+inchangé. Ouvert dans `backlog.md`.
+
 ⚠️ **Le premier apply après un bump de `talos_version` échoue sur OVH et
 Outscale** avec « Provider produced inconsistent final plan », une fois par
 machine config. Rien n'est laissé à moitié appliqué ; relancer. C'est l'issue
