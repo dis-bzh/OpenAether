@@ -248,6 +248,14 @@ invites someone to build what nobody decided.
       fine — an orphan from an earlier pin that the state no longer tracks. So two
       versions can coexist, but only by accident, and only until a forward build
       destroys the one the state does track.
+      A fourth consequence, 2026-08-15: **a cluster whose tfvars name a version
+      the account no longer has cannot be DESTROYED either.** The destroy plan
+      still evaluates the image data source, which answers "your query returned
+      no results", and `fleet-down` stops partway — after taking the Talos
+      config-apply resources out of state. Recovered by pointing the tfvars back
+      at the version the account actually holds and re-running, but a teardown
+      that depends on an image being present is a teardown that can be blocked by
+      a rebuild.
       Rollback is the part that makes this 1.2.0 rather than a nicety: `--upgrade`
       moves forward, nothing moves back, and the ability to move back is currently
       luck. Keying the image resources by version
@@ -328,10 +336,21 @@ invites someone to build what nobody decided.
       closed off: it deploys and then stops at seeding, because the control
       planes are tainted and one worker cannot hold OpenBao's three replicas
       (2026-08-15).
-      **Decide:** raise the quota, or pick a smaller flavour that fits 3+3 under
-      40 GB. There is no working topology below three workers.
-      **Closes:** `OSC-mgmt-ha` reaching 35/35 Kustomizations inside quota. Rung:
-      real cloud.
+      And three workers of that flavour are not enough either, for the same
+      reason OVH's `b3-8` was not: `tinav5.c2r7p2` is 2 vCPU, the workers sat at
+      93/81/35% of CPU requests, both CNPG clusters went to "Failing over" and
+      Grafana crash-looped on a database with no primary. 34 of 35 Kustomizations
+      Ready, and the missing one is the observability CRs.
+      The arithmetic for the fix, read from `preflight-quotas` on 2026-08-15:
+      7/10 instances, **14/20 vCPU**, 44/40 GB RAM. Moving the three workers to
+      `tinav5.c4r7p2` costs +6 vCPU — exactly 20/20 — and no extra RAM. It fits,
+      barely, and it is untested: Outscale updates `vm_type` in place with a
+      stop/start, so applying it to six nodes at once would do to etcd what the
+      OVH resize did.
+      **Decide:** raise the quota, or move the workers to 4 vCPU one at a time.
+      There is no working topology below three workers.
+      **Closes:** `OSC-mgmt-ha` reaching 35/35 Kustomizations inside quota, then
+      a worker roll finishing. Rung: real cloud.
 
 - [ ] **`talos_machine_bootstrap` still needs a human after an interrupted
       apply.** The comment and the missing timeout are fixed; the behaviour is
