@@ -45,6 +45,7 @@ Deux couches de réglages orthogonales :
 | Stockage workers | `worker_storage.disks[]` + `worker_storage.volumes[]` (LUKS2 `UserVolumeConfig`) | aucun, ou disques+volumes | `{disks=[],volumes=[]}` | scw/ovh/outscale/proxmox ; local forcé à off | `disks` → module provider ; `volumes` → `modules/talos`. |
 | Phase d'amorçage | `talos_bootstrap` | `false` (phase 1 infra), `true` (phase 2 config+etcd+Flux) | `true` | tous | `task infra` → `task bootstrap-phase2`. |
 | auto_tunnels | `auto_tunnels` (+ `ssh_key_path`) | `true`/`false` | `false` | cloud/proxmox | EXPÉRIMENTAL, apply unique ; jamais testé sur machine réelle. |
+| Bloc de ports des tunnels | `TALOS_TUNNEL_OFFSET` → `talos_tunnel_port_offset` | multiple de 200, positif ou nul | `0` | cloud/proxmox | Décale les CP en `50000+off+i` et les workers en `50100+off+i`, pour monter plusieurs clusters depuis un même poste. Ne poser que la variable d'environnement ; `Taskfile.yml` alimente la variable tofu. |
 | secrets_prevent_destroy | `secrets_prevent_destroy` | `true`/`false` | `true` | tous | `false` réservé au nettoyage de `tofu test`. |
 | skip_port_ready_wait | `skip_port_ready_wait` | `true`/`false` | `false` | tous | `true` réservé à la CI mockée. |
 | backup_enabled | `backup_enabled` | `true`/`false` | `true` | racine | `false` saute le local-exec de backup. |

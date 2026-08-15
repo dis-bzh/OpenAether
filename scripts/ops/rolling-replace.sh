@@ -46,6 +46,7 @@
 #   Needs: tofu init, AWS_* creds, open Talos tunnels, ./talosconfig + ./kubeconfig.
 # ==============================================================================
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 
 # --- args --------------------------------------------------------------------
 PROVIDER="${1:-scaleway}"
@@ -73,9 +74,13 @@ case "$PROVIDER" in
   proxmox)  MOD="proxmox" ;;
   *) echo "✗ unknown provider: $PROVIDER (expected scaleway|ovh|outscale|proxmox)" >&2; exit 2 ;;
 esac
-if [[ "$PROVIDER" != "scaleway" ]]; then
-  echo "⚠ ${PROVIDER}: rolling-replace path is code-complete but has NEVER been exercised" >&2
-  echo "  on a live cluster (deployment-test-matrix ⬜) — run --dry-run first and review targets." >&2
+# --upgrade has been exercised live on all three clouds (2026-08-13); the
+# REPLACEMENT path (no --upgrade) only ever on Scaleway. Warn about the one that
+# is actually unproven, not about the whole script — the blanket warning
+# contradicted this file's own header and taught readers to ignore it.
+if [[ "$PROVIDER" != "scaleway" && "$UPGRADE" -eq 0 ]]; then
+  echo "⚠ ${PROVIDER}: the node-REPLACEMENT path has never been exercised on a live" >&2
+  echo "  cluster (only --upgrade has) — run --dry-run first and review the targets." >&2
 fi
 if [[ "$PROVIDER" == "proxmox" ]]; then
   echo "⚠ proxmox: worker data disks are inline on the VM — replacing a worker WIPES its" >&2
@@ -138,12 +143,14 @@ mapfile -t WK_IPS < <(jq -r '.worker_private_ips.value[]? // empty' <<<"$OUTPUTS
 info "Cluster: ${NODE_PREFIX} on ${PROVIDER}  (${#CP_IPS[@]} CP, ${#WK_IPS[@]} workers)"
 info "Scope: ${SCOPE}   dry-run: $([[ $DRY_RUN -eq 1 ]] && echo yes || echo no)"
 
-# --- talos endpoint per node (matches talos-tunnels.sh: CP 50000+i, WK 50100+i) ---
+# --- talos endpoint per node (matches talos-tunnels.sh: CP 50000+i, WK 50100+i,
+# both shifted by TALOS_TUNNEL_OFFSET) ---
 # Talos node identity is the private IP; we reach its API via the localhost tunnel.
+TUNNEL_OFFSET="$(oa_tunnel_offset)" || exit 1
 talos_ep() { # <type> <index>
   case "$1" in
-    cp)     echo "127.0.0.1:$((50000 + $2))" ;;
-    worker) echo "127.0.0.1:$((50100 + $2))" ;;
+    cp)     echo "127.0.0.1:$((50000 + TUNNEL_OFFSET + $2))" ;;
+    worker) echo "127.0.0.1:$((50100 + TUNNEL_OFFSET + $2))" ;;
   esac
 }
 

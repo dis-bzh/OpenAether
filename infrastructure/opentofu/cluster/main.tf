@@ -513,9 +513,11 @@ module "talos" {
 
   # Phase 2 reaches the private nodes through per-node SSH tunnels on localhost
   # (see the `instructions` output). `endpoint` is where the provider connects;
-  # node identity stays the private IP. CPs: 127.0.0.1:50000+i, workers: :50100+i.
-  control_plane_endpoints = var.talos_bootstrap ? [for i in range(local.total_control_planes) : "127.0.0.1:${50000 + i}"] : []
-  worker_endpoints        = var.talos_bootstrap ? [for i in range(local.total_workers) : "127.0.0.1:${50100 + i}"] : []
+  # node identity stays the private IP. CPs: 127.0.0.1:50000+i, workers: :50100+i,
+  # both shifted by talos_tunnel_port_offset when a second cluster is being
+  # brought up from the same workstation.
+  control_plane_endpoints = var.talos_bootstrap ? [for i in range(local.total_control_planes) : "127.0.0.1:${50000 + var.talos_tunnel_port_offset + i}"] : []
+  worker_endpoints        = var.talos_bootstrap ? [for i in range(local.total_workers) : "127.0.0.1:${50100 + var.talos_tunnel_port_offset + i}"] : []
 
   # Bootstrap manifests — Cilium is always injected (CNI required),
   # Flux only on initial bootstrap (not on upgrades/DRP)

@@ -1,5 +1,13 @@
 version: "3"
 
+# One knob for "which local ports the Talos tunnels use". The scripts read
+# TALOS_TUNNEL_OFFSET; the cluster root needs the same number to know where to
+# connect, and gets it from here rather than from a second variable a caller
+# could forget to keep in step. Default 0 = the historical fixed block.
+env:
+  TF_VAR_talos_tunnel_port_offset:
+    sh: echo "${TALOS_TUNNEL_OFFSET:-0}"
+
 # The repo's real OpenTofu roots. ⚠️ DO NOT go back to a
 # `-recursive infrastructure/opentofu`: it would sweep in untracked local
 # scratch directories (e.g. `_v2/`), which used to fail `task lint`.

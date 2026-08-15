@@ -52,8 +52,9 @@ trap 'rm -rf "$GNUPGHOME" "$WORK"' EXIT
 # --- 1) snapshot from the first healthy CP (tunnels: CP i → 50000+i) ---------
 SNAP="$WORK/etcd.snap"
 took=""
+TUNNEL_OFFSET="$(oa_tunnel_offset)"
 for k in "${!CP_IPS[@]}"; do
-  ep="127.0.0.1:$((50000 + k))"; ip="${CP_IPS[$k]}"
+  ep="127.0.0.1:$((50000 + TUNNEL_OFFSET + k))"; ip="${CP_IPS[$k]}"
   if talosctl -e "$ep" -n "$ip" etcd snapshot "$SNAP" >/dev/null 2>&1; then
     took="cp-${k} (${ip})"; break
   fi

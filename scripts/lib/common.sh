@@ -78,3 +78,21 @@ s3_cred() {
 #   project = cluster_name's first segment, provider = scaleway|ovh|outscale
 oa_state_bucket() { printf 's3-%s-%s-tfstate-%s' "$1" "$2" "$3"; }            # project provider env
 oa_artifact_bucket() { printf 's3-%s-%s-%s-%s' "$1" "$2" "$3" "$4"; }         # project provider role env
+
+# --- Local port block for the per-node Talos API tunnels (CPs 50000+off+i,
+# workers 50100+off+i). The ports were fixed, which meant one cluster at a time
+# per workstation — a second provider's tunnels collide and talos-tunnels.sh
+# refuses. TALOS_TUNNEL_OFFSET shifts the whole block so clusters can be brought
+# up side by side. The cluster root needs the SAME number to know where to
+# connect; Taskfile.yml derives TF_VAR_talos_tunnel_port_offset from this one
+# variable so the two cannot drift.
+oa_tunnel_offset() {
+  local o="${TALOS_TUNNEL_OFFSET:-0}"
+  [[ "$o" =~ ^[0-9]+$ ]] ||
+    { echo "✗ TALOS_TUNNEL_OFFSET must be a non-negative integer, got: '$o'" >&2; return 1; }
+  # Non-multiples of 200 would overlap the CP block of one cluster with the
+  # worker block of another, and the collision would look like a flaky tunnel.
+  (( o % 200 == 0 )) ||
+    { echo "✗ TALOS_TUNNEL_OFFSET must be a multiple of 200, got: '$o'" >&2; return 1; }
+  printf '%s' "$o"
+}

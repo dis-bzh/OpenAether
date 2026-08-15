@@ -99,6 +99,22 @@ variable "ssh_key_path" {
   default     = "~/.ssh/id_ed25519"
 }
 
+variable "talos_tunnel_port_offset" {
+  description = <<-EOT
+    Shifts the localhost ports Phase 2 reaches the nodes on (CPs 50000+offset+i,
+    workers 50100+offset+i), so more than one cluster can be bootstrapped from a
+    single workstation instead of colliding on a fixed block.
+    Must equal TALOS_TUNNEL_OFFSET, which is what actually opens the tunnels;
+    Taskfile.yml derives this from that one variable so the two cannot drift.
+  EOT
+  type        = number
+  default     = 0
+  validation {
+    condition     = var.talos_tunnel_port_offset >= 0 && var.talos_tunnel_port_offset % 200 == 0
+    error_message = "talos_tunnel_port_offset must be a non-negative multiple of 200 — the CP and worker blocks are 100 apart, so anything else overlaps them."
+  }
+}
+
 variable "talos_version" {
   description = "Talos Linux version"
   type        = string

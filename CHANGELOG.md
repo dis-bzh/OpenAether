@@ -20,6 +20,17 @@ lane holds one version per provider, so nothing can move backwards yet.
 
 ### Added
 
+- **`TALOS_TUNNEL_OFFSET` — one cluster at a time per workstation was a
+  limitation, not a decision.** The Talos API tunnels bound a fixed port block
+  (CPs `50000+i`, workers `50100+i`), so a second provider's bring-up collided
+  and `talos-tunnels.sh` refused it — which is what made a three-provider
+  validation run three sequential runs. The offset shifts the whole block; the
+  cluster root needs the same number and `Taskfile.yml` derives
+  `TF_VAR_talos_tunnel_port_offset` from it, so the two cannot drift. Default 0
+  keeps every existing invocation on the historical ports. The orphan-tunnel
+  fallback in `close_tunnels` is now scoped to its own block, instead of a
+  blanket `pkill` that would have torn down the cluster next door.
+
 - **`scripts/ops/seed-openbao.sh` — the Day-1 step a deploy is not finished
   without.** `admin-access.md` § 3 listed it as manual `bao kv put` calls and
   nothing automated or checked it, so a fresh cluster stopped six Kustomizations
