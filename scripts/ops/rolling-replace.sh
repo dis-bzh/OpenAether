@@ -267,6 +267,30 @@ cnpg_maintenance() { # <true|false>
   # wants them. Leaving a Kustomization suspended is the failure mode this
   # function must not have — staging-verify.sh fails the run if one is.
   [[ "$on" == "true" ]] || cnpg_flux_suspend false
+
+  # ⚠️ The patch returning 0 is not the setting taking effect. On OVH
+  # 2026-08-15 both clusters logged enablePDB=false and their budgets were still
+  # there ten minutes later, carrying their deploy-time creation timestamp — so
+  # they had never been deleted, the roll drained on an assumption that had
+  # silently failed, and it cost 900s of eviction retries to find out. The same
+  # patch applied by hand afterwards removed them in under thirty seconds, so the
+  # mechanism is right and only the confirmation was missing.
+  #
+  # Confirm on the way IN only: on the way out the budgets coming back is Flux's
+  # and the operator's business, and staging-verify.sh is what checks the end
+  # state.
+  [[ "$on" == "true" ]] || return 0
+  local waited=0 left
+  while [[ $waited -lt 120 ]]; do
+    left="$("${KCTL[@]}" get pdb -A -l cnpg.io/cluster \
+      -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {end}' 2>/dev/null || true)"
+    [[ -z "$left" ]] && { ok "CNPG budgets are gone — the node can lose a primary"; return 0; }
+    sleep 5; waited=$((waited + 5))
+  done
+  die "CNPG budgets survived enablePDB=false after 120s: ${left}
+  The patch reported success and the operator did not act on it. Draining now
+  would retry evictions for ${DRAIN_TIMEOUT} and fail — see docs/upgrade.md
+  § 'What actually blocks a drain'. Check the operator in cnpg-system."
 }
 
 # The CNPG primary used to be switched off the node here, with `kubectl cnpg
@@ -366,9 +390,20 @@ wait_pdb_headroom() { # <node_name>
     fi
     sleep 10; waited=$((waited + 10))
   done
-  # Not fatal here: the drain that follows is, and it names the pods. This gate
-  # exists to stop arriving early, not to become a second place to fail.
+  # Fatal, unattended. This used to warn and drain anyway, on the reasoning that
+  # the drain names the pods. It does — after another ${DRAIN_TIMEOUT}. On OVH
+  # 2026-08-15 that meant 600s of "these budgets allow nothing" followed by 900s
+  # of eviction retries against the same budgets, and the same answer at the end.
+  # Every budget this gate waits on reads currentHealthy < expectedPods, so a pod
+  # is MISSING: draining cannot supply it, and time cannot either.
   warn "after ${PDB_TIMEOUT}s these budgets still allow nothing on ${node}: ${blocked}"
+  if [[ $ASSUME_YES -eq 1 ]]; then
+    die "refusing to drain ${node} into budgets that already said no.
+  Each one above is short of a pod (currentHealthy < expectedPods), so the drain
+  would retry evictions for ${DRAIN_TIMEOUT} and reach the same conclusion.
+  Fix what is missing, then re-run — nodes already upgraded are skipped."
+  fi
+  read -rp "Drain ${node} anyway? [y/N] " a; [[ "$a" == [yY] ]] || die "aborted by operator"
 }
 
 cordon_drain() { # <node_name>
