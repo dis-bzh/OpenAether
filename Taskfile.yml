@@ -149,6 +149,15 @@ tasks:
       # match; two of them once matched nothing and passed.
       - ./scripts/dev/check-gitleaks-rules.sh
 
+  test-scripts:
+    desc: >-
+      Unit-test the shell gates against a stub kubectl. Rung ZERO: the defects
+      that cost real cloud runs on 2026-08-15 were logic, not cloud — a resource
+      name resolving to the wrong CRD, an error read as an empty list, an rc
+      capture `set -e` never reached. Seconds here instead of 25-90 minutes there.
+    cmds:
+      - ./scripts/dev/test-rolling-replace.sh
+
   test:
     desc: Run OpenTofu tests (cluster root)
     dir: infrastructure/opentofu/cluster

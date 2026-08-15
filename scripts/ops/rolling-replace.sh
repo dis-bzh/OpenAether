@@ -373,10 +373,65 @@ cnpg_maintenance() { # <true|false>
 # demoted primary waiting for a switchover and the target replica waiting for WAL
 # only a running primary would produce. It cost a hand-deleted pod, twice.
 #
+# --- the one deadlock CNPG does not get out of by itself -----------------------
+#
+# Seen FOUR times on 2026-08-15, always the same, always after the node holding a
+# primary was drained:
+#
+#   status.currentPrimary  -> a pod that NO LONGER EXISTS (evicted; its
+#                             local-path-retain PVC pins it to the drained node)
+#   status.targetPrimary   -> a pod that exists and never becomes ready
+#                             (it wants WAL that only a running primary produces)
+#   a third instance       -> ready, healthy, ignored
+#
+# CNPG will not recreate the missing primary while a switchover is pending, and
+# the switchover cannot finish without a primary. Restarting the operator does
+# nothing. Deleting the TARGET's pod forces a re-evaluation and it resolves in
+# about a minute — four times out of four.
+#
+# So the roll does that itself rather than leaving a human to. The four
+# conditions below are ALL required: a narrow unstick, not a "delete pods when
+# stuck". It fires once per cluster per roll and says exactly what it did.
+CNPG_UNSTICK_AFTER="${CNPG_UNSTICK_AFTER:-180}"   # seconds of no progress first
+
+# "absent" only for a genuine NotFound. An unanswered query is "unknown", which
+# must NOT read as "the primary is gone" — that is the premise of the whole test.
+cnpg_pod_state() { # <ns> <pod> -> ready | notready | absent | unknown
+  local ns="$1" pod="$2" out err
+  if err="$("${KCTL[@]}" -n "$ns" get pod "$pod" \
+       -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>&1 >/dev/null)"; then
+    out="$("${KCTL[@]}" -n "$ns" get pod "$pod" \
+      -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)"
+    [[ "$out" == "True" ]] && echo ready || echo notready
+    return 0
+  fi
+  case "$err" in
+    *NotFound* | *"not found"*) echo absent ;;
+    *) echo unknown ;;
+  esac
+}
+
+# Echoes "<ns> <cluster> <targetPod>" for every cluster in the known deadlock.
+cnpg_deadlocked() {
+  local ns name cur tgt
+  while read -r ns name cur tgt; do
+    [[ -n "$ns" && -n "$name" && -n "$cur" && -n "$tgt" ]] || continue
+    [[ "$cur" != "$tgt" ]] || continue                              # 1. a switchover is pending
+    [[ "$(cnpg_pod_state "$ns" "$cur")" == absent ]] || continue    # 2. the primary pod is gone
+    [[ "$(cnpg_pod_state "$ns" "$tgt")" == notready ]] || continue  # 3. the target exists, not ready
+    # 4. something else is ready, or there is nothing to elect and deleting
+    #    the target would only make it worse.
+    [[ -n "$("${KCTL[@]}" -n "$ns" get pods -l "cnpg.io/cluster=${name}" \
+        -o jsonpath="{range .items[?(@.status.conditions[?(@.type=='Ready')].status=='True')]}{.metadata.name} {end}" 2>/dev/null)" ]] || continue
+    echo "$ns $name $tgt"
+  done < <("${KCTL[@]}" get clusters.postgresql.cnpg.io -A \
+    -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.status.currentPrimary}{" "}{.status.targetPrimary}{"\n"}{end}' 2>/dev/null)
+}
+
 # The qualified resource name is not optional — see the note above.
 CNPG_TIMEOUT="${CNPG_TIMEOUT:-600}"   # seconds
 wait_cnpg_whole() {
-  local waited=0 pending ns name inst ready answer rc
+  local waited=0 pending ns name inst ready answer rc unstuck=0 d
   # The guard its two siblings have and this one did not: on a cluster that
   # never picked the cnpg brick, the query below fails, and under `set -e` the
   # roll dies inside the first cordon_drain having cordoned nothing.
@@ -405,6 +460,24 @@ wait_cnpg_whole() {
     fi
     [[ -z "$pending" ]] && { [[ $waited -gt 0 ]] && ok "every CNPG cluster is whole again"; return 0; }
     [[ $waited -eq 0 ]] && info "Waiting for CNPG to finish electing: ${pending}"
+
+    # Give it CNPG_UNSTICK_AFTER to sort itself out first — most failovers are
+    # done inside a minute and this must not race a healthy election.
+    if [[ $waited -ge $CNPG_UNSTICK_AFTER && $unstuck -eq 0 ]]; then
+      while read -r d; do
+        [[ -n "$d" ]] || continue
+        set -- $d
+        warn "CNPG ${1}/${2} is in the known deadlock: primary ${1} pod gone, target ${3} stuck."
+        warn "  Deleting ${3} to force a re-election — see docs/upgrade.md."
+        if "${KCTL[@]}" -n "$1" delete pod "$3" >/dev/null 2>&1; then
+          ok "deleted ${1}/${3}; waiting for the cluster to elect"
+          unstuck=1
+        else
+          warn "could not delete ${1}/${3} — the wait continues and will time out"
+        fi
+      done < <(cnpg_deadlocked)
+    fi
+
     sleep 10; waited=$((waited + 10))
   done
   warn "after ${CNPG_TIMEOUT}s these CNPG clusters are still not whole: ${pending}"

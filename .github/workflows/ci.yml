@@ -208,6 +208,12 @@ jobs:
       - name: Setup Task
         run: ./scripts/internal/install-task.sh
 
+      # Rung zero, and it runs first because it is the cheap one: the shell
+      # gates against a stub kubectl, seconds rather than the 25-90 minutes a
+      # real cloud roll took to surface the same class of defect.
+      - name: task test-scripts
+        run: task test-scripts
+
       - name: task test
         run: task test
         env:
