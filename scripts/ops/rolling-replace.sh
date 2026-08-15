@@ -287,6 +287,37 @@ cnpg_maintenance() { # <true|false>
 # the primary unevictable, which is what the switchover was for. Nothing here
 # needs the plugin any more.
 
+# Wait until every CNPG cluster is whole again before touching the next node.
+#
+# With the budgets off for the roll, a drain evicts a primary and CNPG fails over
+# — normal, and finished in a minute when it is left alone. Arriving at the next
+# node before it finishes is what is not: on 2026-08-15 the roll drained a second
+# worker while zitadel-db was still electing, and the cluster deadlocked with the
+# demoted primary waiting for a switchover and the target replica waiting for WAL
+# only a running primary would produce. It cost a hand-deleted pod, twice.
+#
+# The qualified resource name is not optional — see the note above.
+CNPG_TIMEOUT="${CNPG_TIMEOUT:-600}"   # seconds
+wait_cnpg_whole() {
+  local waited=0 pending ns name inst ready
+  while [[ $waited -lt $CNPG_TIMEOUT ]]; do
+    pending=""
+    while read -r ns name inst ready; do
+      [[ -n "$ns" && -n "$name" ]] || continue
+      # A status that has not been populated must not read as "whole": require
+      # real numbers, the way the 0/0 check that used to pass here did not.
+      [[ "$inst" =~ ^[1-9][0-9]*$ && "$ready" == "$inst" ]] || pending+="${ns}/${name}(${ready:-?}/${inst:-?}) "
+    done < <("${KCTL[@]}" get clusters.postgresql.cnpg.io -A \
+      -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.status.instances}{" "}{.status.readyInstances}{"\n"}{end}' 2>/dev/null || true)
+    [[ -z "$pending" ]] && { [[ $waited -gt 0 ]] && ok "every CNPG cluster is whole again"; return 0; }
+    [[ $waited -eq 0 ]] && info "Waiting for CNPG to finish electing: ${pending}"
+    sleep 10; waited=$((waited + 10))
+  done
+  warn "after ${CNPG_TIMEOUT}s these CNPG clusters are still not whole: ${pending}"
+  warn "  draining the next node now is what deadlocked one on 2026-08-15 —"
+  warn "  see docs/upgrade.md § 'A database left \"Failing over\" after the roll'."
+}
+
 # Wait until the cluster says it can afford to lose a pod on this node.
 #
 # Between nodes the roll gates on etcd and Longhorn and on NOTHING else, so it
@@ -342,6 +373,7 @@ wait_pdb_headroom() { # <node_name>
 
 cordon_drain() { # <node_name>
   local node="$1"
+  wait_cnpg_whole
   wait_pdb_headroom "$node"
   info "Cordon + drain ${node}…"
   "${KCTL[@]}" cordon "$node" || die "cordon failed for ${node}"

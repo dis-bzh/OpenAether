@@ -211,14 +211,15 @@ invites someone to build what nobody decided.
       WAL only a running primary would produce. Deadlock, 15 minutes, no
       progress; the third instance was healthy and ready the whole time.
       Restarting the operator did nothing. Deleting the target's pod resolved it
-      in about a minute.
-      **Decide:** whether the roll should wait for `readyInstances == instances`
-      between nodes (it would have prevented this — the second drain started
-      while the first node's instances were still rejoining) or whether this is
-      a CNPG problem to report upstream. The first is cheap and belongs to the
-      roll either way.
+      in about a minute, both times; that recovery is now in `upgrade.md`.
+      The roll no longer creates the conditions for it — `wait_cnpg_whole` gates
+      each node on `readyInstances == instances` — but that is prevention, not a
+      cure, and it is UNPROVEN: it was written after the clusters came down.
       **Closes:** two consecutive worker drains with the databases healthy at the
-      end, no pod deleted by hand. Rung: real cloud.
+      end and no pod deleted by hand. Rung: real cloud.
+      Still open behind it: whether the deadlock itself is worth reporting
+      upstream, since a target replica that cannot catch up should not pin the
+      old primary indefinitely when a caught-up replica is sitting there.
 
 - [ ] **The OpenBao bootstrap jobs fail terminally and nothing retries them.**
       Both of them, on Outscale 2026-08-15: `openbao-init` hit its
