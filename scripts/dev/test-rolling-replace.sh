@@ -26,6 +26,8 @@ bad()  { printf '  \033[31m✗\033[0m %s\n' "$*"; FAIL=$((FAIL + 1)); }
 # --- the stub ----------------------------------------------------------------
 # STUB_PLAN is a file of "match<TAB>rc<TAB>stdout" lines. The first line whose
 # match is a substring of the joined argv wins. No line matching = rc 1, empty.
+# One record per line, so multi-line output is written with %% where a newline
+# goes — several of these queries legitimately return a list.
 cat >"$STUB_DIR/kubectl" <<'STUB'
 #!/usr/bin/env bash
 argv="$*"
@@ -37,6 +39,7 @@ while IFS=$'\t' read -r match rc out; do
       # Like the real thing: results on stdout, diagnostics on stderr. Getting
       # this wrong made the first run of these tests report two false failures,
       # which is the right way round for a harness to be wrong.
+      out="${out//%%/$'\n'}"
       if [ "${rc:-0}" = 0 ]; then
         [ -n "$out" ] && printf '%b\n' "$out"
       else
@@ -94,7 +97,7 @@ echo "=== cnpg_deadlocked: fires on the measured shape and nothing else ==="
 
 # The real deadlock: currentPrimary gone, target exists but unready, a third ready.
 DEADLOCK='get clusters.postgresql.cnpg.io -A\t0\tfoundation-databases zitadel-db zitadel-db-1 zitadel-db-2\n'
-plan "${DEADLOCK}get pod zitadel-db-1\t1\tError from server (NotFound): pods \"zitadel-db-1\" not found\nget pod zitadel-db-2\t0\tFalse\nget pods -l cnpg.io/cluster=zitadel-db\t0\tzitadel-db-3 \n"
+plan "${DEADLOCK}get pod zitadel-db-1\t1\tError from server (NotFound): pods \"zitadel-db-1\" not found\nget pod zitadel-db-2\t0\tFalse\nget pods -l cnpg.io/cluster=zitadel-db\t0\tzitadel-db-2 False%%zitadel-db-3 True\n"
 [ "$(cnpg_deadlocked)" = "foundation-databases zitadel-db zitadel-db-2" ] \
   && ok "the measured deadlock is detected, naming the target to delete" \
   || bad "deadlock not detected: got '$(cnpg_deadlocked)'"
@@ -104,15 +107,15 @@ plan 'get clusters.postgresql.cnpg.io -A\t0\tfoundation-databases zitadel-db zit
 [ -z "$(cnpg_deadlocked)" ] && ok "no switchover pending → does not fire" || bad "fired on a healthy cluster"
 
 # Switchover pending but the primary pod still exists — a NORMAL election.
-plan "${DEADLOCK}get pod zitadel-db-1\t0\tTrue\nget pod zitadel-db-2\t0\tFalse\nget pods -l cnpg.io/cluster=zitadel-db\t0\tzitadel-db-3 \n"
+plan "${DEADLOCK}get pod zitadel-db-1\t0\tTrue\nget pod zitadel-db-2\t0\tFalse\nget pods -l cnpg.io/cluster=zitadel-db\t0\tzitadel-db-2 False%%zitadel-db-3 True\n"
 [ -z "$(cnpg_deadlocked)" ] && ok "a normal election in progress → does not fire" || bad "fired during a healthy switchover"
 
 # The API is flaky: currentPrimary reads unknown, not absent. Must NOT fire.
-plan "${DEADLOCK}get pod zitadel-db-1\t1\tThe connection to the server was refused\nget pod zitadel-db-2\t0\tFalse\nget pods -l cnpg.io/cluster=zitadel-db\t0\tzitadel-db-3 \n"
+plan "${DEADLOCK}get pod zitadel-db-1\t1\tThe connection to the server was refused\nget pod zitadel-db-2\t0\tFalse\nget pods -l cnpg.io/cluster=zitadel-db\t0\tzitadel-db-2 False%%zitadel-db-3 True\n"
 [ -z "$(cnpg_deadlocked)" ] && ok "an unreachable API → does not fire (would delete a live primary's target)" || bad "fired on an API error"
 
 # Nothing else is ready: deleting the target would only make it worse.
-plan "${DEADLOCK}get pod zitadel-db-1\t1\tError from server (NotFound): pods \"zitadel-db-1\" not found\nget pod zitadel-db-2\t0\tFalse\nget pods -l cnpg.io/cluster=zitadel-db\t0\t\n"
+plan "${DEADLOCK}get pod zitadel-db-1\t1\tError from server (NotFound): pods \"zitadel-db-1\" not found\nget pod zitadel-db-2\t0\tFalse\nget pods -l cnpg.io/cluster=zitadel-db\t0\tzitadel-db-2 False%%zitadel-db-3 False\n"
 [ -z "$(cnpg_deadlocked)" ] && ok "no healthy instance to elect → does not fire" || bad "fired with nothing to elect"
 
 echo
