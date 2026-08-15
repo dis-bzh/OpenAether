@@ -160,7 +160,16 @@ task plan ROLE=management PROVIDER=<p> STRICT=1   # exit 2 = not converged
 
 ## Replacing a node rather than upgrading it
 
-`--upgrade` cannot carry an `instance_type`, disk or zone change, nor a new image
-schematic — those need a new VM. Same script, without `--upgrade`: it drains,
-applies a targeted `-replace`, and waits, one node at a time. That path *does*
-need the new cloud image to exist.
+`--upgrade` cannot carry a disk or zone change, nor a new image schematic —
+those need a new VM. Same script, without `--upgrade`: it drains, applies a
+targeted `-replace`, and waits, one node at a time. That path *does* need the
+new cloud image to exist.
+
+⚠️ **A flavour change is not one of them on OpenStack, and that is worse.** OVH
+resizes the instance in place, so `task infra` plans it as an update rather than
+a replacement and applies it to **every node at once** — measured 2026-08-15,
+where six nodes went into `VERIFY_RESIZE` together and the apiserver was
+unreachable for several minutes. `rolling-replace`'s "one node at a time" guard
+does not catch it either: that guard counts what a plan would DESTROY, and a
+resize destroys nothing. Change `flavor_name` one node at a time with
+`-target`, or accept the outage knowingly.

@@ -171,7 +171,16 @@ task plan ROLE=management PROVIDER=<p> STRICT=1   # sortie 2 = non convergé
 
 ## Remplacer un nœud plutôt que le mettre à niveau
 
-`--upgrade` ne peut pas porter un changement d'`instance_type`, de disque ou de
-zone, ni un nouveau schematic d'image : ceux-là exigent une nouvelle VM. Même
-script, sans `--upgrade` : il draine, applique un `-replace` ciblé et attend, un
-nœud à la fois. Ce chemin-là, lui, exige que la nouvelle image cloud existe.
+`--upgrade` ne peut pas porter un changement de disque ou de zone, ni un nouveau
+schematic d'image : ceux-là exigent une nouvelle VM. Même script, sans
+`--upgrade` : il draine, applique un `-replace` ciblé et attend, un nœud à la
+fois. Ce chemin-là, lui, exige que la nouvelle image cloud existe.
+
+⚠️ **Le gabarit n'en fait pas partie sur OpenStack, et c'est pire.** OVH
+redimensionne l'instance en place : `task infra` le planifie donc comme une mise
+à jour et non un remplacement, et l'applique à **tous les nœuds en même temps** —
+mesuré le 2026-08-15, six nœuds passés ensemble en `VERIFY_RESIZE` et l'apiserver
+injoignable plusieurs minutes. La garde « un nœud à la fois » de
+`rolling-replace` ne l'attrape pas non plus : elle compte ce qu'un plan
+DÉTRUIRAIT, et un redimensionnement ne détruit rien. Changer `flavor_name` un
+nœud à la fois avec `-target`, ou accepter la coupure en connaissance de cause.
