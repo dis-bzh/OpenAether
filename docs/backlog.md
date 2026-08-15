@@ -152,6 +152,25 @@ invites someone to build what nobody decided.
       **Closes:** `workers = N+1` in a tfvars, one `task up`, exit 0, N+1 nodes
       Ready. Rung: real cloud.
 
+- [ ] **A cluster can end up with a Talos PKI the state no longer matches, and
+      there is no way back.** OVH, 2026-08-15, after several interrupted applies
+      (a flavour resize, then a teardown stopped part way, then a reconcile):
+      `talosctl` against every control plane returned "certificate signed by
+      unknown authority … candidate authority certificate 'talos'", with a
+      talosconfig freshly regenerated from `talos_machine_secrets`, which was
+      never destroyed and is `prevent_destroy`. Kubernetes stayed healthy
+      throughout — six nodes Ready — so nothing else reported a problem, and
+      `task infra` sat for 11 of its 15 minutes trying to reach nodes that would
+      not trust it. Not diagnosed; the cluster was torn down.
+      It matters because `talos_machine_secrets` takes `talos_version` and the
+      provider replaces it when that changes: `prevent_destroy` turns that into a
+      loud plan error rather than a silent new CA, which is the right behaviour,
+      but this cluster had its version moved back and forth several times while
+      applies were being killed.
+      **Closes:** either a reproduction (version flip-flop + interrupted apply →
+      CA mismatch) and a guard, or evidence that only an interrupted apply can do
+      it and a documented recovery. Rung: real cloud.
+
 - [ ] **`kubectl cnpg promote` does nothing here, and says it worked.** Plugin
       1.23.6 against a 1.23.1 operator: exit 0, "Node X in cluster Y will be
       promoted" on stdout, and `status.targetPrimary` unchanged. Measured three
