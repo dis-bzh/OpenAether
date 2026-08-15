@@ -237,3 +237,15 @@ variable "worker_storage" {
   })
   default = { disks = [], volumes = [] }
 }
+
+variable "installer_schematic_id" {
+  description = <<-EOT
+    Image Factory schematic ID, so the machine config installs from
+    factory.talos.dev/installer/<id>:<version> and keeps the schematic's system
+    extensions across every reinstall and `talosctl upgrade`. Empty falls back to
+    the plain ghcr.io installer, which carries NO extensions — see the comment on
+    local.installer_image for what that costs.
+  EOT
+  type        = string
+  default     = ""
+}

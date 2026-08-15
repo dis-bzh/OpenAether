@@ -480,6 +480,9 @@ module "talos" {
   cluster_endpoint   = "https://${local.k8s_lb_ip}:6443"
   kubernetes_version = var.kubernetes_version
   talos_version      = var.talos_version
+  # Container mode has no installer and no extensions; everywhere else the
+  # installer must carry the schematic or a reinstall silently drops them.
+  installer_schematic_id = local.active_provider == "local" ? "" : var.talos_installer_schematic_id
 
   # Phase 2 apply sets talos_bootstrap = true. Use the planned counts (known at
   # plan) rather than length(local.*_ips) (unknown until the VMs exist), so the

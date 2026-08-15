@@ -75,6 +75,32 @@ if [ "$P" = proxmox ]; then
   }
 fi
 
+# ──────────────────────────────────────────────────────────────────────────────
+# The schematic decides the image's system extensions AND, since 2026-08-15, the
+# installer the machine config names — so a node keeps iscsi-tools across a
+# `talosctl upgrade` instead of coming back without it and taking Longhorn with
+# it. Two files have to agree on the id, and this is the only place that already
+# computes it, so this is where the drift is caught. A build is also the only
+# moment the answer can change.
+# ──────────────────────────────────────────────────────────────────────────────
+SCHEMATIC_YAML="$(dirname "${BASH_SOURCE[0]}")/../../infrastructure/opentofu/talos-image/schematic.yaml"
+CLUSTER_VARS="$(dirname "${BASH_SOURCE[0]}")/../../infrastructure/opentofu/cluster/variables.tf"
+if [ -f "$SCHEMATIC_YAML" ] && [ -f "$CLUSTER_VARS" ]; then
+  LIVE_ID="$(curl -sf -X POST -H 'Content-Type: application/yaml' \
+    --data-binary @"$SCHEMATIC_YAML" https://factory.talos.dev/schematics \
+    | sed -nE 's/.*"id":"([0-9a-f]+)".*/\1/p')"
+  PINNED_ID="$(awk '/variable "talos_installer_schematic_id"/,/^}/' "$CLUSTER_VARS" \
+    | sed -nE 's/^[[:space:]]*default[[:space:]]*=[[:space:]]*"([0-9a-f]+)".*/\1/p' | head -1)"
+  if [ -n "$LIVE_ID" ] && [ -n "$PINNED_ID" ] && [ "$LIVE_ID" != "$PINNED_ID" ]; then
+    echo "✗ schematic.yaml now resolves to ${LIVE_ID}" >&2
+    echo "  but cluster/variables.tf pins talos_installer_schematic_id = ${PINNED_ID}." >&2
+    echo "  Nodes would install from the OLD schematic and lose the new extensions." >&2
+    echo "  Update the default in cluster/variables.tf, then re-run." >&2
+    exit 1
+  fi
+  [ -n "$LIVE_ID" ] && echo "  ✓ schematic ${LIVE_ID:0:12}… matches the cluster pin"
+fi
+
 STATE_BUCKET="s3-openaether-${TGT}-talos-image"
 
 ensure() { # bucket

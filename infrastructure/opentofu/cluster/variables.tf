@@ -383,3 +383,21 @@ variable "emulator_api_url" {
     error_message = "emulator_api_url must be empty or a loopback URL (http://127.0.0.1:<port>): it exists to reach a local emulator, never a remote endpoint."
   }
 }
+
+variable "talos_installer_schematic_id" {
+  description = <<-EOT
+    Image Factory schematic ID for the installer the machine config names, so a
+    node keeps its system extensions (iscsi-tools, util-linux-tools,
+    qemu-guest-agent) across `talosctl upgrade`. MUST match what
+    `talos-image/schematic.yaml` resolves to — `talos-image.sh` refuses to build
+    when the two disagree, which is the only place that can catch drift without
+    a network call on every plan.
+
+    Recompute after editing that file:
+      curl -sf -X POST -H 'Content-Type: application/yaml' \
+        --data-binary @infrastructure/opentofu/talos-image/schematic.yaml \
+        https://factory.talos.dev/schematics
+  EOT
+  type        = string
+  default     = "53513e54bb39202f35694412577a6bc53d484744d35a126e5d42ef34785c0d83"
+}

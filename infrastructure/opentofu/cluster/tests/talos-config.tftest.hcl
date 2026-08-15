@@ -259,9 +259,13 @@ run "installer_image_uses_talos_version" {
   # it checked the installer. It could not fail, and the installer reference it
   # claims to cover is the one that decides which Talos a node actually runs:
   # booting a newer image changes nothing if this string stays behind.
+  # The FACTORY installer, not the plain one: the plain image carries no system
+  # extensions, so every reinstall dropped iscsi-tools and Longhorn's manager
+  # crash-looped on a missing iscsiadm (Scaleway, 2026-08-15). Asserting the
+  # exact string is the point — a version pin alone was what let this through.
   assert {
-    condition     = module.talos.installer_image == "ghcr.io/siderolabs/installer:v1.13.3"
-    error_message = "the machine config must pin the installer to var.talos_version"
+    condition     = module.talos.installer_image == "factory.talos.dev/installer/53513e54bb39202f35694412577a6bc53d484744d35a126e5d42ef34785c0d83:v1.13.3"
+    error_message = "the machine config must install from the Image Factory schematic, pinned to var.talos_version"
   }
 }
 

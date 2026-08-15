@@ -31,7 +31,17 @@ locals {
   # image the VM boots. Named once, and exposed as an output, so a test can
   # assert it and an operator can read it back after an upgrade instead of
   # inferring it from `kubectl`, whose node osImage lags a Talos rejoin.
-  installer_image = "ghcr.io/siderolabs/installer:${var.talos_version}"
+  #
+  # ⚠️ It decides the EXTENSIONS too, and that is how this went wrong. The plain
+  # `ghcr.io/siderolabs/installer` carries none, so the schematic's extensions
+  # lived only in the boot image and any reinstall dropped them. Measured on
+  # Scaleway 2026-08-15: after the documented in-place upgrade every node
+  # reported zero system extensions, `longhorn-manager` crash-looped on
+  # "please make sure you have iscsiadm/open-iscsi installed on the host", its
+  # admission webhook lost every endpoint, and `storage-backup-target` could not
+  # apply — 34 of 35 Kustomizations, on a cluster whose API had never blinked and
+  # whose `tofu plan` was empty.
+  installer_image = var.installer_schematic_id == "" ? "ghcr.io/siderolabs/installer:${var.talos_version}" : "factory.talos.dev/installer/${var.installer_schematic_id}:${var.talos_version}"
 }
 
 # 32-byte random key for Kubernetes Secrets encryption at rest (AES-256-GCM via
