@@ -163,8 +163,12 @@ if [ "$P" = ovh ] || [ "$P" = outscale ]; then
     # before the filter downstream can see it: with no Talos pin left in the
     # file, the bastion's own image was read as the pin and this guard refused
     # the very configuration it recommends (measured on OVH, 2026-08-15).
+    # `|| true` is load-bearing: under `set -e` + `pipefail`, a grep that
+    # matches nothing fails the whole substitution and kills the script HERE,
+    # before the emptiness test below can decide there is no pin to compare.
+    # It exits 1 having printed nothing at all.
     HAVE="$(grep -E '^[[:space:]]*image_id[[:space:]]*=' "$f" \
-            | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
+            | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)"
     [ -n "$WANT" ] && [ -n "$HAVE" ] && [ "$WANT" != "$HAVE" ] || continue
     echo "✗ $(basename "$f") pins image_id = $HAVE" >&2
     echo "  but the image this lane just resolved is $WANT." >&2
