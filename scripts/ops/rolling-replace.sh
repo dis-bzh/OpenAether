@@ -323,9 +323,16 @@ cnpg_maintenance() { # <true|false>
     # never been deleted, 167 refused evictions and a 900s timeout later.
     # Third time today that a swallowed error read as a pass. Keep the exit
     # status: only an ANSWER of "none" counts as none.
-    left="$("${KCTL[@]}" get pdb -A -l cnpg.io/cluster \
-      -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {end}' 2>/dev/null)"
-    rc=$?
+    # `if !` and not `x=$(...); rc=$?`: under `set -e` a failing substitution
+    # exits the shell AT the assignment, so the rc branch below was dead code —
+    # the very defect this block was added to fix, one layer down. Only a
+    # compound command's failure is exempt from `set -e`.
+    if ! left="$("${KCTL[@]}" get pdb -A -l cnpg.io/cluster \
+      -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {end}' 2>/dev/null)"; then
+      rc=1
+    else
+      rc=0
+    fi
     if [[ $rc -eq 0 && -z "$left" ]]; then
       ok "CNPG budgets are gone — the node can lose a primary"
       return 0
@@ -370,14 +377,21 @@ cnpg_maintenance() { # <true|false>
 CNPG_TIMEOUT="${CNPG_TIMEOUT:-600}"   # seconds
 wait_cnpg_whole() {
   local waited=0 pending ns name inst ready answer rc
+  # The guard its two siblings have and this one did not: on a cluster that
+  # never picked the cnpg brick, the query below fails, and under `set -e` the
+  # roll dies inside the first cordon_drain having cordoned nothing.
+  cnpg_installed || return 0
   while [[ $waited -lt $CNPG_TIMEOUT ]]; do
     # Same rule as the budget confirmation above: a query that FAILED is not a
     # cluster that is whole. Written with `|| true` first time round, a blip
     # while the apiserver settles after a control-plane roll would have emptied
     # the list and waved the next drain through.
-    answer="$("${KCTL[@]}" get clusters.postgresql.cnpg.io -A \
-      -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.status.instances}{" "}{.status.readyInstances}{"\n"}{end}' 2>/dev/null)"
-    rc=$?
+    if ! answer="$("${KCTL[@]}" get clusters.postgresql.cnpg.io -A \
+      -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.status.instances}{" "}{.status.readyInstances}{"\n"}{end}' 2>/dev/null)"; then
+      rc=1
+    else
+      rc=0
+    fi
     if [[ $rc -ne 0 ]]; then
       pending="(apiserver did not answer)"
     else
@@ -859,8 +873,13 @@ fi
 # this ends — including on failure, where leaving the budgets relaxed would be
 # worse than the drain that failed.
 if [[ $DRY_RUN -eq 0 ]]; then
-  cnpg_maintenance true
+  # Trap FIRST. cnpg_maintenance suspends Flux and patches enablePDB before it
+  # confirms the budgets are gone, and that confirmation can die — so installing
+  # the trap after the call leaves a suspended Kustomization and relaxed budgets
+  # behind with nothing to restore them. Restoring a cluster that was never
+  # changed is a no-op; not restoring one that was is the failure that matters.
   trap 'cnpg_maintenance false' EXIT
+  cnpg_maintenance true
 fi
 
 # Workers first (heavy stateful load), then control planes (etcd-gated).
