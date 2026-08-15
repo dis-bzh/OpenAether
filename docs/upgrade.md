@@ -116,6 +116,9 @@ ALLOWED:.status.disruptionsAllowed,HEALTHY:.status.currentHealthy,EXPECTED:.stat
 # `kubectl get cluster` means clusters.cluster.x-k8s.io, not this one.
 kubectl get clusters.postgresql.cnpg.io -A -o custom-columns=NS:.metadata.namespace,\
 NAME:.metadata.name,PRIMARY:.status.currentPrimary,READY:.status.readyInstances
+
+# and, for one database in detail (plugin installed by `task setup`)
+kubectl cnpg status <cluster> -n <ns>
 ```
 
 ⚠️ **The first apply after a `talos_version` bump fails on OVH and Outscale**
