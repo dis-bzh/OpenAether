@@ -30,7 +30,11 @@ node_distribution = {
     control_planes     = 3
     workers            = 2
     region             = "EU-WEST-PAR"
-    flavor_name        = "b3-8"
+    # c3-8 (4 vCPU / 8 GB), not b3-8 (2 vCPU): measured 2026-08-15, three b3-8
+    # workers sit at ~99% of CPU requests with the platform on them, so no node
+    # can be drained and `rolling-replace --upgrade` cannot finish. A rolling
+    # upgrade needs one node's worth of spare capacity — see docs/upgrade.md.
+    flavor_name        = "c3-8"
     # image_id optional — defaults to looking up "talos-ovh-amd64-<talos_version>" by
     # name (published by talos-image). Override only if you use a different name/UUID:
     # image_id           = "TALOS_IMAGE_ID"
