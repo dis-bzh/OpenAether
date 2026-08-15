@@ -419,10 +419,17 @@ cnpg_deadlocked() {
     [[ "$cur" != "$tgt" ]] || continue                              # 1. a switchover is pending
     [[ "$(cnpg_pod_state "$ns" "$cur")" == absent ]] || continue    # 2. the primary pod is gone
     [[ "$(cnpg_pod_state "$ns" "$tgt")" == notready ]] || continue  # 3. the target exists, not ready
-    # 4. something else is ready, or there is nothing to elect and deleting
-    #    the target would only make it worse.
+    # 4. something else is ready, or there is nothing to elect and deleting the
+    #    target would only make it worse.
+    #    Listed then filtered in the shell, NOT with a nested jsonpath filter:
+    #    kubectl cannot parse `items[?(@.status.conditions[?(...)]...)]` and
+    #    answers "unterminated filter", so the first version of this line always
+    #    returned empty and the whole unstick could never fire. Found on a live
+    #    deadlock 2026-08-15, after the unit tests passed it — a stub answers the
+    #    query it is asked, it does not tell you the query is malformed.
     [[ -n "$("${KCTL[@]}" -n "$ns" get pods -l "cnpg.io/cluster=${name}" \
-        -o jsonpath="{range .items[?(@.status.conditions[?(@.type=='Ready')].status=='True')]}{.metadata.name} {end}" 2>/dev/null)" ]] || continue
+        -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null |
+        awk '$2 == "True" { print $1 }')" ]] || continue
     echo "$ns $name $tgt"
   done < <("${KCTL[@]}" get clusters.postgresql.cnpg.io -A \
     -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.status.currentPrimary}{" "}{.status.targetPrimary}{"\n"}{end}' 2>/dev/null)
