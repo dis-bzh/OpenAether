@@ -478,6 +478,13 @@ cordon_drain() { # <node_name>
     if [[ $ASSUME_YES -eq 1 ]]; then
       "${KCTL[@]}" get pods --field-selector "spec.nodeName=${node}" -A \
         -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name --no-headers 2>/dev/null | head -20 >&2 || true
+      # Give the node back before dying. Leaving it cordoned blocks the very
+      # recovery the message below asks for: the pods this drain evicted are
+      # pinned to it by node-local volumes, so while it is unschedulable they
+      # stay Pending, their databases stay degraded, and the re-run meets the
+      # same refusal. Measured on Scaleway 2026-08-15 — both CNPG clusters were
+      # still short an instance an hour later, waiting for a cordon nobody lifted.
+      "${KCTL[@]}" uncordon "$node" >&2 || warn "could not uncordon ${node} — do it by hand before re-running"
       # The two causes seen for real, in the order worth checking. Capacity is
       # first because it is the one nothing else reports: on OVH 2026-08-15 the
       # three workers sat at 78/99/100% of CPU requests, so an evicted pod had
