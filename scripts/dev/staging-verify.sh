@@ -97,6 +97,16 @@ while :; do
 done
 ok "all $TOTAL_K Flux Kustomizations Ready"
 
+# A SUSPENDED Kustomization keeps whatever Ready condition it had when it was
+# suspended, so the loop above passes it happily while nothing reconciles it any
+# more. `rolling-replace` suspends the one owning the CNPG clusters for the
+# duration of a roll and resumes it in its exit trap — if that trap ever does not
+# run, this is what says so instead of a green run over a frozen DAG.
+SUSPENDED="$(kubectl get kustomizations.kustomize.toolkit.fluxcd.io -A \
+  -o jsonpath='{range .items[?(@.spec.suspend==true)]}{.metadata.namespace}/{.metadata.name}{" "}{end}' 2>/dev/null || true)"
+[ -z "$SUSPENDED" ] || fail "Kustomization(s) suspended, so their Ready status is stale: ${SUSPENDED}"
+ok "no Kustomization is suspended"
+
 # --- Regression: the storage-admin UI stays unpublished -----------------------
 # 1.0.1 took httproute-longhorn.yaml out of the default build because the UI has
 # no authentication and the app LB has no ACL. Anything that puts it back has to

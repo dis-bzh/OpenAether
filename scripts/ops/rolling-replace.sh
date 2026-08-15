@@ -222,11 +222,34 @@ healthy_peer_cp() { # <exclude_index>
 # The maintenance window stays alongside it: it is what tells the operator to
 # reuse the PVC rather than reprovision the instance elsewhere, which on
 # node-local storage it could not do.
+# Flux owns the CNPG Cluster objects and reconciles them every 10 minutes, which
+# is shorter than a roll: measured on Scaleway 2026-08-15, the budgets were back
+# and the drain blocked again three nodes in, because git says enablePDB is on
+# and git wins. Suspend the Kustomization that owns them for the duration and
+# resume it on the way out. The owner comes from the objects' own Flux labels,
+# not a hardcoded name, so a rename does not silently turn this into a no-op.
+cnpg_flux_suspend() { # <true|false>
+  local suspend="$1" ns name
+  { "${KCTL[@]}" get clusters.postgresql.cnpg.io -A -o jsonpath='{range .items[*]}{.metadata.labels.kustomize\.toolkit\.fluxcd\.io/namespace}{" "}{.metadata.labels.kustomize\.toolkit\.fluxcd\.io/name}{"\n"}{end}' 2>/dev/null || true; } |
+    sort -u |
+    while read -r ns name; do
+      [[ -n "$ns" && -n "$name" ]] || continue
+      if "${KCTL[@]}" -n "$ns" patch kustomizations.kustomize.toolkit.fluxcd.io "$name" \
+        --type merge -p "{\"spec\":{\"suspend\":${suspend}}}" >/dev/null 2>&1; then
+        info "Flux ${ns}/${name}: suspend=${suspend}"
+      else
+        warn "could not set suspend=${suspend} on Kustomization ${ns}/${name}"
+      fi
+    done
+}
+
 cnpg_maintenance() { # <true|false>
   local on="$1" ns name pdb
   # enablePDB is the INVERSE of "maintenance in progress": budgets off while we
   # roll, back on when we are done.
   [[ "$on" == "true" ]] && pdb=false || pdb=true
+  # Suspend BEFORE patching, so there is no window for Flux to undo it.
+  [[ "$on" == "true" ]] && cnpg_flux_suspend true
   # `|| true`: a cluster without the CNPG CRD is a normal cluster, and under
   # `pipefail` the failing get would otherwise kill the whole roll.
   { "${KCTL[@]}" get clusters.postgresql.cnpg.io -A \
@@ -240,6 +263,10 @@ cnpg_maintenance() { # <true|false>
         warn "could not set enablePDB=${pdb} / nodeMaintenanceWindow=${on} on ${ns}/${name}"
       fi
     done
+  # Resume AFTER restoring, so Flux finds the objects already back where git
+  # wants them. Leaving a Kustomization suspended is the failure mode this
+  # function must not have — staging-verify.sh fails the run if one is.
+  [[ "$on" == "true" ]] || cnpg_flux_suspend false
 }
 
 # The CNPG primary used to be switched off the node here, with `kubectl cnpg
