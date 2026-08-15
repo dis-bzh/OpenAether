@@ -127,13 +127,26 @@ ENVN="$(grep -E '^[[:space:]]*environment[[:space:]]*=' "$TFVARS" | head -1 | se
 [[ -n "$CN" && -n "$ENVN" ]] || die "could not read cluster_name/environment from $TFVARS"
 NODE_PREFIX="${CN}-${ENVN}"
 
-# --upgrade needs the installer image for the version this tree declares. Read it
-# from the same tfvars everything else comes from; TALOS_IMAGE overrides for a
-# custom schematic (Image Factory) whose id is not derivable from a version.
+# --upgrade needs the installer image, and it must be THE ONE THE MACHINE CONFIG
+# NAMES. This used to rebuild the string itself as
+# `ghcr.io/siderolabs/installer:<talos_version>` — a real image, the right
+# version, and no system extensions. So an upgrade reinstalled every node
+# without iscsi-tools, longhorn-manager crash-looped on the missing iscsiadm and
+# storage-backup-target could not apply, on a cluster whose API had not blinked
+# (Scaleway, 2026-08-15). The comment here even said a Factory schematic "is not
+# derivable from a version" and then derived it anyway.
+# `installer_image` is now a root output, so there is one source and it is the
+# config's own. TALOS_IMAGE still overrides, for a deliberate one-off.
 if [[ $UPGRADE -eq 1 && -z "${TALOS_IMAGE:-}" ]]; then
-  TV="$(grep -E '^[[:space:]]*talos_version[[:space:]]*=' "$TFVARS" | head -1 | sed -E 's/^[^=]*=[[:space:]]*"?([^"#]*)"?.*/\1/' | tr -d '[:space:]')"
-  [[ -n "$TV" ]] || die "--upgrade: no talos_version in ${TFVARS}. Pin it, or pass TALOS_IMAGE=ghcr.io/siderolabs/installer:vX.Y.Z"
-  TALOS_IMAGE="ghcr.io/siderolabs/installer:${TV}"
+  TALOS_IMAGE="$(jq -r '.installer_image.value // empty' <<<"$OUTPUTS")"
+  if [[ -z "$TALOS_IMAGE" ]]; then
+    TV="$(grep -E '^[[:space:]]*talos_version[[:space:]]*=' "$TFVARS" | head -1 | sed -E 's/^[^=]*=[[:space:]]*"?([^"#]*)"?.*/\1/' | tr -d '[:space:]')"
+    [[ -n "$TV" ]] || die "--upgrade: no installer_image output and no talos_version in ${TFVARS}."
+    die "--upgrade: the state has no installer_image output (pre-2026-08-15 apply).
+  Re-run \`task infra\` so the root republishes it, or pass it explicitly:
+    TALOS_IMAGE=factory.talos.dev/installer/<schematic-id>:${TV}
+  Do NOT fall back to ghcr.io/siderolabs/installer — it has no extensions."
+  fi
 fi
 
 mapfile -t CP_IPS < <(jq -r '.control_plane_private_ips.value[]? // empty' <<<"$OUTPUTS")

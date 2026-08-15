@@ -142,3 +142,14 @@ output "instructions" {
     #   task failover PROVIDER=ovh
   EOT
 }
+
+# The image a node reinstalls from, and therefore which extensions it keeps.
+# `rolling-replace --upgrade` reads it from here rather than rebuilding the
+# string: it constructed `ghcr.io/siderolabs/installer:<version>` on its own,
+# the plain image carries no system extensions, and an upgrade silently left
+# every node without iscsi-tools (Scaleway, 2026-08-15). One source, and it is
+# the one the machine config actually names.
+output "installer_image" {
+  description = "Talos installer image the machine config installs from (Image Factory schematic included)"
+  value       = var.talos_bootstrap ? module.talos.installer_image : null
+}
