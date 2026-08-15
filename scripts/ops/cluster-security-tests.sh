@@ -325,7 +325,7 @@ WILDCARD_ROLES=$(kubectl get clusterrole -o json 2>/dev/null | python3 -c "
 import json,sys
 roles=json.load(sys.stdin)['items']
 # Exclude the upstream charts and system roles
-EXCLUDE_PREFIXES=('system:' 'clusternet:' 'cnpg-' 'cloudnative-pg' 'external-secrets-' 'longhorn-' 'istio-' 'cert-manager-' 'kyverno-' 'capi-' 'cluster-api-' 'gateway-api-' 'fluent-' 'kube-state-metrics-' 'loki-' 'alloy-' 'prometheus-' 'node-exporter-' 'victoria-metrics-')
+EXCLUDE_PREFIXES=('system:', 'clusternet:', 'cnpg-', 'cloudnative-pg', 'external-secrets-', 'longhorn-', 'istio-', 'cert-manager-', 'kyverno-', 'capi-', 'cluster-api-', 'gateway-api-', 'fluent-', 'kube-state-metrics-', 'loki-', 'alloy-', 'prometheus-', 'node-exporter-', 'victoria-metrics-')
 wildcards=[r for r in roles
   if not any(r['metadata']['name'].startswith(p) for p in EXCLUDE_PREFIXES)
   and any(rule.get('verbs')==['*'] or rule.get('resources')==['*'] for rule in r.get('rules',[]))]
@@ -341,7 +341,7 @@ fi
 ADMIN_BINDINGS=$(kubectl get clusterrolebinding -o json 2>/dev/null | python3 -c "
 import json,sys
 bindings=json.load(sys.stdin)['items']
-EXCLUDE_PREFIXES=('system:' 'cnpg-' 'external-secrets-' 'longhorn-' 'istio-' 'cert-manager-' 'kyverno-' 'capi-' 'cluster-api-')
+EXCLUDE_PREFIXES=('system:', 'cnpg-', 'external-secrets-', 'longhorn-', 'istio-', 'cert-manager-', 'kyverno-', 'capi-', 'cluster-api-')
 custom=[b for b in bindings
   if b['roleRef'].get('name')=='cluster-admin'
   and not any(b['metadata']['name'].startswith(p) for p in EXCLUDE_PREFIXES)]
@@ -488,9 +488,9 @@ ADDED_CAPS=$(kubectl get pods -A -o json 2>/dev/null | python3 -c "
 import json,sys
 pods=json.load(sys.stdin).get('items',[])
 # System namespaces + legitimately privileged workloads
-SKIP_NS=('kube-system' 'longhorn-system' 'local-path-storage' 'capi-system' 'capi-operator-system' 'foundation-storage')
+SKIP_NS=('kube-system', 'longhorn-system', 'local-path-storage', 'capi-system', 'capi-operator-system', 'foundation-storage')
 # Legitimately privileged pods (CNI, CSI, node-exporter)
-SKIP_PATTERNS=('cilium' 'istio-cni' 'longhorn' 'csi-' 'instance-manager' 'engine-image' 'node-exporter' 'alloy')
+SKIP_PATTERNS=('cilium', 'istio-cni', 'longhorn', 'csi-', 'instance-manager', 'engine-image', 'node-exporter', 'alloy')
 caps=0
 for p in pods:
   ns=p.get('metadata',{}).get('namespace','')

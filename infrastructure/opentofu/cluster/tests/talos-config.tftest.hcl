@@ -173,7 +173,11 @@ run "valid_cilium_manifest_passes" {
   }
 
   assert {
-    condition     = module.talos.control_plane_count > 0 || true
+    # `> 0 || true` is a constant, and it guarded the one thing that matters:
+    # the Cilium-placeholder precondition self-disables at control_plane_count
+    # == 0 (modules/talos/main.tf), so a run that asserted nothing about the
+    # count was documented as validating it.
+    condition     = module.talos.control_plane_count == 3
     error_message = "Talos module should be instantiated with valid cilium manifest."
   }
 }

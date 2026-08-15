@@ -42,9 +42,21 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 command -v kubectl >/dev/null 2>&1 || { echo "✗ kubectl required" >&2; exit 1; }
 kubectl cluster-info >/dev/null 2>&1 || { echo "✗ KUBECONFIG points at no reachable cluster" >&2; exit 1; }
 
-if ! kubectl get clusters.cluster.x-k8s.io "$CLUSTER" -n "$NS" >/dev/null 2>&1; then
-  ok "cluster '$CLUSTER' already absent (nothing to do)"
-  exit 0
+# NotFound is "already absent"; anything else is "we do not know", and the two
+# must not share an exit code — fleet-down reads a 0 here as a successful edge
+# teardown and moves on to destroying the management.
+if ! CLUSTER_ERR="$(kubectl get clusters.cluster.x-k8s.io "$CLUSTER" -n "$NS" 2>&1 >/dev/null)"; then
+  case "$CLUSTER_ERR" in
+    *NotFound* | *"not found"*)
+      ok "cluster '$CLUSTER' already absent (nothing to do)"
+      exit 0
+      ;;
+    *)
+      echo "✗ cannot tell whether '$CLUSTER' exists: ${CLUSTER_ERR}" >&2
+      echo "  Refusing to report a teardown that was never verified." >&2
+      exit 1
+      ;;
+  esac
 fi
 
 # Inventory before deletion — used for the final report.
@@ -138,7 +150,18 @@ while (( SECONDS < deadline )); do
 EOT
       exit 1
     fi
-    ok "cluster '$CLUSTER' fully deleted"
+    # Falling through means the provider was never re-checked — either the
+    # kind→provider probe above matched nothing, or verify-provider-clean.py is
+    # missing. Both are the state the comment at the top of this block calls NOT
+    # proof, and claiming "fully deleted" here is the sentence that let an OVH
+    # network and a billed Outscale EIP survive on 2026-07-30.
+    if [ -z "$PROVIDER" ]; then
+      echo "✗ could not tell which provider '$CLUSTER' ran on, so nothing verified" >&2
+      echo "  its provider side. Kubernetes objects are gone; resources may not be." >&2
+      echo "  Check by hand: scripts/ops/verify-provider-clean.py $CLUSTER <provider>" >&2
+      exit 1
+    fi
+    warn "cluster '$CLUSTER': Kubernetes objects gone, provider NOT re-checked ($VERIFY missing)"
     exit 0
   fi
   printf '  … cluster=%s machines=%s\n' "$left" "$mach"

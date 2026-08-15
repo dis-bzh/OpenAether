@@ -85,7 +85,17 @@ else
   # partially destroyed, providers not yet reconciled — `kubectl get cluster`
   # returns the DATABASES (observed 2026-07-27: grafana-db, zitadel-db) and this
   # script would run `edge-down` against them. Always qualify the API group.
-  mapfile -t EDGES < <(kubectl get clusters.cluster.x-k8s.io -A -o jsonpath='{range .items[*]}{.metadata.name} {.metadata.namespace}{"\n"}{end}' 2>/dev/null)
+  # ⚠️ A query that FAILED is not an absence of children. `mapfile` over failing
+  # output gives an empty array, indistinguishable from a childless management —
+  # and the next step destroys the management, which is precisely how a child
+  # outlives the thing that could delete it and bills forever. That is the
+  # scenario this script's own header calls non-negotiable.
+  if ! EDGES_RAW="$(kubectl get clusters.cluster.x-k8s.io -A -o jsonpath='{range .items[*]}{.metadata.name} {.metadata.namespace}{"\n"}{end}' 2>/dev/null)"; then
+    die "cannot enumerate child clusters (clusters.cluster.x-k8s.io) — refusing to
+  destroy the management. If the CAPI CRDs are genuinely absent, there are no
+  children by definition and --force-no-edges says so explicitly."
+  fi
+  mapfile -t EDGES < <(printf '%s' "$EDGES_RAW")
   if [ "${#EDGES[@]}" -eq 0 ]; then
     ok "no child cluster"
   else
