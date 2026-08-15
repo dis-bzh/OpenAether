@@ -105,6 +105,14 @@ lane holds one version per provider, so nothing can move backwards yet.
     ever. It was meant to have two replicas, and the values used `replicaCount`
     where that chart's key is `replicas` — Helm ignored it without a word.
 
+- **A teardown left its tunnels behind.** Twelve SSH forwards were still
+  listening after the three teardowns on 2026-08-15, pointing at bastions that
+  no longer existed — and a stale listener answers `nc -z`, which is the check
+  the next deploy makes, so a healthy bastion had already produced "4/6 tunnels
+  up" once. `task destroy` now closes its own block on the way out (scoped by
+  `TALOS_TUNNEL_OFFSET`, so it cannot touch a cluster running beside it), and
+  `fleet-down` inherits it.
+
 - **OVH workers raced the subnet, and the race just kept winning.** A worker
   boots on the private network by uuid, which creates no dependency on the
   SUBNET; Nova refuses that with 400 "Network <id> requires a subnet in order to

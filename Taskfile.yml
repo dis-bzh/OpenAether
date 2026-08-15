@@ -414,6 +414,12 @@ tasks:
       # through the SSH tunnels and hang if they're already closed (see
       # cluster/README.md's Teardown section).
       - tofu destroy -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=false
+      # The cluster is gone; its tunnels are not. Twelve were still listening
+      # after three teardowns on 2026-08-15, forwarding to bastions that no
+      # longer existed — and a stale listener reads as "up" to the `nc -z` check
+      # the next deploy makes, which is how a healthy bastion produced 4/6
+      # tunnels. Scoped to this cluster's own port block by TALOS_TUNNEL_OFFSET.
+      - ../../../scripts/bootstrap/talos-tunnels.sh close .
 
   close-tunnels:
     desc: "Close the Talos API SSH tunnels opened for Phase 2"

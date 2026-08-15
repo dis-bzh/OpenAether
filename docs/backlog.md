@@ -269,14 +269,6 @@ invites someone to build what nobody decided.
       for the other repository to call it. Rung: `task test`.
 
 
-- [ ] **`fleet-down` leaves the bastion SSH tunnels open.** Six were still
-      listening after a teardown on 2026-08-14, pointing at a cluster that no
-      longer existed. `talos-tunnels.sh open` now waits for the ports rather than
-      racing them, so the next deploy recovers — but a teardown that leaves
-      processes behind is a teardown that is not finished.
-      **Closes:** `task fleet-down` followed by zero matching `ssh -L 5000x`
-      processes. Rung: real cloud.
-
 - [ ] **The image lane holds one version per provider, and an upgrade needs two.
       Target 1.2.0.** `talos-image/` has a single image resource behind a single
       `talos-image.tfstate` per provider, so moving `talos_version` REPLACES the
