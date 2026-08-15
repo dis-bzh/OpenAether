@@ -71,6 +71,21 @@ cost etcd its quorum. One node at a time, health-gated between each, and
 re-runnable: a node already on the target version is skipped. Control planes
 first — a worker needs a healthy control plane to drain against.
 
+### The cluster has to be able to lose a node
+
+Check this before rolling, not after a drain has waited out its timeout:
+
+```bash
+kubectl describe nodes -l '!node-role.kubernetes.io/control-plane' | grep -E '^Name:|^  cpu '
+```
+
+Requests must leave one node's worth of room. Measured 2026-08-15: Scaleway's
+three `DEV1-L` workers sat at 72/47/27% and every drain went through; OVH's
+three `b3-8` at 78/99/100% and the first drain waited out its full 900s with no
+eviction error to show for it — the evicted pods simply had nowhere to go, so
+the budgets they belong to never recovered. Add a worker or a bigger flavour
+before rolling; that is a prerequisite, not a symptom.
+
 ### What actually blocks a drain, and the two gates that clear it
 
 **A CNPG primary is unevictable while it is primary.** The operator publishes a

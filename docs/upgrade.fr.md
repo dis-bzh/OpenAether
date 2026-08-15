@@ -77,6 +77,22 @@ de santé entre chacun, et rejouable : un nœud déjà sur la version cible est
 sauté. Les control planes d'abord — un worker a besoin d'un control plane sain
 pour se drainer.
 
+### Le cluster doit pouvoir perdre un nœud
+
+À vérifier avant de dérouler, pas après qu'un drain a épuisé son délai :
+
+```bash
+kubectl describe nodes -l '!node-role.kubernetes.io/control-plane' | grep -E '^Name:|^  cpu '
+```
+
+Les demandes doivent laisser l'équivalent d'un nœud libre. Mesuré le
+2026-08-15 : les trois workers `DEV1-L` de Scaleway étaient à 72/47/27 % et tous
+les drains sont passés ; les trois `b3-8` d'OVH à 78/99/100 %, et le premier
+drain a épuisé ses 900 s sans la moindre erreur d'éviction — les pods évincés
+n'avaient nulle part où aller, donc les budgets dont ils relèvent ne se sont
+jamais rétablis. Ajouter un worker ou un gabarit plus gros avant de dérouler :
+c'est un prérequis, pas un symptôme.
+
 ### Ce qui bloque vraiment un drain, et les deux portes qui le débloquent
 
 **Un primaire CNPG est inévinçable tant qu'il est primaire.** L'opérateur publie

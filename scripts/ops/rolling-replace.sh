@@ -355,11 +355,20 @@ cordon_drain() { # <node_name>
     if [[ $ASSUME_YES -eq 1 ]]; then
       "${KCTL[@]}" get pods --field-selector "spec.nodeName=${node}" -A \
         -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name --no-headers 2>/dev/null | head -20 >&2 || true
+      # The two causes seen for real, in the order worth checking. Capacity is
+      # first because it is the one nothing else reports: on OVH 2026-08-15 the
+      # three workers sat at 78/99/100% of CPU requests, so an evicted pod had
+      # nowhere to go, its budget never recovered, and the drain waited out its
+      # full 900s with no eviction error to show for it.
+      "${KCTL[@]}" describe nodes -l '!node-role.kubernetes.io/control-plane' 2>/dev/null |
+        grep -E "^Name:|^  cpu " >&2 || true
       die "${node} could not be drained within ${DRAIN_TIMEOUT} — refusing to reboot it under workloads that would not move.
-  A CNPG primary (a *-db-N pod above) cannot be evicted, only switched over:
-  docs/upgrade.md § 'The roll stops on a node holding a database primary'.
-  Switch it to a replica on another node, then re-run this same command — nodes
-  already on the target version are skipped."
+  1. Capacity: the CPU requests above are per worker. If the others are near
+     100%, the evicted pods cannot be rescheduled, so their budgets never
+     recover. A rolling upgrade needs one node's worth of spare capacity.
+  2. A budget that can never allow a disruption — see docs/upgrade.md
+     § 'What actually blocks a drain, and the two gates that clear it'.
+  Then re-run this same command: nodes already on the target version are skipped."
     fi
     read -rp "Continue with ${node} anyway? [y/N] " a; [[ "$a" == [yY] ]] || die "aborted by operator"
   fi
