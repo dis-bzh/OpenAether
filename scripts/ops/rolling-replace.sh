@@ -241,9 +241,31 @@ healthy_peer_cp() { # <exclude_index>
 # and git wins. Suspend the Kustomization that owns them for the duration and
 # resume it on the way out. The owner comes from the objects' own Flux labels,
 # not a hardcoded name, so a rename does not silently turn this into a no-op.
+# Is CNPG even installed? Asked once, explicitly, so that everywhere else a
+# failing enumeration can be treated as what it is — an unanswered question, not
+# an empty answer. Without this the `|| true` on those queries turned an
+# apiserver blip into "no databases to protect", and the roll drained into live
+# budgets.
+cnpg_installed() { "${KCTL[@]}" get crd clusters.postgresql.cnpg.io >/dev/null 2>&1; }
+
+# The Flux Kustomization(s) owning the CNPG clusters, one "namespace name" per
+# line. Dies rather than hand back an empty guess.
+cnpg_flux_owners() {
+  "${KCTL[@]}" get clusters.postgresql.cnpg.io -A -o jsonpath='{range .items[*]}{.metadata.labels.kustomize\.toolkit\.fluxcd\.io/namespace}{" "}{.metadata.labels.kustomize\.toolkit\.fluxcd\.io/name}{"\n"}{end}' 2>/dev/null ||
+    die "the CNPG CRD exists but its clusters could not be listed — refusing to roll blind."
+}
+
+# The CNPG clusters themselves, one "namespace name" per line. Same rule.
+cnpg_clusters() {
+  "${KCTL[@]}" get clusters.postgresql.cnpg.io -A \
+    -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null ||
+    die "the CNPG CRD exists but its clusters could not be listed — refusing to roll blind."
+}
+
 cnpg_flux_suspend() { # <true|false>
   local suspend="$1" ns name
-  { "${KCTL[@]}" get clusters.postgresql.cnpg.io -A -o jsonpath='{range .items[*]}{.metadata.labels.kustomize\.toolkit\.fluxcd\.io/namespace}{" "}{.metadata.labels.kustomize\.toolkit\.fluxcd\.io/name}{"\n"}{end}' 2>/dev/null || true; } |
+  cnpg_installed || return 0
+  cnpg_flux_owners |
     sort -u |
     while read -r ns name; do
       [[ -n "$ns" && -n "$name" ]] || continue
@@ -261,12 +283,11 @@ cnpg_maintenance() { # <true|false>
   # enablePDB is the INVERSE of "maintenance in progress": budgets off while we
   # roll, back on when we are done.
   [[ "$on" == "true" ]] && pdb=false || pdb=true
+  # A cluster without the CNPG CRD is a normal cluster and there is nothing to do.
+  cnpg_installed || return 0
   # Suspend BEFORE patching, so there is no window for Flux to undo it.
   [[ "$on" == "true" ]] && cnpg_flux_suspend true
-  # `|| true`: a cluster without the CNPG CRD is a normal cluster, and under
-  # `pipefail` the failing get would otherwise kill the whole roll.
-  { "${KCTL[@]}" get clusters.postgresql.cnpg.io -A \
-    -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null || true; } |
+  cnpg_clusters |
     while read -r ns name; do
       [[ -n "$ns" && -n "$name" ]] || continue
       if "${KCTL[@]}" -n "$ns" patch clusters.postgresql.cnpg.io "$name" --type merge \
@@ -293,11 +314,23 @@ cnpg_maintenance() { # <true|false>
   # and the operator's business, and staging-verify.sh is what checks the end
   # state.
   [[ "$on" == "true" ]] || return 0
-  local waited=0 left
+  local waited=0 left rc
   while [[ $waited -lt 120 ]]; do
+    # ⚠️ The query FAILING is not the budgets being gone. Written with
+    # `2>/dev/null || true` first time round, this passed on Scaleway
+    # 2026-08-15 right after the control-plane roll — when the apiserver was
+    # still settling — and the worker roll then drained into budgets that had
+    # never been deleted, 167 refused evictions and a 900s timeout later.
+    # Third time today that a swallowed error read as a pass. Keep the exit
+    # status: only an ANSWER of "none" counts as none.
     left="$("${KCTL[@]}" get pdb -A -l cnpg.io/cluster \
-      -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {end}' 2>/dev/null || true)"
-    [[ -z "$left" ]] && { ok "CNPG budgets are gone — the node can lose a primary"; return 0; }
+      -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {end}' 2>/dev/null)"
+    rc=$?
+    if [[ $rc -eq 0 && -z "$left" ]]; then
+      ok "CNPG budgets are gone — the node can lose a primary"
+      return 0
+    fi
+    [[ $rc -eq 0 ]] || left="(apiserver did not answer)"
     sleep 5; waited=$((waited + 5))
   done
   die "CNPG budgets survived enablePDB=false after 120s: ${left}
@@ -336,16 +369,26 @@ cnpg_maintenance() { # <true|false>
 # The qualified resource name is not optional — see the note above.
 CNPG_TIMEOUT="${CNPG_TIMEOUT:-600}"   # seconds
 wait_cnpg_whole() {
-  local waited=0 pending ns name inst ready
+  local waited=0 pending ns name inst ready answer rc
   while [[ $waited -lt $CNPG_TIMEOUT ]]; do
-    pending=""
-    while read -r ns name inst ready; do
-      [[ -n "$ns" && -n "$name" ]] || continue
-      # A status that has not been populated must not read as "whole": require
-      # real numbers, the way the 0/0 check that used to pass here did not.
-      [[ "$inst" =~ ^[1-9][0-9]*$ && "$ready" == "$inst" ]] || pending+="${ns}/${name}(${ready:-?}/${inst:-?}) "
-    done < <("${KCTL[@]}" get clusters.postgresql.cnpg.io -A \
-      -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.status.instances}{" "}{.status.readyInstances}{"\n"}{end}' 2>/dev/null || true)
+    # Same rule as the budget confirmation above: a query that FAILED is not a
+    # cluster that is whole. Written with `|| true` first time round, a blip
+    # while the apiserver settles after a control-plane roll would have emptied
+    # the list and waved the next drain through.
+    answer="$("${KCTL[@]}" get clusters.postgresql.cnpg.io -A \
+      -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.status.instances}{" "}{.status.readyInstances}{"\n"}{end}' 2>/dev/null)"
+    rc=$?
+    if [[ $rc -ne 0 ]]; then
+      pending="(apiserver did not answer)"
+    else
+      pending=""
+      while read -r ns name inst ready; do
+        [[ -n "$ns" && -n "$name" ]] || continue
+        # A status that has not been populated must not read as "whole": require
+        # real numbers, the way the 0/0 check that used to pass here did not.
+        [[ "$inst" =~ ^[1-9][0-9]*$ && "$ready" == "$inst" ]] || pending+="${ns}/${name}(${ready:-?}/${inst:-?}) "
+      done <<<"$answer"
+    fi
     [[ -z "$pending" ]] && { [[ $waited -gt 0 ]] && ok "every CNPG cluster is whole again"; return 0; }
     [[ $waited -eq 0 ]] && info "Waiting for CNPG to finish electing: ${pending}"
     sleep 10; waited=$((waited + 10))
