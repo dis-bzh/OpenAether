@@ -97,9 +97,20 @@ else
   # outlives the thing that could delete it and bills forever. That is the
   # scenario this script's own header calls non-negotiable.
   if ! EDGES_RAW="$(kubectl get clusters.cluster.x-k8s.io -A -o jsonpath='{range .items[*]}{.metadata.name} {.metadata.namespace}{"\n"}{end}' 2>/dev/null)"; then
-    die "cannot enumerate child clusters (clusters.cluster.x-k8s.io) — refusing to
+    # …and HONOUR the flag the message tells the operator to use. The fail-closed
+    # guard added on 2026-08-15 ignored it here, so on an infrastructure-only
+    # cluster — where the CAPI CRDs are legitimately absent and the query cannot
+    # succeed — every teardown refused, with a message naming the escape hatch it
+    # was itself declining to take. Found on 2026-08-16 with two clusters running
+    # and billing.
+    if [ "$FORCE_NO_EDGES" -eq 1 ]; then
+      warn "the CAPI CRDs are absent, so there are no child clusters by definition (--force-no-edges)."
+    else
+      die "cannot enumerate child clusters (clusters.cluster.x-k8s.io) — refusing to
   destroy the management. If the CAPI CRDs are genuinely absent, there are no
   children by definition and --force-no-edges says so explicitly."
+    fi
+    EDGES_RAW=""
   fi
   mapfile -t EDGES < <(printf '%s' "$EDGES_RAW")
   if [ "${#EDGES[@]}" -eq 0 ]; then
