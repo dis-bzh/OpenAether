@@ -337,11 +337,20 @@ fi
 echo -e "\n${GREEN}🚀 Environment ready!${NC}"
 echo ""
 echo "Next steps (one env file == one cluster):"
-echo "  1. export SCW_ACCESS_KEY / SCW_SECRET_KEY / SCW_DEFAULT_PROJECT_ID"
-echo "  2. export AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (= your Scaleway keys, for S3)"
-echo "     (prod cross-provider backup: also export BACKUP_AWS_ACCESS_KEY_ID / BACKUP_AWS_SECRET_ACCESS_KEY)"
-echo "  3. export TF_VAR_encryption_passphrase=<32+ chars>   # encrypts tfstate AND the backups"
-echo "  4. Build the Talos image once:  task talos-image PROVIDER=scaleway   (or ovh or outscale)"
-echo "  5. cd infrastructure/opentofu/cluster"
-echo "  6. cp envs/management-scaleway.tfvars.example envs/management-scaleway.tfvars  # then edit"
-echo "  7. cd - && task up ROLE=management PROVIDER=scaleway"
+echo "  1. cp .env.example .env.sh, fill in your provider's keys, then: source .env.sh"
+echo "     (Scaleway: SCW_ACCESS_KEY / SCW_SECRET_KEY / SCW_DEFAULT_PROJECT_ID)"
+# The S3 credentials are DERIVED from the provider's own keys by
+# scripts/internal/resolve-s3-cred.sh, and the Taskfile sets AWS_* from it. This
+# used to tell people to export AWS_ACCESS_KEY_ID themselves; the Taskfile then
+# overwrote it, so the instruction was inert and misleading in the first screen a
+# newcomer reads.
+echo "     S3 credentials are derived from those — do NOT export AWS_* yourself."
+echo "     Cross-provider backup only: BACKUP_AWS_ACCESS_KEY_ID / BACKUP_AWS_SECRET_ACCESS_KEY"
+echo "  2. export TF_VAR_encryption_passphrase=<32+ chars>   # encrypts tfstate AND the backups"
+echo "  3. cp infrastructure/opentofu/cluster/envs/management-scaleway.tfvars.example \\"
+echo "        infrastructure/opentofu/cluster/envs/management-scaleway.tfvars   # then edit it"
+echo "     Six fields have no default: environment, admin_ip, s3_primary_endpoint,"
+echo "     s3_primary_region, s3_replica_endpoint, s3_replica_region. See README.md."
+echo "  4. task up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey"
+echo "     One idempotent command: image, manifests, infra, tunnels, Talos bootstrap."
+echo "     KEY must be the private half of a key listed in bastion_ssh_keys."

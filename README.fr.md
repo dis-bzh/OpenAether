@@ -136,15 +136,36 @@ source .env.sh
 
 cp infrastructure/opentofu/cluster/envs/management-scaleway.tfvars.example \
    infrastructure/opentofu/cluster/envs/management-scaleway.tfvars
-# Éditer : admin_ip, bastion_ssh_keys, image_name/image_id, s3_primary_*/s3_replica_*
-# Et git_repo_url + git_ref si tu utilises ton propre fork d'OpenAether-apps —
-# les défauts pointent sur le nôtre, et son apps/clusters n'est pas le tien.
-
-task preflight-quotas PROVIDER=ovh          # vérifier les quotas d'abord
-task talos-image PROVIDER=scaleway          # une fois par version d'image
-task infra ROLE=management PROVIDER=scaleway
-task bootstrap-phase2 ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
 ```
+
+Six champs n'ont pas de valeur par défaut et le déploiement ne démarrera pas sans
+eux. Tout le reste de l'exemple a déjà une valeur qui fonctionne.
+
+| champ | quoi mettre dedans |
+|---|---|
+| `environment` | `dev`, `staging`, `prod` — il nomme les buckets et les ressources |
+| `admin_ip` | ton IP publique en CIDR. C'est la liste d'autorisation SSH **et** l'ACL du LB apiserver |
+| `s3_primary_endpoint` / `s3_primary_region` | le S3 du tfstate chiffré, chez le **même** provider que le cluster (ex. `https://s3.fr-par.scw.cloud` / `fr-par`) |
+| `s3_replica_endpoint` / `s3_replica_region` | le S3 de la **copie de sauvegarde**. En production, chez un **autre provider** — un état qu'on ne peut lire que depuis le cloud qui vient de tomber n'est pas une sauvegarde |
+
+Et `bastion_ssh_keys` : la moitié **publique** de la clé que tu passeras en `KEY=`.
+Les deux forment une paire, et `task up` refuse de démarrer si elles ne
+correspondent pas — avant toute dépense. Ainsi que `git_repo_url` + `git_ref` si
+tu utilises ton propre fork d'OpenAether-apps ; les défauts pointent sur le
+nôtre, et son `apps/clusters` n'est pas le tien.
+
+```bash
+task preflight-quotas PROVIDER=scaleway     # vérifier les quotas d'abord
+task up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
+```
+
+`task up` est la commande unique, et elle est idempotente : elle construit
+l'image Talos si le compte ne l'a pas, rend les manifests de bootstrap, applique
+l'infrastructure, ouvre les tunnels et amorce Talos. Relance-la après avoir
+corrigé une erreur, elle reprend. C'est aussi la commande que joue la CI, donc
+le chemin qui est réellement validé. Les étapes séparées (`task talos-image`,
+`task infra`, `task bootstrap-phase2`) restent disponibles pour n'en piloter
+qu'une.
 
 **Après le déploiement** : suivre le parcours jour-1
 ([docs/admin-access.fr.md](docs/admin-access.fr.md)) — escrow Shamir/root/restic,

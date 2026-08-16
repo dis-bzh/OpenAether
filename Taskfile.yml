@@ -46,6 +46,11 @@ tasks:
       # English is canonical; French belongs in *.fr.md, and .languageignore
       # lists what is French on purpose, one reason per entry.
       - ./scripts/dev/check-language.sh
+      # Required inputs must be named where the operator will look. A variable
+      # with no default that no document mentions is a deploy that works for us
+      # and fails for a stranger — the release criterion is that the docs are
+      # followable, not that we know the answers.
+      - ./scripts/dev/check-doc-inputs.sh
 
   fmt:
     desc: Format OpenTofu code

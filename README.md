@@ -138,15 +138,35 @@ source .env.sh
 
 cp infrastructure/opentofu/cluster/envs/management-scaleway.tfvars.example \
    infrastructure/opentofu/cluster/envs/management-scaleway.tfvars
-# Edit: admin_ip, bastion_ssh_keys, image_name/image_id, s3_primary_*/s3_replica_*
-# And git_repo_url + git_ref if you run your own fork of OpenAether-apps —
-# the defaults point at ours, and its apps/clusters is not yours.
-
-task preflight-quotas PROVIDER=ovh          # check quotas first
-task talos-image PROVIDER=scaleway          # once per image version
-task infra ROLE=management PROVIDER=scaleway
-task bootstrap-phase2 ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
 ```
+
+Six fields have no default and the deploy will not start without them. Everything
+else in the example already has a working value.
+
+| field | what to put in it |
+|---|---|
+| `environment` | `dev`, `staging`, `prod` — it names the buckets and the resources |
+| `admin_ip` | your public IP as a CIDR. It is the SSH allow-list AND the apiserver LB ACL |
+| `s3_primary_endpoint` / `s3_primary_region` | S3 for the encrypted tfstate, on the **same** provider as the cluster (e.g. `https://s3.fr-par.scw.cloud` / `fr-par`) |
+| `s3_replica_endpoint` / `s3_replica_region` | S3 for the **backup copy**. In production put it on a **different provider** — a state you can only read from the cloud that just failed is not a backup |
+
+Also `bastion_ssh_keys`: the **public** half of the key you will pass as `KEY=`.
+They are a pair, and `task up` refuses to start if they do not match — before it
+spends anything. And `git_repo_url` + `git_ref` if you run your own fork of
+OpenAether-apps; the defaults point at ours, and its `apps/clusters` is not yours.
+
+```bash
+task preflight-quotas PROVIDER=scaleway     # check quotas first
+task up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
+```
+
+`task up` is the one command, and it is idempotent: it builds the Talos image if
+the account lacks it, renders the bootstrap manifests, applies the
+infrastructure, opens the tunnels and bootstraps Talos. Re-run it after fixing
+any failure and it resumes. It is also the command CI runs, so it is the path
+that gets validated. The individual steps (`task talos-image`, `task infra`,
+`task bootstrap-phase2`) still exist for when you want to drive one of them
+alone.
 
 **After deployment**: follow the day-1 path
 ([docs/admin-access.md](docs/admin-access.md)) — Shamir/root/restic
