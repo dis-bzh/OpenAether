@@ -134,9 +134,37 @@ if [ "$ASSUME_YES" -eq 0 ]; then
   read -rp "Destroy the $ROLE-$PROVIDER management? [y/N] " a
   [ "$a" = y ] || [ "$a" = Y ] || { echo "aborted"; exit 1; }
 fi
-( cd "$ROOT" && TF_CLI_ARGS_destroy=-auto-approve task destroy ROLE="$ROLE" PROVIDER="$PROVIDER" ) \
-  && ok "management destroyed" \
-  || { warn "the management destroy FAILED — re-run after fixing (idempotent)"; FAILED=1; }
+# BOUNDED RETRY. Cloud deletions propagate asynchronously and the network teardown
+# races them. Outscale, 2026-08-16: two consecutive passes died on "Subnet ... is
+# in use. It has NICs" and "A load balancer is present on Net ... The Internet
+# service cannot be detached" — while the provider's own API already answered
+# zero instances, zero load balancers and zero network interfaces. Nothing was
+# broken; the plan simply ran ahead of the provider, and re-running by hand
+# worked. That is a loop's job, not the operator's.
+#
+# Still fails at the end, and says how many attempts it took: a retry that hides
+# a permanent failure would be worse than the race it fixes.
+DESTROY_ATTEMPTS="${DESTROY_ATTEMPTS:-3}"
+DESTROY_BACKOFF="${DESTROY_BACKOFF:-60}"   # seconds, for deletions to settle
+attempt=1
+while :; do
+  if ( cd "$ROOT" && TF_CLI_ARGS_destroy=-auto-approve task destroy ROLE="$ROLE" PROVIDER="$PROVIDER" ); then
+    if [ "$attempt" -gt 1 ]; then
+      ok "management destroyed (attempt ${attempt}/${DESTROY_ATTEMPTS})"
+    else
+      ok "management destroyed"
+    fi
+    break
+  fi
+  if [ "$attempt" -ge "$DESTROY_ATTEMPTS" ]; then
+    warn "the management destroy FAILED after ${attempt} attempt(s) — re-run after fixing (idempotent)"
+    FAILED=1
+    break
+  fi
+  warn "destroy attempt ${attempt}/${DESTROY_ATTEMPTS} failed; waiting ${DESTROY_BACKOFF}s for the provider's deletions to propagate, then retrying"
+  sleep "$DESTROY_BACKOFF"
+  attempt=$((attempt + 1))
+done
 
 # ------------------------------------------------ 3. what is left (report)
 info "Step 3/3 — left to purge MANUALLY (deliberately survives the teardown)"

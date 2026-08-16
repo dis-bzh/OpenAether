@@ -68,6 +68,14 @@ STUB
 cat >"$STUB_DIR/task" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"${STUB_TASK_LOG:?}"
+# STUB_TASK_FAIL_TIMES: fail the first N invocations, then honour STUB_TASK_RC.
+# The count lives in a file because every call is a fresh process, and a stub
+# that cannot change its mind cannot exercise a retry loop at all.
+if [ -n "${STUB_TASK_FAIL_TIMES:-}" ] && [ -n "${STUB_TASK_COUNT_FILE:-}" ]; then
+  n=$(cat "$STUB_TASK_COUNT_FILE" 2>/dev/null || echo 0)
+  n=$((n + 1)); printf '%s' "$n" >"$STUB_TASK_COUNT_FILE"
+  [ "$n" -le "$STUB_TASK_FAIL_TIMES" ] && exit 1
+fi
 exit "${STUB_TASK_RC:-0}"
 STUB
 
@@ -175,6 +183,54 @@ expect_log 'get clusters\.cluster\.x-k8s\.io -A' "the enumeration is group-quali
 refute_log "$UNQUALIFIED" "no unqualified 'cluster' query in the enumeration path"
 
 echo
+echo "=== fleet-down: the destroy retries a race, and stops ==="
+
+# Outscale, 2026-08-16: two passes died on "Subnet is in use. It has NICs" and
+# "A load balancer is present on Net" while the provider API already reported
+# zero instances, zero LBs and zero NICs. The plan ran ahead of the provider's
+# own deletions. A retry fixes that; a retry that hides a permanent failure, or
+# one that never stops, would be worse than the race.
+export STUB_TASK_COUNT_FILE="$STUB_DIR/task.count"
+export DESTROY_BACKOFF=0
+destroys() { grep -c '^destroy ' "$STUB_TASK_LOG" 2>/dev/null || echo 0; }
+expect_destroys() { # <n> <label>
+  local got; got="$(destroys)"
+  if [ "$got" = "$1" ]; then ok "$2"; else bad "$2 (ran $got destroy/destroys, expected $1)"; fi
+}
+
+plan "${CLUSTER_INFO_OK}get clusters.cluster.x-k8s.io -A\t0\t\n"
+
+# 1. Transient, the case that actually happened.
+: >"$STUB_TASK_COUNT_FILE"
+export STUB_TASK_FAIL_TIMES=2
+run "$FLEET_DOWN" stubcloud --yes
+expect_rc 0 "two failed destroys then a success still completes the teardown"
+expect_out "attempt 3/3" "it names the attempt that succeeded"
+expect_destroys 3 "it retried exactly twice"
+expect_out "fleet-down complete" "it reports success once the destroy worked"
+
+# 2. Permanent. The retry must not turn a real failure into a green run — this
+#    script reporting success over surviving resources is the billing defect its
+#    own header is about.
+: >"$STUB_TASK_COUNT_FILE"
+export STUB_TASK_FAIL_TIMES=99
+run "$FLEET_DOWN" stubcloud --yes
+expect_rc 1 "a destroy that never succeeds still fails the run"
+expect_out "after 3 attempt(s)" "it says how many attempts it made"
+refute_out "fleet-down complete" "it does not report success after exhausting the retries"
+expect_destroys 3 "it stops at DESTROY_ATTEMPTS instead of looping"
+
+# 3. And it must not retry what worked: three destroys where one was needed is
+#    three chances to destroy something that came back.
+: >"$STUB_TASK_COUNT_FILE"
+unset STUB_TASK_FAIL_TIMES
+run "$FLEET_DOWN" stubcloud --yes
+expect_rc 0 "a destroy that works first time completes"
+expect_destroys 1 "it does not retry a destroy that succeeded"
+refute_out "attempt" "no attempt counter is printed on the happy path"
+
+unset STUB_TASK_COUNT_FILE DESTROY_BACKOFF
+
 echo "=== fleet-down: an unreachable management is not a childless one ==="
 
 plan 'no line matches, so cluster-info fails\t1\t\n'
