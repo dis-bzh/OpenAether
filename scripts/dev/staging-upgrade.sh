@@ -203,7 +203,18 @@ task plan ROLE="$ROLE" PROVIDER="$PROVIDER" STRICT=1 ||
   fail "the plan is not empty after the upgrade — read provider-contract.md § Node image drift before re-running anything"
 ok "plan empty after the upgrade"
 
-"$ROOT/scripts/dev/staging-verify.sh" "$PROVIDER" "$ROLE"
+# Verify what this cluster ACTUALLY is, not what the upgrade lane assumes it is.
+# staging-verify.sh waits for 35 Flux Kustomizations; a 1.0.0 cluster is Talos
+# and Cilium and has none, so calling it unconditionally failed an upgrade that
+# had just succeeded on every count — nodes on the target version, three seconds
+# of API outage, empty plan. Asked of the cluster rather than of a variable,
+# because that is the only source that cannot drift from reality.
+if kubectl get namespace flux-system >/dev/null 2>&1; then
+  "$ROOT/scripts/dev/staging-verify.sh" "$PROVIDER" "$ROLE"
+else
+  ok "no flux-system — verifying against the infrastructure floor"
+  "$ROOT/scripts/dev/infra-verify.sh" "$PROVIDER" "$ROLE"
+fi
 
 report_probe
 echo "✓ ${PROVIDER}/${ROLE}: upgraded ${TALOS_FROM}→${TALOS_TO} / ${K8S_FROM}→${K8S_TO}, in place"

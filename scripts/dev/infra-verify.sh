@@ -41,7 +41,24 @@ K() { timeout 60 kubectl "$@"; }
 
 info "The cluster answers"
 
-if K get --raw='/readyz' >/dev/null 2>&1; then ok "apiserver ready"; else bad "apiserver is not ready"; fi
+# WAIT, do not sample once. `task up` returns when the Talos bootstrap RPC
+# succeeded, which is before the apiserver serves — and on the tfvars that set
+# skip_health_check it returns even earlier. Measured on OVH 2026-08-16: nodes
+# five seconds old and the API load balancer answering EOF because it has no
+# healthy backend yet. Sampling once here would have made every cloud run red
+# for the one reason that is guaranteed to pass a minute later. Same defect this
+# repository fixed in the roll's pre-flight the same morning.
+API_TIMEOUT="${API_TIMEOUT:-420}"
+deadline=$((SECONDS + API_TIMEOUT))
+until K get --raw='/readyz' >/dev/null 2>&1; do
+  if [ "$SECONDS" -ge "$deadline" ]; then break; fi
+  sleep 10
+done
+if K get --raw='/readyz' >/dev/null 2>&1; then
+  ok "apiserver ready"
+else
+  bad "apiserver never answered /readyz within ${API_TIMEOUT}s"
+fi
 
 # Bounded wait, not an instant assertion: `task up` returns when OpenTofu is
 # done, which is before the last worker has finished joining.
@@ -123,10 +140,17 @@ else
   else
     bad "no tfstate object found in ${BUCKET} — the backup claim is unproven"
   fi
+  # Cross-provider is a PRODUCTION rule, and variables.tf says so in as many
+  # words ("Prod: a different provider"). Failing a dev cluster for it is a
+  # false red — the mirror of the false greens this repository keeps meeting,
+  # and just as useless: an assertion that cannot pass where it runs gets muted,
+  # and then it protects nothing anywhere.
   if [ -n "$REPL_EP" ] && [ "$REPL_EP" != "$PRIM_EP" ]; then
     ok "the replica store is a different endpoint from the primary"
+  elif [ "$ENVN" = prod ]; then
+    bad "prod: s3_replica_endpoint equals s3_primary_endpoint — a copy on the cloud that just failed is not a backup"
   else
-    bad "s3_replica_endpoint equals s3_primary_endpoint — that is a copy, not a backup"
+    printf '  \033[33m~\033[0m %s\n' "${ENVN}: the replica shares the primary's endpoint — fine here, but prod must cross providers"
   fi
 fi
 

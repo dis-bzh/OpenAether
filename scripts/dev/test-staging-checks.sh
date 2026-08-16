@@ -114,6 +114,11 @@ TFVARS="$CLUSTER/envs/${ROLE}-${PROVIDER}.tfvars"
 mkdir -p "$FAKE/scripts/dev" "$CLUSTER/envs"
 ln -s "$ROOT/scripts/dev/staging-verify.sh" "$FAKE/scripts/dev/staging-verify.sh"
 ln -s "$ROOT/scripts/dev/staging-upgrade.sh" "$FAKE/scripts/dev/staging-upgrade.sh"
+# staging-upgrade now picks its verifier from the cluster: staging-verify.sh when
+# flux-system exists, infra-verify.sh when it does not. Both have to be reachable
+# from the fake root, or the all-green control dies on rc 127 — which is how this
+# harness caught the change five minutes after it was written.
+ln -s "$ROOT/scripts/dev/infra-verify.sh" "$FAKE/scripts/dev/infra-verify.sh"
 VERIFY="$FAKE/scripts/dev/staging-verify.sh"
 UPGRADE="$FAKE/scripts/dev/staging-upgrade.sh"
 KEYFILE="$STUB_DIR/ssh-key-fixture"; : >"$KEYFILE"
@@ -179,7 +184,11 @@ last_at()  { awk -v pat="$1" 'index($0,pat){n=NR} END{print n+0}' "$STUB_LOG"; }
 
 # Every query staging-verify makes, all answered green. Scenarios prepend the one
 # line they want to change, because the first match wins.
+# staging-upgrade asks the CLUSTER which verifier applies. This scenario is the
+# full platform, so flux-system must answer present or the upgrade would verify
+# against the infrastructure floor and the checks below would never run.
 VERIFY_OK='get --raw=/readyz\t0\tok\n'
+VERIFY_OK+='get namespace flux-system\t0\tflux-system Active 9m\n'
 VERIFY_OK+='get nodes --no-headers\t0\tnode-a Ready control-plane 9m v0.0.1%%node-b Ready <none> 9m v0.0.1\n'
 VERIFY_OK+='flux check\t0\t\n'
 VERIFY_OK+='k8s-app=cilium\t0\tcilium-aaaaa 1/1 Running 0 9m%%cilium-bbbbb 1/1 Running 0 9m\n'
@@ -311,6 +320,15 @@ called 'task talos-image PROVIDER=stubcloud VERSION=v0.0.2 ENSURE=1' \
 { called '-- --cp-only --upgrade --yes' && called '-- --workers-only --upgrade --yes'; } \
   && ok "rolling-replace is driven non-interactively, control planes first" \
   || bad "rolling-replace was not called with --yes (an unattended lane would hang on its prompt)"
+
+# --- and the branch a 1.0.0 cluster takes -------------------------------------
+# The upgrade must not demand a platform the release does not ship. Asked of the
+# cluster, so the answer cannot drift from a variable someone forgot to set.
+plan 'get namespace flux-system\t1\tNotFound\n'"${UPGRADE_OK}${VERIFY_OK}"
+upgrade
+{ said 'no flux-system' && said 'infrastructure floor'; } \
+  && ok "no flux-system: the upgrade verifies against the infrastructure floor" \
+  || bad "an apps-free cluster still had staging-verify demanded of it"
 
 plan "nodeInfo.kubeletVersion\t0\tv0.0.2%%v0.0.1\n${UPGRADE_OK}${VERIFY_OK}"
 upgrade
