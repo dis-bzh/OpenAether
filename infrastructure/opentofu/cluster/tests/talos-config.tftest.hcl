@@ -349,3 +349,52 @@ run "auto_tunnels_disabled_by_default" {
     error_message = "terraform_data.talos_tunnels must have count=0 when auto_tunnels is left at its default (false)."
   }
 }
+
+# ==============================================================================
+# Test 14: deploy_flux governs BOTH manifests, in both directions
+#
+# 1.0.0 ships infrastructure only, so the default must leave Flux out. An
+# off-switch whose only tested position is "off" is not a switch — it is a
+# deletion nobody wrote down, and Flux comes back as a user choice in 1.1.0.
+# Asserted on the rendered control-plane config, which is where inlineManifests
+# actually land, rather than on the local that builds them.
+# ==============================================================================
+
+run "flux_absent_by_default" {
+  command = plan
+
+  variables {
+    talos_bootstrap = true
+  }
+
+  assert {
+    condition     = !contains(module.talos.inline_manifest_names, "flux-install") && !contains(module.talos.inline_manifest_names, "flux-bootstrap")
+    error_message = "deploy_flux defaults to false, so the control-plane config must carry no Flux manifest."
+  }
+
+  assert {
+    condition     = contains(module.talos.inline_manifest_names, "cilium")
+    error_message = "Cilium is the floor and is unconditional — a cluster without a CNI is not a cluster."
+  }
+}
+
+run "flux_present_when_asked" {
+  command = plan
+
+  variables {
+    talos_bootstrap         = true
+    deploy_flux             = true
+    flux_manifest           = "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: flux-system"
+    flux_bootstrap_manifest = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: flux-bootstrap-probe"
+  }
+
+  assert {
+    condition     = contains(module.talos.inline_manifest_names, "flux-install")
+    error_message = "deploy_flux=true must put the Flux install manifest back into the control-plane config."
+  }
+
+  assert {
+    condition     = contains(module.talos.inline_manifest_names, "flux-bootstrap")
+    error_message = "The bootstrap manifest is governed by the same switch — a half-empty pair injects an empty manifest."
+  }
+}

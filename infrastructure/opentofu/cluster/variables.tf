@@ -286,6 +286,27 @@ variable "git_ref" {
   }
 }
 
+variable "deploy_flux" {
+  description = <<-EOT
+    Install Flux on the cluster. FALSE by default: 1.0.0 is infrastructure only —
+    Talos plus Cilium, which is what makes a cluster healthy, up and ready. Flux
+    and everything it reconciles live in OpenAether-apps and come back as a
+    user choice in 1.1.0.
+
+    The mechanism is not new and is not switched off code: modules/talos already
+    reads an empty flux_manifest as "no Flux", and infrastructure/opentofu-local
+    has driven that exact path through this same module on every `task local-up`
+    since the local cluster existed. This variable only chooses which way the
+    existing branch goes, in a local — no resource address moves, so flipping it
+    cannot replace a node.
+
+    When false, git_repo_url / git_ref / flux_namespace / apps_profile are inert:
+    they exist to fill a template that is never rendered.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "flux_namespace" {
   description = "Namespace for Flux installation"
   type        = string

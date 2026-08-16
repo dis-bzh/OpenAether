@@ -85,3 +85,14 @@ output "installer_image" {
   description = "Installer image the machine config pins; this is what a node upgrades to"
   value       = local.installer_image
 }
+
+output "inline_manifest_names" {
+  description = <<-EOT
+    Names of the inline manifests going into the control-plane machine config:
+    "cilium" always, plus "flux-install"/"flux-bootstrap" only when Flux is asked
+    for. Exposed because control_plane_config is unknown until apply, so a test
+    cannot assert on it at plan time — and an off-switch whose only tested
+    position is "off" is a deletion nobody wrote down.
+  EOT
+  value       = [for m in local.inline_manifests : m.name]
+}

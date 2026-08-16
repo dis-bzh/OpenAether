@@ -406,7 +406,11 @@ locals {
 
 locals {
   cilium_manifest = var.cilium_manifest != null ? var.cilium_manifest : file("${path.module}/bootstrap-manifests/cilium.yaml")
-  flux_manifest   = var.flux_manifest != null ? var.flux_manifest : file("${path.module}/bootstrap-manifests/flux-install.yaml")
+  # deploy_flux=false yields "", which modules/talos already reads as "no Flux"
+  # (main.tf:116) — the same path infrastructure/opentofu-local drives through
+  # this very module on every `task local-up`. Locals only: no resource address
+  # moves, so turning it off cannot replace a node.
+  flux_manifest = var.deploy_flux ? (var.flux_manifest != null ? var.flux_manifest : file("${path.module}/bootstrap-manifests/flux-install.yaml")) : ""
   # Cluster identity, published as the `cluster-identity` ConfigMap (flux-system)
   # and consumed by the bricks that must distinguish themselves from ANOTHER
   # cluster — today the restic repositories, which share cross-provider buckets.
@@ -414,7 +418,11 @@ locals {
   # read "openaether-dev" on all three clouds, so they distinguish nothing.
   cluster_id = "${var.cluster_name}-${var.environment}-${local.active_provider}"
 
-  flux_bootstrap_manifest = var.flux_bootstrap_manifest != null ? var.flux_bootstrap_manifest : templatefile("${path.module}/bootstrap-manifests/flux-bootstrap.yaml.tftpl", {
+  # Emptied by the SAME switch. modules/talos:116 only tests flux_manifest, so a
+  # half-empty pair would inject a manifest with no content — asymmetric and
+  # untested. One variable governs both, and the template is not even rendered
+  # when Flux is off.
+  flux_bootstrap_manifest = !var.deploy_flux ? "" : var.flux_bootstrap_manifest != null ? var.flux_bootstrap_manifest : templatefile("${path.module}/bootstrap-manifests/flux-bootstrap.yaml.tftpl", {
     namespace    = var.flux_namespace
     git_repo_url = var.git_repo_url
     git_ref      = var.git_ref
