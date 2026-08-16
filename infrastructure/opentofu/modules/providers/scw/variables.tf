@@ -122,6 +122,18 @@ variable "k8s_lb_mode" {
   }
 }
 
+variable "deploy_app_lb" {
+  description = <<-EOT
+    Create the public HTTP/HTTPS load balancer fronting the application Gateway.
+    FALSE by default: its backends are pinned to the Gateway's fixed NodePorts,
+    so on an infrastructure-only cluster it is created, billed, and forwards to
+    ports where nothing listens. The Kubernetes API LB is a separate resource
+    (k8s_lb_mode) and is NOT governed by this.
+  EOT
+  type        = bool
+  default     = false
+}
+
 # ==============================================================================
 # Gateway NodePorts — CROSS-REPOSITORY CONTRACT
 #

@@ -16,8 +16,8 @@ output "k8s_lb_ip" {
 }
 
 output "app_lb_ip" {
-  description = "Public IP of the App LB (80/443)"
-  value       = scaleway_lb_ip.app.ip_address
+  description = "Public IP of the App LB (80/443). Null means no application load balancer on this cluster (deploy_app_lb = false)."
+  value       = one(scaleway_lb_ip.app[*].ip_address)
 }
 
 # Bastion

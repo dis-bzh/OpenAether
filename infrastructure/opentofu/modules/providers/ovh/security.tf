@@ -39,7 +39,10 @@ resource "openstack_networking_secgroup_rule_v2" "talos_api" {
 # HTTP/HTTPS — from the private subnet (App LB + its health checks), on the
 # Gateway's FIXED NodePorts. Opening 80/443 on the nodes would be pointless:
 # it is the Istio Gateway that listens, behind a NodePort.
+# Gated on deploy_app_lb: the App LB is the only source these two ever admit,
+# so without it they widen the nodes' inbound surface for no traffic at all.
 resource "openstack_networking_secgroup_rule_v2" "http" {
+  count             = var.deploy_app_lb ? 1 : 0
   direction         = "ingress"
   ethertype         = "IPv4"
   protocol          = "tcp"
@@ -50,6 +53,7 @@ resource "openstack_networking_secgroup_rule_v2" "http" {
 }
 
 resource "openstack_networking_secgroup_rule_v2" "https" {
+  count             = var.deploy_app_lb ? 1 : 0
   direction         = "ingress"
   ethertype         = "IPv4"
   protocol          = "tcp"

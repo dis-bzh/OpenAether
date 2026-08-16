@@ -52,9 +52,10 @@ resource "outscale_load_balancer_vms" "k8s" {
   backend_vm_ids     = outscale_vm.control_plane[*].vm_id
 }
 
-# --- App LB (HTTP/HTTPS) ---
+# --- App LB (HTTP/HTTPS), only when var.deploy_app_lb ---
 
 resource "outscale_load_balancer" "app" {
+  count              = var.deploy_app_lb ? 1 : 0
   load_balancer_name = "${var.cluster_name}-app-lb"
   load_balancer_type = "internet-facing"
 
@@ -83,6 +84,7 @@ resource "outscale_load_balancer" "app" {
 }
 
 resource "outscale_load_balancer_vms" "app" {
-  load_balancer_name = outscale_load_balancer.app.load_balancer_name
+  count              = var.deploy_app_lb ? 1 : 0
+  load_balancer_name = outscale_load_balancer.app[0].load_balancer_name
   backend_vm_ids     = outscale_vm.worker[*].vm_id
 }

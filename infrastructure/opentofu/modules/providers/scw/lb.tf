@@ -1,27 +1,33 @@
 # ==============================================================================
-# App LB (permanent) — public 80/443, the Gateway's NodePorts on the workers
+# App LB — public 80/443, the Gateway's NodePorts on the workers
+# Whole block gated by deploy_app_lb: without the apps, this LB is billed while
+# forwarding to NodePorts where nothing listens.
 # ==============================================================================
 
 resource "scaleway_lb_ip" "app" {
+  count      = var.deploy_app_lb ? 1 : 0
   zone       = var.zone
   project_id = var.project_id
 }
 
 resource "scaleway_lb" "app" {
+  count      = var.deploy_app_lb ? 1 : 0
   name       = "${var.cluster_name}-app-lb"
-  ip_ids     = [scaleway_lb_ip.app.id]
+  ip_ids     = [scaleway_lb_ip.app[0].id]
   zone       = var.zone
   type       = "LB-S"
   project_id = var.project_id
 }
 
 resource "scaleway_lb_private_network" "app" {
-  lb_id              = scaleway_lb.app.id
+  count              = var.deploy_app_lb ? 1 : 0
+  lb_id              = scaleway_lb.app[0].id
   private_network_id = scaleway_vpc_private_network.this.id
 }
 
 resource "scaleway_lb_backend" "http" {
-  lb_id = scaleway_lb.app.id
+  count = var.deploy_app_lb ? 1 : 0
+  lb_id = scaleway_lb.app[0].id
   name  = "http-backend"
   # Worker-side port = the Gateway's fixed NodePort (public inbound_port stays 80).
   forward_port           = var.app_lb_node_ports.http
@@ -31,14 +37,16 @@ resource "scaleway_lb_backend" "http" {
 }
 
 resource "scaleway_lb_frontend" "http" {
-  lb_id        = scaleway_lb.app.id
-  backend_id   = scaleway_lb_backend.http.id
+  count        = var.deploy_app_lb ? 1 : 0
+  lb_id        = scaleway_lb.app[0].id
+  backend_id   = scaleway_lb_backend.http[0].id
   name         = "http-frontend"
   inbound_port = 80
 }
 
 resource "scaleway_lb_backend" "https" {
-  lb_id                  = scaleway_lb.app.id
+  count                  = var.deploy_app_lb ? 1 : 0
+  lb_id                  = scaleway_lb.app[0].id
   name                   = "https-backend"
   forward_port           = var.app_lb_node_ports.https
   forward_port_algorithm = "roundrobin"
@@ -47,8 +55,9 @@ resource "scaleway_lb_backend" "https" {
 }
 
 resource "scaleway_lb_frontend" "https" {
-  lb_id        = scaleway_lb.app.id
-  backend_id   = scaleway_lb_backend.https.id
+  count        = var.deploy_app_lb ? 1 : 0
+  lb_id        = scaleway_lb.app[0].id
+  backend_id   = scaleway_lb_backend.https[0].id
   name         = "https-frontend"
   inbound_port = 443
 }

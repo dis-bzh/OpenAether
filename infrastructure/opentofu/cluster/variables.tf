@@ -286,6 +286,22 @@ variable "git_ref" {
   }
 }
 
+variable "deploy_app_lb" {
+  description = <<-EOT
+    Create the public HTTP/HTTPS load balancer that fronts the application
+    Gateway. FALSE by default: its backends are pinned to the Istio Gateway's
+    fixed NodePorts (30080/30443), so on an infrastructure-only cluster it is a
+    load balancer that is created, billed, and points at ports where nothing
+    listens. Turn it on with the apps that need it.
+
+    The Kubernetes API load balancer is a different resource and is NOT governed
+    by this — a cluster needs its apiserver reachable whether or not it runs any
+    application.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "deploy_flux" {
   description = <<-EOT
     Install Flux on the cluster. FALSE by default: 1.0.0 is infrastructure only —

@@ -216,6 +216,7 @@ module "scw" {
   instance_type    = local.scw_dist.instance_type
   additional_zones = local.scw_dist.zones != null ? local.scw_dist.zones : ["fr-par-1", "fr-par-2", "fr-par-3"]
   k8s_lb_mode      = local.scw_dist.k8s_lb_mode
+  deploy_app_lb    = var.deploy_app_lb
 
   worker_storage = var.worker_storage
 
@@ -244,6 +245,7 @@ module "ovh" {
   availability_zones = local.ovh_dist.availability_zones
   bastion_image_id   = local.ovh_dist.bastion_image_id
   k8s_lb_mode        = local.ovh_dist.k8s_lb_mode
+  deploy_app_lb      = var.deploy_app_lb
 
   worker_storage = var.worker_storage
 
@@ -270,6 +272,7 @@ module "outscale" {
   availability_zones = local.osc_dist.availability_zones
   bastion_image_id   = local.osc_dist.bastion_image_id
   k8s_lb_mode        = local.osc_dist.k8s_lb_mode
+  deploy_app_lb      = var.deploy_app_lb
 
   worker_storage = var.worker_storage
 

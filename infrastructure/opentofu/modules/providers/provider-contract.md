@@ -16,7 +16,7 @@ this contract to be consumed by the Talos module and the root `main.tf`.
 
 | Output | Type | Description |
 |---|---|---|
-| `app_lb_ip` | `string` | Public IP of the application Load Balancer (ports 80/443) |
+| `app_lb_ip` | `string` (nullable) | Public IP (or DNS name) of the application Load Balancer (ports 80/443). A module that gates that LB behind `deploy_app_lb` MUST return `null` when it is off, never fail — use `one(...)`. |
 | `nat_gateway_ip` | `string` | Public IP of the NAT gateway (for LB ACL whitelisting) |
 
 ## Required Variables

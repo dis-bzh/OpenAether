@@ -96,6 +96,14 @@ variable "bastion_vm_type" {
   default     = "tinav5.c2r2p2"
 }
 
+# The Kubernetes API LB is deliberately NOT governed by this toggle: an
+# apiserver has to stay reachable whether or not the cluster serves an app.
+variable "deploy_app_lb" {
+  description = "Create the public HTTP/HTTPS LB fronting the application Gateway. False on an infrastructure-only cluster: its backends are pinned to the Gateway's fixed NodePorts, so it would be created and billed while pointing at ports where nothing listens."
+  type        = bool
+  default     = false
+}
+
 # ==============================================================================
 # Gateway NodePorts — CROSS-REPOSITORY CONTRACT
 #
