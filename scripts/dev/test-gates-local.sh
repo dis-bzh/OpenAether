@@ -25,8 +25,8 @@ NS="gate-lab-$$"
 
 PASS=0
 FAIL=0
-ok()  { printf '  \033[32m✓\033[0m %s\n' "$*"; PASS=$((PASS + 1)); }
-bad() { printf '  \033[31m✗\033[0m %s\n' "$*"; FAIL=$((FAIL + 1)); }
+pass() { printf '  \033[32m✓\033[0m %s\n' "$*"; PASS=$((PASS + 1)); }
+bad()  { printf '  \033[31m✗\033[0m %s\n' "$*"; FAIL=$((FAIL + 1)); }
 
 kubectl cluster-info >/dev/null 2>&1 || {
   echo "✗ no local cluster — run: task local-up" >&2
@@ -51,7 +51,10 @@ eval "$(awk '
 KCTL=(kubectl)
 info() { :; }
 warn() { :; }
-ok_()  { :; }
+# `ok` is what the gates themselves log through, so it must NOT be the pass
+# counter. While it was, a gate logging its own success scored an assertion
+# nobody wrote: this file reported 8 passes for 6 assertions.
+ok()   { :; }
 die()  { printf 'die: %s\n' "$*"; return 1; }
 ASSUME_YES=0
 DRAIN_TIMEOUT=60s
@@ -64,10 +67,10 @@ while IFS= read -r res; do
   out="$(kubectl get "$res" -A 2>&1 >/dev/null)"
   case "$out" in
     *"the server doesn't have a resource type"* | *NotFound* | "")
-      ok "$res — resolves or is legitimately absent" ;;
+      pass "$res — resolves or is legitimately absent" ;;
     *"error parsing"* | *ambiguous*)
       bad "$res — $out" ;;
-    *) ok "$res — resolves" ;;
+    *) pass "$res — resolves" ;;
   esac
 done < <(grep -rhoE "get [a-z]+\.[a-z0-9.-]+\.io\b" "$ROOT/scripts/ops" "$ROOT/scripts/dev" 2>/dev/null |
   sed 's/^get //' | sort -u)
@@ -105,24 +108,41 @@ PDB_TIMEOUT=20
   # `read -rp` on a non-terminal stdin blocks for ever. Unattended is the mode
   # under test, and this harness hung ten minutes learning that.
   if wait_pdb_headroom "$NODE" >/dev/null 2>&1 </dev/null; then
-  ok "a satisfiable budget lets the gate through"
+  pass "a satisfiable budget lets the gate through"
 else
   bad "the gate blocked on a budget that allows a disruption"
 fi
 
 # A budget that can never allow one AND is short a pod: 3 required, 2 healthy.
 # This is the shape the gate must WAIT on (currentHealthy < expectedPods).
+#
+# The third pod is one that can NEVER be scheduled, not a third replica: scaling
+# the deployment made the shape a race that failed both ways — read too early the
+# budget still says 2 of 2, read too late all three are healthy and not short.
+# And pause-ok goes first, because while two budgets select the same pods a pod
+# event re-syncs exactly ONE of them ("matches multiple PodDisruptionBudgets.
+# Chose arbitrarily") and the loser keeps a stale expectedPods for ever.
+kubectl -n "$NS" delete pdb pause-ok >/dev/null 2>&1
 kubectl -n "$NS" apply -f - >/dev/null 2>&1 <<EOF
+apiVersion: v1
+kind: Pod
+metadata: {name: pause-ghost, namespace: $NS, labels: {app: pause}}
+spec:
+  nodeSelector: {openaether.io/no-such-node: "true"}
+  containers: [{name: pause, image: registry.k8s.io/pause:3.9}]
+---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata: {name: pause-stuck, namespace: $NS}
 spec: {minAvailable: 3, selector: {matchLabels: {app: pause}}}
 EOF
-kubectl -n "$NS" scale deployment/pause --replicas=3 >/dev/null 2>&1
-sleep 8
-ALLOWED="$(kubectl -n "$NS" get pdb pause-stuck -o jsonpath='{.status.disruptionsAllowed}' 2>/dev/null)"
-HEALTHY="$(kubectl -n "$NS" get pdb pause-stuck -o jsonpath='{.status.currentHealthy}' 2>/dev/null)"
-EXPECTED="$(kubectl -n "$NS" get pdb pause-stuck -o jsonpath='{.status.expectedPods}' 2>/dev/null)"
+for _ in $(seq 1 30); do
+  ALLOWED="$(kubectl -n "$NS" get pdb pause-stuck -o jsonpath='{.status.disruptionsAllowed}' 2>/dev/null)"
+  HEALTHY="$(kubectl -n "$NS" get pdb pause-stuck -o jsonpath='{.status.currentHealthy}' 2>/dev/null)"
+  EXPECTED="$(kubectl -n "$NS" get pdb pause-stuck -o jsonpath='{.status.expectedPods}' 2>/dev/null)"
+  [ "${ALLOWED:-1}" = "0" ] && [ "${HEALTHY:-0}" -lt "${EXPECTED:-0}" ] && break
+  sleep 2
+done
 if [ "${ALLOWED:-1}" = "0" ]; then
   ASSUME_YES=1
   PDB_TIMEOUT=20
@@ -132,18 +152,25 @@ if [ "${ALLOWED:-1}" = "0" ]; then
   if wait_pdb_headroom "$NODE" >/dev/null 2>&1 </dev/null; then
     bad "the gate passed a budget at disruptionsAllowed=0 (healthy=$HEALTHY expected=$EXPECTED)"
   else
-    ok "a blocking budget stops the gate (healthy=$HEALTHY expected=$EXPECTED)"
+    pass "a blocking budget stops the gate (healthy=$HEALTHY expected=$EXPECTED)"
   fi
 else
   bad "could not build a blocking budget — got disruptionsAllowed=$ALLOWED, test inconclusive"
 fi
 
 echo
-echo "=== cnpg_installed answers honestly on a cluster without CNPG ==="
-if cnpg_installed; then
-  bad "claims CNPG is installed on a cluster that has no such CRD"
+echo "=== cnpg_installed agrees with the apiserver, whichever answer that is ==="
+# Both branches are real states of this cluster: test-cnpg-gates-local.sh leaves
+# the operator installed. Asserting only "absent" turned that into a failure and
+# said nothing about the branch the roll actually takes on a cluster with databases.
+if kubectl get crd clusters.postgresql.cnpg.io >/dev/null 2>&1; then
+  cnpg_installed \
+    && pass "the CNPG CRD is there and cnpg_installed says so" \
+    || bad "the CNPG CRD is there and cnpg_installed denies it — the roll would drain past every database gate"
 else
-  ok "no CNPG CRD → not installed (so the roll skips its gates instead of dying)"
+  cnpg_installed \
+    && bad "claims CNPG is installed on a cluster that has no such CRD" \
+    || pass "no CNPG CRD → not installed (so the roll skips its gates instead of dying)"
 fi
 
 echo

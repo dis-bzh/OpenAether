@@ -165,6 +165,16 @@ tasks:
     cmds:
       - ./scripts/dev/test-gates-local.sh
 
+  test-cnpg-gates-local:
+    desc: >-
+      Rung ONE for the DATABASE gates: rolling-replace.sh's cnpg_* logic against a
+      real CloudNativePG in Docker (needs `task local-up`). test-gates-local.sh only
+      ever proved CNPG ABSENT; this drives the branch a stub gave eleven green
+      assertions to while kubectl could not parse its jsonpath. Installs
+      local-path-provisioner and the CNPG operator (pinned) if absent, ~80s.
+    cmds:
+      - ./scripts/dev/test-cnpg-gates-local.sh
+
   test-scripts:
     desc: >-
       Unit-test the shell gates against a stub kubectl. Rung ZERO: the defects

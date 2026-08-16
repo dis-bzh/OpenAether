@@ -18,7 +18,10 @@
 # starts holding, `defect_gone` fails so the expectation is promoted to a hard
 # assertion. STRICT_DEFECTS=1 makes them fatal now.
 #
-# Usage: test-staging-checks.sh
+# Verdicts: ✓ pass, ✗ fail, ⏱ hang (the run never returned, so nothing was
+# proven), — skip (the check never ran), ! known defect. Only ✓ is green.
+#
+# Usage: test-staging-checks.sh          (STRICT_DEFECTS=1, STRICT_SKIPS=1, RUN_TIMEOUT=<s>)
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -28,15 +31,30 @@ trap 'rm -rf "$STUB_DIR"' EXIT
 REAL_SLEEP="$(command -v sleep)"; export REAL_SLEEP
 REAL_KUBECTL="$(command -v kubectl || true)"
 
-PASS=0 FAIL=0 KNOWN=0
-ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; PASS=$((PASS + 1)); }
-bad()  { printf '  \033[31m✗\033[0m %s\n' "$*"; FAIL=$((FAIL + 1)); }
-skip() { printf '  \033[34m—\033[0m SKIP %s\n' "$*"; }
+PASS=0 FAIL=0 KNOWN=0 SKIPPED=0 HUNG=0
+# A run killed by the timeout comes back rc 124, and EVERY negative below is
+# `[ "$RUN_RC" -ne 0 ]` — so a script that deadlocks scores as one that correctly
+# refused. A hang proves nothing in either direction: it is its own verdict, and
+# no conclusion drawn from a run that never returned may count as pass or fail.
+RUN_HUNG=0 RUN_CMD=
+hung() { printf '  \033[35m⏱\033[0m HANG %s\n' "$*"; HUNG=$((HUNG + 1)); }
+from_hang() { # true (and reports) when the verdict comes from a run that never returned
+  [ "$RUN_HUNG" = 1 ] || return 1
+  hung "$1 — verdict void: '${RUN_CMD}' never returned, killed after ${RUN_TIMEOUT}s"
+}
+ok()   { from_hang "$*" && return 0; printf '  \033[32m✓\033[0m %s\n' "$*"; PASS=$((PASS + 1)); }
+bad()  { from_hang "$*" && return 0; printf '  \033[31m✗\033[0m %s\n' "$*"; FAIL=$((FAIL + 1)); }
+# Counted, because "27 passed" reads identical whether 0 or 20 of them ran.
+skip() { printf '  \033[34m—\033[0m SKIP %s\n' "$*"; SKIPPED=$((SKIPPED + 1)); }
 defect() { # a defect proven in the script under test, not fixed here
+  from_hang "$*" && return 0
   printf '  \033[33m!\033[0m KNOWN DEFECT %s\n' "$*"
   KNOWN=$((KNOWN + 1)); [ "${STRICT_DEFECTS:-0}" = 1 ] && FAIL=$((FAIL + 1)); return 0
 }
-defect_gone() { printf '  \033[35m^\033[0m FIXED: %s — promote this to a hard assertion\n' "$*"; FAIL=$((FAIL + 1)); }
+defect_gone() {
+  from_hang "$*" && return 0
+  printf '  \033[35m^\033[0m FIXED: %s — promote this to a hard assertion\n' "$*"; FAIL=$((FAIL + 1))
+}
 
 # --- the stubs ----------------------------------------------------------------
 # One stub serves kubectl, task and flux, keyed on "<name> <argv>", so a single
@@ -122,13 +140,21 @@ tfvars v0.0.1 v0.0.1
 
 # --- driving a run -------------------------------------------------------------
 plan() { : >"$STUB_LOG"; printf '%b' "$*" >"$STUB_PLAN"; }
+RUN_TIMEOUT="${RUN_TIMEOUT:-30}"
+# `timeout 0` means NO timeout: the knob that exists to catch hangs would silently
+# switch the catching off, and a hang would go back to being the CI job's own.
+[ "$RUN_TIMEOUT" -gt 0 ] 2>/dev/null ||
+  { echo "RUN_TIMEOUT must be a positive integer (0 disables the hang guard)" >&2; exit 2; }
 run() { # <cmd...> — RUN_OUT gets stdout+stderr, RUN_RC the status
-  : >"$STUB_LOG"
+  : >"$STUB_LOG"; RUN_HUNG=0; RUN_CMD="$*"
   # To a file, not a pipe: staging-upgrade leaves a background probe holding the
   # inherited stdout, and a command substitution would wait on it forever.
-  # 30s is ten times the slowest scenario. A run that hits it is a hang, and a
-  # hang has to end as a red assertion, not as the CI job's own timeout.
-  timeout 30 "$@" >"$STUB_DIR/out" 2>&1 && RUN_RC=0 || RUN_RC=$?
+  # 30s is ten times the slowest scenario. -k: a script that swallows TERM must
+  # still die here rather than become the CI job's own timeout.
+  timeout -k 5 "$RUN_TIMEOUT" "$@" >"$STUB_DIR/out" 2>&1 && RUN_RC=0 || RUN_RC=$?
+  # 124 = timed out, 137 = still there 5s after TERM. Nothing under test exits
+  # with either on purpose, so both mean "it never returned".
+  case "$RUN_RC" in 124 | 137) RUN_HUNG=1 ;; esac
   RUN_OUT="$(cat "$STUB_DIR/out")"
 }
 verify()  { run env FLUX_READY_TIMEOUT="${FLUX_READY_TIMEOUT:-2}" "$VERIFY" "$PROVIDER" "$ROLE"; }
@@ -324,6 +350,7 @@ fi
 echo
 echo "=== staging-upgrade: report_probe, the interruption budget ==="
 
+RUN_HUNG=0  # nothing below concludes from a run(), so a prior hang must not void it
 # Extracted rather than run: how many samples a background probe gets in a stub
 # run is a timing accident, and the interesting input is a log that stayed empty.
 eval "$(awk '/^report_probe\(\) \{/,/^\}/' "$ROOT/scripts/dev/staging-upgrade.sh")"
@@ -335,23 +362,32 @@ probe_ok() { ( report_probe ) >/dev/null; }
 # shellcheck disable=SC2034  # both are read by the extracted function
 PROBE_LOG="$STUB_DIR/probe"; MAX_PROBE_FAILS=15
 
-printf 'ok\nok\nFAIL\nok\n' >"$PROBE_LOG"
-probe_ok && ok "3 samples, 1 FAIL, budget 15 → passes" || bad "a healthy probe failed"
-
-printf 'FAIL\n%.0s' {1..20} >"$PROBE_LOG"
-probe_ok && bad "20 FAIL against a budget of 15 passed" || ok "20 FAIL over a budget of 15 → fails"
-
-: >"$PROBE_LOG"
-if probe_ok; then
-  defect "staging-upgrade.sh:127 reports '0 FAIL in 0 samples' and PASSES on an empty probe log — a probe that never ran proves the API stayed up"
+# The awk range above is a text match on the script's FORMATTING. When it misses
+# — `report_probe () {`, a reindented brace — eval defines nothing, report_probe
+# is "command not found", and `probe_ok && bad … || ok …` takes the GREEN branch
+# on rc 127. So the extraction is asserted before anything is concluded from it.
+if ! declare -F report_probe >/dev/null; then
+  bad "report_probe could NOT be extracted from staging-upgrade.sh — the checks below would have scored a pass from rc 127"
 else
-  defect_gone "report_probe now refuses to conclude from zero samples"
+  printf 'ok\nok\nFAIL\nok\n' >"$PROBE_LOG"
+  probe_ok && ok "3 samples, 1 FAIL, budget 15 → passes" || bad "a healthy probe failed"
+
+  printf 'FAIL\n%.0s' {1..20} >"$PROBE_LOG"
+  probe_ok && bad "20 FAIL against a budget of 15 passed" || ok "20 FAIL over a budget of 15 → fails"
+
+  : >"$PROBE_LOG"
+  if probe_ok; then
+    defect "staging-upgrade.sh:127 reports '0 FAIL in 0 samples' and PASSES on an empty probe log — a probe that never ran proves the API stayed up"
+  else
+    defect_gone "report_probe now refuses to conclude from zero samples"
+  fi
 fi
-unset -f fail report_probe probe_ok
+unset -f fail probe_ok; unset -f report_probe 2>/dev/null || true
 
 echo
 echo "=== the jsonpath templates parse (real kubectl, no cluster) ==="
 
+RUN_HUNG=0  # kubectl is driven directly here, not through run()
 # The stub answers whatever the plan says, so it can never tell us the QUERY is
 # wrong — and one of the 2026-08-15 defects was a filter kubectl cannot parse,
 # which fails every time and returns nothing, which reads as "nothing wrong".
@@ -378,13 +414,49 @@ YAML
   parses '{range .items[?(@.spec.suspend==true]}{end}' \
     && bad "an unterminated filter was accepted — this check cannot fail" \
     || ok "control: a malformed template IS rejected"
-  # Read out of the scripts, so a template added tomorrow is covered too.
+  templates() { # <file...> — every jsonpath template, whichever way it is quoted
+    # Four shapes in the wild: single or double quotes, opening either before
+    # the word jsonpath or after its `=`. An extractor that knows one of them is
+    # blind to the rest and reports that blindness as "every template parses" —
+    # the defect class this block exists for. What it cannot see, it cannot
+    # check. (No literal template in this comment: check-jsonpath.sh reads it.)
+    grep -ohE -e "jsonpath='[^']*'" -e "'jsonpath=[^']*'" "$@" |
+      sed -E "s/^'?jsonpath='?//; s/'\$//"
+    # A double-quoted shell string owns the backslash before " $ ` \ — strip
+    # exactly those, so the template is what kubectl would receive. {"\n"} stays.
+    grep -ohE -e 'jsonpath="(\\.|[^"\\])*"' -e '"jsonpath=(\\.|[^"\\])*"' "$@" |
+      sed -E 's/^"?jsonpath="?//; s/"$//; s/\\(["$`\\])/\1/g'
+  }
+  # Read out of the scripts, so a template added tomorrow is covered too — and
+  # from all THREE, staging-idempotency.sh included.
+  TPL_FILES=("$ROOT/scripts/dev/staging-verify.sh" "$ROOT/scripts/dev/staging-upgrade.sh"
+    "$ROOT/scripts/dev/staging-idempotency.sh")
+  n_tpl=0
   while read -r tpl; do
     [ -n "$tpl" ] || continue
+    n_tpl=$((n_tpl + 1))
+    # A `$VAR` survives extraction as literal text, and kubectl ACCEPTS literal
+    # text — so parsing it would mint a green tick for a template never read.
+    if [[ $tpl =~ \$[A-Za-z_{] ]]; then
+      skip "built from a shell variable, so it was never parsed: $tpl"; continue
+    fi
+    # `{range}` with no `{end}` PARSES and then prints nothing — the same "the
+    # query came back empty, so nothing is wrong" class. It is also what a
+    # template split over a line continuation looks like to the extractor.
+    case "$tpl" in
+      *'{range'*'{end}'*) ;;
+      *'{range'*) bad "unterminated {range}: parses, selects nothing, reads as clean: $tpl"; continue ;;
+    esac
     parses "$tpl" && ok "parses: ${tpl:0:56}…" || bad "kubectl cannot parse: $tpl"
-  done < <(grep -ohE "jsonpath='[^']*'" \
-    "$ROOT/scripts/dev/staging-verify.sh" "$ROOT/scripts/dev/staging-upgrade.sh" |
-    sed -E "s/^jsonpath='//; s/'$//" | sort -u)
+  done < <(templates "${TPL_FILES[@]}" | sort -u)
+  # A COVERAGE floor, not a zero floor: "> 0" still reads green when the extractor
+  # sees five uses out of six. Count what the files ASK for and demand as many
+  # back, so a quoting style nobody anticipated fails loudly instead of unchecked.
+  n_used="$(grep -vhE '^[[:space:]]*#' "${TPL_FILES[@]}" | grep -ohE 'jsonpath[a-z-]*=' | grep -c . || true)"
+  n_raw="$(templates "${TPL_FILES[@]}" | grep -c . || true)"
+  { [ "$n_raw" -ge "$n_used" ] && [ "$n_tpl" -gt 0 ]; } \
+    && ok "the extractor saw all ${n_used} jsonpath use(s): ${n_tpl} distinct template(s)" \
+    || bad "the jsonpath extractor saw ${n_raw} of ${n_used} jsonpath use(s) — what it cannot see, it cannot check"
   # The filter itself, against data: parsing it is not selecting with it.
   got="$("$REAL_KUBECTL" patch --local --type merge -f "$STUB_DIR/obj.yaml" -p '{}' \
     -o 'jsonpath={.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)"
@@ -393,7 +465,18 @@ YAML
 fi
 
 echo
-printf '%s passed, %s failed, %s known defect(s) in the scripts under test\n' "$PASS" "$FAIL" "$KNOWN"
+printf '%s passed, %s failed, %s hung, %s skipped, %s known defect(s) in the scripts under test\n' \
+  "$PASS" "$FAIL" "$HUNG" "$SKIPPED" "$KNOWN"
 { [ "$KNOWN" -eq 0 ] || [ "${STRICT_DEFECTS:-0}" = 1 ]; } ||
   printf 'known defects are reported, not fixed: this file owns the tests. STRICT_DEFECTS=1 makes them fatal.\n'
-[ "$FAIL" -eq 0 ]
+RC=0
+[ "$FAIL" -eq 0 ] || RC=1
+# A hang is red on its own: it means an assertion never got an answer to judge.
+[ "$HUNG" -eq 0 ] || { printf 'NOT green: %s verdict(s) came from a run that never returned.\n' "$HUNG"; RC=1; }
+# An assertion that did not run has proven nothing, so a run with skips is not
+# "all passed" however many passed. Soft by default (kubectl may be absent).
+[ "$SKIPPED" -eq 0 ] || {
+  printf 'NOT fully green: %s check(s) were SKIPPED and proved nothing. STRICT_SKIPS=1 makes them fatal.\n' "$SKIPPED"
+  [ "${STRICT_SKIPS:-0}" = 1 ] && RC=1
+}
+exit "$RC"
