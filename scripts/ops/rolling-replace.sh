@@ -260,9 +260,39 @@ cnpg_installed() {
 
 # The Flux Kustomization(s) owning the CNPG clusters, one "namespace name" per
 # line. Dies rather than hand back an empty guess.
+# Every Kustomization in the ANCESTRY of the CNPG Cluster objects, not just the
+# one that owns them directly.
+#
+# A Kustomization is itself an object Flux manages, and it carries the same
+# ownership labels. Suspending only the immediate owner therefore has a
+# reconcile-interval half-life: measured on Scaleway 2026-08-16, `cnpg` carries
+# kustomize.toolkit.fluxcd.io/name=openaether-platform, and about ten minutes
+# into a forty-minute roll the parent reconciled `cnpg` back to suspend=false,
+# `cnpg` then reverted enablePDB to true, the primaries' budgets reappeared, and
+# the next drain spent its full 900s being refused. Last session's fix — "suspend
+# the owning Kustomization" — was right about the mechanism and one level short.
 cnpg_flux_owners() {
-  "${KCTL[@]}" get clusters.postgresql.cnpg.io -A -o jsonpath='{range .items[*]}{.metadata.labels.kustomize\.toolkit\.fluxcd\.io/namespace}{" "}{.metadata.labels.kustomize\.toolkit\.fluxcd\.io/name}{"\n"}{end}' 2>/dev/null ||
+  local seeds seen="" queue ns name parent pns pname
+  seeds="$("${KCTL[@]}" get clusters.postgresql.cnpg.io -A -o jsonpath='{range .items[*]}{.metadata.labels.kustomize\.toolkit\.fluxcd\.io/namespace}{" "}{.metadata.labels.kustomize\.toolkit\.fluxcd\.io/name}{"\n"}{end}' 2>/dev/null)" ||
     die "the CNPG CRD exists but its clusters could not be listed — refusing to roll blind."
+  queue="$(sort -u <<<"$seeds")"
+  while [[ -n "${queue//[[:space:]]/}" ]]; do
+    local next=""
+    while read -r ns name; do
+      [[ -n "$ns" && -n "$name" ]] || continue
+      grep -qxF "$ns $name" <<<"$seen" && continue
+      seen+="${ns} ${name}"$'\n'
+      # A Kustomization with no owner label is the root — stop there.
+      parent="$("${KCTL[@]}" -n "$ns" get kustomizations.kustomize.toolkit.fluxcd.io "$name" \
+        -o jsonpath='{.metadata.labels.kustomize\.toolkit\.fluxcd\.io/namespace}{" "}{.metadata.labels.kustomize\.toolkit\.fluxcd\.io/name}' 2>/dev/null)" || continue
+      read -r pns pname <<<"$parent"
+      [[ -n "$pns" && -n "$pname" ]] || continue
+      [[ "$pns $pname" == "$ns $name" ]] && continue   # self-owned root
+      next+="${pns} ${pname}"$'\n'
+    done <<<"$queue"
+    queue="$next"
+  done
+  printf '%s' "$seen"
 }
 
 # The CNPG clusters themselves, one "namespace name" per line. Same rule.
@@ -273,10 +303,15 @@ cnpg_clusters() {
 }
 
 cnpg_flux_suspend() { # <true|false>
-  local suspend="$1" ns name
+  local suspend="$1" ns name order
   cnpg_installed || return 0
+  # cnpg_flux_owners lists child first, then its ancestors. Suspend the ANCESTOR
+  # first, or the parent can reconcile the child back to suspend=false in the
+  # window between the two patches — the very race this walk exists to close.
+  # Restore in the other direction, so the parent is the last thing let go.
+  [[ "$suspend" == "true" ]] && order="tac" || order="cat"
   cnpg_flux_owners |
-    sort -u |
+    "$order" |
     while read -r ns name; do
       [[ -n "$ns" && -n "$name" ]] || continue
       if "${KCTL[@]}" -n "$ns" patch kustomizations.kustomize.toolkit.fluxcd.io "$name" \
@@ -297,16 +332,39 @@ cnpg_maintenance() { # <true|false>
   cnpg_installed || return 0
   # Suspend BEFORE patching, so there is no window for Flux to undo it.
   [[ "$on" == "true" ]] && cnpg_flux_suspend true
-  cnpg_clusters |
-    while read -r ns name; do
-      [[ -n "$ns" && -n "$name" ]] || continue
-      if "${KCTL[@]}" -n "$ns" patch clusters.postgresql.cnpg.io "$name" --type merge \
-        -p "{\"spec\":{\"enablePDB\":${pdb},\"nodeMaintenanceWindow\":{\"inProgress\":${on},\"reusePVC\":true}}}" >/dev/null 2>&1; then
-        info "CNPG ${ns}/${name}: enablePDB=${pdb}, nodeMaintenanceWindow.inProgress=${on}"
-      else
-        warn "could not set enablePDB=${pdb} / nodeMaintenanceWindow=${on} on ${ns}/${name}"
+  # `done < <(...)` and not `cnpg_clusters | while`: a pipeline puts the loop in a
+  # subshell, where `die` kills only the subshell and the caller sails on.
+  local list attempt err
+  if ! list="$(cnpg_clusters)"; then
+    die "could not list the CNPG clusters to put into maintenance"
+  fi
+  while read -r ns name; do
+    [[ -n "$ns" && -n "$name" ]] || continue
+    # RETRY, and keep the reason. This patch goes through CNPG's validating
+    # webhook, whose pod has just been evicted by the control-plane roll — so
+    # the first attempt of the worker roll can be rejected while the operator is
+    # still coming back (Scaleway, 2026-08-16: grafana-db patched, zitadel-db
+    # refused, one warning, and a confirmation below that could then only fail).
+    # The old code discarded stderr, so the warning named no cause at all.
+    for attempt in 1 2 3 4 5 6; do
+      if err="$("${KCTL[@]}" -n "$ns" patch clusters.postgresql.cnpg.io "$name" --type merge \
+        -p "{\"spec\":{\"enablePDB\":${pdb},\"nodeMaintenanceWindow\":{\"inProgress\":${on},\"reusePVC\":true}}}" 2>&1 >/dev/null)"; then
+        info "CNPG ${ns}/${name}: enablePDB=${pdb}, nodeMaintenanceWindow.inProgress=${on}$([[ $attempt -gt 1 ]] && printf ' (attempt %s)' "$attempt")"
+        continue 2
       fi
+      sleep 5
     done
+    # On the way IN this is fatal: the confirmation below cannot pass, so warning
+    # and continuing only buys 120 more seconds before the same conclusion. On
+    # the way OUT we are already unwinding — say it loudly and finish restoring
+    # the other clusters.
+    if [[ "$on" == "true" ]]; then
+      die "could not set enablePDB=false on ${ns}/${name} after 6 tries: ${err%%$'\n'*}
+  The CNPG webhook rejects or cannot be reached. Its operator lives in
+  cnpg-system and may still be rescheduling after the control-plane roll."
+    fi
+    warn "could not restore enablePDB on ${ns}/${name}: ${err%%$'\n'*}"
+  done <<<"$list"
   # Resume AFTER restoring, so Flux finds the objects already back where git
   # wants them. Leaving a Kustomization suspended is the failure mode this
   # function must not have — staging-verify.sh fails the run if one is.
@@ -513,6 +571,30 @@ wait_cnpg_whole() {
 #
 # Non-zero return = the query failed, which is not "no budget is short". This
 # used to be `|| echo '{"items":[]}'`, i.e. an apiserver blip read as headroom.
+# The budgets pdb_short deliberately does NOT return: they allow nothing AND are
+# not missing a pod, so waiting cannot change them. CNPG's <cluster>-primary is
+# one, and it is what cost a full 900s drain on Scaleway 2026-08-16.
+#
+# DIAGNOSTIC ONLY — do not gate on this. Longhorn keeps a per-node
+# instance-manager budget at exactly 1/1 allowing 0, and clears it in RESPONSE to
+# the node being cordoned; wait_pdb_headroom runs BEFORE the cordon, so refusing
+# on this list would refuse every roll that works today (measured live: it named
+# worker-0's instance-manager alongside the real culprit, and worker-0 had just
+# drained cleanly). The budget the roll is entitled to demand is gone is a CNPG
+# one, and cnpg_maintenance is what asserts that — per node, now.
+pdb_hard() {
+  local out
+  out="$("${KCTL[@]}" get pdb -A -o json 2>/dev/null)" || return 1
+  jq -r '.items[]
+         | select((.status.disruptionsAllowed // 0) == 0)
+         | select((.status.expectedPods // 0) > 0)
+         | select((.status.currentHealthy // 0) >= (.status.expectedPods // 0))
+         | [ .metadata.namespace, .metadata.name,
+             "\(.status.currentHealthy // 0)/\(.status.expectedPods // 0)",
+             ((.spec.selector.matchLabels // {}) | to_entries
+              | map("\(.key)=\(.value)") | join(",")) ] | @tsv' <<<"$out"
+}
+
 pdb_short() {
   local out
   out="$("${KCTL[@]}" get pdb -A -o json 2>/dev/null)" || return 1
@@ -555,9 +637,17 @@ wait_pdb_headroom() { # <node_name>
         # as blocking: waiting is recoverable, draining on a wrong answer is not.
         # Same rule as pdb_short above — this was the last line in the file still
         # written the other way, and it is defect #2 of the sweep verbatim.
+        #
+        # `[*]` and NOT `[0]`: on an empty list kubectl answers "array index out
+        # of bounds: index 0, length 0" and exits 1, so `[0]` makes the ORDINARY
+        # case — this budget has no pod on this node — indistinguishable from an
+        # apiserver failure. With the fail-closed branch above, that is a gate
+        # that can never pass: OVH cp-2, 2026-08-16, 600s of
+        # "zitadel-db(unreadable)" for a budget whose pods were all on workers.
+        # Read it as blocking AND make it unreadable only when it truly is.
         if ! on_node="$("${KCTL[@]}" -n "$ns" get pods -l "$sel" \
               --field-selector "spec.nodeName=${node}" \
-              -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"; then
+              -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)"; then
           blocked+="${ns}/${name}(unreadable) "
         elif [[ -n "$on_node" ]]; then
           blocked+="${ns}/${name}(${state}) "
@@ -636,7 +726,20 @@ preflight_roll() {
       warn "capacity: a single worker, so rolling it takes its workloads down with it."
     elif [[ $total -gt $room ]]; then
       warn "capacity: the ${nodes} workers request ${total}%, and any ${nodes} minus one of them hold ${room}%."
-      fatal=1
+      # Fatal only when this run will actually drain a worker. A --cp-only roll
+      # evacuates control planes, whose pods are a small fraction (13-17% of a CP
+      # on the clusters measured), and blocking it on worker headroom denies an
+      # upgrade the cluster can perfectly well take: Outscale 2026-08-16 could not
+      # roll its workers at 99/98/98%, and was refused its CONTROL PLANES for the
+      # same reason. Still printed, because a worker roll is what comes next.
+      # Defaulted, and defaulted to the FATAL side: the unit harness extracts this
+      # function without the globals, and a gate that softens itself because a
+      # variable happens to be unset is not a gate.
+      if [[ "${SCOPE:-all}" == cp ]]; then
+        warn "capacity: not fatal for --cp-only — no worker is drained by this run, but the worker roll will be refused until this changes."
+      else
+        fatal=1
+      fi
     else
       ok "capacity: ${total}% requested, ${room}% available without one worker"
     fi
@@ -682,6 +785,14 @@ preflight_roll() {
 
 cordon_drain() { # <node_name>
   local node="$1"
+  # RE-ASSERT, once per node. cnpg_maintenance ran once for the whole roll, and a
+  # roll is forty minutes that reboots every worker: on Scaleway 2026-08-16 the
+  # budgets were confirmed gone, worker-0 rebooted, CNPG rebuilt the instances it
+  # had lost ("grafana-db(1/2) zitadel-db(1/3)"), and by the time worker-1 was
+  # drained its primaries were protected again — 900s of refused evictions. What
+  # put them back matters less than the fact that a setting asserted once at the
+  # start of a long, disruptive operation is not a setting that holds.
+  cnpg_maintenance true
   wait_cnpg_whole
   wait_pdb_headroom "$node"
   info "Cordon + drain ${node}…"
@@ -689,6 +800,19 @@ cordon_drain() { # <node_name>
   if ! "${KCTL[@]}" drain "$node" \
         --ignore-daemonsets --delete-emptydir-data --timeout="$DRAIN_TIMEOUT"; then
     warn "drain hit its timeout (${DRAIN_TIMEOUT}); some pods may be stuck (PDBs?)."
+    # Name them instead of asking. Every one of these forbids its last disruption
+    # while missing nothing, so it is the drain's answer, and "(PDBs?)" made the
+    # operator go and find by hand what the cluster already knew.
+    local hard on_node ns name state sel
+    if hard="$(pdb_hard)"; then
+      while IFS=$'\t' read -r ns name state sel; do
+        [[ -n "$ns" && -n "$name" && -n "$sel" ]] || continue
+        on_node="$("${KCTL[@]}" -n "$ns" get pods -l "$sel" \
+          --field-selector "spec.nodeName=${node}" \
+          -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)" || continue
+        [[ -n "$on_node" ]] && warn "  ${ns}/${name} (${state}) allows 0 and is short nothing — blocks ${on_node}"
+      done <<<"$hard"
+    fi
     # Unattended, this used to answer its own question and carry on. Rebooting a
     # node whose pods REFUSED to move is how a database gets cut off mid-write;
     # a half-rolled cluster is recoverable (this script skips nodes already on
@@ -934,8 +1058,25 @@ replace_node() { # <type: cp|worker> <index>
     info "talosctl upgrade ${node_name} ${running:-?} → ${TALOS_IMAGE}"
     # --drain=false: we just drained, tolerantly. Talos's own drain is all-or-
     # nothing and dies on the first PDB that forbids eviction.
-    talosctl upgrade -e "$up_ep" -n "$node_ip" --image "$TALOS_IMAGE" --wait --drain=false \
-      || die "upgrade failed on ${node_name} — the node kept its disk and membership; investigate before retrying"
+    if ! talosctl upgrade -e "$up_ep" -n "$node_ip" --image "$TALOS_IMAGE" --wait --drain=false; then
+      # The CLIENT'S WATCH IS NOT THE VERDICT. On OVH 2026-08-16 the installer
+      # logged "installation of v1.13.8 complete" and "Exit code: 0", then
+      # talosctl spent 14 minutes being GOAWAY'd — ENHANCE_YOUR_CALM,
+      # "too_many_pings" — following the node through its own reboot over an SSH
+      # tunnel, and returned non-zero. The node was Ready on the new version the
+      # whole time, and the roll aborted anyway. Ask the node, not the client.
+      warn "talosctl upgrade --wait returned non-zero on ${node_name}; asking the node itself"
+      local back=0 deadline=$(( SECONDS + NODE_READY_TIMEOUT ))
+      while (( SECONDS < deadline )); do
+        running="$(talosctl version -e "$ep" -n "$node_ip" --short 2>/dev/null \
+                   | awk '/Server/{f=1} f && /Tag:/{print $2; exit}')"
+        [[ "$running" == "${TALOS_IMAGE##*:}" ]] && { back=1; break; }
+        sleep "$POLL"
+      done
+      (( back == 1 )) || die "upgrade failed on ${node_name} — it reports ${running:-no version at all}, not ${TALOS_IMAGE##*:}.
+  The node kept its disk and its etcd membership; investigate before retrying."
+      ok "${node_name} came back on ${running} — the watch failed, the upgrade did not"
+    fi
     ok "${node_name} upgraded, waiting for it to come back"
   else
 
@@ -1041,12 +1182,34 @@ info "Pre-flight health check…"
 if [[ $DRY_RUN -eq 0 ]]; then
   wait_etcd_healthy "${#CP_IPS[@]}" || die "etcd is not ${#CP_IPS[@]}/${#CP_IPS[@]} healthy — refusing to start a rolling replace on an unhealthy cluster"
   "${KCTL[@]}" get nodes >/dev/null 2>&1 || die "kubectl cannot reach the API via ${KUBECONFIG_FILE}"
+  # WAIT, do not sample once. staging-upgrade.sh calls this immediately after a
+  # Kubernetes version bump, and a kubelet that has just restarted is NotReady
+  # for a few seconds while reporting the new version — so a single sample
+  # refused the whole Talos roll on a cluster that was fine moments later
+  # (OVH, 2026-08-16). The etcd check one line above already waits; this is the
+  # same requirement, and it was the only one asserted instantaneously.
+  #
   # "Ready,SchedulingDisabled" is Ready. Matching the column exactly counted a
   # merely cordoned node as unhealthy — and a cordoned node is the state THIS
   # script leaves behind when it stops mid-node, so the check blocked its own
   # retry until someone uncordoned by hand.
-  not_ready="$("${KCTL[@]}" get nodes --no-headers 2>/dev/null | awk '$2 !~ /^Ready/{c++} END{print c+0}')"
-  [[ "$not_ready" == "0" ]] || die "${not_ready} node(s) not Ready — stabilize the cluster first"
+  nodes_deadline=$(( SECONDS + NODE_READY_TIMEOUT ))
+  info "Waiting for every node to be Ready…"
+  while :; do
+    # A FAILED query is not "every node is Ready". Keeping the exit status is
+    # the difference between waiting and draining a cluster we cannot see.
+    if raw="$("${KCTL[@]}" get nodes --no-headers 2>/dev/null)" && [[ -n "$raw" ]]; then
+      not_ready="$(awk '$2 !~ /^Ready/{printf "%s ", $1}' <<<"$raw")"
+      # An EMPTY node list has no not-Ready node either, and would read as
+      # "everything is fine" — the same shape as the failed query above.
+      [[ -z "$not_ready" ]] && { ok "all $(wc -l <<<"$raw") nodes Ready"; break; }
+    else
+      not_ready="(apiserver did not answer)"
+    fi
+    (( SECONDS < nodes_deadline )) ||
+      die "still not Ready after ${NODE_READY_TIMEOUT}s: ${not_ready}— stabilize the cluster first"
+    sleep "$POLL"
+  done
   cordoned="$("${KCTL[@]}" get nodes --no-headers 2>/dev/null | awk '$2 ~ /SchedulingDisabled/{printf "%s ", $1}')"
   [[ -z "$cordoned" ]] || warn "already cordoned (interrupted run?): ${cordoned}— uncordon by hand any node this run does not touch."
   ok "Cluster healthy — proceeding"

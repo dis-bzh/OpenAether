@@ -123,13 +123,26 @@ PROBE_PID=$!
 # shellcheck disable=SC2064  # PROBE_PID must expand now, not at trap time
 trap "kill $PROBE_PID 2>/dev/null || true; rm -f '$PROBE_LOG'" EXIT
 
+# The assertion is about the LONGEST CONSECUTIVE outage, not the total number of
+# failed samples — those are different claims and only the first matches the
+# message this used to print ("unreachable for ~Ns"). Eighteen one-second blips
+# spread over a control-plane roll is an HA cluster working as designed; eighteen
+# in a row is the API being down. Counting them the same way cannot tell a
+# healthy rolling restart from a total outage. Measured 2026-08-16: OVH 4 fails
+# in 31 samples, Scaleway 18 in 59, on identical health-check settings.
+#
+# The log is also KEPT when the assertion trips: the old trap deleted the only
+# evidence at exactly the moment someone would need it.
 report_probe() {
-  local fails total
+  local fails total longest keep
   fails="$(grep -c FAIL "$PROBE_LOG" || true)"
   total="$(wc -l <"$PROBE_LOG")"
-  echo "  probe: ${fails} FAIL in ${total} samples (~1s apart)"
-  [ "$fails" -le "$MAX_PROBE_FAILS" ] ||
-    fail "the API was unreachable for ~${fails}s, over the ${MAX_PROBE_FAILS}s this lane allows"
+  longest="$(awk '/FAIL/{r++; if (r>m) m=r; next} {r=0} END{print m+0}' "$PROBE_LOG")"
+  echo "  probe: ${fails} FAIL in ${total} samples (~1s apart), longest outage ${longest}s"
+  [ "$longest" -le "$MAX_PROBE_FAILS" ] && return 0
+  keep="${PROBE_LOG}.kept"
+  cp "$PROBE_LOG" "$keep" 2>/dev/null || true
+  fail "the API was unreachable for ${longest}s in a row, over the ${MAX_PROBE_FAILS}s this lane allows (samples kept in ${keep})"
 }
 
 # --- Kubernetes first: no reboot, so it isolates the control-plane roll --------
