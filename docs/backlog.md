@@ -87,23 +87,6 @@ of Talos v1.13.8. The spec carries `secureBoot`, `selinuxState` and
 `Running` is never reached — `talosctl logs machined` on a node stuck at BOOTING
 is the next read. Rung: real cloud.
 
-### OPEN — the roll cannot be interrupted
-
-Ctrl+C during the OVH roll printed `Signal received, aborting` from talosctl and
-`task: Signal received: "interrupt"` — and `rolling-replace.sh` carried on to the
-next node, draining and rebooting it.
-
-The interrupt is absorbed by the recovery added for the GOAWAY case: a non-zero
-`talosctl upgrade --wait` sends the script to "ask the node itself", the node
-answers with the target version, and the roll concludes success and continues.
-Right for a client that lost its watch; wrong for an operator who asked to stop.
-
-**Closes:** a trap on INT/TERM that sets a flag, checked at the boundary BETWEEN
-nodes — the node in flight finishes and returns to rotation, then the run stops
-and says so. Stopping between drain and reboot would leave exactly the cordoned,
-half-upgraded node that has already polluted one diagnosis. Rung: the stub
-harness can drive it (scripts/dev/test-rolling-replace.sh).
-
 ### OPEN — one OVH control plane boots the previous Talos version
 
 Measured 2026-08-16, and narrower than it first looked: **cp-0 only**. The

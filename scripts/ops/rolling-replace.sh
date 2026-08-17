@@ -96,6 +96,15 @@ KUBECONFIG_FILE="${KUBECONFIG:-./kubeconfig}"
 # fatal, so the budget has to be generous enough to tell the two apart.
 DRAIN_TIMEOUT="${DRAIN_TIMEOUT:-900s}"
 NODE_READY_TIMEOUT="${NODE_READY_TIMEOUT:-600}"   # seconds
+# Ceiling on `talosctl upgrade --wait`, which has none. A Talos node reboots in
+# one to three minutes; past this we stop watching and ask the node what it runs.
+UPGRADE_WATCH_TIMEOUT="${UPGRADE_WATCH_TIMEOUT:-420}"
+# Set by the INT/TERM trap and by an interrupted upgrade. Checked BETWEEN nodes:
+# the node in flight finishes and returns to rotation, then the run stops. Halting
+# between drain and reboot would leave the cordoned, half-upgraded node that has
+# already ruined one diagnosis.
+STOP_REQUESTED=0
+trap 'STOP_REQUESTED=1; printf "\n⚠ stop requested — finishing the node in flight, then stopping.\n" >&2' INT TERM
 ETCD_TIMEOUT="${ETCD_TIMEOUT:-300}"               # seconds
 LONGHORN_TIMEOUT="${LONGHORN_TIMEOUT:-600}"       # seconds
 POLL=10                                           # seconds between health polls
@@ -938,6 +947,15 @@ node_targets() { # <tf_t> <index>
   '
 }
 
+# stop_here answers "was a stop asked for?" and says so once, at the only place
+# it is safe to obey: before touching the next node.
+stop_here() {
+  (( STOP_REQUESTED == 1 )) || return 1
+  warn "stopping before the next ${1}: the cluster is consistent, and the nodes not yet"
+  warn "reached are still on the previous version. Re-run to continue where this left off."
+  return 0
+}
+
 replace_node() { # <type: cp|worker> <index>
   local t="$1" i="$2"
   local node_name node_ip ep cfg_addr tf_t
@@ -1058,14 +1076,33 @@ replace_node() { # <type: cp|worker> <index>
     info "talosctl upgrade ${node_name} ${running:-?} → ${TALOS_IMAGE}"
     # --drain=false: we just drained, tolerantly. Talos's own drain is all-or-
     # nothing and dies on the first PDB that forbids eviction.
-    if ! talosctl upgrade -e "$up_ep" -n "$node_ip" --image "$TALOS_IMAGE" --wait --drain=false; then
+    # BOUNDED. `--wait` has no deadline of its own, and on OVH it does not return:
+    # the node reboots, reports `stage: BOOTING ready: true unmetCond: []`, never
+    # reaches Running as far as the watcher is concerned, and the operator waits
+    # forty minutes for nothing (measured 2026-08-17). The recovery below already
+    # knew how to ask the node directly — it was simply unreachable, because a
+    # command that hangs never returns non-zero.
+    upgrade_rc=0
+    timeout "$UPGRADE_WATCH_TIMEOUT" talosctl upgrade -e "$up_ep" -n "$node_ip" \
+      --image "$TALOS_IMAGE" --wait --drain=false || upgrade_rc=$?
+    if (( upgrade_rc != 0 )); then
       # The CLIENT'S WATCH IS NOT THE VERDICT. On OVH 2026-08-16 the installer
       # logged "installation of v1.13.8 complete" and "Exit code: 0", then
       # talosctl spent 14 minutes being GOAWAY'd — ENHANCE_YOUR_CALM,
       # "too_many_pings" — following the node through its own reboot over an SSH
       # tunnel, and returned non-zero. The node was Ready on the new version the
       # whole time, and the roll aborted anyway. Ask the node, not the client.
-      warn "talosctl upgrade --wait returned non-zero on ${node_name}; asking the node itself"
+      case "$upgrade_rc" in
+        124) warn "the upgrade watch did not return within ${UPGRADE_WATCH_TIMEOUT}s on ${node_name} — asking the node itself" ;;
+        130 | 2)
+          # SIGINT. The operator asked to stop, and until 2026-08-17 this branch
+          # read the interrupt as a lost watch, confirmed the node was on the new
+          # version, and rolled on to drain the NEXT one. Pressing Ctrl+C must
+          # stop the roll, not accelerate it.
+          STOP_REQUESTED=1
+          warn "interrupted during the upgrade of ${node_name} — finishing this node, then stopping" ;;
+        *) warn "talosctl upgrade --wait returned ${upgrade_rc} on ${node_name}; asking the node itself" ;;
+      esac
       local back=0 deadline=$(( SECONDS + NODE_READY_TIMEOUT ))
       while (( SECONDS < deadline )); do
         running="$(talosctl version -e "$ep" -n "$node_ip" --short 2>/dev/null \
@@ -1253,10 +1290,10 @@ fi
 
 # Workers first (heavy stateful load), then control planes (etcd-gated).
 if [[ "$SCOPE" == "all" || "$SCOPE" == "workers" ]]; then
-  for j in "${!WK_IPS[@]}"; do replace_node worker "$j"; done
+  for j in "${!WK_IPS[@]}"; do stop_here worker && break; replace_node worker "$j"; done
 fi
 if [[ "$SCOPE" == "all" || "$SCOPE" == "cp" ]]; then
-  for j in "${!CP_IPS[@]}"; do replace_node cp "$j"; done
+  for j in "${!CP_IPS[@]}"; do stop_here cp && break; replace_node cp "$j"; done
 fi
 
 hr
