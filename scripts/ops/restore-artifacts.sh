@@ -51,19 +51,25 @@ CLUSTER_DIR="$ROOT/infrastructure/opentofu/cluster"
 TFVARS="$CLUSTER_DIR/envs/${ROLE}-${PROVIDER}.tfvars"
 OUT="${OUT:-$CLUSTER_DIR}"
 
-command -v gpg >/dev/null 2>&1 || { echo "✗ gpg is required to decrypt" >&2; exit 1; }
-command -v aws >/dev/null 2>&1 || { echo "✗ the aws CLI is required to fetch" >&2; exit 1; }
-[ -f "$TFVARS" ] || { echo "✗ no $TFVARS — the bucket name is derived from it" >&2; exit 1; }
-
-# Refuse EARLY and by name. The failure that costs an hour is discovering after
-# the download that the passphrase was never exported: gpg then reports a
-# checksum error, which reads like a corrupt backup rather than a missing key.
+# FIRST, before the tools and before the tfvars. It is the only thing that cannot
+# be obtained any other way: without it these objects are noise, whatever else is
+# in place. Checking it after the download would also turn a missing key into
+# what looks like a corrupt backup — gpg reports a checksum error either way.
+#
+# The order is not cosmetic. It first sat below the tfvars check, so on a machine
+# with no cluster configured the script refused for a different reason, and
+# test-restore.sh — which asserts THIS refusal — passed only where a real tfvars
+# happened to exist. It passed here and failed in CI.
 PASSPHRASE="${TF_VAR_encryption_passphrase:-}"
 [ -n "$PASSPHRASE" ] || {
   echo "✗ TF_VAR_encryption_passphrase is not set." >&2
   echo "  It is the ONLY thing that can decrypt these objects; there is no recovery without it." >&2
   exit 1
 }
+
+command -v gpg >/dev/null 2>&1 || { echo "✗ gpg is required to decrypt" >&2; exit 1; }
+command -v aws >/dev/null 2>&1 || { echo "✗ the aws CLI is required to fetch" >&2; exit 1; }
+[ -f "$TFVARS" ] || { echo "✗ no $TFVARS — the bucket name is derived from it" >&2; exit 1; }
 
 tfv() { grep -E "^[[:space:]]*$1[[:space:]]*=" "$TFVARS" 2>/dev/null | head -1 | sed -E 's/.*"([^"]*)".*/\1/'; }
 CN="$(tfv cluster_name)"; ENVN="$(tfv environment)"
