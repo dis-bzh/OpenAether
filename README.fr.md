@@ -193,7 +193,7 @@ L'ordre compte : le management détient les CR de ses enfants.
 ```bash
 source .env.sh
 task edge-down CLUSTER=edge-1 -- --yes      # chaque enfant CAPI d'abord
-task fleet-down PROVIDER=ovh -- --yes       # puis le management
+task down PROVIDER=ovh -- --yes       # puis le management
 python3 scripts/ops/purge-orphans/ovh.py    # dry-run : vérifier qu'il ne reste rien
 ```
 

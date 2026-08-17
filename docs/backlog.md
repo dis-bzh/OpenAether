@@ -48,6 +48,62 @@ ciphertext; there is no working restore path; and the documented user journey
 (`docs/first-cluster.md`, written 2026-08-17) was assembled by reading the code,
 not by walking it.
 
+### OPEN — the OVH upgrade does not complete, and here is what it looks like
+
+2026-08-17, a second OVH cluster, deployed and torn down the same afternoon. The
+roll was STOPPED by the operator because it was not progressing, not because
+anything else went wrong.
+
+**The symptom is the watch, not the install.** `talosctl upgrade --wait` prints,
+repeatedly:
+
+    * 10.0.0.x: stage: BOOTING ready: true unmetCond: []
+
+The node reboots, reports itself ready, and never reaches `Running` as far as the
+watcher is concerned — so `--wait` does not return. That is precisely the
+condition under which Talos does not confirm an upgrade: the controller drops the
+META `Upgrade` tag only on `Stage == Running && Status.Ready`, and an unconfirmed
+upgrade is what gets reverted on a later boot. It ties the hang and the revert
+into one mechanism instead of two mysteries.
+
+**And the boot method changes across the upgrade — measured:**
+
+    cp-0  v1.13.8   (no BOOT_IMAGE)
+    cp-1  v1.13.8   (no BOOT_IMAGE)
+    cp-2  v1.13.7   BOOT_IMAGE=/A/vmlinuz     ← not yet upgraded
+
+So `BOOT_IMAGE=/A/vmlinuz` is what a NOT-YET-UPGRADED OVH node looks like, and an
+upgraded one has none. The 2026-08-16 note read that line as "it booted partition
+A"; it is better read as "it is back on its original GRUB entry", which is the
+same family as talos#13967 (open, names legacy boot) and consistent with GRUB no
+longer being used for new installs since Talos 1.10.
+
+**Correction to that entry:** `bootedWithUKI` does not exist in the SecurityState
+of Talos v1.13.8. The spec carries `secureBoot`, `selinuxState` and
+`moduleSignatureEnforced`, nothing else. The usable signal is `BOOT_IMAGE` in
+`/proc/cmdline`, via `talosctl read /proc/cmdline`.
+
+**Closes:** an OVH roll where `--wait` returns on its own, or a diagnosis of why
+`Running` is never reached — `talosctl logs machined` on a node stuck at BOOTING
+is the next read. Rung: real cloud.
+
+### OPEN — the roll cannot be interrupted
+
+Ctrl+C during the OVH roll printed `Signal received, aborting` from talosctl and
+`task: Signal received: "interrupt"` — and `rolling-replace.sh` carried on to the
+next node, draining and rebooting it.
+
+The interrupt is absorbed by the recovery added for the GOAWAY case: a non-zero
+`talosctl upgrade --wait` sends the script to "ask the node itself", the node
+answers with the target version, and the roll concludes success and continues.
+Right for a client that lost its watch; wrong for an operator who asked to stop.
+
+**Closes:** a trap on INT/TERM that sets a flag, checked at the boundary BETWEEN
+nodes — the node in flight finishes and returns to rotation, then the run stops
+and says so. Stopping between drain and reboot would leave exactly the cordoned,
+half-upgraded node that has already polluted one diagnosis. Rung: the stub
+harness can drive it (scripts/dev/test-rolling-replace.sh).
+
 ### OPEN — one OVH control plane boots the previous Talos version
 
 Measured 2026-08-16, and narrower than it first looked: **cp-0 only**. The

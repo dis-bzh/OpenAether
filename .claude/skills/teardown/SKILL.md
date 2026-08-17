@@ -11,7 +11,7 @@ This is the OpenAether commands and the traps this project has actually met.
 ## The sequence
 
 ```
-task fleet-down PROVIDER=<p> -- --force-no-edges --yes
+task down PROVIDER=<p> -- --force-no-edges --yes
 python3 scripts/ops/purge-orphans/<p>.py
 ```
 

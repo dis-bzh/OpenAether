@@ -192,7 +192,7 @@ Order matters: the management owns its children's CRs.
 ```bash
 source .env.sh
 task edge-down CLUSTER=edge-1 -- --yes      # each CAPI child first
-task fleet-down PROVIDER=ovh -- --yes       # then the management
+task down PROVIDER=ovh -- --yes       # then the management
 python3 scripts/ops/purge-orphans/ovh.py    # dry-run: confirm nothing is left
 ```
 

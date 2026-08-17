@@ -174,7 +174,7 @@ terre.
 
 ```bash
 task destroy ROLE=management PROVIDER=scaleway
-task fleet-down PROVIDER=scaleway -- --force-no-edges --yes
+task down PROVIDER=scaleway -- --force-no-edges --yes
 python3 scripts/ops/purge-orphans/scaleway.py
 ```
 

@@ -22,9 +22,37 @@ vars:
 
 tasks:
   default:
-    desc: Show available tasks
+    # `task --list` prints 52 targets in alphabetical order, which is a map of the
+    # repository rather than a path through it. Most of them are steps of `up`, dev
+    # rungs, or belong to a later version. This is the path.
+    silent: true
     cmds:
-      - task --list
+      - |
+        cat <<'EOT'
+        OpenAether — one Talos cluster, on any provider.
+
+        Deploy and operate, in order:
+          task setup                      install the toolchain
+          task bucket-suffix              a discriminator for your bucket names
+          task plan     PROVIDER=…        what would be created, before spending
+          task up       PROVIDER=… KEY=…  deploy, or converge an existing cluster
+          task verify   PROVIDER=…        ask the cluster whether it is what we promise
+          task upgrade  PROVIDER=… KEY=…  Kubernetes then Talos, measuring the outage
+          task down     PROVIDER=…        destroy, and prove the account is empty
+
+        When you need them:
+          task kubeconfig        PROVIDER=…   get access back
+          task restore-artifacts PROVIDER=…   recover access from the encrypted backups
+          task tunnels           PROVIDER=…   open the Talos API tunnels
+
+        Before you push:
+          task preflight                  everything provable without a cloud account
+
+        Everything else — the steps `up` runs for you, the local and emulated rungs,
+        the CAPI and application targets — is still there:  task --list-all
+
+        Start here: docs/first-cluster.md
+        EOT
 
   setup:
     desc: Install dependencies (OpenTofu, Talosctl, Kubectl, Task, pre-commit)
@@ -672,13 +700,14 @@ tasks:
         export KUBECONFIG="${KUBECONFIG:-$PWD/infrastructure/opentofu/cluster/kubeconfig}"
         ./scripts/ops/edge-down.sh {{.CLUSTER}} --namespace {{.NS}} --timeout {{.TIMEOUT}} {{.CLI_ARGS}}
 
-  fleet-down:
+  down:
+    aliases: [fleet-down]
     desc: >-
       COMPLETE, idempotent fleet teardown: every CAPI child cluster (edge-down,
       clean cascade) THEN the management (tofu destroy), then a report of what is
       left to purge by hand (buckets, images, keypairs). The order is not
       negotiable: a child outliving the management means orphaned, billed VMs.
-      Usage: task fleet-down PROVIDER=ovh [ROLE=management] [-- --yes]
+      Usage: task down PROVIDER=ovh [ROLE=management] [-- --yes]
     vars:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
       ROLE: '{{.ROLE | default "management"}}'
