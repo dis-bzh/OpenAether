@@ -19,7 +19,12 @@ if [[ -z "$PROVIDER" ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TOFU_DIR="${SCRIPT_DIR}/../infrastructure/opentofu/cluster"
+# ../.. — this script lives in scripts/bootstrap/, not scripts/. With a single
+# `..` it resolved to scripts/infrastructure/opentofu/cluster, so the guard
+# below always fired and printed a path that cannot exist. Four sibling
+# scripts were addressed the same wrong way; they live in internal/ and ops/.
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+TOFU_DIR="${REPO_ROOT}/infrastructure/opentofu/cluster"
 ENVFILE="${TOFU_DIR}/envs/failover-${PROVIDER}.tfvars"
 
 if [[ ! -f "${ENVFILE}" ]]; then
@@ -49,10 +54,10 @@ cd "${TOFU_DIR}"
 echo ""
 echo "▶ Phase 1: Provisioning infrastructure on ${PROVIDER}..."
 # Ensure the backup buckets exist before init (the S3 backend won't create them).
-"${SCRIPT_DIR}/ensure-buckets.sh" "${ENVFILE}"
+"${REPO_ROOT}/scripts/internal/ensure-buckets.sh" "${ENVFILE}"
 # Partial backend derived from the tfvars (single source of truth): the failover
 # cluster's state lives on its own provider, reachable when the primary is down.
-tofu init -reconfigure $("${SCRIPT_DIR}/tf-backend.sh" "${ENVFILE}")
+tofu init -reconfigure $("${REPO_ROOT}/scripts/internal/tf-backend.sh" "${ENVFILE}")
 tofu apply -var-file="${ENVFILE}" -auto-approve
 
 BASTION_IP=$(tofu output -raw bastion_ip)
@@ -94,7 +99,7 @@ echo "  ✅ Talos cluster bootstrapped"
 
 # Replicate the rebuilt cluster's (encrypted) state to its -backup store. Set
 # BACKUP_AWS_* to the recovering primary's creds to push it back there.
-"${SCRIPT_DIR}/backup-state.sh" "${TOFU_DIR}" || echo "  ⚠️  state replication skipped"
+"${REPO_ROOT}/scripts/ops/backup-state.sh" "${TOFU_DIR}" || echo "  ⚠️  state replication skipped"
 
 # ─── Phase 4: Verify & Instructions ──────────────────────────────────────────
 echo ""
