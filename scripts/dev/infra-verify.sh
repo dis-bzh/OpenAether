@@ -33,12 +33,18 @@ export TALOSCONFIG="${TALOSCONFIG:-$CLUSTER_DIR/talosconfig}"
 
 PASS=0
 FAIL=0
+UNKNOWN=0
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; PASS=$((PASS + 1)); }
 bad()  { printf '  \033[31m✗\033[0m %s\n' "$*"; FAIL=$((FAIL + 1)); }
 # Neither pass nor fail: a fact the operator must read. Used where the cluster is
 # legitimately below the release's target but the run is not wrong (a non-HA
 # topology, a dev replica sharing its endpoint).
 warn() { printf '  \033[33m~\033[0m %s\n' "$*"; }
+# "I could not perform this check" is NOT "this check failed", and reporting both
+# as `2 failed` tells an operator their cluster is broken when the truth is that
+# the verifier could not see it. Still fatal — a release is not certified on
+# questions nobody could ask — but counted and named apart.
+unk()  { printf '  \033[33m?\033[0m %s\n' "$*"; UNKNOWN=$((UNKNOWN + 1)); }
 info() { printf '\n▶ %s\n' "$*"; }
 
 K() { timeout 60 kubectl "$@"; }
@@ -93,7 +99,7 @@ if [ "$PROVIDER" != local ]; then
   want_cp="$(cd "$CLUSTER_DIR" && timeout 60 tofu output -json control_plane_private_ips 2>/dev/null | jq 'length' 2>/dev/null)"
   got_cp="$(K get nodes -l node-role.kubernetes.io/control-plane --no-headers 2>/dev/null | wc -l)"
   if ! [[ "${want_cp:-}" =~ ^[0-9]+$ ]] || [ "$want_cp" -eq 0 ]; then
-    bad "could not read control_plane_private_ips from the state — cannot check the topology"
+    unk "could not read control_plane_private_ips from the state — the topology is UNCHECKED"
   elif [ "$got_cp" -ne "$want_cp" ]; then
     bad "${got_cp} control-plane node(s) in the cluster, ${want_cp} in the state"
   elif [ "$want_cp" -lt 3 ]; then
@@ -144,7 +150,7 @@ if [ "$PROVIDER" != local ]; then
       *) bad "an application load balancer exists and is billed, pointing at Gateway NodePorts nothing serves" ;;
     esac
   else
-    bad "could not read app_lb_ip (is the backend initialised, are the S3 credentials exported?) — the absence of an app LB is UNVERIFIED"
+    unk "could not read app_lb_ip (is the backend initialised, are the S3 credentials exported?) — the absence of an app LB is UNCHECKED"
   fi
 fi
 
@@ -167,7 +173,7 @@ else
   PRIM_EP="$(tfv "$TFVARS" s3_primary_endpoint)"; REPL_EP="$(tfv "$TFVARS" s3_replica_endpoint)"
   BUCKET="$(oa_state_bucket "$(oa_project "$CN" "$(tfv "$TFVARS" bucket_suffix)")" "$PROVIDER" "$ENVN")-backup"
   if [ -z "$CN" ] || [ -z "$ENVN" ]; then
-    bad "could not read cluster_name/environment from ${TFVARS##*/} — cannot name the backup bucket"
+    unk "could not read cluster_name/environment from ${TFVARS##*/} — cannot name the backup bucket"
   # BACKUP credentials, not primary. The bucket being listed is the replica, and
   # in production the replica is on a different provider's account — so reading
   # it with the cluster provider's keys fails precisely when the release's
@@ -192,7 +198,7 @@ else
             timeout 90 aws s3api get-object --bucket "$BUCKET" --key "${CN}.tfstate" \
               --range bytes=0-4095 --endpoint-url "${REPL_EP:-$PRIM_EP}" /dev/stdout 2>/dev/null)"
     if [ -z "$HEAD" ]; then
-      bad "could not read the first bytes of ${CN}.tfstate — the encryption claim is UNVERIFIED"
+      unk "could not read the first bytes of ${CN}.tfstate — the encryption claim is UNCHECKED"
     elif grep -qE '"(terraform_version|resources)"' <<<"$HEAD"; then
       bad "the stored state is PLAINTEXT — anyone with read access to ${BUCKET} has the cluster"
     elif grep -q '"encrypted_data"' <<<"$HEAD"; then
@@ -218,6 +224,18 @@ else
 fi
 
 echo
-printf '%s passed, %s failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] && printf '✓ %s/%s: pure-infra cluster verified against the cluster, not the state\n' "$PROVIDER" "$ROLE"
-[ "$FAIL" -eq 0 ]
+printf '%s passed, %s failed, %s could not be checked\n' "$PASS" "$FAIL" "$UNKNOWN"
+if [ "$FAIL" -eq 0 ] && [ "$UNKNOWN" -eq 0 ]; then
+  printf '✓ %s/%s: pure-infra cluster verified against the cluster, not the state\n' "$PROVIDER" "$ROLE"
+  exit 0
+fi
+if [ "$FAIL" -gt 0 ]; then
+  printf '✗ %s/%s: %s assertion(s) FAILED — the cluster is not what this release promises.\n' "$PROVIDER" "$ROLE" "$FAIL" >&2
+else
+  # The distinction that matters at 2am: nothing is known to be wrong.
+  printf '✗ %s/%s: nothing failed, but %s check(s) could not be performed, so this run\n' "$PROVIDER" "$ROLE" "$UNKNOWN" >&2
+  printf '  proves less than it looks. Usually the S3 credentials: run it as\n' >&2
+  printf '    task verify PROVIDER=%s ROLE=%s\n' "$PROVIDER" "$ROLE" >&2
+  printf '  rather than calling this script directly — the Taskfile derives AWS_* per provider.\n' >&2
+fi
+exit 1
