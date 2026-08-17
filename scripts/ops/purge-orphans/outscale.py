@@ -29,10 +29,25 @@ def call(action, payload=None):
                  'Authorization': f"AWS4-HMAC-SHA256 Credential={AK}/{scope}, "
                                   "SignedHeaders=content-type;host;x-amz-date, "
                                   f"Signature={sig}"})
+    global UNREACHABLE
     try:
         return json.load(urllib.request.urlopen(req, timeout=60))
     except urllib.error.HTTPError as e:
+        # COUNT it and SAY it. This returned {'error': …} in silence, every
+        # listing then read as empty, and the script announced "the account is
+        # clean" with exit 0 — measured with every call forced to HTTP 403, it
+        # printed one line total. A refused question is not an empty answer, and
+        # it must be louder than a network error, not quieter.
+        UNREACHABLE += 1
+        print(f"  ⚠ unreachable: {action} (HTTP {e.code})")
         return {'error': e.read().decode()[:200]}
+    except Exception as e:                       # noqa: BLE001 — same reasoning
+        UNREACHABLE += 1
+        print(f"  ⚠ unreachable: {action} ({str(e)[:60]})")
+        return {}
+
+
+UNREACHABLE = 0
 
 
 # Counted so a clean account SAYS it is clean. This script is the last thing
@@ -76,6 +91,10 @@ for sn in call('ReadSubnets').get('Subnets', []):
     do('DeleteSubnet', {'SubnetId': sn['SubnetId']}, f"subnet {sn['SubnetId']}")
 for net in call('ReadNets').get('Nets', []):
     do('DeleteNet', {'NetId': net['NetId']}, f"net {net['NetId']} ({net.get('IpRange')})")
+if TOTAL == 0 and UNREACHABLE:
+    print(f"\n✗ {UNREACHABLE} call(s) refused — found nothing, but nothing was actually asked.")
+    print("  This is NOT an all-clear: check OUTSCALE_ACCESS_KEY_ID / _SECRET_KEY and re-run.")
+    sys.exit(2)
 if TOTAL == 0:
     print("Nothing to purge — the account is clean.")
 elif not APPLY:

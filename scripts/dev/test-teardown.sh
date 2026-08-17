@@ -165,6 +165,19 @@ refute_destroyed "the management destroy is NOT reached after a failed enumerati
 refute_out "no child cluster" "a failed query is not reported as 'no child cluster'"
 refute_out "fleet-down complete" "it does not report success"
 
+# …and the escape hatch that same refusal names. On an infrastructure-only
+# cluster the CAPI CRDs are legitimately absent, so the query above can NEVER
+# succeed and this is the branch every 1.0.0 teardown takes. It shipped in
+# 70aa053 with no assertion of its own — the guard was exercised against the
+# pathological case and not against the normal one, which is the sentence in
+# that commit's own message.
+plan "${CLUSTER_INFO_OK}get clusters.cluster.x-k8s.io -A\t1\terror: the server doesn't have a resource type \"clusters\"\n"
+run "$FLEET_DOWN" stubcloud --yes --force-no-edges
+expect_rc 0 "--force-no-edges proceeds when the CAPI CRDs are absent"
+expect_out "CAPI CRDs are absent" "it says why it is allowed to continue"
+expect_destroyed "the management destroy IS reached"
+expect_out "fleet-down complete" "it reports success"
+
 # The other side of the same coin: the query worked and there is genuinely
 # nothing. This must proceed, or the fail-safe above is just a script that
 # never works.

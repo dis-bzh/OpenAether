@@ -32,15 +32,26 @@ def call(url, method='GET', body=None):
     return json.loads(raw) if raw else {}
 
 
+# Counted, not just printed. An endpoint that REFUSED to answer is not an
+# endpoint that answered "nothing here" — but both used to leave `total` at 0,
+# and the script then said "the project is clean" and exited 0. Measured: with
+# every call forced to HTTP 403, this printed thirteen warnings and an all-clear.
+# This script is the last sentence between a failed teardown and a bill.
+UNREACHABLE = 0
+
+
 def listing(url, key):
+    global UNREACHABLE
     try:
         return call(url).get(key, [])
     except urllib.error.HTTPError as e:
         if e.code in (404, 501):                # service not offered in this zone
             return []
+        UNREACHABLE += 1
         print(f"  ⚠ unreachable: {url.split('?')[0]} (HTTP {e.code})")
         return []
     except Exception as e:
+        UNREACHABLE += 1
         print(f"  ⚠ unreachable: {url.split('?')[0]} ({str(e)[:60]})")
         return []
 
@@ -95,6 +106,10 @@ for pn in listing(f'{API}/vpc/v2/regions/{REGION}/private-networks?project_id={P
     act(f"private network {pn['name']}",
         lambda i=pn['id']: call(f'{API}/vpc/v2/regions/{REGION}/private-networks/{i}', 'DELETE'))
 
+if total == 0 and UNREACHABLE:
+    print(f"\n✗ {UNREACHABLE} endpoint(s) refused to answer — found nothing, but nothing was")
+    print("  actually asked. This is NOT an all-clear: check the credentials and re-run.")
+    sys.exit(2)
 if total == 0:
     print("Nothing to purge — the project is clean.")
 elif not APPLY:
