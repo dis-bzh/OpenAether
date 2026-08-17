@@ -14,8 +14,25 @@ that runs. This is the reasoning behind both.
 `rolling-replace.sh --upgrade` calls `talosctl upgrade`, which keeps the node's
 disk, identity and etcd membership, drains it, and refuses a control-plane
 upgrade that would cost etcd quorum. Replacing the VM throws all of that away and
-rebuilds it — which is what used not to work on OVH. Replacement remains correct
-for anything that is **not** a version change.
+rebuilds it. Replacement remains correct for anything that is **not** a version
+change.
+
+**This is upstream's position, not ours.** Talos documents the upgrade as an API
+call and states it refuses a control-plane upgrade that would lose etcd quorum
+(docs.siderolabs.com, v1.13, *lifecycle-management/upgrading-talos*). Omni —
+Sidero's own fleet product — upgrades in place and explicitly says not to delete
+machines out of band, nor to add control-plane nodes to resolve a quorum issue;
+Sidero has deprecated its own CAPI control-plane provider for Talos in its
+favour. etcd prescribes the opposite of "surge" for a control plane: remove the
+old member, then add the new one, because an unreachable new member already
+counts toward quorum (etcd.io, v3.6, *runtime-configuration*). Cluster API,
+which defaults to replacement, added a delete-first strategy with `MaxSurge: 0`
+precisely for resource-constrained clusters — which is what ours are during a
+roll.
+
+So: "add a node, then retire the old one" is a defensible *ordering* when you are
+already replacing a machine. It is not a reason to replace one instead of
+upgrading it.
 
 ## Check the pair before moving either
 
@@ -54,6 +71,33 @@ deliberately has none, because a retry turns the defect green.
   and the running version have disagreed, and that plan would take the cluster
   down.
 
+## OPEN: a node that comes back on the old version
+
+Observed on OVH, not on Scaleway: the installer logs the new version, `talosctl
+upgrade` exits 0, and later some nodes report the previous one. **Not diagnosed
+here yet** — treat every explanation below as a hypothesis with an experiment
+attached, and record the answer in `docs/backlog.md` when you have it.
+
+Upstream documents a deliberate mechanism that fits: the installer writes an
+`Upgrade` tag to the META partition, a controller drops it only once the node is
+`Running` **and** `Ready` — readiness includes the CNI — and otherwise the
+bootloader is reverted to the previous partition. `talos#9088` is closed as
+intended behaviour.
+
+Ask the node, in this order, before theorising:
+
+```
+talosctl -e <cp> -n <ip> logs machined | grep -i "reverting failed upgrade"
+talosctl -e <cp> -n <ip> get securitystate -o yaml     # bootedWithUKI?
+talosctl -e <cp> -n <ip> version --short               # what it actually runs
+```
+
+`BOOT_IMAGE=/A/vmlinuz` is legacy GRUB, and since Talos 1.10 GRUB is no longer
+used for new UEFI installs — so two providers can exercise different bootloader
+code from the same repository. A competing hypothesis, already recorded for
+OpenStack in `rolling-replace.sh`, is that the instance boots the image volume
+rather than the installed disk, so the reboot simply discards the upgrade.
+
 ## A stuck drain is one budget's fault, not the stack's
 
 A worker drains clean — measured 2026-08-13, exit 0, zero non-DaemonSet pods
@@ -61,9 +105,11 @@ left. It did not before, and the cause was singular: `istiod` ran one replica
 under a budget requiring one available, so it could never be evicted. It runs two
 now.
 
-The remaining zero-disruption budgets are correct and transient — CNPG guards
-each cluster's primary until a switchover, Longhorn blocks while volumes are
-attached, OpenBao wants 2 of 3 raft replicas. If a drain hangs, look for a
-single-replica workload under a `minAvailable: 1` before concluding the stack
-cannot be drained. That wrong conclusion was written into a release note and had
-to be corrected in public.
+**Applies from 1.1.0 onward, when applications are back.** A pure-infra cluster
+has no PodDisruptionBudget worth the name, and a drain that hangs on one is a
+different bug. The remaining zero-disruption budgets are correct and transient —
+CNPG guards each cluster's primary until a switchover, Longhorn blocks while
+volumes are attached, OpenBao wants 2 of 3 raft replicas. If a drain hangs, look
+for a single-replica workload under a `minAvailable: 1` before concluding the
+stack cannot be drained. That wrong conclusion was written into a release note
+and had to be corrected in public.

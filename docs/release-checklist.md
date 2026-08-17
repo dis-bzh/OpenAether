@@ -300,10 +300,11 @@ Only once everything above is green.
 - [ ] `docs/deployment-test-matrix.md` updated with what you actually ran —
       including the ones that failed
 - [ ] `docs/backlog.md` — drop what is now done, add what this shook out
-- [ ] **`OpenAether-apps` tagged `1.1.0` first**, then `OpenAether-infra`
-- [ ] a GitHub Release on each (there are none today, on any tag)
-- [ ] `git describe --tags` clean on both
-- [ ] the twelve `envs/*.tfvars.example` still pin `refs/tags/1.1.0`
+- [ ] a GitHub Release, with notes that name the open items
+- [ ] `git describe --tags` clean
+- [ ] the `envs/*.tfvars.example` carry `git_ref = "refs/heads/main"` — infra no
+      longer pins an `OpenAether-apps` tag, so there is no ordering constraint
+      between the two repositories and no matching-version rule to honour
 
 ## 10. Before communicating
 
