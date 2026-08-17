@@ -175,10 +175,31 @@ else
   elif AWS_ACCESS_KEY_ID="$("$ROOT/scripts/internal/resolve-s3-cred.sh" "$PROVIDER" ak backup)" \
        AWS_SECRET_ACCESS_KEY="$("$ROOT/scripts/internal/resolve-s3-cred.sh" "$PROVIDER" sk backup)" \
        timeout 90 aws s3 ls "s3://${BUCKET}/" --endpoint-url "${REPL_EP:-$PRIM_EP}" 2>/dev/null | grep -q 'tfstate'; then
-    # Says "exists", not "is encrypted": the test above is a filename match on a
-    # listing, and nothing here has ever opened the object. Claiming encryption
-    # from an `s3 ls` is the green line this file's own header warns about.
-    ok "a tfstate replica exists in ${BUCKET} (encryption NOT checked here)"
+    ok "a tfstate replica exists in ${BUCKET}"
+    # …and OPEN it. Listing a filename proved nothing about its contents, and
+    # "the state is encrypted" was declared in backend.tf, implemented, and never
+    # once verified against a stored object.
+    #
+    # The predicate has to distinguish two JSON documents, and a careless one gets
+    # this backwards: an ENCRYPTED state is an envelope that also carries `serial`
+    # and `lineage`, so matching on those calls ciphertext plaintext. What only a
+    # plaintext state has is `terraform_version` and `resources`; what only an
+    # encrypted one has is `encrypted_data`. Measured on a live Scaleway cluster
+    # 2026-08-17: the envelope's keys are encrypted_data, encryption_version,
+    # lineage, meta, serial — and 4 KB is far more than enough to see them.
+    HEAD="$(AWS_ACCESS_KEY_ID="$("$ROOT/scripts/internal/resolve-s3-cred.sh" "$PROVIDER" ak backup)" \
+            AWS_SECRET_ACCESS_KEY="$("$ROOT/scripts/internal/resolve-s3-cred.sh" "$PROVIDER" sk backup)" \
+            timeout 90 aws s3api get-object --bucket "$BUCKET" --key "${CN}.tfstate" \
+              --range bytes=0-4095 --endpoint-url "${REPL_EP:-$PRIM_EP}" /dev/stdout 2>/dev/null)"
+    if [ -z "$HEAD" ]; then
+      bad "could not read the first bytes of ${CN}.tfstate — the encryption claim is UNVERIFIED"
+    elif grep -qE '"(terraform_version|resources)"' <<<"$HEAD"; then
+      bad "the stored state is PLAINTEXT — anyone with read access to ${BUCKET} has the cluster"
+    elif grep -q '"encrypted_data"' <<<"$HEAD"; then
+      ok "the stored state is ciphertext (OpenTofu encrypted envelope)"
+    else
+      bad "the stored state is neither recognisably encrypted nor plaintext — refusing to guess"
+    fi
   else
     bad "no tfstate object found in ${BUCKET} — the backup claim is unproven"
   fi

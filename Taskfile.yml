@@ -476,6 +476,36 @@ tasks:
         else
           TB=false
         fi
+        # FAIL FAST when the tunnels are shut. On a bootstrapped cluster this plan
+        # reads data.talos_cluster_health, whose endpoints are localhost tunnels
+        # (cluster/main.tf) — so from a shell that did not open them it waits out
+        # health_check_timeout and dies on "cluster health check failed", naming
+        # neither the tunnels nor the cause.
+        #
+        # MEASURED on a live Scaleway cluster, 2026-08-17: 15m10s to reach that
+        # message. This is the command docs/first-cluster.md calls the idempotency
+        # assertion, so a reader in a fresh terminal pays a quarter of an hour for
+        # a diagnosis they then have to guess. One second is enough to know.
+        if [ "$TB" = true ]; then
+          BASE=$(( 50000 + ${TF_VAR_talos_tunnel_port_offset:-0} ))
+          # `nc`, not bash's /dev/tcp: Task runs commands through its own shell,
+          # which does not implement that bash extension — so the first version of
+          # this guard reported every port closed and refused a plan on a cluster
+          # whose six tunnels were up. A guard written for the pathological case
+          # firing on the normal one, for the third time in a day.
+          #
+          # Skipped when nc is absent (setup.sh installs it) rather than blocking:
+          # refusing to plan over a check we could not run is worse than the
+          # 15 minutes it saves.
+          if command -v nc >/dev/null 2>&1 && ! nc -z -w2 127.0.0.1 "$BASE" 2>/dev/null; then
+            echo "✗ the Talos tunnels are not open on 127.0.0.1:${BASE}, and this plan reads" >&2
+            echo "  the cluster health through them — it would wait 15 minutes and then fail" >&2
+            echo "  with a message about etcd. Open them first:" >&2
+            echo "    task tunnels PROVIDER={{.PROVIDER}} KEY=~/.ssh/yourkey" >&2
+            echo "  and close them with 'task close-tunnels' when you are done." >&2
+            exit 1
+          fi
+        fi
         # -detailed-exitcode: 0 = no changes, 2 = changes, 1 = error. Task fails on
         # any non-zero, which is what turns "the plan is empty" into an assertion.
         # OUT= saves the plan so it can be APPLIED, not merely read. Without it
@@ -487,6 +517,27 @@ tasks:
         # in-memory plan; this is for every case where nobody is watching.
         tofu plan {{if eq .STRICT "1"}}-detailed-exitcode{{end}} {{if .OUT}}-out="{{.OUT}}"{{end}} \
           -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=$TB
+
+  tunnels:
+    desc: >-
+      Open the per-node Talos API tunnels through the bastion (control planes on 50000+i, workers on
+      50100+i). Needed by `task plan` and by talosctl on a bootstrapped cluster. Usage:
+      task tunnels PROVIDER=scaleway [ROLE=management] [KEY=~/.ssh/yourkey] — then `task close-tunnels`.
+    dir: infrastructure/opentofu/cluster
+    vars:
+      ROLE: '{{.ROLE | default "management"}}'
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+      KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
+    env: *provider-env
+    cmds:
+      # The init is what makes this runnable from a cold shell. Called by hand,
+      # talos-tunnels.sh reads `tofu output -json` with no backend and no
+      # credentials, falls back to `{}` and reports "No bastion_ip in the state —
+      # deploy the infrastructure first" against a cluster that is running. That
+      # message sent a reader looking for a deployment bug for the length of the
+      # search. Verified 2026-08-17 on a live cluster.
+      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
+      - SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh open .
 
   apply-plan:
     desc: >-

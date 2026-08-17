@@ -90,6 +90,28 @@ can review and apply the same bytes. It still does not use them.
 `apply-plan`; one green run per provider. Rung: real cloud, and only once the
 lane has credentials at all.
 
+### MEASURED — `task plan` needed the tunnels, and took 15 minutes to say so
+
+No longer a hypothesis. On a live Scaleway cluster, 2026-08-17, tunnels closed:
+`task plan STRICT=1` ran for **15m10s** and died on
+
+    Error: cluster health check failed
+    waiting for etcd to be healthy: rpc error: code = Unavailable …
+      with module.talos.data.talos_cluster_health.this[0], modules/talos/main.tf:576
+
+which is `health_check_timeout`, and which names neither the tunnels nor the
+cause. This is the command docs/first-cluster.md calls the idempotency
+assertion, so a reader in a fresh terminal paid a quarter of an hour for a
+diagnosis they then had to guess.
+
+Fixed: a port probe before planning (4s instead of 15m), and `task tunnels`,
+which did not exist — running `talos-tunnels.sh` by hand has no backend and no
+credentials, falls back to `{}`, and reports "No bastion_ip in the state —
+deploy the infrastructure first" against a cluster that is running.
+
+Idempotency itself is PROVEN on Scaleway, warm and cold: "No changes. Your
+infrastructure matches the configuration.", exit 0.
+
 ### OPEN — the restore path is proven offline, never against S3
 
 `scripts/ops/restore-artifacts.sh` and `task restore-artifacts` are new on
