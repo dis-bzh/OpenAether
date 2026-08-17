@@ -79,7 +79,25 @@ if [[ "${1:-}" == "--destroy" ]]; then
   # (machine_secrets is prevent_destroy'd), and a stale state breaks the next
   # fresh apply (CA mismatch / skipped bootstrap). No backend, so this is safe.
   rm -f "${TOFU_DIR}/terraform.tfstate" "${TOFU_DIR}/terraform.tfstate.backup"
-  success "Local cluster destroyed"
+
+  # ASK DOCKER, do not assume. Everything above is best-effort by design —
+  # `tofu destroy` has its stderr discarded and its exit code ignored, each
+  # `docker rm` ends in `|| true`, and the state file is deleted rather than
+  # emptied, so "0 resources in the state" afterwards proves only that the file
+  # is gone. Until this check, `✓ Local cluster destroyed` printed whatever
+  # happened; a sweep that removed nothing looked exactly like a clean teardown.
+  left=""
+  for kind in "container:$(docker ps -aq --filter "name=${CLUSTER_NAME}-" 2>/dev/null | wc -l)" \
+    "volume:$(docker volume ls -q --filter "name=${CLUSTER_NAME}-" 2>/dev/null | wc -l)" \
+    "network:$(docker network ls -q --filter "name=${CLUSTER_NAME}-net" 2>/dev/null | wc -l)"; do
+    [ "${kind##*:}" -gt 0 ] && left="${left}${kind%%:*}=${kind##*:} "
+  done
+  if [ -n "$left" ]; then
+    echo "✗ still present after the teardown: ${left}— remove them by hand, or the next" >&2
+    echo "  deploy inherits half a cluster (a stale container answers, and the bootstrap skips)." >&2
+    exit 1
+  fi
+  success "Local cluster destroyed — docker reports no container, volume or network left"
   exit 0
 fi
 
