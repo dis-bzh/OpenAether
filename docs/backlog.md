@@ -12,144 +12,121 @@ explanation belongs in the commit that ruled it out.
 
 ## Where we stand
 
-2026-08-15: **the three clouds ran side by side for the first time** — one git
-worktree and one tunnel port block each. The Talos tunnels used a fixed block of
-local ports, so a three-provider validation had to be three sequential runs;
-`TALOS_TUNNEL_OFFSET` is what made a day of findings affordable, and it is
-proven by Scaleway on 50000+i, OVH on 50200+i and Outscale on 50400+i at the
-same moment.
+2026-08-17: **the release restarts as 0.5.0, infrastructure only.** Every 1.x tag
+and release was deleted on both repositories; 0.4.0 is the newest tag here, so
+0.5.0 continues an uninterrupted sequence rather than reusing a number that has
+already carried a published release. Scope, and nothing else: deploy, a healthy
+HA cluster (Talos + Cilium), idempotency, Kubernetes and Talos upgrades, and an
+encrypted tfstate replicated to a second store. Flux is disabled, not amputated
+(`deploy_flux`, default false) and returns as a user choice afterwards.
 
-Deploy → Day-1 seed → 35/35 Kustomizations → idempotency: green and unattended
-on Scaleway and OVH, ~25 minutes each. Kubernetes 1.36.2→1.36.3 and Talos
-1.13.7→1.13.8 applied in **one** apply on both, with no "inconsistent final
-plan" anywhere — upstream #352 does not reproduce since the
-`replace_triggered_by` workaround, which closes that entry.
+**What a pure-infra run actually did on 2026-08-16.** These results existed only
+in a working directory until today, which is why they are written here first —
+a result nobody records is a result you pay to reproduce.
 
-The Talos node roll is where the day went, and the fix shipped for it last
-session **never ran**: both of its readbacks used `kubectl get cluster`, which
-on a cluster carrying CAPI resolves to `clusters.cluster.x-k8s.io`, not CNPG. It
-compared an empty string, declared the primary moved a second after asking, and
-drained a node whose primary had not moved. Behind it, three more:
-`nodeMaintenanceWindow` keeps the `<cluster>-primary` budget at zero (measured —
-`spec.enablePDB: false` is what removes it); Flux owns those objects and put
-them back ten minutes into the roll, so the roll now suspends the owning
-Kustomization and `staging-verify.sh` fails if one is left suspended; and
-`kube-state-metrics` blocked every drain it met because `minAvailable: 1` on a
-one-replica Deployment forbids eviction for ever — it was meant to have two
-replicas and the values used the wrong key, which Helm ignored in silence.
+| | deploy | infra-verify | idempotency | k8s upgrade | Talos upgrade |
+|---|---|---|---|---|---|
+| Docker | ✅ | ✅ 6/6 | ✅ empty plan | — | — |
+| Scaleway | ✅ ~8 min | ✅ 7/8 | ✅ | ✅ | ✅ |
+| OVH | ✅ ~6 min | ✅ 7/8 | ✅ | ✅ | ⚠ one node, see below |
+| Outscale | ❌ LB timeout | — | — | — | — |
 
-Two environment truths came with them, and they are prerequisites rather than
-bugs: a rolling upgrade needs one node's worth of spare capacity (Scaleway at
-72/47/27% of CPU requests drained clean, OVH at 78/99/100% did not), and Outscale
-at 3 CP + 1 worker deploys but cannot host the platform at all.
+The single failure in both 7/8 runs was the same assertion — `s3_replica_endpoint
+equals s3_primary_endpoint` — which was fatal everywhere at the time and is now a
+warning outside `prod`. So `infra-verify.sh` HAS run against cloud clusters,
+contrary to what its own history suggests, and would score 8/8 today.
 
-**Where each provider actually got to.** The day ran twice: once with the fixes
-being written as the defects appeared, then a clean re-run on the corrected HEAD
-with `1.1.0-rc3` and no intervention at all. The second run is the one that
-counts, and neither provider finished it:
+**The claim to make about the upgrades is a number, not an adjective.** The probe
+samples `/readyz` once a second through the load-balanced endpoint, and the
+assertion is on the LONGEST CONSECUTIVE run of failures, not the total. "No
+service interruption" is not measurable; "no consecutive outage longer than 15s
+at 1 Hz" is, and that is what 0.5.0 asserts.
 
-| | deploy | seed | 35/35 | idempotent | upgrade | post-upgrade 35/35 |
-|---|---|---|---|---|---|---|
-| Scaleway | ✅ | ✅ | ✅ | ✅ | ✅ 6/6 nodes, plan empty | ❌ **34/35** |
-| OVH | ✅ | ✅ | ✅ | ✅ | ❌ stopped at worker-1 | — |
-| Outscale (first run) | ✅ | ✅ | 30–34/35 | ✅ | not attempted | — |
+**Not proven, and each is an entry below**: no lane has ever run unattended to
+completion; nothing has opened a stored object to confirm the state is
+ciphertext; there is no working restore path; and the documented user journey
+(`docs/first-cluster.md`, written 2026-08-17) was assembled by reading the code,
+not by walking it.
 
-Scaleway's upgrade itself was faultless — 3 probe FAILs in 26 samples for
-Kubernetes, 12 in 2000 for Talos, six nodes on v1.13.8/v1.36.3, `tofu plan`
-empty. It then failed its post-upgrade check on ONE Kustomization, and the
-reason is the entry below: the installer carried no system extensions, so the
-upgrade left every node without `iscsi-tools` and Longhorn's manager
-crash-looped. Green API, green plan, dead storage — the exact shape this
-repository keeps meeting.
+### OPEN — one OVH control plane boots the previous Talos version
 
-OVH stopped at worker-1: `enablePDB=false` was logged and the budgets were still
-there ten minutes later, so the drain retried evictions for its full 900s and the
-roll refused. Both gates saw it and only warned; both now fail instead, and the
-setting is confirmed rather than assumed.
+Measured 2026-08-16, and narrower than it first looked: **cp-0 only**. The
+installer wrote partition B and logged "installation of v1.13.8 complete" with
+exit 0; both kubectl and talosctl then reported v1.13.8; forty minutes later the
+node was back on v1.13.7 with `BOOT_IMAGE=/A/vmlinuz` on its kernel command line.
+It happened twice on that node. **cp-1 and cp-2 upgraded in the same run and
+stayed**, so it is neither the platform nor the installer image.
 
-All clusters torn down at the end of the session.
+One confounder, and it is large: cp-0 had been left CORDONED by an earlier run
+that died mid-roll, and it is the node every etcd health check is driven through.
+Two candidates, neither proven — Talos reverting a boot entry that never reached
+`Running && Ready` (documented upstream behaviour, `talos#9088`, closed as
+intended), or a GRUB entry the OVH firmware does not boot (`talos#13967`, open,
+names legacy boot; `/A/vmlinuz` is legacy GRUB, and since Talos 1.10 GRUB is not
+used for new UEFI installs).
 
-2026-08-14: **everything below was proven by a human running commands. Nothing
-re-proves it.** `.github/workflows/staging.yml` is the answer to that and it has
-never executed: it was merged 2026-08-13 with no `staging` environment and none
-of its 17 secrets set, so its first scheduled fire would have died on an empty
-blob — and a workflow that has never run looks exactly like one that passes.
-Fixed today, except the part only a human can do: the environment exists
-(deployment branch policy `main` only, no approval gate, so the weekly run is
-not blocked), the lane now covers all three providers on the cron instead of
-Scaleway alone, and it gained an idempotency stage and an upgrade stage that
-does not retry the known failing apply. `scripts/dev/check-staging-secrets.sh`
-names what is still missing; until someone runs those `gh secret set` commands,
-the unattended lane is code, not coverage.
+**Closes:** one clean OVH roll with no interrupted predecessor, plus, on any node
+that comes back on the old version, `talosctl logs machined | grep -i "reverting
+failed upgrade"` and `talosctl get securitystate -o yaml` (`bootedWithUKI`).
+Rung: real cloud. Until then the backstop holds — the roll re-upgrades any node
+not on the target and the end-of-run assertion fails if one is left behind — but
+a node that REVERTS after a confirmed upgrade should say so rather than be
+quietly upgraded again.
 
-Also today: the first-apply-after-a-version-bump failure is no longer a
-hypothesis. It is upstream #352 on `.machine_configuration_hash`, fixed in the
-0.12.0 pre-release line only — see the entry below. Feint moved to 0.7.3, which
-served both issues we filed (#74, #99); the emulated fixture tags six kinds now
-and `task feint-test` is green on both providers, both lanes.
+### OPEN — the restore path is proven offline, never against S3
 
-2026-08-13: **the three clouds each ran deploy → idempotency → Kubernetes upgrade
-→ Talos upgrade, and all three passed.** Scaleway 3+3, OVH 3+3, Outscale 3+1;
-every node upgraded in place with `rolling-replace --upgrade` rather than
-replaced, every node back under its own name, `tofu plan` clean afterwards on
-each. Torn down, no orphans anywhere. What that cost, in defects nobody could see
-from a green pipeline: a reboot renamed nodes on every provider (the images are
-`metal` builds, the names came from DHCP); a routine apply after an upgrade
-proposed replacing all three control planes at once; `task test` deleted the
-operator's kubeconfig; OVH was never idempotent; a worker could never be upgraded
-in place; a node could not be fully drained; and a tfvars backup was not
-gitignored.
-The upgrade path itself is the headline — 1.0.0 shipped it unverified.
+`scripts/ops/restore-artifacts.sh` and `task restore-artifacts` are new on
+2026-08-17: until then the repository could encrypt a kubeconfig and a
+talosconfig to two stores and had no way to read them back, and `task failover`
+— the nearest thing — stands up a NEW cluster rather than recovering access to
+the one you have. Its four script paths were also broken (it resolved
+`scripts/infrastructure/...`), so it died at its own guard for every provider.
 
-Since then, on the same day: a node CAN be fully drained. istiod ran a single
-replica under a budget requiring one, which is what pinned it; with two, a worker
-drained clean — exit 0, zero non-DaemonSet pods left, about a minute while
-OpenBao's raft quorum settled. The six other zero-disruption budgets are correct
-and transient.
+What is proven: the round trip, offline, real `enc()` against real `dec()`, byte
+for byte, wrong passphrase refused (`scripts/dev/test-restore.sh`, 7 assertions).
+What is not: the transport. Nobody has fetched one of these objects from a real
+bucket, and nobody has opened a stored tfstate to confirm it is ciphertext.
 
-Still open: the two applies a version bump needs, and the Outscale image lane,
-which cannot replace an image for a reason now measured rather than guessed —
-`create_before_destroy` was tried and reverted. Both below.
+**Closes:** on the first paid run, `task restore-artifacts PROVIDER=<p>` returns
+both artifacts and they match the live files, plus
+`aws s3 cp s3://<state-bucket>/<cluster>.tfstate - | head -c 200` is not JSON.
+Rung: real cloud, and free once the cluster exists.
 
-Alerting exists and is proven end to end: 19 rules, a real alert delivered to
-Slack from a Scaleway cluster, and a `Watchdog` whose silence is the signal.
-etcd, Cilium, Flux and cert-manager are scraped.
+### OPEN — nobody has deployed under a bucket_suffix
 
-2026-07-30: the full 1.0.0 phased rollout ran end to end — a real 3-provider
-fleet (management/Scaleway + edge-2/OVH + edge-3/Outscale, both edges
-gitception-injected, `workload` profile autonomous), a real Talos/K8s rolling
-upgrade proven zero-downtime on edge-2 (after fixing a real surge-FIP gap),
-and a full `task fleet-down` teardown. CI hardened (SHA-pinned actions/hooks,
-branch rulesets, object-collision gate) on both repos. Fleet is torn down;
-the `1.0.0` tag was cut on 2026-07-31 (`2a4c7df`); 1.0.1 follows on 2026-08-11.
+S3 bucket names are unique across a whole provider, not per account (Scaleway
+"in our whole platform", OVH "within OVHcloud", Outscale per region), so the
+hardcoded names made `task up`'s first billable step unrepeatable by any second
+account. `bucket_suffix` (2026-08-17) is the discriminator; it is empty by
+default, which keeps the existing names, and `task bucket-suffix` prints one.
 
-2026-07-31: the two gaps the 2026-07-30 teardown had exposed are fixed and
-validated live, not just reasoned about — `task infra` no longer forces
-`talos_bootstrap=false` on an already-bootstrapped cluster (re-ran `task up`
-twice on a fresh Scaleway management: 0 changes on the second pass, node ages
-unchanged, kubeconfig intact), and `edge-down.sh` now re-checks the provider
-directly after the Kubernetes-level cascade instead of trusting it (new
-`scripts/ops/verify-provider-clean.py`). Proving that second fix live
-surfaced a THIRD real bug on the first try: an Octavia load balancer orphaned
-by the 2026-07-30 OVH teardown was silently reused by CAPO on the next
-`edge-2` deploy and broke it (stale VIP port, 404). Fixed live (scoped delete,
-`scripts/ops/delete-openstack-resource.py`) and now a permanent check in
-`verify-provider-clean.py`. Both fixes then proved on a full real cycle: fresh
-management → real OVH edge-2 deploy → `edge-down.sh` teardown (provider
-verified clean on the first pass) → full `fleet-down` (edge-3, never
-provisioned — blocked cleanly on missing Outscale credentials, no spend) →
-all 3 providers independently re-verified clean. Fleet is torn down again;
-`1.0.0` was tagged the same day.
+Six places build a bucket name in two languages that cannot import each other;
+`scripts/dev/test-bucket-names.sh` compares the derivations (18 assertions). But
+every one of them is arithmetic on strings — **no deployment has ever run with a
+non-empty suffix**, so the day someone sets one is the day the backend, the
+image build and the verifier are first asked to agree on it for real.
 
-**Idempotency bilan (Phase 4, 2026-07-30):** CAPI provisioning, gitception
-injection and each child's own Flux reconciliation are genuinely automatic —
-no operator step once credentials exist. What is NOT: per-provider CAPI
-credentials/keypairs (`kubectl create secret`, by hand, no `task` target);
-OVH's floating IP (scripted allocation, but the address is hand-copied into
-git); and OpenBao seeding (`bao kv put`, entirely manual per cluster, by
-design — secrets don't belong in git — but with real room for the ordering
-bug below). `task up`/`bootstrap-phase2` re-run safety against an
-already-bootstrapped cluster is fixed as of 2026-07-31, see above.
+**Closes:** one deploy with `bucket_suffix` set, reaching `task verify` green.
+Rung: real cloud. Cheap to fold into a run that is happening anyway.
+
+### OPEN — the Outscale apiserver load balancer never finishes provisioning
+
+Pure-infra deploy, 2026-08-16: `outscale_load_balancer.k8s` (`modules/providers/
+outscale/lb.tf:11`) — "timeout while waiting for state to become active (last
+state: provisioning, timeout: 10m0s)". The provider default is 10 minutes and the
+resource declares no `timeouts` block. This is also what wedged the Net for the
+teardown afterwards.
+
+**Closes:** `timeouts { create = "20m" }` on that resource, then one deploy that
+reaches a Ready cluster. Rung: real cloud. Until then Outscale is out of the
+0.5.0 definition of done.
+
+### OPEN — `scripts/setup.sh` gave a toolchain that could not run the local rung
+
+Fixed 2026-08-17 (helm pinned to 4.2.3, matching CI and the renderer), and kept
+here as the shape to watch: three files pin the same tool and only one of them is
+enforced. Invisible to anyone who already had helm 4 — which is everyone who has
+worked on this repository.
 
 ## Open — work we can do
 
