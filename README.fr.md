@@ -2,21 +2,28 @@
 
 > **Store Anywhere, Run Anywhere.**
 > Un cluster Talos idempotent sur n'importe quel environnement — local (Docker),
-> on-prem (Proxmox) ou cloud (Scaleway/OVH/Outscale) — avec pour seul socle figé
-> **CNI (Cilium) + Flux**. Tout le reste se pioche dans `OpenAether-apps`.
+> on-prem (Proxmox) ou cloud (Scaleway/OVH/Outscale) — avec un seul socle figé :
+> **Cilium**. Les applications sont un choix distinct, dans `OpenAether-apps`.
 
 🇬🇧 [English version](README.md)
 
 ## Version
 
-**1.1.0** — socle Talos modulaire multi-provider (cf. `CHANGELOG.md`). Déploie
-le tag `OpenAether-apps` correspondant : une version identifie un système.
+**0.5.0, en cours** — infrastructure seule. Cinq choses et rien d'autre :
+déployer, un cluster HA sain (Talos + Cilium), l'idempotence, les upgrades
+Kubernetes et Talos, et un état OpenTofu chiffré côté client dans S3 avec un
+réplica optionnel chez un second provider. kubeconfig et talosconfig sont
+traités pareil.
 
-Management validé de bout en bout sur **Scaleway, OVH et Outscale** ; local
-Docker validé (3 CP + 3 workers) ; Proxmox code-complet mais **jamais appliqué
-sur matériel réel**. Backups tfstate/artefacts chiffrés côté client, double
-store. Le multi-cloud actif-actif est abandonné ; le hub/spoke CAPI est une
-**surcouche optionnelle**.
+Flux est présent dans le code et **désactivé** (`deploy_flux = false`) ; il
+redevient un choix utilisateur après la 0.5.0. Tous les tags 1.x ont été
+retirés — voir `CHANGELOG.md`.
+
+**Statut honnête** : Docker, Scaleway et OVH déployés, vérifiés et mis à jour
+une fois, à la main, le 2026-08-16 ; Outscale échoue sur un timeout de load
+balancer ; Proxmox est code-complet et **jamais appliqué sur matériel réel** ;
+aucune lane n'a encore tourné sans intervention jusqu'au bout. Le détail, avec
+les points ouverts : [`docs/backlog.md`](docs/backlog.md).
 
 ## Architecture
 
@@ -53,17 +60,14 @@ ressources dont 3 seulement sont des instances. Procédure complète et pièges 
 |--------|-------------|--------|
 | **IaC** | OpenTofu 1.12.x | ✅ |
 | **OS** | Talos Linux v1.13.x (immuable) | ✅ |
-| **CNI** | Cilium 1.19.2 (WireGuard) | ✅ |
-| **GitOps** | Flux v2.4.0 (hub/spoke) | ✅ |
-| **Secrets** | OpenBao 2.5.4 (fork Vault) | ✅ validé en cloud réel |
-| **PKI** | cert-manager v1.15.3 | ✅ |
-| **Gateway / Mesh** | Istio 1.24.2 (ambient + Gateway API) | ✅ |
-| **Base de données** | CloudNativePG 1.23.1 | ✅ |
-| **Stockage** | Longhorn 1.9.2 | ✅ |
-| **Identité** | Zitadel 10.0.2 | ✅ déployé — SSO Grafana à confirmer au navigateur |
-| **Observabilité** | VictoriaMetrics operator 0.65.1, Loki 6.25.0, Grafana 8.6.4, Alloy 0.11.0 | ✅ |
-| **Policy** | Kyverno v1.12.1 | ✅ |
-| **Cluster API** | CAPI v1.13.2, CABPT v0.6.12, CACPPT v0.5.13, CAPS v0.2.1, CAPO v0.14.4, CAPOSC v1.5.0 | ✅ surcouche optionnelle |
+| **CNI** | Cilium 1.20.0 (WireGuard) | ✅ livré, manifeste inline — toute la plateforme de la 0.5.0 |
+| **GitOps** | Flux v2.9.3 | ⬜ code présent, `deploy_flux = false` — redeviendra un choix après la 0.5.0 |
+
+Tout le reste — secrets, PKI, mesh, base de données, stockage, identité,
+observabilité, policy, Cluster API — vit dans
+[`OpenAether-apps`](https://github.com/dis-bzh/OpenAether-apps) et n'est **pas
+déployé par cette version**. Les versions que ce tableau listait étaient celles
+de cet autre dépôt, et aucune chaîne de caractères ici ne pouvait les confirmer.
 
 ## Providers
 
@@ -98,6 +102,11 @@ Les manifests Kubernetes vivent dans
 [dis-bzh/OpenAether-apps](https://github.com/dis-bzh/OpenAether-apps).
 
 ## Démarrage rapide
+
+> **Première fois ?** Lis plutôt **[docs/first-cluster.fr.md](docs/first-cluster.fr.md)** :
+> le même chemin, pas à pas, avec chaque valeur à fournir, ce que crée chaque
+> commande, ce qui te dit qu'elle a marché, et la liste honnête de ce qui n'est
+> pas encore prouvé. Ce qui suit est la forme courte, pour qui l'a déjà fait.
 
 ### Prérequis
 
@@ -143,7 +152,7 @@ eux. Tout le reste de l'exemple a déjà une valeur qui fonctionne.
 
 | champ | quoi mettre dedans |
 |---|---|
-| `environment` | `dev`, `staging`, `prod` — il nomme les buckets et les ressources |
+| `environment` | `dev` ou `prod` — rien d'autre n'est accepté. Il nomme les buckets et les ressources, et `prod` exige en plus que `s3_replica_endpoint` soit sur un **autre** provider |
 | `admin_ip` | ton IP publique en CIDR. C'est la liste d'autorisation SSH **et** l'ACL du LB apiserver |
 | `s3_primary_endpoint` / `s3_primary_region` | le S3 du tfstate chiffré, chez le **même** provider que le cluster (ex. `https://s3.fr-par.scw.cloud` / `fr-par`) |
 | `s3_replica_endpoint` / `s3_replica_region` | le S3 de la **copie de sauvegarde**. En production, chez un **autre provider** — un état qu'on ne peut lire que depuis le cloud qui vient de tomber n'est pas une sauvegarde |
@@ -155,8 +164,13 @@ tu utilises ton propre fork d'OpenAether-apps ; les défauts pointent sur le
 nôtre, et son `apps/clusters` n'est pas le tien.
 
 ```bash
-task preflight-quotas PROVIDER=scaleway     # vérifier les quotas d'abord
+# Quotas : OVH et Outscale uniquement — le script ne couvre pas Scaleway.
+# Sur Scaleway, vérifie la console : 3 control planes + 2 workers demandent
+# 5 instances du type de ton tfvars, et un compte neuf peut être plafonné à 1.
+task preflight-quotas PROVIDER=ovh
+
 task up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
+task verify PROVIDER=scaleway               # demander au cluster, pas à l'outil
 ```
 
 `task up` est la commande unique, et elle est idempotente : elle construit
@@ -217,7 +231,8 @@ task security            # contrôles de durcissement
 
 | Fichier | Contenu |
 |---|---|
-| [docs/admin-access.fr.md](docs/admin-access.fr.md) | Parcours jour-1 : escrow, PKI offline, accès UIs, tests navigateur |
+| [docs/first-cluster.fr.md](docs/first-cluster.fr.md) | **Commence ici.** De la machine nue à un cluster joignable, upgradable et destructible — et ce qui n'est pas prouvé |
+| [docs/admin-access.fr.md](docs/admin-access.fr.md) | Parcours jour-1 de la plateforme applicative : escrow, PKI offline, accès UIs, tests navigateur. **Inutile pour un cluster d'infrastructure seule** |
 | [docs/capi-bootstrap.fr.md](docs/capi-bootstrap.fr.md) | Amorcer un management par CAPI et le rendre autogéré |
 | [docs/deployment-test-matrix.fr.md](docs/deployment-test-matrix.fr.md) | Ce qui est validé, où, et comment |
 | [docs/emulated-cloud.fr.md](docs/emulated-cloud.fr.md) | Tester Scaleway/Outscale contre un émulateur local — et les limites de l'exercice |
