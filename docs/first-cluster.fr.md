@@ -103,9 +103,13 @@ cd ../../../..
 task up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
 ```
 
-Demande un terminal : l'apply sollicite une approbation deux fois. Dans l'ordre,
-il construit l'image Talos et la téléverse (deux buckets, un snapshot et une
-image par zone), crée quatre buckets de plus, applique l'infrastructure, ouvre un
+Demande un terminal : l'apply sollicite une approbation deux fois, et il applique
+le plan qu'il vient de montrer — n'utilise pas `-auto-approve`, qui en applique
+un *autre*, recalculé à cet instant. (Pour un run non supervisé, enregistre-le
+d'abord : `task plan … OUT=tfplan`, relis-le, puis `task apply-plan PLAN=tfplan`.)
+
+Dans l'ordre, il construit l'image Talos et la téléverse — **mesuré à 52 s sur
+Scaleway le 2026-08-17**, pour deux buckets, un snapshot et une image par zone — crée quatre buckets de plus, applique l'infrastructure, ouvre un
 tunnel SSH par nœud, puis applique les configurations machine et amorce Talos.
 
 Six buckets existent ensuite : l'état et les artefacts, chacun avec son jumeau

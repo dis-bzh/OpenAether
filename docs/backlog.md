@@ -73,6 +73,23 @@ not on the target and the end-of-run assertion fails if one is left behind — b
 a node that REVERTS after a confirmed upgrade should say so rather than be
 quietly upgraded again.
 
+### OPEN — the unattended lane applies a plan nobody read
+
+`.github/workflows/staging.yml:109` sets `TF_CLI_ARGS_apply: -auto-approve`. That
+is not the same weakness as approving interactively: `tofu apply` with no plan
+file computes a plan, shows it and applies THAT one, in the same run. With
+`-auto-approve` after a separate `task plan`, the plan that was reviewed and the
+plan that runs are two different computations — OpenTofu says so itself, "you
+didn't use the -out option, so OpenTofu can't guarantee to take exactly these
+actions".
+
+`task plan OUT=…` and `task apply-plan PLAN=…` now exist (2026-08-17) so the lane
+can review and apply the same bytes. It still does not use them.
+
+**Closes:** staging.yml plans with `OUT=`, prints the plan, and applies it with
+`apply-plan`; one green run per provider. Rung: real cloud, and only once the
+lane has credentials at all.
+
 ### OPEN — the restore path is proven offline, never against S3
 
 `scripts/ops/restore-artifacts.sh` and `task restore-artifacts` are new on

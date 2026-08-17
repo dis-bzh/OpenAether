@@ -101,8 +101,13 @@ cd ../../../..
 task up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
 ```
 
-Needs a terminal: the apply asks for approval twice. In order it builds the
-Talos image and uploads it (two buckets, one snapshot and one image per zone),
+Needs a terminal: the apply asks for approval twice, and it applies the plan it
+just showed you — do not reach for `-auto-approve`, which applies a *different*
+plan computed at that moment. (For an unattended run, save one first:
+`task plan … OUT=tfplan`, read it, then `task apply-plan PLAN=tfplan`.)
+
+In order it builds the Talos image and uploads it — **measured at 52 s on
+Scaleway, 2026-08-17**, for two buckets, one snapshot and one image per zone —
 creates four more buckets, applies the infrastructure, opens one SSH tunnel per
 node, then applies the machine configs and bootstraps Talos.
 

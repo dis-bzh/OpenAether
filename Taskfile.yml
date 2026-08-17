@@ -353,6 +353,29 @@ tasks:
           echo "  to bastion_ssh_keys in $TFVARS, or pass the matching KEY=." >&2
           exit 1
         fi
+        # The S3 credentials, HERE, not twenty lines into talos-image. Demonstrated
+        # twice in three minutes on 2026-08-17: a shell that had not sourced .env.sh
+        # passed both guards above and died in the image build. Nothing was created
+        # either time, so this costs nothing but the round trip — and the round trip
+        # is what a first-time reader pays, twice, before finding the sentence in
+        # the README that explains it.
+        for kind in primary backup; do
+          if [ -z "$(./scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak "$kind" 2>/dev/null)" ]; then
+            echo "✗ no ${kind} S3 credentials for '{{.PROVIDER}}'." >&2
+            echo "  Did you 'source .env.sh'? Every cloud task needs it, and nothing" >&2
+            echo "  else in this shell will tell you it is missing until it costs time." >&2
+            exit 1
+          fi
+        done
+        # The passphrase encrypts the state and both access artifacts, and NOTHING
+        # else checks it: without it `tofu` stops to prompt, and with the shipped
+        # placeholder — long enough to pass the only validation there is — it
+        # deploys happily under a secret published in this repository.
+        case "${TF_VAR_encryption_passphrase:-}" in
+          "") echo "✗ TF_VAR_encryption_passphrase is not set — tofu would stop and prompt for it." >&2; exit 1 ;;
+          *change-me*) echo "✗ TF_VAR_encryption_passphrase is still the example from .env.example." >&2
+                       echo "  It is public. Replace it: openssl rand -base64 48" >&2; exit 1 ;;
+        esac
       - task: talos-image
         vars:
           PROVIDER: "{{.PROVIDER}}"
@@ -455,8 +478,39 @@ tasks:
         fi
         # -detailed-exitcode: 0 = no changes, 2 = changes, 1 = error. Task fails on
         # any non-zero, which is what turns "the plan is empty" into an assertion.
-        tofu plan {{if eq .STRICT "1"}}-detailed-exitcode{{end}} \
+        # OUT= saves the plan so it can be APPLIED, not merely read. Without it
+        # "review the plan, then apply" is two different plans: OpenTofu says so
+        # itself — "you didn't use the -out option, so OpenTofu can't guarantee to
+        # take exactly these actions". Reviewing one and applying another is not a
+        # review, and `-auto-approve` after a separate plan is exactly that.
+        # Interactive `tofu apply` is sound because it shows and applies the SAME
+        # in-memory plan; this is for every case where nobody is watching.
+        tofu plan {{if eq .STRICT "1"}}-detailed-exitcode{{end}} {{if .OUT}}-out="{{.OUT}}"{{end}} \
           -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=$TB
+
+  apply-plan:
+    desc: >-
+      Apply a plan file saved by `task plan OUT=…` — exactly those actions, nothing recomputed.
+      Usage: task plan ROLE=management PROVIDER=scaleway OUT=tfplan, review it, then
+      task apply-plan PROVIDER=scaleway PLAN=tfplan
+    dir: infrastructure/opentofu/cluster
+    vars:
+      ROLE: '{{.ROLE | default "management"}}'
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+      PLAN: '{{.PLAN | default "tfplan"}}'
+    env: *provider-env
+    cmds:
+      - |
+        [ -f "{{.PLAN}}" ] || {
+          echo "✗ no plan file {{.PLAN}} — create one with:" >&2
+          echo "    task plan ROLE={{.ROLE}} PROVIDER={{.PROVIDER}} OUT={{.PLAN}}" >&2
+          exit 1
+        }
+        # A saved plan carries its own variables; passing -var-file here is an
+        # error, and the backend must be the one it was made against.
+        tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
+        tofu apply "{{.PLAN}}"
+        rm -f "{{.PLAN}}"
 
   bootstrap-phase2:
     desc: >-
