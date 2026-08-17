@@ -35,7 +35,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # first set, and sixteen `# Groupe NN` headers survived the second. Widen it
 # again when you meet French this misses — and check the new words against BOTH
 # repositories before committing, which is what caught `distinct`.
-WORDS='le|la|les|des|une|dans|pour|avec|cette|être|est|sont|était|sera|qui|que|quand|ainsi|alors|aussi|avant|après|chaque|comme|depuis|donc|déjà|encore|entre|jamais|leur|mais|même|moins|notre|parce|peut|plutôt|puis|sans|sous|toujours|tout|toute|toutes|tous|très|vers|voici|voilà|faut|doit|doivent|ici|cela|ceci|celui|celle|nous|vous|elles|ils|du|au|aux|ni|elle|leurs|afin|lorsque|selon|plusieurs|ceux|celles|ensuite|enfin|pourrait|pourraient|publique|publiques|groupe|groupes|nom|noms|certificat|certificats|interne|internes|externe|externes|fichier|fichiers|exemple|exemples|attendu|attendue|ordinaire|ordinaires|racine|seule|seul|court|courte|observee|observée'
+WORDS='le|la|les|des|une|dans|pour|avec|cette|être|est|sont|était|sera|qui|que|quand|ainsi|alors|aussi|avant|après|chaque|comme|depuis|donc|déjà|encore|entre|jamais|leur|mais|même|moins|notre|parce|peut|plutôt|puis|sans|sous|toujours|tout|toute|toutes|tous|très|vers|voici|voilà|faut|doit|doivent|ici|cela|ceci|celui|celle|nous|vous|elles|ils|du|au|aux|ni|elle|leurs|afin|lorsque|selon|plusieurs|ceux|celles|ensuite|enfin|pourrait|pourraient|publique|publiques|groupe|groupes|nom|noms|certificat|certificats|interne|internes|externe|externes|fichier|fichiers|exemple|exemples|attendu|attendue|ordinaire|ordinaires|racine|seule|seul|court|courte|observee|observée|valide|valider|ajoute|ajouter|affiche|utilise|supprime|renvoie|permet'
 
 usage() { sed -n '2,20p' "$0" | sed 's/^# \?//'; }
 case "${1:-}" in
@@ -108,10 +108,16 @@ scan_code() {
     ignored "$repo" "$f" && continue
     awk -v words="$WORDS" -v file="$f" '
       # Two kinds of prose: comment lines (# for yaml/sh/py/tf, // and * for the
-      # hcl/go style) and the text a script prints.
+      # hcl/go style) and the text a script shows its user.
+      #
+      # `help=` and `description=` are shown, even though nothing prints them in
+      # the source: argparse does, on every --help. Without them this reported
+      # the repository clean while `preflight-quotas.py --help` answered "VMs que
+      # la topologie ajoutera" between two English options — a half-translated
+      # block, which is the 2026-07-29 regression CLAUDE.md names by hand.
       {
         comment = ($0 ~ /^[[:space:]]*(#|\/\/|\*)/)
-        printed = (!comment && $0 ~ /(echo|print|printf|puts)[[:space:](]/)
+        printed = (!comment && $0 ~ /((echo|print|printf|puts)[[:space:](]|(help|description)=)/)
         if (!comment && !printed) next
         text = $0
         # In a printed line, a substitution is code, not prose: `du -h "$SNAP"`
@@ -121,7 +127,13 @@ scan_code() {
         n = split(words, w, "|")
         for (i = 1; i <= n; i++) {
           cap = toupper(substr(w[i], 1, 1)) substr(w[i], 2)
-          if (text ~ ("(^|[^[:alnum:]_])(" w[i] "|" cap ")([^[:alnum:]_]|$)")) {
+          # A leading hyphen means a flag, not a word: `-le 15`, `-la`, `-du` are
+          # shell test operators and CLI switches, and reading them as French is
+          # how a checker earns its place on the ignore list. No French word in
+          # this repository follows a hyphen directly.
+          # (No apostrophes in this comment: the awk program is single-quoted,
+          #  and one here silently ends it and hands the rest to bash.)
+          if (text ~ ("(^|[^[:alnum:]_-])(" w[i] "|" cap ")([^[:alnum:]_]|$)")) {
             printf "%s:%d: %s\n", file, NR, $0
             next
           }

@@ -92,6 +92,19 @@ install_kubectl() {
     fi
 }
 
+install_shellcheck() {
+    # `task lint` gates on it, so a contributor who ran this script and cannot
+    # run `task lint` is the defect this repository has already met twice — with
+    # checkov, which lived only in CI, and with helm, pinned here one major below
+    # what the renderer accepts.
+    echo "Installing shellcheck..."
+    if command -v apt-get &> /dev/null; then
+        $SUDO apt-get update && $SUDO apt-get install -y shellcheck
+    else
+        echo "⚠️  Could not install shellcheck automatically — 'task lint' will fail until you do."
+    fi
+}
+
 install_yamllint() {
     echo "Installing yamllint..."
     if command -v pip3 &> /dev/null; then
@@ -203,8 +216,14 @@ install_flux() {
 }
 
 install_helm() {
+    # MUST stay on the same MAJOR as .github/workflows/ci.yml and as
+    # HELM_MAJOR_EXPECTED in scripts/bootstrap/render-bootstrap-manifests.sh, which
+    # refuses to render on any other and exits 1. This pinned 3.x while both of
+    # those required 4, so a fresh clone got a toolchain that could not run
+    # `task local-up` — the credential-free rung the README calls the best first
+    # step. The mismatch was invisible to anyone who already had helm 4.
     # renovate: datasource=github-releases depName=helm/helm extractVersion=^v(?<version>.*)$
-    local HELM_VERSION="3.21.3"
+    local HELM_VERSION="4.2.3"
     local ARCH="linux-amd64"
     echo "Installing Helm v${HELM_VERSION}..."
     local tmp
@@ -256,6 +275,11 @@ fi
 # 4. Check yamllint
 if ! check_cmd yamllint; then
     install_yamllint
+fi
+
+# 4b. Check shellcheck — `task lint` gates on it
+if ! check_cmd shellcheck; then
+    install_shellcheck
 fi
 
 # 5. Check Task

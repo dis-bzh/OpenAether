@@ -118,6 +118,14 @@ jobs:
       - name: Install yamllint
         run: pip install yamllint
 
+      # `task lint` gates on shellcheck. The GitHub runner image is DOCUMENTED to
+      # carry it, but "the image happens to ship it" is not a dependency — the
+      # day it stops, a lint step disappears silently instead of failing. Same
+      # reasoning as pinning Task above: a runner and a workstation must not
+      # disagree about what is installed.
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
       - name: Validate Renovate config
         run: npx --yes -p renovate -- renovate-config-validator renovate.json5
 
