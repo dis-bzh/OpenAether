@@ -162,6 +162,11 @@ time, in place. Start the probe before you begin: the claim this project makes
 is not "no interruption", it is **the longest run of consecutive failed
 `/readyz` samples, one second apart, stays under 15 seconds**. Measure it.
 
+Measured on Scaleway, 2026-08-17, 3 control planes: **7 failed samples out of
+1817, longest outage 3 s**, across both upgrades. The two numbers are different
+claims — scattered blips over a control-plane roll are an HA cluster working;
+consecutive ones are the API being down.
+
 ## 8. Tear it down
 
 ```bash

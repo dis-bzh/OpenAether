@@ -164,6 +164,12 @@ n'est pas « sans interruption », c'est **la plus longue série d'échecs
 consécutifs de `/readyz`, à une seconde d'intervalle, reste sous 15 secondes**.
 Mesure-la.
 
+Mesuré sur Scaleway le 2026-08-17, 3 control planes : **7 échantillons en échec
+sur 1817, plus longue coupure 3 s**, sur les deux upgrades. Les deux nombres sont
+des affirmations différentes — des ratés dispersés pendant un roulement de
+control planes, c'est un cluster HA qui fonctionne ; consécutifs, c'est l'API à
+terre.
+
 ## 8. Détruire
 
 ```bash

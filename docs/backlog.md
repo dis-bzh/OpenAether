@@ -109,9 +109,22 @@ The OVH revert therefore does not reproduce on Scaleway, on a cluster with no
 interrupted predecessor — which is consistent with the cordoned-node confounder
 recorded for it, and leaves that entry open on OVH alone.
 
-Still missing from this run: the probe figure. `report_probe` prints the longest
-consecutive outage and it was not captured, so the claim "no consecutive window
-longer than 15 s" remains DOCUMENTED, not measured, on this cluster.
+**The interruption, measured** — the claim this release makes, as a number:
+
+    probe: 7 FAIL in 1817 samples (~1s apart), longest outage 3s
+
+Thirty minutes of upgrade, one second apart, against the load-balanced endpoint.
+Three seconds of consecutive unavailability against the 15 s ceiling. Note the
+two figures are different claims: seven scattered blips over a control-plane roll
+is an HA cluster working; three in a row is the API being down, and three is what
+the assertion is about.
+
+**And the apps machinery is inert, verified rather than asserted.** The roll
+reported "no CNPG CRD — no database to gate on" and "Longhorn not present —
+skipping volume gate" on every one of the six nodes. The decision to leave those
+~400 lines in rolling-replace.sh until after the tag rested on reading the
+runtime probes; it now rests on watching them.
+
 
 ### MEASURED — `task plan` needed the tunnels, and took 15 minutes to say so
 
