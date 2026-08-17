@@ -15,9 +15,10 @@
 # 0.7.3 — history, not drift. Failing those would make this noise, and a checker
 # that cries wolf gets muted, which is the defect it exists to prevent. Only
 # lines that DECLARE the current pin are compared, and the marker is the phrase
-# "Pinned to" (EN) / "Épinglé à|sur|au" (FR). The French variants are not optional:
-# the twin of the very line that motivated this file says "Épinglé SUR", and a marker
-# matching only "à" checked the English half and silently skipped the French one.
+# "Pinned to" and its three French forms (see the git grep below). All three are
+# needed: the French twin of the very line that motivated this file uses the one
+# a narrower marker missed, so the check verified the English half and skipped
+# the other in silence.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

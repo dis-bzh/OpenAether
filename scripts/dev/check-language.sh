@@ -19,6 +19,11 @@
 #      every operator who built an Outscale image. A comment is read once; that
 #      line is read every run.
 #
+# BLIND TO UNTRACKED FILES: it scans `git ls-files`, so a new script passes until
+# it is committed. check-version-drift.sh was written, run clean, committed, and
+# only then reported a French word in its own comment. Run this again after
+# `git add`, not before.
+#
 # Usage: check-language.sh [path ...]        (defaults to the repository root)
 #        check-language.sh --list            list the words it looks for
 set -euo pipefail
