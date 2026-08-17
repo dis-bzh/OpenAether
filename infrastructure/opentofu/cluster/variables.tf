@@ -10,6 +10,34 @@ variable "cluster_name" {
   default     = "openaether"
 }
 
+variable "bucket_suffix" {
+  description = <<-EOT
+    Discriminator appended to the bucket namespace, so this deployment does not
+    collide with anybody else's.
+
+    S3 bucket names are NOT scoped to your account. Scaleway documents them as
+    unique "in our whole platform"; OVH as "unique within OVHcloud"; Outscale as
+    unique per region. Whoever creates `s3-<project>-<provider>-tfstate-<env>`
+    first owns that name for every other customer, and the next person's very
+    first billable command fails on it.
+
+    Empty by default, which keeps the names already in use. Set it — six
+    lowercase alphanumerics is plenty, `task bucket-suffix` prints one — and
+    every bucket becomes s3-<project>-<suffix>-<provider>-…
+
+    It cannot be random or generated here: the state bucket has to exist before
+    OpenTofu runs, so its name cannot come from OpenTofu state. Pick it once,
+    keep it in the tfvars, and treat it as part of the cluster's identity —
+    changing it later orphans every bucket you already have.
+  EOT
+  type        = string
+  default     = ""
+  validation {
+    condition     = can(regex("^[a-z0-9]{0,16}$", var.bucket_suffix))
+    error_message = "bucket_suffix must be 0-16 lowercase letters or digits (it goes into an S3 bucket name)."
+  }
+}
+
 variable "environment" {
   description = "Deployment environment (e.g., dev, prod)"
   type        = string

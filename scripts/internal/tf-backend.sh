@@ -26,7 +26,7 @@ provider_pu "$PROVIDER" >/dev/null || { echo "tf-backend.sh: could not detect pr
 [ -n "$CLUSTER" ] && [ -n "$ENVN" ] && [ -n "$EP" ] && [ -n "$REGION" ] || {
   echo "tf-backend.sh: missing cluster_name/environment/s3_primary_* in $TFVARS" >&2; exit 1; }
 
-BUCKET="$(oa_state_bucket "${CLUSTER%%-*}" "$PROVIDER" "$ENVN")"
+BUCKET="$(oa_state_bucket "$(oa_project "$CLUSTER" "$(tfv "$TFVARS" bucket_suffix)")" "$PROVIDER" "$ENVN")"
 
 # Space-separated; values contain no spaces, so the caller's $(...) word-splits cleanly.
 printf -- '-backend-config=bucket=%s -backend-config=key=%s.tfstate -backend-config=region=%s -backend-config=endpoint=%s' \

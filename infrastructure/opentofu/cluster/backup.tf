@@ -20,7 +20,10 @@ locals {
   # Bucket naming convention: s3-<project>-<provider>-{tfstate|<role>}-<env> (+ -backup).
   # The provider is explicit (not buried in cluster_name) so it's consistent across
   # management and workload clusters; project is cluster_name's first segment.
-  backup_project        = split("-", var.cluster_name)[0]
+  # Must stay identical to oa_project() in scripts/lib/common.sh: the shell
+  # creates these buckets before OpenTofu ever runs, so the two derivations
+  # disagreeing means the backend points at a bucket nothing created.
+  backup_project        = join("-", compact([split("-", var.cluster_name)[0], var.bucket_suffix]))
   backup_provider_short = lookup({ scaleway = "scaleway", ovh = "ovh", outscale = "outscale" }, local.active_provider, local.active_provider)
   backup_bucket_prefix  = "s3-${local.backup_project}-${local.backup_provider_short}"
 

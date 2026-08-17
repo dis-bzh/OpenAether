@@ -33,7 +33,7 @@ PU="$(provider_pu "$PROVIDER")" || { echo "✗ could not detect provider from no
 [ -n "$PRIMARY_EP" ] && [ -n "$REPLICA_EP" ] || {
   echo "✗ could not read s3_primary_endpoint/s3_replica_endpoint from $TFVARS"; exit 1; }
 
-PROJECT="${CLUSTER%%-*}"
+PROJECT="$(oa_project "$CLUSTER" "$(tfv "$TFVARS" bucket_suffix)")"
 PRIMARY_AK="$(s3_cred "$PROVIDER" primary ak)"
 PRIMARY_SK="$(s3_cred "$PROVIDER" primary sk)"
 BACKUP_AK="$(s3_cred "$PROVIDER" backup ak)"

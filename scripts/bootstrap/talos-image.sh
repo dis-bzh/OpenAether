@@ -101,12 +101,39 @@ if [ -f "$SCHEMATIC_YAML" ] && [ -f "$CLUSTER_VARS" ]; then
   [ -n "$LIVE_ID" ] && echo "  ✓ schematic ${LIVE_ID:0:12}… matches the cluster pin"
 fi
 
-STATE_BUCKET="s3-openaether-${TGT}-talos-image"
+# The image buckets follow the same namespace as every other bucket, read from
+# the cluster tfvars for this provider. They used to be the literal string
+# "openaether", overridable by nothing — and since S3 names are unique across a
+# whole provider (not per account), that made `task up`'s FIRST billable step
+# unrepeatable by anyone else. See oa_project in scripts/lib/common.sh.
+IMG_TFVARS="${OA_TFVARS:-$(dirname "${BASH_SOURCE[0]}")/../../infrastructure/opentofu/cluster/envs/${OA_ROLE:-management}-${TGT}.tfvars}"
+if [ -f "$IMG_TFVARS" ]; then
+  IMG_PROJECT="$(oa_project "$(tfv "$IMG_TFVARS" cluster_name)" "$(tfv "$IMG_TFVARS" bucket_suffix)")"
+else
+  IMG_PROJECT=openaether
+  echo "  ~ no ${IMG_TFVARS##*/}: falling back to the 'openaether' bucket namespace."
+  echo "    Create the tfvars first if these names are not yours — S3 names are"
+  echo "    unique across the whole provider, not per account."
+fi
+STATE_BUCKET="s3-${IMG_PROJECT}-${TGT}-talos-image"
 
 ensure() { # bucket
-  aws s3api head-bucket --bucket "$1" --endpoint-url "$SEP" --region "$SREGION" >/dev/null 2>&1 \
-    || aws s3 mb "s3://$1" --endpoint-url "$SEP" --region "$SREGION" >/dev/null
-  echo "  ✓ bucket $1"
+  aws s3api head-bucket --bucket "$1" --endpoint-url "$SEP" --region "$SREGION" >/dev/null 2>&1 && {
+    echo "  ✓ bucket $1"; return 0; }
+  if aws s3 mb "s3://$1" --endpoint-url "$SEP" --region "$SREGION" >/dev/null 2>&1; then
+    echo "  ✓ bucket $1 (created)"; return 0
+  fi
+  # The message that turns an hour of confusion into a one-line fix. A
+  # head-bucket on someone else's bucket answers 403, so the probe above fails
+  # and the failure lands here rather than where the cause is.
+  echo "✗ could not create s3://$1 on ${TGT}." >&2
+  echo "  The most likely cause is that the NAME IS ALREADY TAKEN — by another" >&2
+  echo "  customer, not by you. S3 bucket names are unique across the whole" >&2
+  echo "  provider (Scaleway and OVH platform-wide, Outscale per region)." >&2
+  echo "  Fix: set a discriminator in ${IMG_TFVARS##*/} —" >&2
+  echo "      bucket_suffix = \"$(openssl rand -hex 3 2>/dev/null || echo 'a1b2c3')\"   # or 'task bucket-suffix'" >&2
+  echo "  then re-run. Other causes: wrong region, or no S3 quota left." >&2
+  exit 1
 }
 
 echo "▶ Ensuring talos-image state bucket on ${TGT} (${STATE_BUCKET})"
@@ -116,7 +143,7 @@ APPLY_VARS=(-var "target_provider=$TGT" -var "talos_version=$VERSION")
 case "$P" in
   scaleway | outscale)
     # Scaleway/Outscale stage the raw image in Object Storage for the snapshot import.
-    STAGING="s3-openaether-${TGT}-talos-staging"
+    STAGING="s3-${IMG_PROJECT}-${TGT}-talos-staging"
     ensure "$STAGING"
     APPLY_VARS+=(-var "staging_bucket=$STAGING" -var "region=$SREGION" -var "s3_endpoint=$SEP")
     ;;
