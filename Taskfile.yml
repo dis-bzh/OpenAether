@@ -31,6 +31,42 @@ tasks:
     cmds:
       - ./scripts/setup.sh
 
+  bucket-suffix:
+    desc: >-
+      Print a fresh bucket_suffix to paste into your tfvars. S3 bucket names are unique across a
+      whole provider, not per account — without one you inherit whatever names someone else took.
+    silent: true
+    cmds:
+      - |
+        printf 'bucket_suffix = "%s"\n' "$(openssl rand -hex 3)"
+        echo "# Paste into infrastructure/opentofu/cluster/envs/<role>-<provider>.tfvars."
+        echo "# Pick it ONCE: changing it later orphans every bucket you already have."
+
+  preflight:
+    desc: >-
+      Everything provable WITHOUT a cloud account, in one command. Run it before spending: a defect
+      found here costs minutes, the same defect found on a paid cluster costs the run and its teardown.
+    # DELIBERATELY SHORT — about four minutes. The first draft of this gate was
+    # fifteen and could not finish on the author's own machine, and a gate that
+    # is skipped protects nothing. `security` (needs checkov), `feint-test` and
+    # `local-up` (need Docker) are heavier and belong to CI or to a deliberate
+    # full run, not to the thing typed before every attempt.
+    cmds:
+      - task: lint
+      - task: render-check
+      - task: validate
+        vars: {ROOT: cluster}
+      - task: validate
+        vars: {ROOT: talos-image}
+      - task: test
+      - task: test-scripts
+      - cmd: |
+          echo
+          echo "✓ preflight green — every free rung passed."
+          echo "  NOT covered here, and only a cloud run can: that the provider accepts these"
+          echo "  arguments, that the state object is ciphertext, that an upgrade keeps the API up,"
+          echo "  and that the teardown leaves the account empty. See docs/first-cluster.md."
+
   lint:
     desc: Lint and format code (OpenTofu, YAML)
     cmds:
@@ -46,6 +82,13 @@ tasks:
       # English is canonical; French belongs in *.fr.md, and .languageignore
       # lists what is French on purpose, one reason per entry.
       - ./scripts/dev/check-language.sh
+      # shellcheck was installed by setup.sh and invoked by nothing — 48 tracked
+      # scripts, none of them gated. -S error only: the 23 warnings below that
+      # level are style, and a lint that fails on style gets bypassed.
+      - shellcheck -S error $(git ls-files '*.sh')
+      # One tool, one version, everywhere it is claimed. Four instances of that
+      # defect landed in one week and every one was mechanically checkable.
+      - ./scripts/dev/check-version-drift.sh
       # Required inputs must be named where the operator will look. A variable
       # with no default that no document mentions is a deploy that works for us
       # and fails for a stranger — the release criterion is that the docs are
@@ -191,6 +234,25 @@ tasks:
       # it meaningless, and this costs milliseconds.
       - ./scripts/dev/check-jsonpath.sh
       - ./scripts/dev/test-rolling-replace.sh
+      # These two were written, they pass, and nothing ever ran them — not this
+      # target, not CI. A harness nobody invokes is the failure mode this whole
+      # target exists for, one level up: the check does work, it is simply never
+      # asked. test-teardown owns the branches that decide whether a management
+      # is destroyed while its children keep billing; test-staging-checks owns
+      # the queries that turn "the apply returned" into "the cluster works".
+      # Both use a stub kubectl, need no credentials, and cost ~10s together.
+      - ./scripts/dev/test-teardown.sh
+      - ./scripts/dev/test-staging-checks.sh
+      # The purge scripts are the last sentence between a failed teardown and a
+      # bill, and both said "clean" when every API call was refused. Forced-403,
+      # in-process, no network.
+      - ./scripts/dev/test-purge-orphans.sh
+      # Six places build a bucket name, in two languages that cannot import each
+      # other. Nothing but this compares them.
+      - ./scripts/dev/test-bucket-names.sh
+      # The backup path had no inverse until 0.5.0. This is the round trip —
+      # the real enc() against the real dec(), offline.
+      - ./scripts/dev/test-restore.sh
 
   test:
     desc: Run OpenTofu tests (cluster root)
@@ -473,11 +535,17 @@ tasks:
     desc: >-
       Replicate the (encrypted) tfstate to the -backup store (post-apply). Set BACKUP_AWS_* for a cross-provider
       replica. Usage: task backup-state [PROVIDER=scaleway|ovh|outscale|proxmox]
+    # `dir:` is NOT cosmetic here: the *provider-env anchor resolves the S3
+    # credentials with `../../../scripts/...`, a path that is only correct from
+    # infrastructure/opentofu/cluster. Without it every use of this target exits
+    # 127 before running anything — so the documented way to re-replicate the
+    # state, which is one of this release's five promises, could not execute.
+    dir: infrastructure/opentofu/cluster
     vars:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
     env: *provider-env
     cmds:
-      - ./scripts/ops/backup-state.sh infrastructure/opentofu/cluster
+      - ../../../scripts/ops/backup-state.sh .
 
   edge-down:
     desc: >-
@@ -595,6 +663,45 @@ tasks:
       - tofu output -raw kubeconfig > kubeconfig
       - tofu output -raw talosconfig > talosconfig
       - echo "KUBECONFIG and TALOSCONFIG written to infrastructure/opentofu/cluster/"
+
+  restore-artifacts:
+    desc: >-
+      Recover kubeconfig + talosconfig from the encrypted backups. Usage:
+      task restore-artifacts PROVIDER=scaleway [ROLE=management] [FROM=primary|replica] [FORCE=1]
+      FROM=replica reads the cross-provider copy — the one that answers when the cluster's own cloud does not.
+    dir: infrastructure/opentofu/cluster
+    vars:
+      ROLE: '{{.ROLE | default "management"}}'
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+      FROM: '{{.FROM | default "primary"}}'
+      FORCE: '{{.FORCE | default ""}}'
+    env: *provider-env
+    cmds:
+      - >-
+        ../../../scripts/ops/restore-artifacts.sh {{.PROVIDER}}
+        --role {{.ROLE}} --from {{.FROM}}{{if .FORCE}} --force{{end}}
+
+  verify:
+    desc: >-
+      Ask the CLUSTER whether it is what this release promises: apiserver up, every node Ready, the
+      requested number of control planes, Cilium on each, CoreDNS serving, no Flux, no app load
+      balancer, a tfstate replica in the backup store. Usage: task verify PROVIDER=scaleway [ROLE=management]
+    # See backup-state above: the *provider-env anchor needs this dir, and the
+    # first version of this target shipped without it and exited 127 everywhere.
+    dir: infrastructure/opentofu/cluster
+    vars:
+      ROLE: '{{.ROLE | default "management"}}'
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    env: *provider-env
+    cmds:
+      # The script reads the state for the topology and the bucket names, so it
+      # needs the backend and the S3 credentials — which is why it goes through a
+      # task rather than being run by hand. It had no target at all until 0.5.0,
+      # and its only caller was the upgrade lane: the one script that says what a
+      # healthy cluster looks like was unreachable to the person deploying one.
+      - task: kubeconfig
+        vars: {ROLE: '{{.ROLE}}', PROVIDER: '{{.PROVIDER}}'}
+      - ../../../scripts/dev/infra-verify.sh {{.PROVIDER}} {{.ROLE}}
 
   # ===========================================================================
   # Emulated cloud (Feint) — no account, no credentials. docs/emulated-cloud.md
