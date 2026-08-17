@@ -239,7 +239,18 @@ if kubectl get namespace flux-system >/dev/null 2>&1; then
   "$ROOT/scripts/dev/staging-verify.sh" "$PROVIDER" "$ROLE"
 else
   ok "no flux-system — verifying against the infrastructure floor"
-  "$ROOT/scripts/dev/infra-verify.sh" "$PROVIDER" "$ROLE"
+  # Through the TASK, not the script. infra-verify reads `tofu output` for the
+  # topology, the app LB and the bucket names, and that needs AWS_* — which this
+  # repository deliberately never sets ambiently: the Taskfile's provider-env
+  # anchor derives them per provider. Called directly from here, the verifier
+  # cannot read the state and reports two checks it could not perform.
+  #
+  # Measured on a live Scaleway cluster 2026-08-17: 7 passed / 2 failed from
+  # here, 9 passed / 0 failed through `task verify`, same cluster, same second.
+  # Both failures were the guards added that morning refusing to conclude from
+  # an unanswered question — the old code would have read the empty output as
+  # "no application load balancer" and gone green.
+  task verify PROVIDER="$PROVIDER" ROLE="$ROLE"
 fi
 
 report_probe

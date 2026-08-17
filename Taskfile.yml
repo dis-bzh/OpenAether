@@ -786,6 +786,22 @@ tasks:
         ../../../scripts/ops/restore-artifacts.sh {{.PROVIDER}}
         --role {{.ROLE}} --from {{.FROM}}{{if .FORCE}} --force{{end}}
 
+  upgrade:
+    desc: >-
+      Upgrade Kubernetes then Talos on a running cluster, MEASURING the interruption instead of
+      asserting there was none. Targets come from cluster/variables.tf; the tfvars is expected to pin
+      one patch below. DRY_RUN=1 resolves the versions and stops, needing no cluster. Needs a terminal:
+      the applies ask for approval. Usage: task upgrade PROVIDER=scaleway [ROLE=management] [KEY=~/.ssh/key]
+    vars:
+      ROLE: '{{.ROLE | default "management"}}'
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+      KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
+    cmds:
+      # staging-upgrade.sh was reachable from no target and from no workflow —
+      # the same gap infra-verify.sh had until today. The script that defines
+      # what an upgrade must prove could only be run by typing its path.
+      - ./scripts/dev/staging-upgrade.sh {{.PROVIDER}} {{.ROLE}} {{.KEY}}
+
   verify:
     desc: >-
       Ask the CLUSTER whether it is what this release promises: apiserver up, every node Ready, the

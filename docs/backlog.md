@@ -90,6 +90,29 @@ can review and apply the same bytes. It still does not use them.
 `apply-plan`; one green run per provider. Rung: real cloud, and only once the
 lane has credentials at all.
 
+### CLOSED by measurement — the five pillars, on Scaleway, 2026-08-17
+
+Walked end to end on a live cluster by following `docs/first-cluster.md`.
+
+| | |
+|---|---|
+| Talos image build | **52 s** (the repo had only "~1 h on Outscale") |
+| Deploy | 43 + 17 resources, 3 CP + 3 workers + bastion, 2 zones |
+| Healthy | `task verify` **9/9** — first run of infra-verify against any cloud |
+| State encrypted | envelope keys `encrypted_data, encryption_version, lineage, meta, serial`; none of four known state strings in clear across 1.7 MB |
+| Artifacts restorable | both stores, byte-identical to the live files |
+| Idempotency | "No changes", exit 0 — warm AND cold |
+| k8s 1.36.2 → 1.36.3 | applied |
+| Talos 1.13.7 → 1.13.8 | **6/6 nodes**, no revert, plan empty afterwards |
+
+The OVH revert therefore does not reproduce on Scaleway, on a cluster with no
+interrupted predecessor — which is consistent with the cordoned-node confounder
+recorded for it, and leaves that entry open on OVH alone.
+
+Still missing from this run: the probe figure. `report_probe` prints the longest
+consecutive outage and it was not captured, so the claim "no consecutive window
+longer than 15 s" remains DOCUMENTED, not measured, on this cluster.
+
 ### MEASURED — `task plan` needed the tunnels, and took 15 minutes to say so
 
 No longer a hypothesis. On a live Scaleway cluster, 2026-08-17, tunnels closed:
