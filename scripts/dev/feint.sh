@@ -40,10 +40,23 @@ running() { feint status 2>/dev/null | grep -q '^running on'; }
 # almost no API calls, so it passes either way. A check that cannot fail is a
 # check that measures nothing, and it hid a broken `feint-up` for exactly one run.
 require_emulator() {
-  running || {
-    echo "✗ no emulator on $FEINT_ENDPOINT — run 'task feint-up' first" >&2
-    exit 1
-  }
+  running && return 0
+  echo "✗ no emulator on $FEINT_ENDPOINT" >&2
+  # "run 'task feint-up' first" was the whole message, and it named the wrong
+  # cause every time the emulator had started and then DIED — which is the only
+  # way this fires in CI, where feint-up is a separate step that prints a pid.
+  # The one thing that could explain it, the emulator's own log, was discarded.
+  # Observed 2026-08-17: the outscale leg planned successfully, then found no
+  # emulator at the apply, and nothing in the run said why.
+  local log="${XDG_RUNTIME_DIR:-/tmp}/feint/${FEINT_ENDPOINT#http://}/feint.log"
+  log="${log//:/_}"
+  if [ -r "$log" ]; then
+    echo "  it was started and is gone. Last lines of ${log}:" >&2
+    tail -20 "$log" | sed 's/^/    /' >&2
+  else
+    echo "  no log at ${log} either — if it never started, run 'task feint-up' first." >&2
+  fi
+  exit 1
 }
 
 # reset_emulator empties the store, which only a restart does: the store is in
