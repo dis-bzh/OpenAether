@@ -120,6 +120,9 @@ probe() {
 }
 probe &
 PROBE_PID=$!
+# When the sampling started, so report_probe can tell "few samples because the
+# step was quick" from "few samples because the probe is dead".
+PROBE_STARTED=$SECONDS
 # shellcheck disable=SC2064  # PROBE_PID must expand now, not at trap time
 trap "kill $PROBE_PID 2>/dev/null || true; rm -f '$PROBE_LOG'" EXIT
 
@@ -137,6 +140,19 @@ report_probe() {
   local fails total longest keep
   fails="$(grep -c FAIL "$PROBE_LOG" || true)"
   total="$(wc -l <"$PROBE_LOG")"
+  # An EMPTY log satisfies "longest outage 0s ≤ 15s". If the probe died at the
+  # start — no kubeconfig yet, no kubectl on PATH — the assertion below concludes
+  # from no evidence and the run is called clean.
+  #
+  # The floor is RELATIVE to how long the probe has been alive, not a fixed count:
+  # the probe samples about once a second, so expect roughly one sample per second
+  # and demand a quarter of that. A fixed floor would fail a legitimately fast
+  # step, which is the mirror defect — a guard written for the pathological case
+  # firing on the normal one. Inert below 30s for the same reason.
+  local elapsed=$(( SECONDS - ${PROBE_STARTED:-0} ))
+  if [ "$elapsed" -ge 30 ] && [ "$total" -lt $(( elapsed / 4 )) ]; then
+    fail "the probe wrote ${total} sample(s) in ${elapsed}s — it is not measuring, so no claim about the outage can be made"
+  fi
   longest="$(awk '/FAIL/{r++; if (r>m) m=r; next} {r=0} END{print m+0}' "$PROBE_LOG")"
   echo "  probe: ${fails} FAIL in ${total} samples (~1s apart), longest outage ${longest}s"
   [ "$longest" -le "$MAX_PROBE_FAILS" ] && return 0
@@ -156,13 +172,19 @@ if [ "$K8S_FROM" != "$K8S_TO" ]; then
   # version is the observable end of that, and it is not instant.
   echo "waiting for every kubelet to report ${K8S_TO}"
   for _ in $(seq 1 60); do
-    STALE="$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.kubeletVersion}{"\n"}{end}' |
+    # COUNT THE NODES, not just the stale ones. `grep -cvx` over the output of a
+    # kubectl that answered nothing returns 0, which reads exactly like "every
+    # kubelet is on the target" — a dead apiserver used to pass this.
+    SEEN="$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.kubeletVersion}{"\n"}{end}' 2>/dev/null |
+      grep -c . || true)"
+    STALE="$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.kubeletVersion}{"\n"}{end}' 2>/dev/null |
       grep -cvx "$K8S_TO" || true)"
-    [ "$STALE" -eq 0 ] && break
+    [ "$SEEN" -gt 0 ] && [ "$STALE" -eq 0 ] && break
     sleep 10
   done
+  [ "${SEEN:-0}" -gt 0 ] || fail "the apiserver reported no nodes at all — nothing was verified, and this is not an upgrade that succeeded"
   [ "${STALE:-1}" -eq 0 ] || fail "${STALE} kubelet(s) still not on ${K8S_TO} after 10 minutes"
-  ok "every kubelet on ${K8S_TO}"
+  ok "every kubelet on ${K8S_TO} (${SEEN} node(s) seen)"
   report_probe
 fi
 
@@ -187,10 +209,14 @@ if [ "$TALOS_FROM" != "$TALOS_TO" ]; then
   task rolling-replace PROVIDER="$PROVIDER" KEY="$KEY" -- --cp-only --upgrade --yes
   task rolling-replace PROVIDER="$PROVIDER" KEY="$KEY" -- --workers-only --upgrade --yes
 
-  RUNNING="$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.osImage}{"\n"}{end}' |
+  # Same trap as the kubelet count above: with no nodes returned, `grep -cv`
+  # answers 0 and a dead cluster reports a clean Talos upgrade.
+  OSIMAGES="$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.osImage}{"\n"}{end}' 2>/dev/null | grep -c . || true)"
+  RUNNING="$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.osImage}{"\n"}{end}' 2>/dev/null |
     grep -cv "$TALOS_TO" || true)"
+  [ "$OSIMAGES" -gt 0 ] || fail "the apiserver reported no nodes at all after the Talos roll — nothing was verified"
   [ "$RUNNING" -eq 0 ] || fail "${RUNNING} node(s) are not running Talos ${TALOS_TO}"
-  ok "every node on Talos ${TALOS_TO}"
+  ok "every node on Talos ${TALOS_TO} (${OSIMAGES} node(s) seen)"
   report_probe
 fi
 

@@ -349,21 +349,19 @@ upgrade
 # are on the target" — from a query that returned nothing at all.
 plan "nodeInfo.kubeletVersion\t1\terror: unable to parse requirement\nnodeInfo.osImage\t1\terror: unable to parse requirement\n${VERIFY_OK}"
 upgrade
-if ! said 'every kubelet on v0.0.2'; then
-  defect_gone "the kubelet wait no longer concludes from an unanswered query"
-else
-  defect "staging-upgrade.sh:146 announces 'every kubelet on v0.0.2' after a FAILED node query — grep -cvx counted 0 lines of nothing"
-fi
-if ! said 'every node on Talos v0.0.2'; then
-  defect_gone "the Talos version assertion no longer concludes from an unanswered query"
-else
-  defect "staging-upgrade.sh:177 announces 'every node on Talos v0.0.2' after a FAILED node query — same grep -cv reading 0"
-fi
-if [ "$RUN_RC" -ne 0 ]; then
-  defect_gone "an upgrade that could not read a single node now fails"
-else
-  defect "the whole upgrade ends green (rc=0) without one node version ever having been read"
-fi
+# Promoted from KNOWN DEFECT on 2026-08-17. `grep -cvx <target>` over the output
+# of a kubectl that answered nothing prints 0, and 0 stale nodes read as "every
+# one of them is on the target" — so a dead apiserver certified both upgrades.
+# Both counters now also count the nodes they SAW, and zero seen is fatal.
+said 'every kubelet on v0.0.2' \
+  && bad "'every kubelet on v0.0.2' announced after a FAILED node query — the counter concluded from nothing" \
+  || ok "a failed node query does not announce 'every kubelet on the target'"
+said 'every node on Talos v0.0.2' \
+  && bad "'every node on Talos v0.0.2' announced after a FAILED node query — same counter, same nothing" \
+  || ok "a failed node query does not announce 'every node on the target Talos'"
+[ "$RUN_RC" -ne 0 ] \
+  && ok "an upgrade that could not read a single node FAILS" \
+  || bad "the upgrade ended green (rc=0) without one node version ever having been read"
 
 echo
 echo "=== staging-upgrade: report_probe, the interruption budget ==="
@@ -387,18 +385,36 @@ PROBE_LOG="$STUB_DIR/probe"; MAX_PROBE_FAILS=15
 if ! declare -F report_probe >/dev/null; then
   bad "report_probe could NOT be extracted from staging-upgrade.sh — the checks below would have scored a pass from rc 127"
 else
+  # PROBE_STARTED is what lets report_probe tell a quick step from a dead probe.
+  # Unset here would leave `elapsed` at the test shell's own uptime, so every
+  # case below sets it deliberately — the sample floor is exercised, not dodged.
+  PROBE_STARTED=$SECONDS   # elapsed 0: the floor is inert, as on a fast step
   printf 'ok\nok\nFAIL\nok\n' >"$PROBE_LOG"
   probe_ok && ok "3 samples, 1 FAIL, budget 15 → passes" || bad "a healthy probe failed"
 
   printf 'FAIL\n%.0s' {1..20} >"$PROBE_LOG"
   probe_ok && bad "20 FAIL against a budget of 15 passed" || ok "20 FAIL over a budget of 15 → fails"
 
+  # The case that used to be a KNOWN DEFECT: an empty log gives longest=0, and
+  # `[ 0 -le 15 ]` passes — a probe that never ran reported the API stayed up.
   : >"$PROBE_LOG"
-  if probe_ok; then
-    defect "staging-upgrade.sh:127 reports '0 FAIL in 0 samples' and PASSES on an empty probe log — a probe that never ran proves the API stayed up"
-  else
-    defect_gone "report_probe now refuses to conclude from zero samples"
-  fi
+  PROBE_STARTED=$(( SECONDS - 600 ))
+  probe_ok && bad "an empty probe log passed after 600s — a probe that never ran proves nothing" \
+    || ok "empty log over 600s → refuses to conclude"
+
+  # …and the mirror: the floor must NOT punish a step that was simply quick.
+  PROBE_STARTED=$SECONDS
+  : >"$PROBE_LOG"
+  probe_ok && ok "empty log over 0s → inert, a fast step is not a dead probe" \
+    || bad "the sample floor fired on a step that had no time to sample — the guard turned on the happy path"
+
+  # A live probe that is merely behind must still pass: 400 samples in 600s is
+  # well above a quarter, and this is what a real run looks like.
+  PROBE_STARTED=$(( SECONDS - 600 ))
+  printf 'ok\n%.0s' {1..400} >"$PROBE_LOG"
+  probe_ok && ok "400 samples over 600s → a healthy real-length run passes" \
+    || bad "a healthy 600s run was rejected by the sample floor"
+  unset PROBE_STARTED
 fi
 unset -f fail probe_ok; unset -f report_probe 2>/dev/null || true
 

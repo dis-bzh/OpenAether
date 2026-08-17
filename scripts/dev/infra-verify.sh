@@ -35,6 +35,10 @@ PASS=0
 FAIL=0
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; PASS=$((PASS + 1)); }
 bad()  { printf '  \033[31m✗\033[0m %s\n' "$*"; FAIL=$((FAIL + 1)); }
+# Neither pass nor fail: a fact the operator must read. Used where the cluster is
+# legitimately below the release's target but the run is not wrong (a non-HA
+# topology, a dev replica sharing its endpoint).
+warn() { printf '  \033[33m~\033[0m %s\n' "$*"; }
 info() { printf '\n▶ %s\n' "$*"; }
 
 K() { timeout 60 kubectl "$@"; }
@@ -81,6 +85,24 @@ else
   bad "after ${NODES_TIMEOUT}s, not Ready: ${notready:-unknown}"
 fi
 
+# "Every node is Ready" is a count of what turned up, not of what was asked for.
+# A one-control-plane cluster passed every check in this file while HA is the
+# release's headline objective — so compare the cluster against the STATE, which
+# is the only place that records the topology the operator actually requested.
+if [ "$PROVIDER" != local ]; then
+  want_cp="$(cd "$CLUSTER_DIR" && timeout 60 tofu output -json control_plane_private_ips 2>/dev/null | jq 'length' 2>/dev/null)"
+  got_cp="$(K get nodes -l node-role.kubernetes.io/control-plane --no-headers 2>/dev/null | wc -l)"
+  if ! [[ "${want_cp:-}" =~ ^[0-9]+$ ]] || [ "$want_cp" -eq 0 ]; then
+    bad "could not read control_plane_private_ips from the state — cannot check the topology"
+  elif [ "$got_cp" -ne "$want_cp" ]; then
+    bad "${got_cp} control-plane node(s) in the cluster, ${want_cp} in the state"
+  elif [ "$want_cp" -lt 3 ]; then
+    warn "${want_cp} control plane(s): this cluster is NOT HA, and an upgrade WILL interrupt the API"
+  else
+    ok "${got_cp} control planes, matching the state — HA"
+  fi
+fi
+
 # The CNI is the floor. A node can be Ready with a broken CNI only briefly, but
 # "Cilium is on every node" is the thing that makes the cluster usable, and it is
 # counted per node rather than globally — one agent short is the interesting case.
@@ -111,11 +133,19 @@ else
 fi
 
 if [ "$PROVIDER" != local ]; then
-  APP_LB="$(cd "$CLUSTER_DIR" && timeout 60 tofu output -raw app_lb_ip 2>/dev/null)"
-  case "${APP_LB:-N/A}" in
-    N/A | "" | null) ok "no application load balancer (deploy_app_lb=false)" ;;
-    *) bad "an application load balancer exists and is billed, pointing at Gateway NodePorts nothing serves" ;;
-  esac
+  # `tofu output` failing and `tofu output` saying N/A are DIFFERENT ANSWERS, and
+  # this used to green on both — an uninitialised backend, missing credentials or
+  # a timeout all produce an empty string, which the old `${APP_LB:-N/A}` read as
+  # "no load balancer". From a cold shell it could only ever pass. Capture the
+  # exit code and treat a failed question as unanswered, never as reassurance.
+  if APP_LB="$(cd "$CLUSTER_DIR" && timeout 60 tofu output -raw app_lb_ip 2>/dev/null)"; then
+    case "$APP_LB" in
+      N/A | "" | null) ok "no application load balancer (deploy_app_lb=false)" ;;
+      *) bad "an application load balancer exists and is billed, pointing at Gateway NodePorts nothing serves" ;;
+    esac
+  else
+    bad "could not read app_lb_ip (is the backend initialised, are the S3 credentials exported?) — the absence of an app LB is UNVERIFIED"
+  fi
 fi
 
 info "The state is backed up"
@@ -126,17 +156,29 @@ else
   # The claim is not "the backup step ran": it is that the object EXISTS in the
   # replica store, and that the replica is a different endpoint from the primary
   # — a copy on the cloud that just failed is not a backup.
+  # The shared helpers, not a local copy: this file used to build the bucket name
+  # inline, so any change to the convention — the bucket_suffix, for one — would
+  # leave it probing the old name and reporting a missing backup that is there
+  # under another one. `tfv` comes from common.sh and takes <file> <key>.
+  # shellcheck source=../lib/common.sh
+  source "$ROOT/scripts/lib/common.sh"
   TFVARS="$CLUSTER_DIR/envs/${ROLE}-${PROVIDER}.tfvars"
-  tfv() { grep -E "^[[:space:]]*$1[[:space:]]*=" "$TFVARS" 2>/dev/null | head -1 | sed -E 's/.*"([^"]*)".*/\1/'; }
-  CN="$(tfv cluster_name)"; ENVN="$(tfv environment)"
-  PRIM_EP="$(tfv s3_primary_endpoint)"; REPL_EP="$(tfv s3_replica_endpoint)"
-  BUCKET="s3-${CN%%-*}-${PROVIDER}-tfstate-${ENVN}-backup"
+  CN="$(tfv "$TFVARS" cluster_name)"; ENVN="$(tfv "$TFVARS" environment)"
+  PRIM_EP="$(tfv "$TFVARS" s3_primary_endpoint)"; REPL_EP="$(tfv "$TFVARS" s3_replica_endpoint)"
+  BUCKET="$(oa_state_bucket "$(oa_project "$CN" "$(tfv "$TFVARS" bucket_suffix)")" "$PROVIDER" "$ENVN")-backup"
   if [ -z "$CN" ] || [ -z "$ENVN" ]; then
     bad "could not read cluster_name/environment from ${TFVARS##*/} — cannot name the backup bucket"
-  elif AWS_ACCESS_KEY_ID="$("$ROOT/scripts/internal/resolve-s3-cred.sh" "$PROVIDER" ak)" \
-       AWS_SECRET_ACCESS_KEY="$("$ROOT/scripts/internal/resolve-s3-cred.sh" "$PROVIDER" sk)" \
+  # BACKUP credentials, not primary. The bucket being listed is the replica, and
+  # in production the replica is on a different provider's account — so reading
+  # it with the cluster provider's keys fails precisely when the release's
+  # cross-provider objective is satisfied.
+  elif AWS_ACCESS_KEY_ID="$("$ROOT/scripts/internal/resolve-s3-cred.sh" "$PROVIDER" ak backup)" \
+       AWS_SECRET_ACCESS_KEY="$("$ROOT/scripts/internal/resolve-s3-cred.sh" "$PROVIDER" sk backup)" \
        timeout 90 aws s3 ls "s3://${BUCKET}/" --endpoint-url "${REPL_EP:-$PRIM_EP}" 2>/dev/null | grep -q 'tfstate'; then
-    ok "an encrypted tfstate replica exists in ${BUCKET}"
+    # Says "exists", not "is encrypted": the test above is a filename match on a
+    # listing, and nothing here has ever opened the object. Claiming encryption
+    # from an `s3 ls` is the green line this file's own header warns about.
+    ok "a tfstate replica exists in ${BUCKET} (encryption NOT checked here)"
   else
     bad "no tfstate object found in ${BUCKET} — the backup claim is unproven"
   fi
