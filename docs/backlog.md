@@ -48,6 +48,29 @@ ciphertext; there is no working restore path; and the documented user journey
 (`docs/first-cluster.md`, written 2026-08-17) was assembled by reading the code,
 not by walking it.
 
+### FIXED — the resume read the tfvars, which the run rewrites before it is true
+
+`staging-upgrade.sh` decided what to do by reading the tfvars, and it rewrites
+that file BEFORE the apply that makes it true. Interrupt in between and the file
+asserts a version nobody runs; the next run reads it, concludes the step is done,
+and skips it — permanently, while reporting success.
+
+Demonstrated on Outscale 2026-08-18: an aborted run left
+`kubernetes_version = v1.36.3`. Harmless there because the apply HAD landed, but
+the same abort one step earlier would have skipped a Kubernetes upgrade for good.
+
+Each axis is now decided by asking every node what it runs, and a MIXED fleet —
+the exact state an interrupted roll leaves — forces the step instead of skipping
+it. With no cluster answering it falls back to the tfvars and says so, rather
+than presenting a claim as a reading.
+
+Two things the testing caught that the change itself did not:
+`set -e` killed the script whenever no node answered (empty grep, `pipefail`), so
+the fallback was unreachable; and the first mutation — reverting to the tfvars —
+did NOT redden the harness, because no scenario made the two sources disagree.
+That scenario now exists and is the only one in the file that can tell the fix
+from the bug.
+
 ### FIXED — the port guard passed in 0s, on every provider, since it was written
 
 Outscale, 2026-08-18. `bootstrap-phase2` reported `✓ 6/6 tunnels up`, the guard

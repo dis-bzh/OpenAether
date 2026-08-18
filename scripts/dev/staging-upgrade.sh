@@ -76,18 +76,65 @@ default_of() { # <key> — cluster/variables.tf only, ignoring the tfvars
     sed -nE 's/^[[:space:]]*default[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' | head -1
 }
 
-TALOS_FROM="$(tfvar_get talos_version)"
-K8S_FROM="$(tfvar_get kubernetes_version)"
 TALOS_TO="${UPGRADE_TALOS_TO:-$(default_of talos_version)}"
 K8S_TO="${UPGRADE_K8S_TO:-$(default_of kubernetes_version)}"
 
-echo "  Talos      ${TALOS_FROM} → ${TALOS_TO}"
-echo "  Kubernetes ${K8S_FROM} → ${K8S_TO}"
+# WHERE WE ARE COMES FROM THE CLUSTER, NOT THE TFVARS.
+#
+# This script rewrites the tfvars BEFORE the apply that makes it true. Interrupt
+# it in between — Ctrl+C, a failed apply, a lost connection — and the file
+# asserts a version nobody is running. The next run then reads that file, decides
+# the step is already done, and skips it. The cluster stays behind and the run
+# reports success.
+#
+# Demonstrated on Outscale, 2026-08-18: an aborted run left
+# `kubernetes_version = v1.36.3` in the tfvars. There it was harmless (the apply
+# HAD landed), but the same abort one step earlier would have silently skipped a
+# Kubernetes upgrade for ever.
+#
+# So each axis is decided by asking every node what it runs. A MIXED fleet is the
+# resume case and must run, not skip: that is precisely the state an interrupted
+# roll leaves behind.
+cluster_versions() { # <field> — the distinct set across all nodes, or empty
+  # custom-columns, not the jsonpath the post-upgrade counters use: this asks a
+  # DIFFERENT question — "which versions exist in the fleet" rather than "how many
+  # are not at the target" — and the two must be distinguishable, both to a reader
+  # and to the stub harness that has to answer them differently in one run.
+  # `|| true`, and it is load-bearing: with no cluster the grep matches nothing,
+  # `pipefail` turns that into a failed pipeline, and `set -e` then kills the
+  # script on the assignment — so the tfvars fallback below could never be
+  # reached. An empty answer is a legitimate answer here; a dead script is not.
+  kubectl get nodes --no-headers -o "custom-columns=V:$1" 2>/dev/null |
+    sed -E 's/^Talos \((v[^)]+)\)$/\1/' | grep -E '^v' | sort -u | paste -sd, - || true
+}
 
-if [ "$TALOS_FROM" = "$TALOS_TO" ] && [ "$K8S_FROM" = "$K8S_TO" ]; then
+CLUSTER_K8S="$(cluster_versions '.status.nodeInfo.kubeletVersion')"
+CLUSTER_TALOS="$(cluster_versions '.status.nodeInfo.osImage')"
+
+if [ -n "$CLUSTER_K8S" ] && [ -n "$CLUSTER_TALOS" ]; then
+  K8S_FROM="$CLUSTER_K8S"; TALOS_FROM="$CLUSTER_TALOS"; SOURCE="the cluster"
+else
+  # No cluster to ask (DRY_RUN, or an apiserver that is down). Fall back to the
+  # tfvars and SAY so, rather than presenting a guess as a reading.
+  K8S_FROM="$(tfvar_get kubernetes_version)"; TALOS_FROM="$(tfvar_get talos_version)"
+  SOURCE="the tfvars (no cluster answered — this is what it CLAIMS, not what runs)"
+fi
+
+# A single value means every node agrees; a comma means the fleet is mixed and
+# the step has to run whatever any file says.
+K8S_DONE=0;   [ "$K8S_FROM" = "$K8S_TO" ] && K8S_DONE=1
+TALOS_DONE=0; [ "$TALOS_FROM" = "$TALOS_TO" ] && TALOS_DONE=1
+
+echo "  Talos      ${TALOS_FROM} → ${TALOS_TO}   (read from ${SOURCE})"
+echo "  Kubernetes ${K8S_FROM} → ${K8S_TO}"
+case "${K8S_FROM}${TALOS_FROM}" in
+  *,*) echo "  ⚠ the fleet is MIXED — this is a resume, and every step below will run." ;;
+esac
+
+if [ "$K8S_DONE" = 1 ] && [ "$TALOS_DONE" = 1 ]; then
   # Loud, and a failure — not a skip. A lane that quietly exercises nothing is
   # indistinguishable from a lane that passed, and this one costs money to run.
-  fail "the staging tfvars already pins both target versions, so this run would
+  fail "every node already runs both target versions, so this run would
   upgrade nothing. Pin a patch below cluster/variables.tf in STAGING_TFVARS_B64,
   or pass UPGRADE_TALOS_TO / UPGRADE_K8S_TO."
 fi
@@ -95,8 +142,8 @@ fi
 if [ "${DRY_RUN:-}" = "1" ]; then
   # Guarded exactly as the real path is, or the dry run would show a rewrite the
   # real run never performs.
-  if [ "$K8S_FROM" != "$K8S_TO" ]; then tfvar_set kubernetes_version "$K8S_TO"; fi
-  if [ "$TALOS_FROM" != "$TALOS_TO" ]; then tfvar_set talos_version "$TALOS_TO"; fi
+  if [ "$K8S_DONE" = 0 ]; then tfvar_set kubernetes_version "$K8S_TO"; fi
+  if [ "$TALOS_DONE" = 0 ]; then tfvar_set talos_version "$TALOS_TO"; fi
   echo "--- what the tfvars would become ---"
   diff -u "$ROOT/infrastructure/opentofu/cluster/envs/${ROLE}-${PROVIDER}.tfvars" "$TFVARS" || true
   ok "dry run: versions resolved and the tfvars rewrite is well-formed"
@@ -163,7 +210,7 @@ report_probe() {
 
 # --- Kubernetes first: no reboot, so it isolates the control-plane roll --------
 
-if [ "$K8S_FROM" != "$K8S_TO" ]; then
+if [ "$K8S_DONE" = 0 ]; then
   echo "--- Kubernetes ${K8S_FROM} → ${K8S_TO} ---"
   tfvar_set kubernetes_version "$K8S_TO"
   task infra ROLE="$ROLE" PROVIDER="$PROVIDER"
@@ -190,7 +237,7 @@ fi
 
 # --- Then Talos, in place ------------------------------------------------------
 
-if [ "$TALOS_FROM" != "$TALOS_TO" ]; then
+if [ "$TALOS_DONE" = 0 ]; then
   echo "--- Talos ${TALOS_FROM} → ${TALOS_TO} ---"
 
   # The nodes ignore their image attribute, but the image DATA SOURCE still has

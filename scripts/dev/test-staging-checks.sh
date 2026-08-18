@@ -199,7 +199,17 @@ VERIFY_OK+="get gitrepository openaether\t0\t${GIT_REF}\n"
 VERIFY_OK+='task \t0\t\n'
 
 # Nodes and kubelets already on the target, for staging-upgrade.
-UPGRADE_OK='nodeInfo.kubeletVersion\t0\tv0.0.2%%v0.0.2\n'
+# The fleet BEFORE the upgrade. staging-upgrade now decides what to run by asking
+# the cluster rather than by reading the tfvars — the tfvars is rewritten before
+# the apply lands, so an interrupted run leaves it claiming a version nobody has,
+# and the next run would skip that step for ever. The survey uses custom-columns
+# so it is a different question from the jsonpath counters below, which is what
+# lets one stub plan answer "v0.0.1 today" and "v0.0.2 afterwards" in one run.
+SURVEY_PRE='custom-columns=V:.status.nodeInfo.kubeletVersion\t0\tv0.0.1%%v0.0.1\n'
+SURVEY_PRE+='custom-columns=V:.status.nodeInfo.osImage\t0\tTalos (v0.0.1)%%Talos (v0.0.1)\n'
+
+UPGRADE_OK="$SURVEY_PRE"
+UPGRADE_OK+='nodeInfo.kubeletVersion\t0\tv0.0.2%%v0.0.2\n'
 UPGRADE_OK+='nodeInfo.osImage\t0\tTalos (v0.0.2)%%Talos (v0.0.2)\n'
 
 echo "=== staging-verify: an unanswered query must not read as a healthy cluster ==="
@@ -300,6 +310,23 @@ run env DRY_RUN=1 "$UPGRADE" "$PROVIDER" "$ROLE" "$KEYFILE"
 { [ "$RUN_RC" -ne 0 ] && said 'upgrade nothing'; } \
   && ok "a run that would upgrade nothing FAILS instead of quietly passing" \
   || bad "a no-op upgrade ended green — indistinguishable from one that worked"
+
+# THE DISAGREEMENT. An interrupted run rewrites the tfvars BEFORE the apply lands,
+# so the file can claim a version no node is running — and the next run used to
+# read that file, conclude the step was done, and skip it for ever. Here the
+# tfvars says v0.0.2 and the fleet says v0.0.1: the cluster is the one that
+# counts, so the run must PROCEED.
+#
+# This is the only scenario in this file where the two sources differ, and
+# therefore the only one that can tell the fix from the bug: reverting
+# staging-upgrade to read the tfvars turns this red and nothing else.
+tfvars v0.0.2 v0.0.2
+plan "$SURVEY_PRE"
+run env DRY_RUN=1 "$UPGRADE" "$PROVIDER" "$ROLE" "$KEYFILE"
+{ [ "$RUN_RC" -eq 0 ] && ! said 'upgrade nothing' && said 'read from the cluster'; } \
+  && ok "a tfvars that claims the target is overruled by a fleet that does not run it" \
+  || bad "a stale tfvars made the run skip an upgrade the cluster still needs (rc=$RUN_RC)"
+tfvars v0.0.1 v0.0.1
 
 echo
 echo "=== staging-upgrade: the two version counters ==="
