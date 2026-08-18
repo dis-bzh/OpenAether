@@ -113,3 +113,23 @@ oa_tunnel_offset() {
     { echo "✗ TALOS_TUNNEL_OFFSET must be a multiple of 200, got: '$o'" >&2; return 1; }
   printf '%s' "$o"
 }
+
+# --- Is a Talos API endpoint REALLY there?
+#
+# "Bound" is not "working": `ssh -L` accepts the local connect itself and keeps
+# listening after the far end dies, so `nc -z` calls a dead tunnel healthy. The
+# TCP connect proves a listener; only the TLS handshake proves apid is behind
+# it. A node in maintenance mode answers with a self-signed cert — still an
+# answer, and still the right verdict.
+#
+# `timeout 5 bash -c` spawns bash on purpose: Task's own shell has no /dev/tcp.
+# scripts/dev/test-endpoint-probe.sh breaks both halves and watches them go red.
+oa_talos_endpoint_ok() { # <host> <port>
+  command -v openssl >/dev/null 2>&1 || {
+    echo "oa_talos_endpoint_ok: openssl is required — a probe that cannot run must not answer 'fine'" >&2
+    return 2
+  }
+  timeout 5 bash -c ">/dev/tcp/${1}/${2}" 2>/dev/null || return 1
+  timeout 10 openssl s_client -connect "${1}:${2}" -brief </dev/null 2>&1 |
+    grep -qiE 'CONNECTION ESTABLISHED|Peer certificate|Protocol version'
+}
