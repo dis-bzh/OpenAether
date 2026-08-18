@@ -20,16 +20,22 @@ HA cluster (Talos + Cilium), idempotency, Kubernetes and Talos upgrades, and an
 encrypted tfstate replicated to a second store. Flux is disabled, not amputated
 (`deploy_flux`, default false) and returns as a user choice afterwards.
 
-**What a pure-infra run actually did on 2026-08-16.** These results existed only
-in a working directory until today, which is why they are written here first —
-a result nobody records is a result you pay to reproduce.
+**Where the five pillars actually stand, walked by the operator.** A result
+nobody records is a result you pay to reproduce.
 
-| | deploy | infra-verify | idempotency | k8s upgrade | Talos upgrade |
-|---|---|---|---|---|---|
-| Docker | ✅ | ✅ 6/6 | ✅ empty plan | — | — |
-| Scaleway | ✅ ~8 min | ✅ 7/8 | ✅ | ✅ | ✅ |
-| OVH | ✅ ~6 min | ✅ 7/8 | ✅ | ✅ | ⚠ one node, see below |
-| Outscale | ❌ LB timeout | — | — | — | — |
+| | deploy | task verify | idempotency | k8s upgrade | Talos upgrade | longest outage |
+|---|---|---|---|---|---|---|
+| Docker | ✅ | ✅ 6/6 | ✅ empty plan | — | — | — |
+| Scaleway | ✅ ~8 min | ✅ 9/9 | ✅ warm and cold | ✅ 1.36.2→1.36.3 | ✅ 6/6 nodes | **3 s** / 7 fails in 1817 |
+| Outscale | ✅ 47+17 | ✅ **9/9, 0 unknown** | ✅ | ✅ 1.36.3 on 6/6 | ✅ **6/6, v1.13.8** | **1 s** / 1 fail in 470 |
+| OVH | ✅ ~6 min | ✅ 7/8 | ✅ | ✅ | ⚠ one node, see below | — |
+
+**Outscale closed on 2026-08-18**, and the Talos versions were confirmed from each
+node's own API, not from Kubernetes alone. Getting there cost three real defects,
+each of them ours and each now fixed: an image rebuild that deleted a snapshot its
+own OMI still used; an upgrade path that needed the Talos API and never opened the
+tunnels to it; and `running="$(talosctl version …)"` under `set -euo pipefail`,
+which killed the roll five nodes into six with no message at all.
 
 The single failure in both 7/8 runs was the same assertion — `s3_replica_endpoint
 equals s3_primary_endpoint` — which was fatal everywhere at the time and is now a
