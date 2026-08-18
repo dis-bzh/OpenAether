@@ -176,6 +176,63 @@ magnitude between two points, so the honest statement is a range, not a number,
 and it now appears in `first-cluster.md` and `upgrade.md` — where a user looks —
 instead of only in a `.tf` comment.
 
+### OPEN — the two S3 stores are the same provider, which is the one thing they must not be
+
+Raised by the operator on 2026-08-18: the whole point of a second store is to
+survive a provider, and every store we actually run is a second bucket on the
+first provider. Checked, and it is worse than that.
+
+- **Nothing validates it.** `cluster/variables.tf` has no `validation` block on
+  `s3_replica_endpoint`; its description says "Prod: a different provider" and
+  descriptions enforce nothing. The only assertion in the repository is
+  `infra-verify.sh:220`, which runs AFTER the deploy — you pay, then learn.
+- **Seven shipped `prod` examples violated the rule** the verifier applies:
+  `workload-{scaleway,ovh,outscale,proxmox}` and
+  `failover-{scaleway,outscale,proxmox}`, each `environment = "prod"` with the
+  replica endpoint equal to the primary. Copying one deployed a prod cluster the
+  project's own checker calls red. FIXED here — every prod example now shows a
+  replica on another provider.
+- **`first-cluster.md` claimed `prod` "requires" it.** It does not. FIXED.
+- **The credential plumbing already exists and has never been used in anger:**
+  `<PROV>_BACKUP_AWS_ACCESS_KEY_ID` / `_SECRET_ACCESS_KEY`, then a generic
+  `BACKUP_AWS_*`, then a fallback to the primary keys (`lib/common.sh::s3_cred`).
+  `.env.example` sets them to the primary's own keys for all three providers,
+  with a comment to repoint them "for real DR". Nobody has.
+
+**The two shapes to support, in the operator's words.** Either one provider and
+no cross-store pretence, or store on A and backup on B, deliberately. The second
+is the one that earns the design, and today nothing distinguishes them except an
+`environment` string that gates one post-hoc warning.
+
+**Closes:** a cluster on provider A whose state and artifacts replicate to
+provider B with B's own keys, and then — the part that actually proves it — A
+treated as gone: fetch the state and the artifacts from B alone and redeploy the
+cluster on B. `envs/failover-*.tfvars.example` exists for exactly this role and
+has never been run. Rung: real cloud, two accounts. Until then "survives a
+provider" is a HYPOTHESIS with plumbing, not a property.
+
+### OPEN — one Talos image at a time, and whether that matters
+
+Same conversation. The image resource is a single `outscale_image` whose name
+carries the version, so after an upgrade the previous OMI is gone. The question
+was whether that removes the ability to roll back.
+
+It does not, because **rollback does not go through the image**. `talosctl
+rollback` — "Rollback a node to the previous installation" — switches the node
+back to its other A/B partition, on the node, with no cloud image involved. The
+OMI is only ever read to CREATE a VM. Nor did `create_before_destroy` make this
+worse: destroy-first previously left a window with NO image at all, so the change
+went from "sometimes zero" to "always exactly one".
+
+What is genuinely lost is the ability to create a NEW node on the old version
+without rebuilding its OMI first — measured at ~8 min on Outscale, and the Image
+Factory schematic is deterministic, so the rebuild is byte-identical rather than
+approximate. Judged not worth a `for_each` over a version list and permanent
+snapshot storage. Recorded so the question is not re-opened from scratch.
+
+**Reopen if:** a real upgrade ever needs a node created on the previous version
+while the roll is still in flight.
+
 ### OPEN — neither state backend takes a lock
 
 Found 2026-08-18 while deciding whether it was safe to run an image rebuild

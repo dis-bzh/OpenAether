@@ -85,7 +85,7 @@ $EDITOR management-scaleway.tfvars
 |---|---|
 | `cluster_name` | yours. **It has a default, so no checker will tell you to change it** — and its first segment names all four cluster buckets |
 | `bucket_suffix` | **set it unless you are the original author.** S3 bucket names are unique across a whole provider, not per account — Scaleway documents them unique "in our whole platform", OVH "within OVHcloud". Without one you will collide with names somebody already took. `task bucket-suffix` prints one; pick it once, changing it later orphans every bucket you have |
-| `environment` | `dev` or `prod`, nothing else. `prod` additionally requires the replica store to be on a different provider |
+| `environment` | `dev` or `prod`, nothing else. It does not *require* anything: nothing validates the replica before you spend. `prod` with the replica on the primary's endpoint deploys fine and `task verify` calls it red afterwards |
 | `admin_ip` | `curl -s ifconfig.me` as a `/32`. It is both the SSH allow-list and the apiserver LB ACL |
 | `s3_primary_endpoint` / `_region` | S3 on the same provider as the cluster |
 | `s3_replica_endpoint` / `_region` | S3 for the backup copy. In production, **a different provider** — a state you can only read from the cloud that just failed is not a backup |

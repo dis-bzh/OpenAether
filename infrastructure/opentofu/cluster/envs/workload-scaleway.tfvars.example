@@ -59,5 +59,5 @@ git_ref          = "refs/heads/main"
 # prod point it at a DIFFERENT provider + export BACKUP_AWS_* for it.
 s3_primary_endpoint = "https://s3.fr-par.scw.cloud"
 s3_primary_region   = "fr-par"
-s3_replica_endpoint = "https://s3.fr-par.scw.cloud" # prod: e.g. OVH https://s3.gra.io.cloud.ovh.net
-s3_replica_region   = "fr-par"                       # prod: e.g. gra
+s3_replica_endpoint = "https://s3.gra.io.cloud.ovh.net" # OVH: prod crosses providers, or drop to environment = "dev"
+s3_replica_region   = "gra"
