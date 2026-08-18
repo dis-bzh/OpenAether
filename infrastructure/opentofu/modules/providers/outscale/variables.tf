@@ -37,7 +37,15 @@ variable "worker_storage" {
 }
 
 variable "availability_zones" {
-  description = "Availability zones for node distribution"
+  # ⚠️ ONLY THE FIRST ENTRY IS USED. On Outscale a node's placement comes from its
+  # SUBNET, and this module creates one private and one public subnet, both in
+  # `availability_zones[0]` — so every node, volume and NAT lands in one
+  # subregion whatever this list contains. scw and ovh round-robin their nodes
+  # with `element(...)`; outscale does not. A 3-control-plane cluster here is HA
+  # against a node failure and not against a subregion failure.
+  # Fixing it means one subnet per subregion, which moves resource addresses and
+  # therefore rebuilds the cluster — see docs/backlog.md.
+  description = "Subregions. NOTE: only the first is used — this module does not spread nodes (see the comment above)"
   type        = list(string)
   default     = ["eu-west-2a", "eu-west-2b", "eu-west-2c"]
 }

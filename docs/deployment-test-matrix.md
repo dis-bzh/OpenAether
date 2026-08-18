@@ -40,7 +40,7 @@ Two orthogonal layers of knobs:
 | k8s LB mode | `node_distribution.<p>.k8s_lb_mode` | `managed`, `vip` | `managed` | **scw, ovh** only; outscale = managed-only (rejects vip); proxmox = always VIP; local = neither | `vip` (EXPERIMENTAL): no LB, private IPAM addr + Talos Layer2 VIP → **API private-only via bastion tunnel**. |
 | apiserver VIP | `local.apiserver_vip` → `module.talos.apiserver_vip`; proxmox `apiserver_vip` (required) + `apiserver_vip_interface` | IP / null | null (cloud); required (proxmox) | proxmox always; scw/ovh in vip mode | Injected as `machine.network.interfaces[].vip` + certSANs. Ignored in container mode. |
 | App LB | `deploy_app_lb` | `true`/`false` | `false` | scw/ovh/outscale; proxmox = host DNAT; local = `127.0.0.1` | Its backends are the Gateway's fixed NodePorts, so an infra-only cluster would pay for an LB pointing at nothing. Off ⇒ `app_lb_ip` is null (`N/A` at the root). |
-| Zones / AZ | scw `.zone`+`.zones`; ovh/outscale `.availability_zones`; proxmox `.node_names` (round-robin) | e.g. scw `["fr-par-1","fr-par-2","fr-par-3"]` | per example | cloud + proxmox | Single vs multi-AZ. Proxmox: 1 host = non-HA, 3 hosts = **true** HA; 3 CP on 1 host = fake HA (avoid). |
+| Zones / AZ | scw `.zone`+`.zones` and ovh `.availability_zones` round-robin with `element(...)`; **outscale reads only `availability_zones[0]`** — one subnet, one subregion, whatever the list says; proxmox `.node_names` (round-robin) | e.g. scw `["fr-par-1","fr-par-2","fr-par-3"]` | per example | cloud + proxmox | Single vs multi-AZ. Proxmox: 1 host = non-HA, 3 hosts = **true** HA; 3 CP on 1 host = fake HA (avoid). |
 | Bastion | proxmox `enable_bastion` | `true` (VM) / `false` (host-as-bastion) | `false` | proxmox toggle; scw/ovh/outscale always a dedicated VM; local none | Contract requires `bastion_ip`. |
 | Worker storage | `worker_storage.disks[]` + `worker_storage.volumes[]` (LUKS2 `UserVolumeConfig`) | none, or disks+volumes | `{disks=[],volumes=[]}` | scw/ovh/outscale/proxmox; local forced off | `disks` → provider module; `volumes` → `modules/talos`. |
 | Bootstrap phase | `talos_bootstrap` | `false` (Phase 1 infra), `true` (Phase 2 config+etcd+Flux) | `true` | all | `task infra` → `task bootstrap-phase2`. |
@@ -97,7 +97,7 @@ Two orthogonal layers of knobs:
 
 | ID | Role | CP/W | k8s_lb_mode | Uniquely exercises | Status |
 |---|---|---|---|---|---|
-| `OSC-mgmt-ha` | mgmt | 3+1 | managed | LB returns a **DNS name**, not an IP; outscale SSH user. 3+3 does not fit the 40 GB RAM quota, so HA here means the control plane only. | ✅ *(2026-08-13, incl. Kubernetes and Talos upgrades in place)* |
+| `OSC-mgmt-ha` | mgmt | 3+1 | managed | LB returns a **DNS name**, not an IP; outscale SSH user. 3+3 does not fit the 40 GB RAM quota, so HA here means the control plane only — and **every node is in eu-west-2a**, because the module never reads past the first subregion. Three control planes, one failure domain. | ✅ *(2026-08-13, incl. Kubernetes and Talos upgrades in place)* |
 | `OSC-work-ha` | workload | 3+3 | managed | Workload role; BSU volumes if paired with storage. | ⬜ |
 | `OSC-vip-reject` | — | any | vip | Negative test: validation must reject `vip`. | 🧪 |
 

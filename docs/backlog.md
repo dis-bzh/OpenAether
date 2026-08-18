@@ -48,6 +48,39 @@ ciphertext; there is no working restore path; and the documented user journey
 (`docs/first-cluster.md`, written 2026-08-17) was assembled by reading the code,
 not by walking it.
 
+### OPEN — Outscale puts a three-control-plane cluster in ONE subregion
+
+Found by the operator on 2026-08-17, looking at a running deploy: every node in
+`eu-west-2a`. Verified in the module, and it is not a configuration mistake:
+
+    modules/providers/outscale/network.tf:28  subregion_name = var.availability_zones[0]
+    modules/providers/outscale/network.tf:40  subregion_name = var.availability_zones[0]
+    modules/providers/outscale/main.tf:116    subregion_name = var.availability_zones[0]
+
+Three reads, always index 0, while the variable defaults to three subregions and
+described itself as "Availability zones for node distribution". scw and ovh both
+round-robin with `element(var.…, count.index)`; outscale is the only module that
+does not, and the only one where a variable promises a spread it never performs.
+`ReadSubregions` confirms eu-west-2a/b/c all exist and are `available`, so the
+platform is not the limit.
+
+Consequence: `OSC-mgmt-ha` is HA against a node failure and not against a
+subregion failure. The matrix said so about the RAM quota and not about this.
+
+**Why it is not a small fix.** On Outscale placement comes from the SUBNET, not
+from an attribute on the VM. Spreading means one private subnet per subregion
+(with its own ip_range), nodes round-robined across them, worker volumes in the
+matching subregion, and a decision about the NAT service — one NAT is a single
+egress failure domain, one per subregion needs a route table each. Turning
+`outscale_subnet.private` into an indexed resource moves its address, which
+replaces the subnet and everything attached to it: it can only be done on a fresh
+deploy, never on a live cluster.
+
+**Closes:** an Outscale deploy whose `kubectl get nodes -o wide` shows control
+planes in at least two subregions, and `task verify` green. Rung: real cloud, and
+it must be a new cluster. Until then the documentation says one subregion, which
+it now does.
+
 ### OPEN — the OVH upgrade does not complete, and here is what it looks like
 
 2026-08-17, a second OVH cluster, deployed and torn down the same afternoon. The
