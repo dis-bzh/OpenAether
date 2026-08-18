@@ -239,6 +239,39 @@ snapshot storage. Recorded so the question is not re-opened from scratch.
 **Reopen if:** a real upgrade ever needs a node created on the previous version
 while the roll is still in flight.
 
+### OPEN — the emulated Scaleway lane is pinned a release behind, and knows it
+
+CI's `Emulated Cloud (scaleway)` went red on 2026-08-18 with
+
+    501 Not Implemented: feint does not serve
+    /instance/v2alpha1/zones/fr-par-1/private-network-interfaces
+
+Diagnosed by asking the emulator itself (`/_feint/routes`): feint v0.8.0 serves
+**130 instance routes, all under `/instance/v1`**, including
+`/instance/v1/zones/{zone}/servers/{id}/private_nics` — the OLD private-NIC API.
+Scaleway moved that call to `instance/v2alpha1 · private-network-interfaces` and
+provider **v2.81.0, released 2026-08-17**, follows it. Our `~> 2.68` constraint
+picked it up the next day.
+
+**v0.8.0 is the newest feint published** — release and tag both, checked against
+the API, and the installed binary is v0.8.0. There is no version to bump to.
+
+Pinned `~> 2.80.0` in `opentofu-feint/versions.tf` only: measured, the emulated
+Scaleway lane then applies 8 and destroys 8, and the Outscale lane is unaffected
+(27/27). The cluster roots keep 2.81.0 and deploy fine on real Scaleway.
+
+**The cost, stated rather than hidden:** this lane no longer emulates the provider
+the clusters run. It still catches what it was built for — our own module shapes,
+at rung zero — but it can no longer catch a break introduced by a provider
+release, which is precisely the break that just happened. That is a real
+reduction in what CI proves.
+
+**Closes:** feint serving the v2alpha1 route (an upstream issue to
+stephrobert/feint, and the report is small: the provider now calls
+CreatePrivateNIC/ListPrivateNICs under `instance/v2alpha1` as
+`private-network-interfaces`; feint only implements the `instance/v1` form).
+Then restore `~> 2.68` and bump `FEINT_VERSION` in the same commit.
+
 ### OPEN — neither state backend takes a lock
 
 Found 2026-08-18 while deciding whether it was safe to run an image rebuild
