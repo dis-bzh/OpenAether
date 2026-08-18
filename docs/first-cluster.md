@@ -112,6 +112,25 @@ Scaleway, 2026-08-17**, for two buckets, one snapshot and one image per zone —
 creates four more buckets, applies the infrastructure, opens one SSH tunnel per
 node, then applies the machine configs and bootstraps Talos.
 
+**The apiserver load balancer is the slowest thing in this step, and the only
+one that can strand you.** On Scaleway it is quick. On OVH and Outscale it is a
+managed service that builds asynchronously: measured at **over 30 minutes still
+"PENDING_CREATE" on OVH, 2026-08-18**, and it was an Outscale one timing out at
+10 minutes that first exposed this on 2026-08-16. The apply shows nothing but
+`Still creating...`; the provider's own API is where the real state lives.
+
+If it does time out, **do not just re-run.** OpenTofu marks the resource
+`tainted`, so the next apply DESTROYS the load balancer the provider was still
+building and starts the wait over. `task infra` now prints the tainted addresses
+and the `tofu untaint` command when it fails — ask the provider first, and keep
+the resource if the provider says it is fine.
+
+And if it is genuinely stuck, that is not something you can fix: a managed load
+balancer reserves a port inside your own subnet before its backend exists, so a
+wedged one cannot be deleted and it pins the subnet, the network, and your whole
+teardown behind it. `task down` recognises this and says so rather than telling
+you to retry. It is a support ticket.
+
 **On Outscale that first step is minutes to an hour, not seconds**, and it is the
 provider, not this project. Outscale registers an image from a snapshot IMPORTED
 from an 11 GiB object, and the import sits in a provider-side queue: **8 min end

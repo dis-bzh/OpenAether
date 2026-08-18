@@ -455,6 +455,42 @@ image build and the verifier are first asked to agree on it for real.
 **Closes:** one deploy with `bucket_suffix` set, reaching `task verify` green.
 Rung: real cloud. Cheap to fold into a run that is happening anyway.
 
+### FIXED — the hour was not the load balancer, it was not being told
+
+2026-08-19. The operator's question after the OVH day was the right one: not "why
+is this provider slow" but **"how do we make it transparent for users"**. Three
+things, each one an hour that was actually spent:
+
+1. **Nothing said the word "tainted".** A create that times out leaves the
+   resource tainted, so re-running DESTROYS what the provider was still building.
+   `task infra` now runs `scripts/internal/explain-failure.sh` from a Taskfile
+   `defer:` guarded on `{{.EXIT_CODE}}` — verified on Task 3.52 that EXIT_CODE is
+   populated on failure and empty on success, so it costs nothing when the apply
+   works. It names the tainted addresses, says re-running destroys and rebuilds
+   them, and prints the `tofu untaint` line for each.
+2. **A failed teardown could not tell "retry" from "only the provider can lift
+   this".** `fleet-down.sh` now captures the destroy transcript through a pipe
+   (`pipefail` keeps the destroy's own status, and the pipeline does not return
+   until tee has written, so there is no flush race) and classifies it. On a
+   wedged-load-balancer signature it prints what to check for billing, tells the
+   operator to put BOTH the provider's listing and the provider's refusal in the
+   ticket, and says to move on.
+3. **The documentation quoted 52s and stopped there.** `first-cluster.md` now
+   states the apiserver LB is the slowest and only stranding step, gives the
+   measured OVH figure, and says not to re-run blindly.
+
+Proven offline, mutation-tested both ways in each case. `test-explain-failure.sh`
+(8 assertions): report every resource instead of only tainted ones → 2 red; let a
+broken `tofu` propagate → 1 red. `test-teardown.sh` grew 64 → **76**: make the
+verdict fire on every failure → 2 red (it blames the provider for a quota error);
+make it never fire → **6** red. That second number was 2 on the first attempt
+because the mutation only broke one alternative of the pattern — the mutation was
+partial, not the test weak, and it was worth the second look.
+
+What none of this does is make the load balancer faster. It makes the twenty
+minutes legible instead of frightening, and it stops the loop that turned twenty
+minutes into an afternoon.
+
 ### OPEN — the same load balancer timeout, on a second provider, because the fix never travelled
 
 2026-08-18, OVH. `openstack_lb_loadbalancer_v2.k8s` died at **9m51s** on "context

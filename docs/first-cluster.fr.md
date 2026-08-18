@@ -115,6 +115,26 @@ Scaleway le 2026-08-17**, pour deux buckets, un snapshot et une image par zone �
 crée quatre buckets de plus, applique l'infrastructure, ouvre un tunnel SSH par
 nœud, puis applique les configurations machine et amorce Talos.
 
+**Le load balancer de l'apiserver est ce qu'il y a de plus lent dans cette
+étape, et le seul objet qui peut te laisser en rade.** Rapide chez Scaleway. Chez
+OVH et Outscale c'est un service managé qui se construit de façon asynchrone :
+mesuré à **plus de 30 minutes toujours en « PENDING_CREATE » chez OVH, le
+2026-08-18**, et c'est un LB Outscale expirant à 10 minutes qui l'a révélé le
+2026-08-16. L'apply n'affiche rien d'autre que `Still creating...` ; l'état réel
+est dans l'API du provider.
+
+En cas de timeout, **ne relance pas bêtement.** OpenTofu marque la ressource
+`tainted`, donc l'apply suivant **détruit** le load balancer que le provider était
+en train de finir et recommence l'attente. `task infra` imprime désormais les
+adresses tainted et la commande `tofu untaint` quand il échoue : demande d'abord
+au provider, et garde la ressource s'il la dit saine.
+
+Et s'il est réellement coincé, ce n'est pas réparable de ton côté : un LB managé
+réserve un port **dans ton propre sous-réseau** avant que son backend existe, si
+bien qu'un LB bloqué ne peut plus être supprimé et retient le sous-réseau, le
+réseau, et tout ton teardown derrière lui. `task down` le reconnaît et te le dit,
+au lieu de te conseiller de réessayer. C'est un ticket support.
+
 **Sur Outscale, cette première étape se compte en minutes voire en heure, pas en
 secondes**, et cela vient du provider, pas de ce projet. Outscale enregistre une
 image à partir d'un snapshot IMPORTÉ depuis un objet de 11 Gio, et cet import

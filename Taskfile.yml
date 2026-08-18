@@ -281,6 +281,16 @@ tasks:
       # The backup path had no inverse until 0.5.0. This is the round trip —
       # the real enc() against the real dec(), offline.
       - ./scripts/dev/test-restore.sh
+      # `nc -z` calls a dead ssh -L tunnel healthy. Two local listeners measure
+      # the difference the whole tunnel guard rests on.
+      - ./scripts/dev/test-endpoint-probe.sh
+      # Forgetting the second provider's keys does not fail — it signs the copy
+      # with the first provider's. Only the ENDPOINTS can say a backup was meant
+      # to be elsewhere, which is what these assert.
+      - ./scripts/dev/test-backup-creds.sh
+      # Nothing said "tainted", so re-running destroyed a load balancer the
+      # provider was still building. This keeps that sentence on screen.
+      - ./scripts/dev/test-explain-failure.sh
 
   test:
     desc: Run OpenTofu tests (cluster root)
@@ -470,6 +480,12 @@ tasks:
           echo "  Re-run with: TF_CLI_ARGS_apply=-auto-approve task {{.TASK}} ..." >&2
           exit 1
         fi
+      # Only on failure — EXIT_CODE is empty when the task succeeded (verified on
+      # Task 3.52). An apply that times out mid-creation leaves the resource
+      # TAINTED, so the obvious "just re-run" destroys what the provider was
+      # still building. Nothing said the word "tainted" on 2026-08-18 and that
+      # cost an hour of rebuilding an OVH load balancer at ten minutes a go.
+      - defer: '{{if .EXIT_CODE}}../../../scripts/internal/explain-failure.sh .{{else}}true{{end}}'
       - ../../../scripts/internal/ensure-buckets.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars
       - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
       - |

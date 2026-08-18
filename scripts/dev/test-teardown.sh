@@ -71,6 +71,9 @@ printf '%s\n' "$*" >>"${STUB_TASK_LOG:?}"
 # STUB_TASK_FAIL_TIMES: fail the first N invocations, then honour STUB_TASK_RC.
 # The count lives in a file because every call is a fresh process, and a stub
 # that cannot change its mind cannot exercise a retry loop at all.
+# STUB_TASK_MSG: what the "provider" says while refusing. fleet-down classifies
+# its own failure from this text, so a stub that says nothing cannot exercise it.
+[ -n "${STUB_TASK_MSG:-}" ] && printf '%s\n' "$STUB_TASK_MSG" >&2
 if [ -n "${STUB_TASK_FAIL_TIMES:-}" ] && [ -n "${STUB_TASK_COUNT_FILE:-}" ]; then
   n=$(cat "$STUB_TASK_COUNT_FILE" 2>/dev/null || echo 0)
   n=$((n + 1)); printf '%s' "$n" >"$STUB_TASK_COUNT_FILE"
@@ -232,6 +235,36 @@ expect_rc 1 "a destroy that never succeeds still fails the run"
 expect_out "after 3 attempt(s)" "it says how many attempts it made"
 refute_out "fleet-down complete" "it does not report success after exhausting the retries"
 expect_destroys 3 "it stops at DESTROY_ATTEMPTS instead of looping"
+
+# 3. Permanent AND not ours. A managed load balancer that never finished
+#    provisioning holds a port inside the customer subnet and cannot be deleted
+#    by anyone but the provider — so subnet, network and teardown all queue
+#    behind it. Measured on Outscale 2026-08-16 and OVH 2026-08-18. Telling this
+#    apart from a retryable race is the difference between a support ticket and
+#    an afternoon of re-running: on 2026-08-18 the operator paid the afternoon.
+for MSG in \
+  "Error: A load balancer is present on Net 'vpc-0000'. The Internet service cannot be unlinked" \
+  "Error: Cannot perform the action. The Subnet subnet-0000 is in use. It has NICs." \
+  "Error: Invalid state PENDING_CREATE of loadbalancer resource 0000-1111"; do
+  : >"$STUB_TASK_COUNT_FILE"
+  export STUB_TASK_FAIL_TIMES=99 STUB_TASK_MSG="$MSG"
+  run "$FLEET_DOWN" stubcloud --yes
+  expect_rc 1 "a provider-held teardown still fails the run"
+  expect_out "this is not yours to fix" "it names the wedged load balancer: ${MSG:7:38}…"
+  expect_out "support ticket" "and sends the operator to a ticket rather than a retry"
+done
+unset STUB_TASK_MSG
+
+# 4. Permanent and ORDINARY. The verdict above must not fire on every failure —
+#    a guard written for the pathological case has turned red on the normal one
+#    three times in this repository.
+: >"$STUB_TASK_COUNT_FILE"
+export STUB_TASK_FAIL_TIMES=99 STUB_TASK_MSG="Error: quota exceeded for instances"
+run "$FLEET_DOWN" stubcloud --yes
+expect_rc 1 "an ordinary failure still fails"
+refute_out "this is not yours to fix" "it does NOT blame the provider for an ordinary failure"
+expect_out "INCOMPLETE" "it gives the ordinary message instead"
+unset STUB_TASK_MSG
 
 # 3. And it must not retry what worked: three destroys where one was needed is
 #    three chances to destroy something that came back.

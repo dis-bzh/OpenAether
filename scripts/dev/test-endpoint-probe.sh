@@ -20,10 +20,16 @@ PASS=0; FAIL=0
 ok()  { printf '  \033[32m✓\033[0m %s\n' "$*"; PASS=$((PASS + 1)); }
 bad() { printf '  \033[31m✗\033[0m %s\n' "$*"; FAIL=$((FAIL + 1)); }
 
-# High, odd ports: outside CP_BASE..WK_BASE+99, so close_tunnels never sweeps them.
-DEAF=59997   # accepts TCP, speaks nothing — what a dead `ssh -L` looks like
-TLS=59998    # a real TLS server — what a live Talos apid looks like
-SHUT=59999   # nothing at all
+# Well outside CP_BASE..WK_BASE+99, so close_tunnels never sweeps them, and
+# derived from this process so two runs of the suite cannot collide on a listener
+# the previous one has not released.
+# ×5, not ×1: processes started together get CONSECUTIVE pids, so a spacing of
+# one made run N's TLS port collide with run N+1's deaf port. Measured — five
+# concurrent copies, two of them unable to bind.
+BASE=$(( 40000 + ($$ % 4000) * 5 ))
+DEAF=$((BASE))       # accepts TCP, speaks nothing — what a dead `ssh -L` looks like
+TLS=$((BASE + 1))    # a real TLS server — what a live Talos apid looks like
+SHUT=$((BASE + 2))   # nothing at all
 
 CERT="$(mktemp -d)/s.pem"
 cleanup() { kill "${DEAF_PID:-}" "${TLS_PID:-}" 2>/dev/null; rm -rf "$(dirname "$CERT")"; }
@@ -48,11 +54,21 @@ timeout 60 openssl s_server -quiet -accept "$TLS" -cert "$CERT" -key "$CERT" \
   >/dev/null 2>&1 &
 TLS_PID=$!
 
-for _ in $(seq 1 20); do
-  timeout 2 bash -c ">/dev/tcp/127.0.0.1/$DEAF" 2>/dev/null &&
-    timeout 2 bash -c ">/dev/tcp/127.0.0.1/$TLS" 2>/dev/null && break
-  sleep 0.3
+# Wait for both listeners with an INDEPENDENT check — a raw openssl handshake,
+# not the function under test, so a genuinely broken probe still fails loudly
+# instead of quietly timing out here. The TLS server needs longer than a TCP
+# accept: waiting only for the connect made this file flaky under load, failing
+# "the probe accepts a real TLS server" when the server simply was not up yet.
+ready=0
+for _ in $(seq 1 60); do
+  if timeout 2 bash -c ">/dev/tcp/127.0.0.1/$DEAF" 2>/dev/null &&
+     timeout 5 openssl s_client -connect "127.0.0.1:$TLS" -brief </dev/null 2>&1 |
+       grep -qiE 'CONNECTION ESTABLISHED|Protocol version'; then
+    ready=1; break
+  fi
+  sleep 0.5
 done
+[ "$ready" = 1 ] || { echo "✗ the test listeners never came up — this harness cannot conclude"; exit 1; }
 
 echo "--- the socket that accepts but is not Talos (a dead ssh -L) ---"
 if command -v nc >/dev/null 2>&1; then

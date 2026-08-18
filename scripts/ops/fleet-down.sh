@@ -158,8 +158,16 @@ fi
 DESTROY_ATTEMPTS="${DESTROY_ATTEMPTS:-3}"
 DESTROY_BACKOFF="${DESTROY_BACKOFF:-60}"   # seconds, for deletions to settle
 attempt=1
+# Kept so the ending can tell "retry this" apart from "only the provider can lift
+# it". Without the transcript the report can only say FAILED, which is what sent
+# an operator round the same loop on 2026-08-18.
+DESTROY_LOG="$(mktemp)"
+trap 'rm -f "$DESTROY_LOG"' EXIT
 while :; do
-  if ( cd "$ROOT" && TF_CLI_ARGS_destroy=-auto-approve task destroy ROLE="$ROLE" PROVIDER="$PROVIDER" ); then
+  # A PIPE, not a process substitution: `set -o pipefail` above makes the `if`
+  # see the destroy's own status, and the pipeline does not return until tee has
+  # finished writing — so the transcript is complete when it is read below.
+  if ( cd "$ROOT" && TF_CLI_ARGS_destroy=-auto-approve task destroy ROLE="$ROLE" PROVIDER="$PROVIDER" ) 2>&1 | tee "$DESTROY_LOG"; then
     if [ "$attempt" -gt 1 ]; then
       ok "management destroyed (attempt ${attempt}/${DESTROY_ATTEMPTS})"
     else
@@ -196,6 +204,32 @@ cat <<EOT
   Local: kubeconfig, talosconfig, edge-*.kubeconfig, restic-escrow-*.txt
 EOT
 if [ "$FAILED" -ne 0 ]; then
+  # Two very different endings, and telling them apart is the whole point.
+  #
+  # A managed load balancer that never finished provisioning cannot be deleted by
+  # ANYONE but the provider, and it holds a port inside the customer subnet — so
+  # the subnet, then the network, then the teardown all queue behind it. Measured
+  # on Outscale 2026-08-16 and on OVH 2026-08-18: the same mechanism, and on
+  # Outscale the provider's own listing said zero load balancers while its refusal
+  # named one. Retrying that is not a strategy. See .claude/skills/teardown.
+  if grep -qEi 'load balancer is present on Net|Invalid state PENDING_(CREATE|DELETE)|is in use\. It has NICs|has dependencies and cannot be deleted' "$DESTROY_LOG" 2>/dev/null; then
+    printf '\n\033[33m─── this is not yours to fix ───\033[0m\n' >&2
+    printf 'The provider refused with one of the signatures of a WEDGED MANAGED LOAD\n' >&2
+    printf 'BALANCER. It reserves a port inside your subnet before its own backend\n' >&2
+    printf 'exists; when the backend never attaches it cannot be deleted, and the\n' >&2
+    printf 'subnet and network queue behind it. Re-running will not change that.\n\n' >&2
+    grep -Ei 'load balancer is present on Net|Invalid state PENDING_|is in use\. It has NICs|has dependencies and cannot be deleted' "$DESTROY_LOG" |
+      sort -u | head -6 | sed 's/^/    /' >&2
+    printf '\nWhat to do, in order:\n' >&2
+    printf '  1. Confirm nothing BILLABLE is left — instances, volumes, public IPs, NAT.\n' >&2
+    printf '     Networks, subnets, route tables and gateways are not the expensive part.\n' >&2
+    printf '       python3 scripts/ops/purge-orphans/%s.py        # dry-run, asks the provider\n' "$PROVIDER" >&2
+    printf '  2. Open a support ticket, and put BOTH answers in it — the listing that\n' >&2
+    printf '     says the resource is absent AND the refusal that names it. That\n' >&2
+    printf '     contradiction is the whole argument.\n' >&2
+    printf '  3. Move on. Nothing in this repository can lift it.\n\n' >&2
+    exit 1
+  fi
   printf '\n✗ fleet-down INCOMPLETE — see the ⚠ above. Resources may still exist\n'  >&2
   printf '  and be BILLED. Check the provider, then re-run (idempotent).\n' >&2
   exit 1
