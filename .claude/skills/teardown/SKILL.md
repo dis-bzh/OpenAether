@@ -51,6 +51,23 @@ workflow, a README line) will refuse and leave the cloud running.
   instances, floating IPs and bastion — the bill is there. Expect the run to fail
   at the end on the subnet, and read that failure as "waiting on the provider",
   not as an incomplete teardown.
+
+- **The provider contradicts ITSELF, and the ERROR is the truthful half.** Measured
+  on Outscale 2026-08-18, on a Net with no VM, no volume, no EIP and no NIC left:
+
+      ReadLoadBalancers        → 0          ReadNics → 0
+      UnlinkInternetService    → "A load balancer is present on Net '{vpc}'"
+      DeleteSubnet             → "The Subnet <id> is in use. It has NICs."
+
+  This project's rule is "ask the provider, not the tool". It is not enough: the
+  provider's LISTING said the Net was empty while the provider's REFUSAL named a
+  load balancer and NICs that no listing returns. When the two disagree, believe
+  the refusal — it is the side that actually holds the lock. A purge that only
+  consults listings will report a clean account and leave one pinned for ever.
+
+  Both clouds land in the same place: a managed load balancer leaves a remnant the
+  customer cannot see and cannot delete. Nothing in this repository can lift it.
+  Collect the two answers side by side, open the ticket, and move on.
 - **The destroy races the provider.** Deletions propagate asynchronously;
   `fleet-down.sh` retries three times with a pause (`DESTROY_ATTEMPTS`,
   `DESTROY_BACKOFF`) and still fails at the end if the resource is genuinely
