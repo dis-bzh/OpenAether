@@ -65,6 +65,15 @@ task rolling-replace PROVIDER=<p> KEY=~/.ssh/<key> -- --cp-only --upgrade
 task rolling-replace PROVIDER=<p> KEY=~/.ssh/<key> -- --workers-only --upgrade
 ```
 
+**On Outscale the first line dominates the whole upgrade.** The image is
+registered from a snapshot imported through a provider-side queue: 8 min on
+2026-08-18, over 60 min on 2026-07-25. It blocks before a single node is touched,
+and no node ever boots from it — the roll installs from the Image Factory
+(`installer_image`). It is required only because `image_id` is unpinned, so the
+data source resolves the OMI by a name carrying the version. `ReadSnapshots`
+tells you where the import really is; the apply's "Still creating..." does not.
+
+
 `--upgrade` calls `talosctl upgrade`, which keeps the node's disk, identity and
 etcd membership, drains it itself, and refuses a control-plane upgrade that would
 cost etcd its quorum. One node at a time, health-gated between each, and

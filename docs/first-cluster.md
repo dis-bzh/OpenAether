@@ -3,8 +3,9 @@
 # Your first cluster
 
 From a bare machine and an empty cloud account to a Talos cluster you can reach,
-upgrade and destroy. Scaleway is used throughout; OVH and Outscale differ only in
-their credentials and their tfvars file.
+upgrade and destroy. Scaleway is used throughout; OVH and Outscale mostly differ
+only in their credentials and their tfvars file — the exception is step 4, where
+Outscale is far slower, and step 7, where OVH is a known open defect.
 
 **Read the honesty note at the bottom before you spend anything.** Parts of this
 path have never been walked end to end, and this document says which.
@@ -110,6 +111,15 @@ In order it builds the Talos image and uploads it — **measured at 52 s on
 Scaleway, 2026-08-17**, for two buckets, one snapshot and one image per zone —
 creates four more buckets, applies the infrastructure, opens one SSH tunnel per
 node, then applies the machine configs and bootstraps Talos.
+
+**On Outscale that first step is minutes to an hour, not seconds**, and it is the
+provider, not this project. Outscale registers an image from a snapshot IMPORTED
+from an 11 GiB object, and the import sits in a provider-side queue: **8 min end
+to end on 2026-08-18, and over 60 min stuck at `in-queue 0%` on 2026-07-25**. Two
+measurements, one order of magnitude apart, so plan for the slow one. Nothing is
+wrong while it waits; `ReadSnapshots` reports the real `State`/`Progress` if you
+want to see it move. The same wait recurs on every Talos version bump, including
+during an upgrade.
 
 Six buckets exist afterwards: state and artifacts, each with a `-backup` twin,
 plus the image and its staging area.

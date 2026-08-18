@@ -3,8 +3,10 @@
 # Ton premier cluster
 
 D'une machine nue et d'un compte cloud vide jusqu'à un cluster Talos que tu peux
-joindre, mettre à jour et détruire. Scaleway sert d'exemple ; OVH et Outscale ne
-diffèrent que par leurs identifiants et leur fichier tfvars.
+joindre, mettre à jour et détruire. Scaleway sert d'exemple ; OVH et Outscale n'en
+diffèrent guère que par leurs identifiants et leur fichier tfvars — à deux
+exceptions près : l'étape 4, bien plus lente sur Outscale, et l'étape 7, un défaut
+ouvert connu sur OVH.
 
 **Lis la note d'honnêteté en fin de page avant de dépenser quoi que ce soit.**
 Une partie de ce chemin n'a jamais été parcourue de bout en bout, et ce document
@@ -109,8 +111,18 @@ un *autre*, recalculé à cet instant. (Pour un run non supervisé, enregistre-l
 d'abord : `task plan … OUT=tfplan`, relis-le, puis `task apply-plan PLAN=tfplan`.)
 
 Dans l'ordre, il construit l'image Talos et la téléverse — **mesuré à 52 s sur
-Scaleway le 2026-08-17**, pour deux buckets, un snapshot et une image par zone — crée quatre buckets de plus, applique l'infrastructure, ouvre un
-tunnel SSH par nœud, puis applique les configurations machine et amorce Talos.
+Scaleway le 2026-08-17**, pour deux buckets, un snapshot et une image par zone —
+crée quatre buckets de plus, applique l'infrastructure, ouvre un tunnel SSH par
+nœud, puis applique les configurations machine et amorce Talos.
+
+**Sur Outscale, cette première étape se compte en minutes voire en heure, pas en
+secondes**, et cela vient du provider, pas de ce projet. Outscale enregistre une
+image à partir d'un snapshot IMPORTÉ depuis un objet de 11 Gio, et cet import
+patiente dans une file côté provider : **8 min de bout en bout le 2026-08-18, et
+plus de 60 min bloqué à `in-queue 0%` le 2026-07-25**. Deux mesures, un ordre de
+grandeur d'écart : prévois la lente. Rien n'est cassé pendant l'attente ;
+`ReadSnapshots` donne l'état et la progression réels si tu veux la voir avancer.
+La même attente revient à chaque changement de version Talos, upgrade compris.
 
 Six buckets existent ensuite : l'état et les artefacts, chacun avec son jumeau
 `-backup`, plus l'image et sa zone de préparation.

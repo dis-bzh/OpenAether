@@ -98,10 +98,13 @@ resource "outscale_snapshot" "talos" {
   snapshot_size = tonumber(data.external.oos_object.result.size)
   description   = "Talos ${var.talos_version} (${var.arch}) — imported for OMI registration"
 
-  # ⚠️ The Outscale snapshot import is SLOW and goes through a provider-side
-  # queue: measured > 60 min at `in-queue 0%` (2026-07-25), beyond the
-  # provider's default timeout (40 min) → the apply fails while the import
-  # then succeeds, leaving a snapshot OUTSIDE STATE. If this happens again:
+  # ⚠️ The Outscale snapshot import goes through a provider-side queue whose
+  # wait is WIDE and outside our control: 8 min end to end (2026-08-18) against
+  # > 60 min stuck at `in-queue 0%` (2026-07-25). Size the timeout for the bad
+  # day, not the good one — the provider default (40 min) let the apply fail
+  # while the import then succeeded, leaving a snapshot OUTSIDE STATE.
+  # `ReadSnapshots` reports State/Progress and is the only honest answer about
+  # where an import actually is. If the apply dies while the import lives on:
   # DO NOT re-run the apply as-is (it creates a second import) — import the
   # existing snapshot into state first, then continue:
   #   tofu import module.outscale[0].outscale_snapshot.talos <snap-id>

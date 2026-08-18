@@ -159,11 +159,22 @@ Two changes in `modules/talos-image/outscale/main.tf`:
   Outscale — in the middle of an upgrade, and an import that then failed would
   leave neither the old artifact nor a new one.
 
-Plan after the fix: `4 to add, 0 to change, 3 to destroy`, and OpenTofu's own
-symbols read `+/-` on all three — create, then destroy. **VERIFIED at plan level
-only**; the apply has not run. scw has no lifecycle block and replaced 7/7
-cleanly on 2026-08-17; ovh and proxmox have a single image resource and no
-ordering to get wrong. The defect was Outscale's alone.
+Plan after the fix: `4 to add, 0 to change, 3 to destroy`, `+/-` on all three.
+**VERIFIED by the apply, 2026-08-18**, and by the native API afterwards: the new
+OMI is registered, the old OMI and the old snapshot are both gone, no 409. The
+provider documents both halves of why — "You cannot delete snapshots that are
+currently used by an OMI", and for the image itself "you can still use VMs
+already launched from this OMI", so deregistering it under six running nodes is
+allowed. scw has no lifecycle block and replaced 7/7 cleanly on 2026-08-17; ovh
+and proxmox have a single image resource and no ordering to get wrong. The defect
+was Outscale's alone.
+
+**The wait is nothing like what we had written.** Upload 2m44s, then the snapshot
+import 12:20:24 → OMI registered 12:28:40: **~8 minutes**, against the "> 60 min"
+in the module comment from a single 2026-07-25 observation. One order of
+magnitude between two points, so the honest statement is a range, not a number,
+and it now appears in `first-cluster.md` and `upgrade.md` — where a user looks —
+instead of only in a `.tf` comment.
 
 ### OPEN — neither state backend takes a lock
 

@@ -70,6 +70,16 @@ task rolling-replace PROVIDER=<p> KEY=~/.ssh/<clé> -- --cp-only --upgrade
 task rolling-replace PROVIDER=<p> KEY=~/.ssh/<clé> -- --workers-only --upgrade
 ```
 
+**Sur Outscale, la première ligne domine tout l'upgrade.** L'image est
+enregistrée depuis un snapshot importé via une file côté provider : 8 min le
+2026-08-18, plus de 60 min le 2026-07-25. Elle bloque avant qu'un seul nœud soit
+touché, et aucun nœud n'en démarre jamais — le roulement installe depuis l'Image
+Factory (`installer_image`). Elle n'est requise que parce que `image_id` n'est pas
+pinné : la source de données résout l'OMI par un nom qui porte la version.
+`ReadSnapshots` dit où en est réellement l'import ; le « Still creating... » de
+l'apply, non.
+
+
 `--upgrade` appelle `talosctl upgrade`, qui conserve le disque, l'identité et
 l'appartenance etcd du nœud, le drain lui-même, et refuse une mise à niveau de
 control plane qui coûterait son quorum à etcd. Un nœud à la fois, avec une porte
