@@ -134,6 +134,54 @@ planes in at least two subregions, and `task verify` green. Rung: real cloud, an
 it must be a new cluster. Until then the documentation says one subregion, which
 it now does.
 
+### FIXED — the Outscale image rebuild deleted a snapshot its own OMI still used
+
+2026-08-18, upgrading the live Outscale cluster v1.13.7 → v1.13.8. `task upgrade`
+died before touching a single node:
+
+    Error: Unable to delete Snapshot
+    409 Conflict — {"Type":"ResourceConflict","Code":"9094"}
+
+The plan said it all: **`Plan: 3 to add, 1 to change, 2 to destroy`**. The image
+was "1 to change" — OpenTofu meant to update it in place and swap the snapshot
+underneath. An OMI's backing snapshot is immutable, so that update was never
+possible; the provider reports `block_device_mappings` as updatable and OpenTofu
+believed it. The native API confirmed the conflict rather than guessing it:
+`ReadImages` showed the v1.13.7 OMI still referencing the snapshot being deleted.
+
+Two changes in `modules/talos-image/outscale/main.tf`:
+
+- `replace_triggered_by = [outscale_snapshot.talos]` on the image, which puts it
+  back in the graph where it belongs — destroyed BEFORE the snapshot it is built
+  on, because it depends on it.
+- `create_before_destroy` on both. Destroy-first left the account with **no
+  bootable Talos image for the length of the import** — measured beyond 60 min on
+  Outscale — in the middle of an upgrade, and an import that then failed would
+  leave neither the old artifact nor a new one.
+
+Plan after the fix: `4 to add, 0 to change, 3 to destroy`, and OpenTofu's own
+symbols read `+/-` on all three — create, then destroy. **VERIFIED at plan level
+only**; the apply has not run. scw has no lifecycle block and replaced 7/7
+cleanly on 2026-08-17; ovh and proxmox have a single image resource and no
+ordering to get wrong. The defect was Outscale's alone.
+
+### OPEN — neither state backend takes a lock
+
+Found 2026-08-18 while deciding whether it was safe to run an image rebuild
+alongside the operator. `infrastructure/opentofu/{cluster,talos-image}/backend.tf`
+both declare `backend "s3"` with no `use_lockfile` and no lock table. Two applies
+against the same state — two terminals, or an operator and an assistant — race,
+and the loser's write is lost silently.
+
+OpenTofu documents `use_lockfile = true` for S3-native locking, which needs
+conditional writes (If-None-Match) from the object store. Whether Scaleway, OVH
+and Outscale S3 all honour that is a HYPOTHESIS; each has to be tried.
+
+**Closes:** `use_lockfile = true` on both backends, and on each of the three
+providers a second apply started during the first one that is REFUSED with a lock
+error rather than proceeding. Rung: real cloud, but cheap — a plan is enough to
+take the lock.
+
 ### OPEN — the OVH upgrade does not complete, and here is what it looks like
 
 2026-08-17, a second OVH cluster, deployed and torn down the same afternoon. The

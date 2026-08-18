@@ -116,6 +116,13 @@ resource "outscale_snapshot" "talos" {
     # import.
     ignore_changes       = [file_location, snapshot_size]
     replace_triggered_by = [terraform_data.build_and_upload]
+
+    # Import the new snapshot BEFORE dropping the old one. Destroy-first would
+    # leave the account with no bootable Talos image for the whole import — an
+    # hour, in the middle of an upgrade — and an import that then fails leaves
+    # neither the old artifact nor a new one. Two versions coexisting costs
+    # snapshot storage; being unable to rebuild a node costs the cluster.
+    create_before_destroy = true
   }
 
   depends_on = [terraform_data.build_and_upload]
@@ -142,6 +149,24 @@ resource "outscale_image" "talos" {
     }
   }
 
+  lifecycle {
+    # An OMI's backing snapshot is IMMUTABLE, so a new snapshot means a new
+    # image — but the provider reports block_device_mappings as updatable, so a
+    # version bump planned "image: update in place, snapshot: replace". OpenTofu
+    # then destroyed the snapshot while this image still pointed at it and
+    # Outscale refused:
+    #     Unable to delete Snapshot — 409 ResourceConflict, Code 9094
+    # (measured 2026-08-18 upgrading v1.13.7 → v1.13.8: the run died before
+    # touching a single node, and the API confirmed ami-… still referenced
+    # snap-…). Forcing the replacement puts the image back where it belongs in
+    # the graph: destroyed BEFORE the snapshot it is built on.
+    replace_triggered_by = [outscale_snapshot.talos]
+
+    # Required for the snapshot's create_before_destroy above: OpenTofu refuses
+    # the mode unless every dependent shares it. Names carry the version, so two
+    # OMIs coexist without colliding.
+    create_before_destroy = true
+  }
 }
 
 # Purge of the staging `.raw`, once the OMI is registered.
