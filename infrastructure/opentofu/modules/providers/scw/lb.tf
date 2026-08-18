@@ -17,6 +17,16 @@ resource "scaleway_lb" "app" {
   zone       = var.zone
   type       = "LB-S"
   project_id = var.project_id
+
+  # Same patience the other two providers needed. Scaleway has not been seen to
+  # exceed the provider default, but "not seen" is not "cannot": Outscale died at
+  # 10m on 2026-08-16 and OVH on 2026-08-18, both on a load balancer that was
+  # still provisioning, and both left a TAINTED resource that the next run
+  # destroys and rebuilds. Waiting longer costs nothing; the loop costs the run.
+  timeouts {
+    create = "30m"
+  }
+
 }
 
 resource "scaleway_lb_private_network" "app" {
@@ -84,6 +94,16 @@ resource "scaleway_lb" "k8s" {
   zone       = var.zone
   type       = "LB-S"
   project_id = var.project_id
+
+  # Same patience the other two providers needed. Scaleway has not been seen to
+  # exceed the provider default, but "not seen" is not "cannot": Outscale died at
+  # 10m on 2026-08-16 and OVH on 2026-08-18, both on a load balancer that was
+  # still provisioning, and both left a TAINTED resource that the next run
+  # destroys and rebuilds. Waiting longer costs nothing; the loop costs the run.
+  timeouts {
+    create = "30m"
+  }
+
 }
 
 resource "scaleway_lb_private_network" "k8s" {

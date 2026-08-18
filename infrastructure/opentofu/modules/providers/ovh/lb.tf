@@ -14,6 +14,22 @@ resource "openstack_lb_loadbalancer_v2" "k8s" {
   count         = var.k8s_lb_mode == "managed" ? 1 : 0
   name          = "${var.cluster_name}-k8s-lb"
   vip_subnet_id = openstack_networking_subnet_v2.private.id
+
+  # Octavia is SLOW and its slowness is not bounded by the provider's patience:
+  # the default create timeout is 10 min, and on 2026-08-18 this load balancer
+  # was still PENDING_CREATE (operating_status ONLINE) fifteen minutes in, having
+  # already killed the apply at 9m51s — "context deadline exceeded". The resource
+  # is then TAINTED, so simply re-running destroys the one that was nearly ready
+  # and starts the wait again. That loop is the whole cost.
+  #
+  # Outscale hit the identical shape on 2026-08-16 and was given create = "30m";
+  # the lesson was never carried to its sibling modules. This is that carry.
+  timeouts {
+    create = "30m"
+    update = "30m"
+    delete = "30m"
+  }
+
 }
 
 resource "openstack_lb_listener_v2" "k8s_api" {
@@ -101,6 +117,22 @@ resource "openstack_lb_loadbalancer_v2" "app" {
   count         = var.deploy_app_lb ? 1 : 0
   name          = "${var.cluster_name}-app-lb"
   vip_subnet_id = openstack_networking_subnet_v2.private.id
+
+  # Octavia is SLOW and its slowness is not bounded by the provider's patience:
+  # the default create timeout is 10 min, and on 2026-08-18 this load balancer
+  # was still PENDING_CREATE (operating_status ONLINE) fifteen minutes in, having
+  # already killed the apply at 9m51s — "context deadline exceeded". The resource
+  # is then TAINTED, so simply re-running destroys the one that was nearly ready
+  # and starts the wait again. That loop is the whole cost.
+  #
+  # Outscale hit the identical shape on 2026-08-16 and was given create = "30m";
+  # the lesson was never carried to its sibling modules. This is that carry.
+  timeouts {
+    create = "30m"
+    update = "30m"
+    delete = "30m"
+  }
+
 }
 
 resource "openstack_lb_listener_v2" "http" {

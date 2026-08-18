@@ -455,6 +455,43 @@ image build and the verifier are first asked to agree on it for real.
 **Closes:** one deploy with `bucket_suffix` set, reaching `task verify` green.
 Rung: real cloud. Cheap to fold into a run that is happening anyway.
 
+### OPEN — the same load balancer timeout, on a second provider, because the fix never travelled
+
+2026-08-18, OVH. `openstack_lb_loadbalancer_v2.k8s` died at **9m51s** on "context
+deadline exceeded", and the provider's native API then showed it **still
+PENDING_CREATE sixteen minutes later**, with `operating_status: ONLINE`.
+
+This is the entry below, on a different cloud. That one was diagnosed on
+2026-08-16 and fixed with `timeouts { create = "30m" }` — **on the Outscale module
+only**. Neither `modules/providers/ovh` nor `modules/providers/scw` had a
+`timeouts` block anywhere, so both were still running on the provider default of
+10 minutes. A lesson learned in one provider module and not carried to its
+siblings is the same defect as `register-spoke.sh:26` keeping the `../` bug that
+its neighbour documents having fixed "in four sibling scripts".
+
+Both load balancers in both modules now carry it. **That is a necessary fix, not a
+proven sufficient one**: nobody has watched an OVH Octavia LB reach ACTIVE, so
+whether 30m is enough is a HYPOTHESIS.
+
+**The cost is not the wait, it is the loop.** A create timeout leaves the resource
+`tainted` in state, so re-running `task up` DESTROYS the load balancer that was
+nearly ready and begins again. Anyone who reacts to the timeout by re-running pays
+twice and learns nothing. Check first:
+
+    tofu state pull | jq '.resources[]|select(.type|startswith("openstack_lb_"))|.instances[0].status'
+
+and if the provider says ACTIVE, `tofu untaint` it instead of rebuilding.
+
+**The escape hatch that already exists:** `k8s_lb_mode = "vip"` (ovh and scw only;
+outscale rejects it by validation) skips Octavia entirely and reserves a private
+port for a Talos Layer2 VIP. It is NOT a drop-in — `k8s_lb_ip` then returns a
+PRIVATE address, so kubectl needs a tunnel and `docs/first-cluster.md` step 5 stops
+being true. Trading a stuck LB for a changed access model is a decision, not a
+workaround.
+
+**Closes:** one OVH deploy that reaches a Ready cluster, and the measured time the
+LB took. Rung: real cloud.
+
 ### OPEN — the Outscale apiserver load balancer never finishes provisioning
 
 Pure-infra deploy, 2026-08-16: `outscale_load_balancer.k8s` (`modules/providers/
