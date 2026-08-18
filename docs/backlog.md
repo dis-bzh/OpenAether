@@ -48,6 +48,36 @@ ciphertext; there is no working restore path; and the documented user journey
 (`docs/first-cluster.md`, written 2026-08-17) was assembled by reading the code,
 not by walking it.
 
+### FIXED — the port guard passed in 0s, on every provider, since it was written
+
+Outscale, 2026-08-18. `bootstrap-phase2` reported `✓ 6/6 tunnels up`, the guard
+reported `Talos API answering` on all six endpoints in **0 seconds**, and the six
+`talos_machine_configuration_apply` then spent **15 minutes each** before dying on
+
+    connect: connection refused   (127.0.0.1:50000 … :50102)
+
+Connection refused on the LOCAL port: the tunnels were not there at all.
+
+The guard exists to prevent exactly that, and had never run. The local-exec
+passes `ENDPOINT` and `NODE` and nothing else, so `talosctl get machinestatus`
+failed with `failed to resolve configuration context: talos config file is
+empty` — it never opened a socket. That string is not in the list of transport
+errors the probe treats as "not there yet", so the probe returned true on its
+first attempt. Reproduced verbatim.
+
+It passed the same way on Scaleway and OVH; those nodes simply happened to be
+ready, so nothing showed. A check that cannot fail is invisible until the day it
+was the only thing standing between you and a quarter of an hour.
+
+The probe now needs no configuration at all and separates three states, each
+verified: a closed port fails (rc 1), a real TLS endpoint passes (rc 0), and a
+TCP port with nothing behind it fails — that last one being the case the original
+comment correctly warned a bare connect would miss.
+
+Still open behind it: **why the tunnels died**. `talos-tunnels.sh open` reported
+6/6 and nothing was listening fifteen minutes later. The guard will now say so in
+seconds instead of hiding it, but the cause is not diagnosed.
+
 ### OPEN — Outscale puts a three-control-plane cluster in ONE subregion
 
 Found by the operator on 2026-08-17, looking at a running deploy: every node in
