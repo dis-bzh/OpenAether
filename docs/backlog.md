@@ -250,6 +250,30 @@ providers a second apply started during the first one that is REFUSED with a loc
 error rather than proceeding. Rung: real cloud, but cheap — a plan is enough to
 take the lock.
 
+### REFRAMED — `talosctl upgrade --wait` never returns, and it is not an OVH defect
+
+2026-08-18, Outscale, six nodes upgraded v1.13.7 → v1.13.8. **Every single one**
+hit the same wall the OVH entry below describes:
+
+    * <node>: stage: BOOTING ready: true unmetCond: []
+    ⚠ the upgrade watch did not return within 420s — asking the node itself
+    ✓ <node> came back on v1.13.8 — the watch failed, the upgrade did not
+
+Six for six, control planes and workers alike, and every node was on the new
+version and Ready. So `--wait` not returning is **not** an OVH problem, and the
+OVH entry below is at most partly about OVH: what OVH lacked was the bounded
+watch and the fallback that asks the node. Outscale had both, and shipped a
+clean upgrade through the same provider behaviour.
+
+What this changes: the 420s `UPGRADE_WATCH_TIMEOUT` and the ask-the-node recovery
+are not a workaround for one provider, they are the normal path. The open
+question is narrower than it was — why does a node that reports `ready: true`
+never reach `Running` for the watcher — and it is no longer blocking an upgrade
+anywhere.
+
+**Still open on OVH specifically:** a control plane came back on the PREVIOUS
+version. That is a different symptom and is untouched by this.
+
 ### OPEN — the OVH upgrade does not complete, and here is what it looks like
 
 2026-08-17, a second OVH cluster, deployed and torn down the same afternoon. The
