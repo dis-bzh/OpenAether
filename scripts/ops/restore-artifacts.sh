@@ -79,7 +79,14 @@ REPL_EP="$(tfv s3_replica_endpoint)"; REPL_REGION="$(tfv s3_replica_region)"
 
 # Same convention as backup.tf and ensure-buckets.sh — via the shared helper, so
 # a change to the naming cannot leave the restore path pointing at the old names.
-BUCKET="$(oa_artifact_bucket "$(oa_project "$CN")" "$PROVIDER" "$ROLE" "$ENVN")"
+#
+# The SUFFIX is part of that convention and was missing here: this was the only
+# one of five oa_project callers passing a single argument, so on any cluster
+# deployed with a bucket_suffix the restore looked in s3-<project>-<provider>-…
+# while the objects sat in s3-<project>-<suffix>-<provider>-… and reported "not
+# found" for a backup that existed. Using the shared helper is not the same as
+# using it with the same inputs.
+BUCKET="$(oa_artifact_bucket "$(oa_project "$CN" "$(tfv bucket_suffix)")" "$PROVIDER" "$ROLE" "$ENVN")"
 if [ "$FROM" = replica ]; then
   BUCKET="${BUCKET}-backup"
   EP="${REPL_EP:-$PRIM_EP}"; REGION="${REPL_REGION:-$PRIM_REGION}"; KIND=backup

@@ -91,5 +91,32 @@ else
 fi
 
 echo
+
+echo "=== the restore path derives the SAME name as everything else ==="
+# Not a grep of the source: this RUNS restore-artifacts.sh with a stub aws and
+# reads the bucket it announces. The previous harness checked the replica branch
+# by grepping the file, and could not see that this was the only one of five
+# oa_project callers dropping the suffix — so a cluster with a bucket_suffix got
+# "not found" for a backup that was sitting there.
+SB="$(mktemp -d)"; SUF=a1b2c3
+printf '#!/usr/bin/env bash\nexit 9\n' >"$SB/aws"; chmod +x "$SB/aws"
+FIX="infrastructure/opentofu/cluster/envs/oatest-scaleway.tfvars"
+cleanup_restore() { rm -f "$FIX"; rm -rf "$SB"; }
+trap cleanup_restore EXIT
+sed -E "s/^bucket_suffix.*//" infrastructure/opentofu/cluster/envs/management-scaleway.tfvars.example >"$FIX"
+printf '\nbucket_suffix = "%s"\n' "$SUF" >>"$FIX"
+CNAME="$(grep -E '^cluster_name' "$FIX" | head -1 | sed -E 's/.*"([^"]*)".*/\1/')"
+ENVV="$(grep -E '^environment' "$FIX" | head -1 | sed -E 's/.*"([^"]*)".*/\1/')"
+WANT="$(oa_artifact_bucket "$(oa_project "$CNAME" "$SUF")" scaleway oatest "$ENVV")-backup"
+
+for kind in primary replica; do
+  want="$WANT"; [ "$kind" = primary ] && want="${WANT%-backup}"
+  got="$(PATH="$SB:$PATH" TF_VAR_encryption_passphrase=x SCW_AWS_ACCESS_KEY_ID=k SCW_AWS_SECRET_ACCESS_KEY=k \
+         ./scripts/ops/restore-artifacts.sh scaleway --role oatest --from "$kind" 2>&1 |
+         sed -nE 's#.*s3://([a-z0-9-]+)/backups/.*#\1#p' | head -1)"
+  eq "restore --from $kind targets the suffixed bucket" "$got" "$want"
+done
+
+
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
