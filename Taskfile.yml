@@ -741,7 +741,12 @@ tasks:
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
     env: *provider-env
     cmds:
-      - ../../../scripts/ops/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
+      # NOT swallowed. This used to end in `|| echo "⚠ …"`, so a replica that could
+      # not be written cost one warning line in a wall of tofu output and the run
+      # reported success — you believed you had a copy and had nothing. The script
+      # already exits 0 by itself when there is legitimately nothing to replicate
+      # yet (no backup_targets output), so a non-zero here means a real failure.
+      - ../../../scripts/ops/backup-state.sh .
 
   # ===========================================================================
   # Multi-Cluster Management

@@ -54,4 +54,8 @@ AWS_ACCESS_KEY_ID="$BACKUP_AK" AWS_SECRET_ACCESS_KEY="$BACKUP_SK" \
   aws s3 cp "$WORK/state" "s3://$REPLICA_BUCKET/$KEY" \
     --endpoint-url "$REPLICA_EP" --region "$REPLICA_REGION" --sse AES256 >/dev/null
 
-echo "✓ tfstate replicated (still client-encrypted): s3://$PRIMARY_BUCKET/$KEY → s3://$REPLICA_BUCKET/$KEY"
+if [ "$REPLICA_EP" = "$PRIMARY_EP" ]; then
+  echo "✓ tfstate replicated (still client-encrypted) to s3://$REPLICA_BUCKET/$KEY — SAME provider"
+else
+  echo "✓ tfstate replicated (still client-encrypted) to s3://$REPLICA_BUCKET/$KEY — on ${REPLICA_EP}"
+fi

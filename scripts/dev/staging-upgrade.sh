@@ -134,9 +134,21 @@ esac
 if [ "$K8S_DONE" = 1 ] && [ "$TALOS_DONE" = 1 ]; then
   # Loud, and a failure — not a skip. A lane that quietly exercises nothing is
   # indistinguishable from a lane that passed, and this one costs money to run.
-  fail "every node already runs both target versions, so this run would
-  upgrade nothing. Pin a patch below cluster/variables.tf in STAGING_TFVARS_B64,
-  or pass UPGRADE_TALOS_TO / UPGRADE_K8S_TO."
+  fail "every node already runs both target versions (Talos ${TALOS_TO}, Kubernetes
+  ${K8S_TO}), so this run would upgrade nothing.
+
+  An upgrade can only be PROVEN from one patch below. Editing the tfvars is not
+  enough — this script reads the CLUSTER, not the file, so a tfvars that claims
+  an older version changes nothing here. The cluster itself has to start lower:
+
+    1. set talos_version / kubernetes_version one patch below in
+       envs/${ROLE}-${PROVIDER}.tfvars
+    2. deploy that cluster (task up …)
+    3. task upgrade …, which moves it to the targets in cluster/variables.tf
+
+  UPGRADE_TALOS_TO / UPGRADE_K8S_TO override the targets upward instead, but only
+  if a newer patch actually exists upstream. In CI the pin lives in
+  STAGING_TFVARS_B64."
 fi
 
 if [ "${DRY_RUN:-}" = "1" ]; then
