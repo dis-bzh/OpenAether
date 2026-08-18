@@ -31,10 +31,26 @@ workflow, a README line) will refuse and leave the cloud running.
   ec2 describe-instances` against `fcu.<region>.outscale.com` returned **0
   instances while the native `ReadVms` returned 7 running**. Use the native API;
   `scripts/ops/preflight-quotas.py` already carries the caller.
-- **Outscale — a wedged load balancer pins the Net**, and then every `tofu
-  destroy` dies on "the subnet is in use, it has NICs" or on a read the provider
-  cannot reconcile. The order that works is the dependency order, by hand,
-  through the native API.
+- **A wedged managed load balancer pins the network — and it is ONE mechanism, on
+  BOTH clouds.** Measured on OVH 2026-08-18, and it explains the Outscale case
+  that was only described before:
+
+      port  owner=Octavia  status=DOWN  ip=10.0.0.35  name=octavia-lb-<id>
+      DELETE /v2.0/lbaas/loadbalancers/<id>?cascade=true
+        → HTTP 409 "Invalid state PENDING_CREATE of loadbalancer resource <id>"
+
+  The managed LB reserves a VIP port **inside the customer subnet** the moment it
+  is created — before its own backend exists. If the backend never attaches, the
+  port stays DOWN, the LB stays in a transitional state, and the API REFUSES to
+  delete a resource in that state. The port belongs to the provider, not to you,
+  so you cannot remove it either. Subnet → network → teardown, all blocked behind
+  a resource only the provider can clear. That is a support ticket, not a bug in
+  this repository, and no retry count will change it.
+
+  **What still works, and do it first:** the compute is not blocked. Destroy the
+  instances, floating IPs and bastion — the bill is there. Expect the run to fail
+  at the end on the subnet, and read that failure as "waiting on the provider",
+  not as an incomplete teardown.
 - **The destroy races the provider.** Deletions propagate asynchronously;
   `fleet-down.sh` retries three times with a pause (`DESTROY_ATTEMPTS`,
   `DESTROY_BACKOFF`) and still fails at the end if the resource is genuinely
