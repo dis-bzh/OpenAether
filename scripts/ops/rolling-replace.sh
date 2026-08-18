@@ -190,6 +190,22 @@ k8s_node_for_ip() { # <private-ip>
 # Health gates
 # ==============================================================================
 
+# What version is this node ACTUALLY running? Empty when it cannot be asked.
+#
+# `talosctl version` exits 1 whenever the endpoint is unreachable — measured
+# 2026-08-18: 1 against a closed port, 1 against a socket that accepts and says
+# nothing, 0 only against a live apid. Under `set -euo pipefail` a bare
+# assignment from that pipeline therefore KILLS the roll, with no message at
+# all: on Outscale it printed the header for the last worker and exited 1, five
+# nodes into a six-node upgrade. A probe that cannot answer must say "I do not
+# know" and let the caller decide, not take the script down with it.
+node_talos_version() { # <endpoint> <node_ip>  → version, or empty
+  local out
+  out="$(talosctl version -e "$1" -n "$2" --short 2>/dev/null |
+         awk '/Server/{f=1} f && /Tag:/{print $2; exit}')" || out=""
+  printf '%s' "$out"
+}
+
 # Find a healthy CP endpoint OTHER than the one being replaced.
 # Echoes "ep ip" for the first CP (index != exclude) whose etcd service is OK.
 healthy_peer_cp() { # <exclude_index>
@@ -1055,8 +1071,25 @@ replace_node() { # <type: cp|worker> <index>
     # Re-runnable: a node already on the target version is left alone. Without
     # this, resuming an interrupted roll reboots the nodes it already did.
     local running
-    running="$(talosctl version -e "$ep" -n "$node_ip" --short 2>/dev/null \
-               | awk '/Server/{f=1} f && /Tag:/{print $2; exit}')"
+    running="$(node_talos_version "$ep" "$node_ip")"
+    if [[ -z "$running" ]]; then
+      # Retry once: this is the first thing touched after the previous node's
+      # reboot, and the tunnel behind it may be a second from re-establishing.
+      sleep "$POLL"; running="$(node_talos_version "$ep" "$node_ip")"
+    fi
+    if [[ -z "$running" ]]; then
+      # Say WHICH end is silent. oa_talos_endpoint_ok demands a TLS answer, so
+      # it separates "the tunnel is gone" from "the node is gone" — `nc -z`
+      # cannot, because ssh -L keeps listening after the far end dies.
+      if oa_talos_endpoint_ok "${ep%%:*}" "${ep##*:}"; then
+        die "${node_name}: ${ep} answers TLS but talosctl will not report a version.
+  The tunnel is up, so this is the node or the talosconfig, not the network."
+      fi
+      die "${node_name}: nothing is answering on ${ep}.
+  The Talos tunnels are down. Reopen them and re-run — an upgrade is re-runnable
+  and skips every node already on the target version:
+    task tunnels PROVIDER=<provider> KEY=<your key>"
+    fi
     if [[ "$running" == "${TALOS_IMAGE##*:}" ]]; then
       ok "${node_name} already runs ${running} — skipping"
       return 0
@@ -1105,8 +1138,7 @@ replace_node() { # <type: cp|worker> <index>
       esac
       local back=0 deadline=$(( SECONDS + NODE_READY_TIMEOUT ))
       while (( SECONDS < deadline )); do
-        running="$(talosctl version -e "$ep" -n "$node_ip" --short 2>/dev/null \
-                   | awk '/Server/{f=1} f && /Tag:/{print $2; exit}')"
+        running="$(node_talos_version "$ep" "$node_ip")"
         [[ "$running" == "${TALOS_IMAGE##*:}" ]] && { back=1; break; }
         sleep "$POLL"
       done

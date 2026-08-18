@@ -213,7 +213,7 @@ report_probe() {
 if [ "$K8S_DONE" = 0 ]; then
   echo "--- Kubernetes ${K8S_FROM} → ${K8S_TO} ---"
   tfvar_set kubernetes_version "$K8S_TO"
-  task infra ROLE="$ROLE" PROVIDER="$PROVIDER"
+  task infra ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY"
 
   # Talos reconciles the static pods and the kubelets; the node's reported
   # version is the observable end of that, and it is not instant.
@@ -246,7 +246,7 @@ if [ "$TALOS_DONE" = 0 ]; then
   task talos-image PROVIDER="$PROVIDER" VERSION="$TALOS_TO" ENSURE=1
 
   tfvar_set talos_version "$TALOS_TO"
-  task infra ROLE="$ROLE" PROVIDER="$PROVIDER"
+  task infra ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY"
 
   # One node at a time, health-gated between each; control planes first because
   # a worker's upgrade needs a healthy control plane to drain against.
@@ -272,7 +272,7 @@ fi
 # Zero destroys. A plan that wants to replace nodes means the boot image and the
 # running version have disagreed — that plan would take the cluster down.
 # See modules/providers/provider-contract.md § "Node image drift".
-task plan ROLE="$ROLE" PROVIDER="$PROVIDER" STRICT=1 ||
+task plan ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY" STRICT=1 ||
   fail "the plan is not empty after the upgrade — read provider-contract.md § Node image drift before re-running anything"
 ok "plan empty after the upgrade"
 

@@ -21,6 +21,8 @@
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 
 ACTION="${1:-open}"
+# Absolute path to this script: `ensure` re-execs it after cd-ing elsewhere.
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
 KEY="${KEY/#\~/$HOME}"
 
@@ -87,7 +89,12 @@ if [[ "$ACTION" == "open-direct" ]]; then
   exit 0
 fi
 
-TOFU_DIR="${2:-infrastructure/opentofu/cluster}"
+# Absolute, because `ensure` re-execs this script AFTER the `cd "$TOFU_DIR"`
+# below — and because PIDFILE is otherwise resolved a second time after that cd,
+# so the pidfile lands somewhere that does not exist while the run still reports
+# "✓ N/N tunnels up" with nothing tracked.
+TOFU_DIR="$(cd "${2:-infrastructure/opentofu/cluster}" 2>/dev/null && pwd)" ||
+  { echo "✗ no such directory: ${2:-infrastructure/opentofu/cluster}"; exit 1; }
 PIDFILE="${TOFU_DIR}/.talos-tunnels.pids"
 
 close_tunnels() {
@@ -145,6 +152,43 @@ BUSER="$(jq -r '.bastion_user.value // "root"' <<<"$OUTPUTS")"
 mapfile -t CPS < <(jq -r '.control_plane_private_ips.value[]? // empty' <<<"$OUTPUTS")
 mapfile -t WKS < <(jq -r '.worker_private_ips.value[]? // empty' <<<"$OUTPUTS")
 K8S_LB_IP="$(jq -r '.k8s_lb_ip.value // empty' <<<"$OUTPUTS")"
+
+# ── ensure: the idempotent front door ───────────────────────────────────────
+# `open` is DESTRUCTIVE — close_tunnels sweeps the whole port block before
+# rebuilding — which is right for bootstrap-phase2 and rolling-replace, where
+# node IPs may have changed, and wrong for anything that just needs the tunnels
+# to be there. Callers that only need them working call `ensure`: it touches
+# nothing when the set answers, and rebuilds only what is actually broken.
+#
+# It asks for a TLS answer, not a bound port. `ssh -L` keeps listening after the
+# connection through it dies, so `nc -z` would skip exactly the rebuild it
+# needed. scripts/dev/test-endpoint-probe.sh measures that difference.
+if [[ "$ACTION" == "ensure" ]]; then
+  BAD=()
+  probe_all() { # fills BAD with the ports that do not answer
+    local i p
+    BAD=()
+    for i in "${!CPS[@]}"; do p=$((CP_BASE + i)); oa_talos_endpoint_ok 127.0.0.1 "$p" || BAD+=("$p"); done
+    for i in "${!WKS[@]}"; do p=$((WK_BASE + i)); oa_talos_endpoint_ok 127.0.0.1 "$p" || BAD+=("$p"); done
+  }
+  TOTAL=$(( ${#CPS[@]} + ${#WKS[@]} ))
+  probe_all
+  if [[ ${#BAD[@]} -eq 0 ]]; then
+    echo "✓ ${TOTAL}/${TOTAL} Talos tunnels answering — leaving them alone"
+    exit 0
+  fi
+  echo "▶ ${#BAD[@]}/${TOTAL} Talos tunnel(s) not answering (${BAD[*]}) — rebuilding" >&2
+  "$SELF" open "$TOFU_DIR" || exit 1
+  for _ in 1 2 3 4 5 6; do
+    probe_all
+    [[ ${#BAD[@]} -eq 0 ]] && { echo "✓ Talos tunnels rebuilt and answering"; exit 0; }
+    sleep 5
+  done
+  echo "✗ still nothing answering on 127.0.0.1: ${BAD[*]}" >&2
+  echo "  A port can be BOUND while the node behind it is down — this probe wants a" >&2
+  echo "  TLS answer, not a listener. Check the nodes before blaming the tunnels." >&2
+  exit 1
+fi
 
 close_tunnels # drop any stale tunnels (old IPs) before reopening
 : >"$PIDFILE"
