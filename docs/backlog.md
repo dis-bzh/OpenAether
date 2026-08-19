@@ -1074,7 +1074,7 @@ invites someone to build what nobody decided.
 - [ ] **The `talos-image` lane hardcodes the project name into its buckets.**
       `scripts/bootstrap/talos-image.sh` builds `s3-openaether-<provider>-talos-image`
       and `-talos-staging` as literals, and `talos-image/variables.tf` defaults
-      `staging_bucket` to `s3-openaether-scaleway-talos-staging`. Everywhere else
+      `staging_bucket` to the staging bucket name. Everywhere else
       the project comes from `cluster_name`'s first segment. A fork of this repo
       therefore creates buckets named after openaether, and the `.example` files
       cannot honestly describe the naming as derived. Already user-visible:

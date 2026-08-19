@@ -267,8 +267,14 @@ run "installer_image_uses_talos_version" {
   # extensions, so every reinstall dropped iscsi-tools and Longhorn's manager
   # crash-looped on a missing iscsiadm (Scaleway, 2026-08-15). Asserting the
   # exact string is the point — a version pin alone was what let this through.
+  #
+  # HARDCODED ON PURPOSE, and updating it by hand IS the feature: reading it
+  # from var.talos_installer_schematic_id would let any schematic change pass
+  # in silence, and a schematic change means every node reinstalls from a
+  # different image. Last moved 2026-08-19, dropping qemu-guest-agent — see
+  # talos-image/schematic.yaml for why that extension had to go.
   assert {
-    condition     = module.talos.installer_image == "factory.talos.dev/installer/53513e54bb39202f35694412577a6bc53d484744d35a126e5d42ef34785c0d83:v1.13.3"
+    condition     = module.talos.installer_image == "factory.talos.dev/installer/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245:v1.13.3"
     error_message = "the machine config must install from the Image Factory schematic, pinned to var.talos_version"
   }
 }
