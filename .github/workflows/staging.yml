@@ -31,10 +31,10 @@ on:
         type: choice
         options: [deploy, deploy+idempotency, full]
         default: full
-  schedule:
-    # Weekly, Monday 03:17 UTC. Off the hour so it does not pile up with
-    # everything else the runners fire at :00.
-    - cron: "17 3 * * 1"
+  # NO schedule. It fired every Monday at 03:17 and failed at "Materialise the
+  # tfvars" — no STAGING_* secret is configured, so it never reached a deploy.
+  # A weekly red that measures nothing teaches you to ignore red. Dispatch it
+  # by hand once the account and its secrets exist.
 
 # One staging cluster at a time. Two concurrent runs would collide on resource
 # names and on the remote state, and the loser would leave billed VMs behind.
@@ -102,23 +102,19 @@ jobs:
       STAGES: ${{ needs.scope.outputs.stages }}
       TF_IN_AUTOMATION: "1"
       TF_INPUT: "0"
-      # NO LONGER what makes this job able to deploy. infra-apply and
-      # bootstrap-phase2 now plan to a file and apply THAT file, and applying a
-      # saved plan never prompts — APPROVE=auto answers our own gate, above the
-      # tofu layer. VERIFIED: -auto-approve alongside a plan file is accepted
-      # and inert.
+      # NO TF_CLI_ARGS_apply / TF_CLI_ARGS_destroy, and that is the point.
       #
-      # It stays for the applies still computed and applied in one step
-      # (talos-image.sh without ENSURE, the rolling replace). The cost is real
-      # and recorded in docs/backlog.md: it would also auto-approve a
+      # Every apply and every destroy in this job now goes through a plan saved
+      # to a file — infra-apply, bootstrap-phase2 and infra-down all end in
+      # `tofu apply <file>`, which never prompts. The approval is answered above
+      # the tofu layer, by APPROVE=auto.
+      #
+      # Injecting -auto-approve into every invocation would also approve a
       # REGRESSION back to a prompting apply, so CI would go green on exactly
-      # the defect that cost three paid runs on 2026-08-19.
-      TF_CLI_ARGS_apply: -auto-approve
-      # And the destroy needs its OWN variable. Only `apply` was set here, so the
-      # teardown step — the one thing that must never be skipped — would have hit
-      # `task destroy`'s no-terminal guard and left the cluster billing. Measured
-      # locally on 2026-08-14, on exactly that guard.
-      TF_CLI_ARGS_destroy: -auto-approve
+      # the defect that cost three paid runs on 2026-08-19. Removed so that a
+      # regression hangs and fails instead. UNVERIFIED against a real run: this
+      # job has never reached a deploy (no STAGING_* secret is configured), so
+      # the first one that does must confirm it.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
