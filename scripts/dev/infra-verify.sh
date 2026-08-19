@@ -212,8 +212,8 @@ else
   # in production the replica is on a different provider's account — so reading
   # it with the cluster provider's keys fails precisely when the release's
   # cross-provider objective is satisfied.
-  elif AWS_ACCESS_KEY_ID="$("$ROOT/scripts/internal/resolve-s3-cred.sh" "$PROVIDER" ak backup)" \
-       AWS_SECRET_ACCESS_KEY="$("$ROOT/scripts/internal/resolve-s3-cred.sh" "$PROVIDER" sk backup)" \
+  elif AWS_ACCESS_KEY_ID="$("$ROOT/scripts/internal/resolve-s3-cred.sh" "$PROVIDER" ak backup "${REPL_EP:-$PRIM_EP}")" \
+       AWS_SECRET_ACCESS_KEY="$("$ROOT/scripts/internal/resolve-s3-cred.sh" "$PROVIDER" sk backup "${REPL_EP:-$PRIM_EP}")" \
        timeout 90 aws s3 ls "s3://${BUCKET}/" --endpoint-url "${REPL_EP:-$PRIM_EP}" 2>/dev/null | grep -q 'tfstate'; then
     ok "a tfstate replica exists in ${BUCKET}"
     # …and OPEN it. Listing a filename proved nothing about its contents, and
@@ -227,8 +227,8 @@ else
     # encrypted one has is `encrypted_data`. Measured on a live Scaleway cluster
     # 2026-08-17: the envelope's keys are encrypted_data, encryption_version,
     # lineage, meta, serial — and 4 KB is far more than enough to see them.
-    HEAD="$(AWS_ACCESS_KEY_ID="$("$ROOT/scripts/internal/resolve-s3-cred.sh" "$PROVIDER" ak backup)" \
-            AWS_SECRET_ACCESS_KEY="$("$ROOT/scripts/internal/resolve-s3-cred.sh" "$PROVIDER" sk backup)" \
+    HEAD="$(AWS_ACCESS_KEY_ID="$("$ROOT/scripts/internal/resolve-s3-cred.sh" "$PROVIDER" ak backup "${REPL_EP:-$PRIM_EP}")" \
+            AWS_SECRET_ACCESS_KEY="$("$ROOT/scripts/internal/resolve-s3-cred.sh" "$PROVIDER" sk backup "${REPL_EP:-$PRIM_EP}")" \
             timeout 90 aws s3api get-object --bucket "$BUCKET" --key "${CN}.tfstate" \
               --range bytes=0-4095 --endpoint-url "${REPL_EP:-$PRIM_EP}" /dev/stdout 2>/dev/null)"
     if [ -z "$HEAD" ]; then
