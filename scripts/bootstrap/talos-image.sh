@@ -169,20 +169,25 @@ tofu init -reconfigure \
 
 if [ "$ENSURE" = true ]; then
   echo "▶ --ensure: checking whether the image needs (re)building..."
+  # Plan ONCE, to a file, and apply THAT file. -auto-approve discarded the plan
+  # that decided "rebuild" and applied a second, unseen one — on buckets, a
+  # snapshot import and an image publish. A saved plan never prompts either, so
+  # the gate stays unattended, and tofu refuses it if the state moved since.
+  PLAN="talos-image-${TGT}.tfplan"
+  trap 'rm -f "$ROOT/$PLAN"' EXIT
   PLAN_EXIT=0
-  tofu plan -detailed-exitcode "${APPLY_VARS[@]}" || PLAN_EXIT=$?
+  tofu plan -detailed-exitcode -out="$PLAN" "${APPLY_VARS[@]}" || PLAN_EXIT=$?
   case "$PLAN_EXIT" in
     0) echo "✓ image already up to date — skipping apply" ;;
-    # --ensure is the non-interactive idempotence gate for `task cluster-up`, so the
-    # apply must not stop to prompt for approval (it would EOF and abort the
-    # pipeline). The plain `task image-build` path below stays interactive.
-    2) tofu apply -auto-approve "${APPLY_VARS[@]}" ;;
+    2) tofu apply "$PLAN" ;;
     *)
       echo "✗ tofu plan failed (exit ${PLAN_EXIT})"
       exit 1
       ;;
   esac
 else
+  # Interactive on purpose: tofu shows and applies the SAME in-memory plan, so
+  # the yes a human types answers the plan they just read. Nothing to freeze.
   tofu apply "${APPLY_VARS[@]}"
 fi
 

@@ -303,6 +303,7 @@ tasks:
       # journey stopped for an approval after spending. Nothing read the call
       # graph; this does.
       - ./scripts/dev/test-unattended.sh
+      - ./scripts/dev/test-talos-image.sh
 
   test:
     desc: Run OpenTofu tests (cluster root)
