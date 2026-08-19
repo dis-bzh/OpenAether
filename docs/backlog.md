@@ -410,9 +410,24 @@ From there it is mechanical, and it explains three things at once:
    fallback stays armed → **the next reboot reverts the node**. And
    `talosctl upgrade --wait` never returns, because it waits for `Running`.
 
-**Why Scaleway is spared:** same schematic, same extension, but its roll never hung
-— so the agent must find its port there. INFERRED, not read: no Scaleway node was
-alive to check.
+**Why Scaleway is spared — READ, no longer inferred.** 2026-08-19, on a live
+Scaleway control plane still carrying the OLD schematic:
+
+    get extensions      qemu-guest-agent 11.0.2
+                        schematic 53513e54…        ← the pre-fix schematic
+    get machinestatus   stage: running
+    get metakeys        0x09 only — NO key 6, the fallback is disarmed
+
+Same schematic, same extension, opposite outcome. So the difference was never our
+image: it is the hypervisor. Scaleway attaches the virtio channel the agent waits
+for; OpenStack attaches it only when the IMAGE declares `hw_qemu_guest_agent`,
+which ours did not, and Outscale offers no equivalent.
+
+One inference remains inside this observation, and it is one link long:
+`stage: running` can only be reached once `startAllServices` completes, which
+requires all thirteen services up, which includes `ext-qemu-guest-agent`. Reading
+`talosctl services` on that node would make it fully direct; the mechanism is the
+one quoted from `machine_status.go` above.
 
 **The fix is ours and it is not `meta delete`.** That command disarms one node and
 changes nothing. Two candidates at the cause:
