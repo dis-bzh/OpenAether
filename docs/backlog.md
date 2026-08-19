@@ -372,6 +372,61 @@ of Talos v1.13.8. The spec carries `secureBoot`, `selinuxState` and
 `Running` is never reached — `talosctl logs machined` on a node stuck at BOOTING
 is the next read. Rung: real cloud.
 
+### ROOT CAUSE, FOUND — an extension we ship waits for a device OVH never creates
+
+2026-08-19. The chain below is complete and every link was read, on the node or in
+siderolabs/talos v1.13.8. It is OURS, not the providers'.
+
+    talos-image/schematic.yaml   shared by all three providers, and it contains
+                                 siderolabs/qemu-guest-agent
+    modules/talos-image/ovh      properties = { architecture, os_distro }
+                                 — no hw_qemu_guest_agent
+    OVH image, read back         os_distro=talos, and NO hw_* property at all
+    the node                     ext-qemu-guest-agent  Waiting
+                                 "Waiting for file /dev/virtio-ports/org.qemu.guest_agent.0 to exist"
+    machined log                 phase startEverything (9/9): 1 tasks(s)
+                                 task startAllServices: waiting for 13 services
+                                 …and no "done" line, ever
+
+Twelve of the thirteen services are `Running/OK`. The thirteenth waits for a
+virtio serial port that Nova only attaches when the IMAGE declares
+`hw_qemu_guest_agent` — DOCUMENTED OpenStack behaviour, not verified here; what is
+verified is that the property is absent and the device is absent.
+
+From there it is mechanical, and it explains three things at once:
+
+1. `startAllServices` never finishes → phase 9/9 never done → the boot sequence
+   never emits `SequenceEvent{boot, STOP}`.
+2. `machine_status.go` sets `Running` only on that event → the node sits at
+   `Booting` for ever while being perfectly healthy.
+3. `drop_upgrade_fallback.go:74` deletes META `Upgrade` only at `Running` → the
+   fallback stays armed → **the next reboot reverts the node**. And
+   `talosctl upgrade --wait` never returns, because it waits for `Running`.
+
+**Why Scaleway is spared:** same schematic, same extension, but its roll never hung
+— so the agent must find its port there. INFERRED, not read: no Scaleway node was
+alive to check.
+
+**The fix is ours and it is not `meta delete`.** That command disarms one node and
+changes nothing. Two candidates at the cause:
+
+- **Drop `siderolabs/qemu-guest-agent` from the schematic**, or make the schematic
+  per-provider. Talos manages the OS; the agent buys hypervisor-side niceties. The
+  project already reached exactly this conclusion for one provider and never
+  carried it: `modules/providers/proxmox/main.tf:63` — "Talos manages the OS; keep
+  the agent off". Outscale cannot take the OpenStack property at all, so this is
+  the only fix that covers both.
+- Or add `hw_qemu_guest_agent = "yes"` to the OVH image properties. Fixes OVH only,
+  and leaves Outscale exactly where it is.
+
+**The cost of the fix, stated:** the schematic ID is content-addressed, so changing
+it is a new image AND a new `installer_image`, i.e. a real upgrade of every node —
+not a free edit.
+
+**Closes:** a cluster on OVH or Outscale where `talosctl services` shows 13/13 up,
+`get machinestatus` shows `Running`, `get metakeys` shows no key 6, and
+`talosctl upgrade --wait` returns on its own. Rung: real cloud.
+
 ### ROOT CAUSE — one missed event explains the hung watch, the lost upgrade and the revert
 
 2026-08-19. Three symptoms this project has chased separately for days are one
