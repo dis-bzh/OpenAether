@@ -2,7 +2,9 @@
 
 🇬🇧 [English version](capi-bootstrap.md)
 
-Validé de bout en bout sur Scaleway le 2026-07-28. Chemin **optionnel**, à côté
+Validé de bout en bout sur Scaleway le 2026-07-28 — avant le recentrage, et **la
+0.1.0 ne déploie aucun CAPI** : ceci est conservé pour la version qui le fera.
+Chemin **optionnel**, à côté
 d'OpenTofu — pas un remplacement : CAPI crée les machines, OpenTofu garde le
 substrat (sur OVH, ~44 ressources dont 3 instances).
 

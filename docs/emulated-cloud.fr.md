@@ -36,8 +36,8 @@ que le `plan`, et ce qui l'en empêche tient désormais en une liste courte :
 
 - **Scaleway** : le module crée toujours une public gateway et des réservations
   IPAM. La gateway n'est pas servie ; la réservation IPAM est déclinée
-  volontairement. Inchangé depuis la 0.5.0 — le pack Scaleway n'a bougé dans
-  aucune des deux versions suivantes.
+  volontairement. Inchangé depuis **Feint** 0.5.0 — aucune version jusqu'à
+  l'enregistrement 0.7.3 ci-dessous n'a fait bouger le pack Scaleway.
 - **Outscale** : les load balancers, et rien d'autre — et c'est une décision, pas
   un manque. La 0.6.0 a fait passer le pack de 31 à 72 routes : security groups,
   IP publiques, internet service, NAT service, route tables et NICs fonctionnent

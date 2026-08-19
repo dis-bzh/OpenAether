@@ -18,7 +18,7 @@ python3 scripts/ops/purge-orphans/<p>.py
 
 The bare `--` is not optional: without it Task keeps the flags for itself.
 
-**`--force-no-edges` is required on every 1.0.0 cluster**, and the reason is
+**`--force-no-edges` is required on every cluster 0.1.0 builds**, and the reason is
 structural rather than incidental. `fleet-down.sh` refuses to destroy the
 management until it has enumerated CAPI child clusters, because a child that
 outlives its management bills for ever. On a pure-infra cluster the CAPI CRDs are

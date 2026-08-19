@@ -2,8 +2,11 @@
 
 🇬🇧 [English version](admin-access.md)
 
-Les opérations manuelles post-déploiement, dans l'ordre. Validé sur Scaleway le
-2026-07-25. Convention : `KC=infrastructure/opentofu/cluster/kubeconfig`.
+Les opérations manuelles post-déploiement d'un cluster portant la **plateforme
+applicative**, dans l'ordre. **La 0.1.0 n'en déploie rien** — sur un cluster
+d'infrastructure seule, `task cluster-verify` est tout le parcours jour-1 et rien
+de ce qui suit ne s'applique. Validé sur Scaleway le 2026-07-25.
+Convention : `KC=infrastructure/opentofu/cluster/kubeconfig`.
 
 ## 1. Escrow (IMMÉDIAT)
 

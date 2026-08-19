@@ -3,10 +3,10 @@
 # Ton premier cluster
 
 D'une machine nue et d'un compte cloud vide jusqu'à un cluster Talos que tu peux
-joindre, mettre à jour et détruire. Scaleway sert d'exemple ; OVH et Outscale n'en
-diffèrent guère que par leurs identifiants et leur fichier tfvars — sauf à
-l'étape 4, bien plus lente sur Outscale, et plus lente encore pour le load
-balancer OVH.
+joindre, mettre à jour et détruire. Scaleway sert d'exemple ; OVH n'en diffère
+que par ses identifiants et son fichier tfvars, sauf à l'étape 4 où son load
+balancer est plus lent. Outscale a lui aussi un module, mais y déployer est
+**bloqué en amont** — voir la fin de cette page.
 
 **Lis la note d'honnêteté en fin de page avant de dépenser quoi que ce soit.**
 Elle dit ce qui a été mesuré, sur quel cloud et quand — et ce qui ne l'a pas été.
@@ -177,14 +177,14 @@ bien qu'un LB bloqué ne peut plus être supprimé et retient le sous-réseau, l
 réseau, et tout ton teardown derrière lui. `task cluster-down` le reconnaît et te le dit,
 au lieu de te conseiller de réessayer. C'est un ticket support.
 
-**Sur Outscale, cette première étape se compte en minutes voire en heure, pas en
-secondes**, et cela vient du provider, pas de ce projet. Outscale enregistre une
-image à partir d'un snapshot IMPORTÉ depuis un objet de 11 Gio, et cet import
-patiente dans une file côté provider : **8 min de bout en bout le 2026-08-18, et
-plus de 60 min bloqué à `in-queue 0%` le 2026-07-25**. Deux mesures, un ordre de
-grandeur d'écart : prévois la lente. Rien n'est cassé pendant l'attente ;
-`ReadSnapshots` donne l'état et la progression réels si tu veux la voir avancer.
-La même attente revient à chaque changement de version Talos, upgrade compris.
+**Sur Outscale, c'est ici que ça s'arrête, et cela vient du provider, pas de ce
+projet.** Enregistrer l'image se compte déjà en minutes voire en heure — le
+snapshot est importé depuis un objet de 11 Gio via une file côté provider : 8 min
+le 2026-08-18, plus de 60 min bloqué à `in-queue 0%` le 2026-07-25. Puis, le
+2026-08-19, un load balancer est resté en `provisioning` plus d'une heure, après
+quoi le Net, son sous-réseau et son internet service ont refusé la suppression
+sur un compte qui ne contenait plus rien. La demande de support 399530 est
+ouverte ; la 0.1.0 ne revendique pas ce provider.
 
 Six buckets existent ensuite : l'état et les artefacts, chacun avec son jumeau
 `-backup`, plus l'image et sa zone de préparation.
@@ -251,16 +251,16 @@ n'est pas « sans interruption », c'est **la plus longue série d'échecs
 consécutifs de `/readyz`, à une seconde d'intervalle, reste sous 15 secondes**.
 Mesure-la.
 
-Mesuré sur Scaleway le 2026-08-17, 3 control planes : **7 échantillons en échec
-sur 1817, plus longue coupure 3 s**, sur les deux upgrades. Les deux nombres sont
-des affirmations différentes — des ratés dispersés pendant un roulement de
-control planes, c'est un cluster HA qui fonctionne ; consécutifs, c'est l'API à
-terre.
+Mesuré le 2026-08-19, sur les deux upgrades : **16 échantillons en échec sur
+575, plus longue coupure 5 s** sur Scaleway, et 9 à 10 sur ~540 pour **7 s** sur
+OVH. Les deux sont pires que les meilleurs chiffres jamais relevés par ce projet
+(3 s et 1 s), et les deux sont le chiffre honnête. Les deux nombres sont des
+affirmations différentes — des ratés dispersés pendant un roulement de control
+planes, c'est un cluster HA qui fonctionne ; consécutifs, c'est l'API à terre.
 
 ## 8. Détruire
 
 ```bash
-task infra-down ROLE=management PROVIDER=scaleway
 task cluster-down PROVIDER=scaleway -- --plan --force-no-edges          # ne détruit rien
 task cluster-down PROVIDER=scaleway -- --plan-file destroy-management-scaleway.tfplan --force-no-edges --yes
 python3 scripts/ops/purge-orphans/scaleway.py
@@ -305,41 +305,53 @@ seconde clé, ni de réinitialisation.
 
 ## Ce qui n'est pas prouvé
 
-Honnête au moment de la 0.5.0, et c'est la raison d'être de ce document.
+Honnête au moment de la 0.1.0 — la première version de ce projet qui livre
+quelque chose de prouvé, et c'est la raison d'être de ce document.
 
 Ce qui **est** mesuré, avec les dates (`docs/backlog.md`, « Where we stand ») :
 
-- `task cluster-verify` donne **9/9 sur Scaleway, 9/9 sur Outscale, 10/10 sur OVH** — la
-  dixième assertion étant le réplica hébergé chez un autre fournisseur. Le
-  cluster Docker local exécute 6 de ces contrôles.
+- `task cluster-verify` donne **11/11 sur Scaleway et 11/11 sur OVH**, le
+  2026-08-19.
+- **L'idempotence, ce sont trois assertions**, et les trois ont tenu 3/3 sur les
+  deux clouds : un plan vide, les *mêmes* nœuds (nom et `creationTimestamp`), et
+  un kubeconfig qui joint encore l'apiserver. Deux des trois peuvent passer alors
+  que le cluster a été reconstruit en silence.
 - **L'état stocké a été ouvert.** Une enveloppe `encrypted_data` sous SSE-AES256,
   récupérée depuis le bucket `-backup` à l'endpoint d'un AUTRE fournisseur, avec
   les identifiants de ce fournisseur, le 2026-08-19. Pas déclaré : téléchargé et
   inspecté.
-- Les deux artefacts d'accès ont été restaurés depuis les deux magasins, octet
-  pour octet identiques aux fichiers vivants, le 2026-08-17.
-- **L'upgrade Talos est passé sur les trois clouds**, 6/6 nœuds chacun. Coupure
-  d'API la plus longue mesurée : 3 s sur Scaleway, 1 s sur Outscale, 1 s sur OVH.
+- **Les deux upgrades sont passés sur Scaleway et sur OVH** : Kubernetes v1.36.2
+  → v1.36.3 et Talos v1.13.7 → v1.13.8 sur 6/6 nœuds, relus depuis les kubelets
+  et depuis l'API Talos de chaque nœud, jamais depuis l'outil qui les a menés.
 
 Ce qui reste ouvert :
 
+- **Outscale est bloqué en amont** — voir l'étape 4. Le module est dans le dépôt ;
+  cette version ne le revendique pas, et Proxmox n'a jamais touché de matériel
+  réel.
 - **Le chemin Scaleway a été parcouru de bout en bout le 2026-08-17**, mais
   depuis une machine qui avait déjà la chaîne d'outils — l'étape 1 sur un hôte nu
-  n'a jamais été suivie. OVH et Outscale ont été pilotés par leur opérateur, pas
-  en suivant cette page.
+  n'a jamais été suivie. OVH a été piloté par son opérateur, pas en suivant cette
+  page.
 - **Le failover complet.** Le fournisseur A traité comme perdu, l'état et les
   artefacts récupérés depuis B seul, le cluster reconstruit chez B.
   `envs/failover-*.tfvars.example` existe exactement pour ça et n'a jamais servi.
   Le transport en dessous est prouvé ; le failover, non.
+- **Le kubeconfig et le talosconfig n'ont jamais été récupérés depuis un vrai
+  bucket.** L'aller-retour est prouvé hors ligne, `enc()` contre `dec()` octet
+  pour octet (`scripts/dev/test-restore.sh`), et le transport du tfstate est
+  prouvé — mais `task restore-artifacts` lui-même n'a jamais tourné que sur des
+  fichiers locaux.
 - **Personne n'a déployé avec un `bucket_suffix` non vide.** Six dérivations
   concordent en tests unitaires ; le jour où quelqu'un en posera un sera le
   premier où le backend, la construction d'image et le vérificateur devront
   s'accorder pour de vrai.
-- **Sur OVH, un control plane est reparti sur la version précédente après un
-  upgrade.** Sa cause — une extension système que nous livrions et qui ne
-  démarrait jamais, si bien que Talos n'atteignait jamais `Running` et ne
-  désarmait jamais le repli d'upgrade — a été retirée du schematic le 2026-08-19.
-  C'est une non-récurrence, pas encore une preuve.
+- **Un control plane repartait sur la version précédente après un upgrade, sur
+  OVH.** La cause était la nôtre : `siderolabs/qemu-guest-agent` dans le
+  schematic ne démarre jamais sur une image sans `hw_qemu_guest_agent`, si bien
+  que Talos n'atteignait jamais `Running` et ne désarmait jamais le repli
+  d'upgrade. Elle est retirée, et le run du 2026-08-19 montre `stage=running` et
+  le repli abandonné sur les six nœuds. Un run propre, pas encore une habitude.
 - Tous les noms de buckets dérivent de `cluster_name` (son premier segment, plus
   `bucket_suffix`), sauf ceux de l'image Talos, codés en dur. Dans un autre
   compte ils peuvent entrer en collision.

@@ -8,7 +8,13 @@
 > du fichier.
 >
 > ✅ testé par apply réel · 🎭 émulé (Feint : vrai provider, vrai HTTP, sans
-> compte) · 🧪 testé unitairement (mocké) · ⬜ non testé. Revue 2026-07-28.
+> compte) · ⛔ bloqué en amont · 🧪 testé unitairement (mocké) · ⬜ non testé.
+> Revue 2026-08-19.
+>
+> Un ✅ est le compte rendu d'un run à sa date, pas une revendication de la
+> 0.1.0. Ce sur quoi cette version repose, c'est le management HA Scaleway et OVH
+> mesuré le 2026-08-19 — `backlog.md` § « Where we stand ». Les lignes datées
+> d'avant, `CAPI-*` comprises, précèdent le recentrage.
 
 ## Modèle mental
 
@@ -97,7 +103,7 @@ Deux couches de réglages orthogonales :
 
 | ID | Rôle | CP/W | k8s_lb_mode | Ce qu'il exerce en propre | Statut |
 |---|---|---|---|---|---|
-| `OSC-mgmt-ha` | mgmt | 3+2 | managed | Le LB renvoie un **nom DNS**, pas une IP ; utilisateur SSH outscale. | ✅ |
+| `OSC-mgmt-ha` | mgmt | 3+1 | managed | Le LB renvoie un **nom DNS**, pas une IP ; utilisateur SSH outscale. 3+3 ne tient pas dans le quota de 40 Go de RAM, donc HA ici ne concerne que le control plane — et **tous les nœuds sont en eu-west-2a**, le module ne lisant jamais au-delà de la première subregion. Trois control planes, un seul domaine de panne. | ⛔ *(bloqué en amont, demande 399530 — le ✅ du 2026-08-13 ne tient pas : son upgrade Talos est revenu en arrière au redémarrage suivant, cf. `backlog.md`)* |
 | `OSC-work-ha` | workload | 3+3 | managed | Rôle workload ; volumes BSU si couplé au stockage. | ⬜ |
 | `OSC-vip-reject` | — | tout | vip | Test négatif : la validation doit rejeter `vip`. | 🧪 |
 

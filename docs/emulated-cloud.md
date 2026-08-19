@@ -35,7 +35,8 @@ provider, `envs/feint-<provider>.tfvars.example`. It cannot go further than
 
 - **Scaleway**: the module always builds a public gateway and IPAM reservations.
   The gateway is unserved; IPAM booking is declined on purpose. Unchanged since
-  0.5.0 — the Scaleway pack has not moved in either release since.
+  **Feint** 0.5.0 — no release up to the 0.7.3 recording below moved the
+  Scaleway pack.
 - **Outscale**: only the load balancers, and that is a decision rather than a
   gap. Feint 0.6.0 took the pack from 31 routes to 72, so security groups,
   public IPs, the internet service, the NAT service, route tables and NICs all

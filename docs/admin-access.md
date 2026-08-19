@@ -2,7 +2,10 @@
 
 🇫🇷 [Version française](admin-access.fr.md)
 
-The manual post-deployment steps, in order. Validated on Scaleway, 2026-07-25.
+The manual post-deployment steps for a cluster carrying the **application
+platform**, in order. **0.1.0 deploys none of it** — on an infrastructure-only
+cluster `task cluster-verify` is the whole day-1 path and nothing below applies.
+Validated on Scaleway, 2026-07-25.
 Convention: `KC=infrastructure/opentofu/cluster/kubeconfig`.
 
 ## 1. Escrow (IMMEDIATE)

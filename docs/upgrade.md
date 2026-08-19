@@ -3,13 +3,15 @@
 🇫🇷 [Version française](upgrade.fr.md)
 
 > Building a cluster and keeping one are different claims. This is the second.
-> Proven by hand on Scaleway, OVH and Outscale on 2026-08-13, HA topologies, every
-> node upgraded **in place** rather than replaced.
+> Measured by hand on **Scaleway and OVH** on 2026-08-19, HA topologies, every
+> node upgraded **in place** rather than replaced and each node's own Talos API
+> asked what it runs. Outscale is blocked upstream; earlier runs there and on OVH
+> reverted on the next reboot, and `backlog.md` says why.
 >
 > The unattended version of this same procedure is
-> [`scripts/dev/staging-upgrade.sh`](../scripts/dev/staging-upgrade.sh), run
-> weekly by `.github/workflows/staging.yml`. If the two ever disagree, the script
-> is the one that gets run.
+> [`scripts/dev/staging-upgrade.sh`](../scripts/dev/staging-upgrade.sh), which
+> `.github/workflows/staging.yml` crons weekly — a lane that has never reached a
+> deploy (`backlog.md`). Until it does, this page is what was actually run.
 
 ## The two facts everything here follows from
 
@@ -36,8 +38,10 @@ while :; do kubectl get --raw=/readyz --request-timeout=2s >/dev/null 2>&1 \
   && echo ok || echo FAIL; sleep 1; done | tee probe.log
 ```
 
-A clean run loses a few seconds while an apiserver restarts. The hand-run on
-2026-08-13 lost three.
+A clean run loses a few seconds while an apiserver restarts. 2026-08-19, both
+upgrades end to end: **5 s** on Scaleway (16 failed samples in 575) and **7 s**
+on OVH (9-10 in ~540). Both are worse than the best this project ever recorded
+(3 s and 1 s) — quote these, not those.
 
 ## Kubernetes first
 

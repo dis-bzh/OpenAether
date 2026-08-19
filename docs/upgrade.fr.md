@@ -3,13 +3,17 @@
 🇬🇧 [English version](upgrade.md)
 
 > Construire un cluster et en garder un sont deux affirmations différentes. Voici
-> la seconde. Prouvée à la main sur Scaleway, OVH et Outscale le 2026-08-13, en
-> topologie HA, chaque nœud mis à niveau **sur place** plutôt que remplacé.
+> la seconde. Mesurée à la main sur **Scaleway et OVH** le 2026-08-19, en
+> topologie HA, chaque nœud mis à niveau **sur place** plutôt que remplacé et
+> l'API Talos de chaque nœud interrogée sur ce qu'il exécute. Outscale est bloqué
+> en amont ; les runs antérieurs là-bas et sur OVH revenaient en arrière au
+> redémarrage suivant, et `backlog.md` dit pourquoi.
 >
 > La version non assistée de cette même procédure est
-> [`scripts/dev/staging-upgrade.sh`](../scripts/dev/staging-upgrade.sh), jouée
-> chaque semaine par `.github/workflows/staging.yml`. Si les deux divergent, c'est
-> le script qui fait foi — c'est lui qui tourne.
+> [`scripts/dev/staging-upgrade.sh`](../scripts/dev/staging-upgrade.sh), que
+> `.github/workflows/staging.yml` cronne chaque semaine — une voie qui n'a jamais
+> atteint un déploiement (`backlog.md`). En attendant, cette page est ce qui a
+> réellement tourné.
 
 ## Les deux faits dont découle tout le reste
 
@@ -39,7 +43,10 @@ while :; do kubectl get --raw=/readyz --request-timeout=2s >/dev/null 2>&1 \
 ```
 
 Une exécution propre perd quelques secondes le temps qu'un apiserver redémarre.
-Celle du 2026-08-13 en a perdu trois.
+Le 2026-08-19, les deux upgrades de bout en bout : **5 s** sur Scaleway (16
+échantillons en échec sur 575) et **7 s** sur OVH (9-10 sur ~540). Les deux sont
+pires que les meilleurs chiffres jamais relevés par ce projet (3 s et 1 s) —
+citer ceux-là, pas ceux-ci.
 
 ## Kubernetes d'abord
 

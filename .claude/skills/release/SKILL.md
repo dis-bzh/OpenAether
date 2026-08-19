@@ -11,14 +11,15 @@ with OpenAether-apps, which has no such file. This is only what the checklist ca
 
 ## A version number is a claim
 
-A tag asserts that something was proven. 1.0.0 was cut before deploy,
-idempotency and upgrade had ever been run on the three clouds — the very things
-it was meant to certify — and had to be withdrawn. Decide what the number
-asserts, prove exactly that, then tag.
+A tag asserts that something was proven. The 1.x tags were cut before deploy,
+idempotency and upgrade had ever been run on a real cloud — the very things they
+were meant to certify — and every one of them, releases included, was deleted.
+0.1.0 is the first number this project puts on something it measured. Decide what
+the number asserts, prove exactly that, then tag.
 
 **Say which rung each claim reached.** Mocked, emulated, real cloud once by hand,
-or unattended and repeated. "Proven at the real-cloud rung on Scaleway, open on
-OVH" is a release note. "Proven" is a hope.
+or unattended and repeated. "Proven at the real-cloud rung on Scaleway and OVH,
+blocked upstream on Outscale" is a release note. "Proven" is a hope.
 
 ## The two repositories are independent
 
@@ -30,7 +31,7 @@ constraint belongs back in this file the same day.
 
 ## Order, and why
 
-1. Everything in `§0`–`§7` of the checklist, on real clouds, **torn down**, with
+1. Everything in `§1`–`§7` of the checklist, on real clouds, **torn down**, with
    `scripts/ops/purge-orphans/` clean on each. Nothing left billing.
 2. A GitHub release, with notes that name the limits.
 3. Re-clone the published tag into a scratch directory and read it as a stranger:
@@ -57,3 +58,6 @@ already has it. If the scope has changed enough to justify starting over, the
 honest move is usually a new number — a major bump for a breaking change of
 scope, or dropping back below 1.0.0 to say plainly that the interface is not yet
 settled. Reusing the same number twice teaches people the numbers mean nothing.
+That is why the restart is **0.1.0** rather than the next 1.x: those numbers were
+published and then deleted, and a first release that ships something proven
+belongs below them, where the interface is plainly not settled yet.
