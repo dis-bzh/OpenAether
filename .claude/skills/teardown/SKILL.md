@@ -26,6 +26,34 @@ legitimately absent, so that query can never succeed — the flag is how the
 operator asserts there are no children. Anything that invokes the bare form (a
 workflow, a README line) will refuse and leave the cloud running.
 
+## Two commands, always — and who is allowed to run them
+
+Destroying takes two deliberate commands and cannot be collapsed into one:
+
+```
+task down PROVIDER=<p> -- --plan                              computes, destroys nothing
+task down PROVIDER=<p> -- --plan-file <f> --force-no-edges --yes    lands exactly that
+```
+
+`--yes`, `YES=1` and `TF_CLI_ARGS_destroy` are deliberately powerless on the first
+step, and the second refuses a plan file that contains no deletions. The point is
+that no single mistyped line, and no variable inherited from somewhere else, can
+destroy a cluster.
+
+**CI is allowed to destroy, and that is not a hole.** It was argued and settled:
+a lane that cannot clean up is the billing defect this repository has already paid
+for twice — seven VMs left running on 2026-07-28, ten Scaleway resources billing
+while the check said "clean" on 2026-08-14. `if: always()` on the teardown exists
+because the FAILED apply is the run that leaves resources standing, and the failed
+run is the one nobody looks at. A CI that can `apply` can destroy anyway, so
+"CI cannot destroy" would be a protection you believe you have.
+
+What limits the blast radius is not the tool but the workflow and its credentials:
+**if you do not want a destroy in an environment, do not put the job in that
+environment's workflow**, and point CI at an account that only holds what it
+creates. That choice belongs to whoever writes the pipeline, and the tool should
+not make it for them.
+
 ## Per-provider, learned the expensive way
 
 - **Outscale — never verify with the EC2-compatible endpoint.** `aws
