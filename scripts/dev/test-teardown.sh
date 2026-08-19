@@ -181,6 +181,19 @@ expect_out "CAPI CRDs are absent" "it says why it is allowed to continue"
 expect_destroyed "the management destroy IS reached"
 expect_out "fleet-down complete" "it reports success"
 
+# The command it PRINTS must be one it will itself accept. The flags were
+# hard-coded, so on a cluster whose CAPI CRDs are absent it told the operator to
+# run a line that step 1 then refused — measured 2026-08-19 on a real teardown,
+# twice, before anyone suspected the instruction rather than the cluster.
+plan "${CLUSTER_INFO_OK}get clusters.cluster.x-k8s.io -A\t1\terror: the server doesn't have a resource type \"clusters\"\n"
+run "$FLEET_DOWN" stubcloud --plan --force-no-edges
+# Anchored on the ORDER, not on the flag: step 1 already prints the word
+# --force-no-edges in its own message, so a bare substring test passes whether
+# the fix is there or not. This one only matches the printed command line.
+expect_out ".tfplan --force-no-edges --yes" "the next-step command carries the flag it was given"
+refute_out ".tfplan --yes" "and does not print the line it would itself refuse"
+
+
 # The other side of the same coin: the query worked and there is genuinely
 # nothing. This must proceed, or the fail-safe above is just a script that
 # never works.

@@ -167,8 +167,13 @@ if [ "$PLAN_ONLY" = 1 ]; then
   PLAN_OUT="destroy-${ROLE}-${PROVIDER}.tfplan"
   ( cd "$ROOT" && task infra-down-plan ROLE="$ROLE" PROVIDER="$PROVIDER" OUT="$PLAN_OUT" ) || {
     warn "could not compute the destruction plan"; exit 1; }
+  # Echo back the flags we were GIVEN, not a fixed string: step 1 refuses without
+  # --force-no-edges when the CAPI CRDs are absent, so a hard-coded line printed a
+  # command this same script then rejected. Measured 2026-08-19.
   printf '\n✓ nothing was destroyed. Read the plan above, then land exactly it:\n'
-  printf '    task cluster-down PROVIDER=%s ROLE=%s -- --plan-file %s --yes\n\n' "$PROVIDER" "$ROLE" "$PLAN_OUT"
+  printf '    task cluster-down PROVIDER=%s ROLE=%s -- --plan-file %s%s --yes\n\n' \
+    "$PROVIDER" "$ROLE" "$PLAN_OUT" \
+    "$([ "$FORCE_NO_EDGES" = 1 ] && printf ' --force-no-edges')"
   exit 0
 fi
 
