@@ -8,7 +8,13 @@
 # died. Three paid deployments found that, one at a time, because no test reads
 # the call graph. This one does.
 #
-# Offline: it parses Taskfile.yml. No cloud, no tofu, no account, no bill.
+# It reads the CALLERS too. staging-idempotency.sh called `task cluster-up` with
+# no approval variable at all, and this harness — which existed for exactly that
+# defect — was reading Taskfile.yml and nothing else, so it stayed green while a
+# CI stage was guaranteed to stop after a full paid deploy.
+#
+# Offline: it parses Taskfile.yml, scripts/**/*.sh and .github/workflows/*.yml.
+# No cloud, no tofu, no account, no bill.
 # ==============================================================================
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
@@ -24,7 +30,7 @@ OUT="$(mktemp)"; trap 'rm -f "$OUT"' EXIT
 # how the other checks read this file. It prints one verdict per line; the shell
 # keeps the counting, so the summary matches every other harness here.
 python3 - >"$OUT" <<'PY'
-import re, yaml
+import glob, re, yaml
 
 with open('Taskfile.yml') as fh:
     TASKS = (yaml.safe_load(fh) or {}).get('tasks') or {}
@@ -49,6 +55,187 @@ def key(k):
     # its own below.
     return 'YES' if k is True else ('NO' if k is False else str(k))
 
+# ---------------------------------------------------------------------------
+# One shell reader for all three inputs. Every blind spot this harness has had
+# was a shape it never tokenised: an `echo` chained ahead of a real command, a
+# usage message that spans lines, a heredoc, a leading VAR=value. So quotes are
+# tracked across lines and the mask below blanks whatever sits inside one.
+# ---------------------------------------------------------------------------
+HEREDOC = re.compile(r'<<(-?)\s*([\'"]?)([A-Za-z_][A-Za-z0-9_]*)\2')
+
+def scan(line, st):
+    """One raw line, carrying the open-construct stack in. Returns
+    (text, mask, stack, continued): `text` has any comment removed, and `mask`
+    is the same length with every character that lives inside a quote blanked,
+    so an operator or a heredoc marker written inside a string is not shell."""
+    out, mask, i, n = [], [], 0, len(line)
+    while i < n:
+        ch, top = line[i], (st[-1] if st else None)
+        if top == "'":
+            out.append(ch); mask.append('\0')
+            if ch == "'": st.pop()
+            i += 1; continue
+        if ch == '\\' and i + 1 < n:
+            out.append(line[i:i+2]); mask.extend('  '); i += 2; continue
+        blank = any(c in '"\'' for c in st)
+        if top == '"' and not line.startswith('$(', i):
+            out.append(ch); mask.append('\0')
+            if ch == '"': st.pop()
+            i += 1; continue
+        for opener, closer in (('$((', '))'), ('$(', ')')):
+            if line.startswith(opener, i):
+                st.append(opener); out.append(opener)
+                mask.extend('\0' * len(opener) if blank or top == '"' else ' ' * len(opener))
+                i += len(opener); break
+        else:
+            if top in ('$((', '$(') and line.startswith({'$((': '))', '$(': ')'}[top], i):
+                c = {'$((': '))', '$(': ')'}[top]
+                st.pop(); out.append(c); mask.extend(('\0' if blank else ' ') * len(c))
+                i += len(c); continue
+            if ch in '"\'':
+                st.append(ch); out.append(ch); mask.append('\0'); i += 1; continue
+            if ch == '#' and not st and (i == 0 or line[i-1].isspace()):
+                break
+            out.append(ch); mask.append('\0' if blank else ch); i += 1
+    text = ''.join(out)
+    return text, ''.join(mask), st, (not st and text.rstrip().endswith('\\'))
+
+def logical_lines(text):
+    """(lineno, line, mask) as the shell would see them: continuations AND
+    multi-line strings joined, whole-line comments and heredoc bodies dropped.
+    Raises rather than returning a short list — a reader that silently swallows
+    the rest of a file is a check that reports 'nothing wrong'."""
+    raw, out = text.splitlines(), []
+    i, st, buf, mbuf, start = 0, [], '', '', 0
+    while i < len(raw):
+        line = raw[i]
+        if not st and not buf and line.lstrip().startswith('#'):
+            i += 1; continue
+        if not buf:
+            start = i + 1
+        t, m, st, cont = scan(line, st)
+        if cont:
+            buf += t.rstrip()[:-1] + ' '; mbuf += m.rstrip()[:-1] + ' '; i += 1; continue
+        buf += t; mbuf += m; i += 1
+        if st:                       # still inside a string: it keeps reading
+            buf += ' '; mbuf += ' '; continue
+        out.append((start, buf, mbuf))
+        for h in (HEREDOC.match(buf, p.start()) for p in re.finditer('<<', mbuf)):
+            if not h:
+                continue
+            delim, dash = h.group(3), h.group(1) == '-'
+            while i < len(raw):
+                cur = raw[i]; i += 1
+                if (cur.strip() if dash else cur.rstrip()) == delim:
+                    break
+        buf, mbuf = '', ''
+    if st:
+        raise ValueError('unterminated ' + ''.join(st))
+    return out
+
+SPLIT = re.compile(r'&&|\|\||[;|]')
+REDIR = re.compile(r'^\d*(?:>>|>|<|>&|<&)')
+ASSIGN = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)=(.*)$', re.S)
+LEAD = {'if', 'then', 'elif', 'else', 'do', 'while', 'until', 'time', 'exec', 'sudo', 'command', '!'}
+
+def segments(line, mask):
+    """Command segments — split only on operators the mask says are unquoted."""
+    parts, last = [], 0
+    for m in SPLIT.finditer(mask):
+        parts.append(line[last:m.start()]); last = m.end()
+    parts.append(line[last:])
+    return [p.strip() for p in parts if p.strip()]
+
+def tokens(seg):
+    out, cur, q = [], '', None
+    for ch in seg:
+        if q:
+            cur += ch
+            if ch == q: q = None
+        elif ch in '"\'':
+            q = ch; cur += ch
+        elif ch.isspace():
+            if cur: out.append(cur); cur = ''
+        else:
+            cur += ch
+    if cur: out.append(cur)
+    return out
+
+def trim(t):
+    t = t.lstrip('(!{ ')
+    while t.endswith((')', '}')) and t.count(')') + t.count('}') > t.count('(') + t.count('{'):
+        t = t[:-1]
+    return t
+
+def lead(tk):
+    """Index of the real command word: leading keywords, subshell parens and
+    VAR=value assignments skipped. `TF_LOG=info tofu apply …` is still an apply,
+    and `APPROVE=auto task cluster-up` still passes the knob (VERIFIED on Task
+    3.52: go-task reads its variables from the environment too)."""
+    i = 0
+    while i < len(tk):
+        t = trim(tk[i])
+        if t and t not in LEAD and not ASSIGN.match(t):
+            break
+        i += 1
+    return i
+
+def command(seg):
+    """(env-prefix, argv) of a segment."""
+    tk = tokens(seg)
+    i = lead(tk)
+    env = {}
+    for t in tk[:i]:
+        m = ASSIGN.match(trim(t))
+        if m:
+            env[m.group(1)] = m.group(2)
+    return env, [trim(x) for x in tk[i:]]
+
+def task_call(seg):
+    """(callee, vars) if this segment runs `task`, else None."""
+    env, argv = command(seg)
+    if not argv or argv[0] != 'task':
+        return None
+    rest = argv[1:]
+    if '--' in rest:
+        rest = rest[:rest.index('--')]   # past `--` it is CLI_ARGS, not a task var
+    callee, kv = None, dict(env)
+    for t in rest:
+        if t.startswith('-') or REDIR.match(t):
+            continue
+        m = ASSIGN.match(t)
+        if m:
+            kv[m.group(1)] = m.group(2)
+        elif callee is None:
+            callee = t
+    return (ALIAS.get(callee, callee), kv) if callee else None
+
+def shell_calls(text):
+    """(lineno, callee, vars) for every `task …` a shell text really runs."""
+    for ln, line, mask in logical_lines(text):
+        for seg in segments(line, mask):
+            c = task_call(seg)
+            if c:
+                yield (ln,) + c
+
+def unquote(v):
+    v = v.strip()
+    return v[1:-1] if len(v) >= 2 and v[0] == v[-1] and v[0] in '"\'' else v
+
+DEFAULTED = re.compile(r'^\$\{[A-Za-z_][A-Za-z0-9_]*:[-=](.*)\}$')
+
+def approves(v):
+    """Does this value provably reach go-task as `auto`? VERIFIED on Task 3.52:
+    an EMPTY value is not a value — `{{.APPROVE | default "ask"}}` wins — so
+    present-but-empty is exactly as bad as absent, and a bare `$VAR` may be
+    either. Only a literal, or an expansion that defaults to one, is provable."""
+    v = unquote(v)
+    if v == 'auto':
+        return True
+    m = DEFAULTED.match(v)
+    return bool(m and unquote(m.group(1)) == 'auto')
+
+# --- what each task is ------------------------------------------------------
 def blocks(t):
     """Every shell command string of a task, in order."""
     out = []
@@ -61,40 +248,12 @@ def blocks(t):
                     out.append(c[k])
     return out
 
-def code(text):
-    """Shell lines, as the shell would see them: continuations joined (an
-    `-auto-approve` on the second line still belongs to the apply on the first),
-    comments, heredoc bodies and console output dropped — `task cluster-up` in
-    the help text or in an `echo` is documentation, not a call."""
-    joined, buf = [], ''
-    for raw in text.splitlines():
-        s = raw.rstrip()
-        if s.endswith('\\'):
-            buf += s[:-1] + ' '
-        else:
-            joined.append(buf + s)
-            buf = ''
-    if buf:
-        joined.append(buf)
-    here = None
-    for raw in joined:
-        s = raw.strip()
-        if here is not None:
-            if s == here:
-                here = None
-            continue
-        m = re.search(r'<<-?\s*[\'"]?([A-Za-z_][A-Za-z0-9_]*)', s)
-        if m:
-            here = m.group(1)
-        if s and not s.startswith('#') and not re.match(r'(echo|printf)\b', s):
-            yield s
-
-def segs(line):
-    return [s.strip() for s in re.split(r'&&|\|\||[;|]', line) if s.strip()]
-
-# --- what each task is ------------------------------------------------------
 BODY = {n: "\n".join(blocks(t)) for n, t in TASKS.items() if isinstance(t, dict)}
-APPROVE_AWARE = {n for n, b in BODY.items() if 'APPROVE' in VARREF.findall(b)}
+ALIAS = {}
+for n, t in TASKS.items():
+    ALIAS[n] = n
+    for a in ((t.get('aliases') or []) if isinstance(t, dict) else []):
+        ALIAS[str(a)] = n
 
 def alternatives(name):
     """Vars other than APPROVE that the callee's own gate accepts instead. Read from
@@ -118,45 +277,43 @@ def callers():
             for c in entries:
                 if isinstance(c, str):
                     if how == 'deps':
-                        yield name, c, how, {}
+                        yield name, ALIAS.get(c, c), how, {}
                 elif c.get('task'):
-                    yield name, c['task'], how, {key(k): str(v) for k, v in (c.get('vars') or {}).items()}
-        for line in code("\n".join(blocks(t))):
-            for seg in segs(line):
-                m = re.match(r'task\s+([A-Za-z0-9:._-]+)(.*)', seg)
-                if m:
-                    kv = dict(re.findall(r'(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)=(\S*)', m.group(2)))
-                    yield name, m.group(1), 'shell', kv
+                    yield name, ALIAS.get(c['task'], c['task']), how, {key(k): str(v) for k, v in (c.get('vars') or {}).items()}
+        for _, callee, kv in shell_calls(BODY[name]):
+            yield name, callee, 'shell', kv
+
+EDGES = list(callers())
+
+# A task NEEDS the approval when its own body reads it, or when it forwards it to
+# one that does: a pure wrapper has no `{{.APPROVE}}` of its own and would
+# otherwise look exempt to every caller of it.
+NEEDS = {n for n, b in BODY.items() if 'APPROVE' in VARREF.findall(b)}
+while True:
+    grown = {c for c, e, _, kv in EDGES
+             if e in NEEDS and c != e and not (alternatives(e) & set(kv))} - NEEDS
+    if not grown:
+        break
+    NEEDS |= grown
 
 # `tofu [-chdir=…] apply …` — flags with a separate value must not be mistaken
 # for the plan file, which is the whole distinction being measured.
 APPLY = re.compile(r'^tofu\b((?:\s+-\S+)*)\s+apply\b(.*)$')
 TAKES_VALUE = {'-var', '-var-file', '-target', '-replace', '-state', '-parallelism', '-lock-timeout'}
 
-REDIR = re.compile(r'^\d*(?:>>|>|<)')
-
-def words(args):
-    """Arguments as the command receives them: a redirection is the shell's, not
-    the apply's. `2>&1` counted as a second positional once, and called a saved
-    plan piped into tee an interactive apply."""
-    out, drop = [], False
-    for tok in args.split():
+def classify(args):
+    """A redirection is the shell's, not the apply's: `2>&1` was counted as a
+    second positional once, and called a saved plan piped into tee interactive."""
+    positional, flags, skip, drop = [], set(), False, False
+    for tok in tokens(args):
         if drop:
-            drop = False
-            continue
+            drop = False; continue
         m = REDIR.match(tok)
         if m:
-            drop = tok == m.group(0)  # a bare `>` / `2>` / `<`: its target is the next word
+            drop = tok == m.group(0)   # a bare `>` / `2>` / `<`: its target is next
             continue
-        out.append(tok)
-    return out
-
-def classify(args):
-    positional, flags, skip = [], set(), False
-    for tok in words(args):
         if skip:
-            skip = False
-            continue
+            skip = False; continue
         if tok.startswith('-'):
             name = tok.split('=', 1)[0]
             flags.add(name)
@@ -171,26 +328,27 @@ def classify(args):
 
 def applies():
     for name in BODY:
-        for line in code(BODY[name]):
-            for seg in segs(line):
-                m = APPLY.match(seg)
+        for _, line, mask in logical_lines(BODY[name]):
+            for seg in segments(line, mask):
+                tk = tokens(seg)
+                m = APPLY.match(' '.join(tk[lead(tk):]))
                 if m:
                     yield name, seg, classify(m.group(2))
 
 # --- A. the defect itself: APPROVE must survive every call edge -----------------
 hdr('APPROVE reaches every task whose body reads it')
 edges = 0
-for caller, callee, how, kv in callers():
-    if callee not in APPROVE_AWARE or caller == callee:
+for caller, callee, how, kv in EDGES:
+    if callee not in NEEDS or caller == callee:
         continue
     edges += 1
     alts = alternatives(callee)
     given = kv.get('APPROVE')
-    if given is not None and (('.APPROVE' in given) or given.strip('"\'') == 'auto'):
+    if given is not None and (('.APPROVE' in given) or approves(given)):
         ok(f'{caller} → {callee} ({how}) carries APPROVE')
     elif given is not None:
         bad(f'{caller} → {callee} ({how}) passes APPROVE={given!r} — it hard-codes an answer instead of forwarding the operator\'s')
-    elif alts & set(kv):
+    elif alts & {k for k, v in kv.items() if unquote(v)}:
         ok(f'{caller} → {callee} ({how}) gives {sorted(alts & set(kv))[0]}, which {callee}\'s own gate accepts instead of APPROVE')
     else:
         want = ' or '.join(sorted(alts | {'APPROVE'}))
@@ -261,14 +419,14 @@ else:
     ok('no unquoted YES/NO key: a 1.1 reader and go-task agree on what the vars are called')
 
 # --- E. the same forgotten-flag defect, one lane over ------------------------
-# talos-image.sh has two applies: --ensure takes the -auto-approve branch, the
-# plain path takes one that prompts. So the unattended entry must carry ENSURE.
+# talos-image.sh has two applies: --ensure applies a saved plan (never prompts),
+# the plain path prompts. So the unattended entry must carry ENSURE.
 hdr('the image build the entry point triggers is the non-interactive one')
-img = [(callee, kv) for c, callee, _, kv in callers() if c == ENTRY and callee == 'image-build']
+img = [(callee, kv) for c, callee, _, kv in EDGES if c == ENTRY and callee == 'image-build']
 if not img:
     bad(f'{ENTRY} no longer calls image-build — this check is measuring a journey that moved')
 for callee, kv in img:
-    if kv.get('ENSURE', '').strip('"\''):
+    if unquote(kv.get('ENSURE', '')):
         ok(f'{ENTRY} → image-build carries ENSURE={kv["ENSURE"]}')
     else:
         bad(f'{ENTRY} → image-build passes no ENSURE — talos-image.sh then takes its prompt-capable apply')
@@ -277,16 +435,127 @@ for callee, kv in img:
     else:
         bad('image-build does not forward --ensure — the ENSURE var is inert')
 
-# --- F. floors: a check that measured nothing is not a green run -------------
+# --- F. the callers OUTSIDE the Taskfile -------------------------------------
+# THE RULE. Anything that runs `task <something that needs the approval>` must
+# hand it one. The single exemption is a script that REFUSES to run without a
+# terminal: the exemption is a behaviour, not a label, so claiming it costs the
+# author the same headless run they were trying to stay silent about. A CI step
+# has no terminal by construction and is never exempt.
+SCRIPTS = sorted(glob.glob('scripts/**/*.sh', recursive=True))
+WORKFLOWS = sorted(glob.glob('.github/workflows/*.yml') + glob.glob('.github/workflows/*.yaml'))
+
+TTY = re.compile(r'(\[\[?|\btest\b)[^;]*?-t\s+[01]')
+
+def refuses_headless(lines):
+    """True when the script cannot run without a terminal: a tty test that exits,
+    on its own statement or as the `if` that wraps one."""
+    for n, (_, line, _) in enumerate(lines):
+        if not TTY.search(line):
+            continue
+        if re.search(r'\bexit\b', line):
+            return True
+        if re.match(r'(if|while|until)\b', line.strip()):
+            depth = 0
+            for _, nxt, nmask in lines[n:]:
+                for seg in segments(nxt, nmask):
+                    if re.match(r'(if)\b', seg): depth += 1
+                    if seg.strip() == 'fi': depth -= 1
+                if re.search(r'\bexit\b', nxt):
+                    return True
+                if depth <= 0 and n:
+                    break
+    return False
+
+def call_sites():
+    """(kind, file, line, callee, vars, exempt_ok) for every `task …` outside
+    the Taskfile. `exempt_ok` is False for a workflow step: there is no tty in
+    a runner, so no CI caller can ever claim the interactive exemption."""
+    for f in SCRIPTS:
+        with open(f) as fh:
+            text = fh.read()
+        try:
+            lines = logical_lines(text)
+        except ValueError as e:
+            bad(f'{f}: could not be read as shell ({e}) — it was NOT checked')
+            continue
+        interactive = refuses_headless(lines)
+        for ln, line, mask in lines:
+            for seg in segments(line, mask):
+                c = task_call(seg)
+                if c:
+                    yield 'script', f, ln, c[0], c[1], interactive
+    for f in WORKFLOWS:
+        with open(f) as fh:
+            raw = fh.read()
+        doc = yaml.safe_load(raw) or {}
+        top = {str(k): str(v) for k, v in (doc.get('env') or {}).items()}
+        for job in (doc.get('jobs') or {}).values():
+            if not isinstance(job, dict):
+                continue
+            jenv = dict(top, **{str(k): str(v) for k, v in (job.get('env') or {}).items()})
+            for step in (job.get('steps') or []):
+                run = step.get('run') if isinstance(step, dict) else None
+                if not isinstance(run, str):
+                    continue
+                senv = dict(jenv, **{str(k): str(v) for k, v in (step.get('env') or {}).items()})
+                for ln, callee, kv in shell_calls(run):
+                    # The run: block's own numbering restarts at 1; point at the
+                    # real file line so the message is actionable.
+                    body = run.splitlines()[ln - 1].strip() if ln <= len(run.splitlines()) else ''
+                    at = next((i + 1 for i, s in enumerate(raw.splitlines()) if body and body in s), 0)
+                    yield 'workflow', f, at, callee, dict(senv, **kv), False
+
+hdr('every task invocation in scripts/ and .github/workflows/ carries the approval')
+sites = list(call_sites())
+external = 0
+claimed = {}
+for kind, f, ln, callee, kv, interactive in sites:
+    if callee not in NEEDS:
+        continue
+    external += 1
+    alts = alternatives(callee)
+    given = kv.get('APPROVE')
+    where = f'{f}:{ln}'
+    if given is not None and approves(given):
+        ok(f'{where} runs `task {callee}` with APPROVE={unquote(given)}')
+    elif alts & {k for k, v in kv.items() if unquote(v)}:
+        ok(f'{where} runs `task {callee}` with {sorted(alts & set(kv))[0]}, which its gate accepts instead of APPROVE')
+    elif interactive:
+        claimed[f] = True
+        ok(f'{where} runs `task {callee}` with no APPROVE, but {f} refuses to run without a terminal — a human is there to answer')
+    else:
+        why = ('a workflow `run:` has no tty, ever' if kind == 'workflow'
+               else f'{f} does not refuse to run without a terminal')
+        detail = (f'APPROVE={given!r}, which go-task drops — an empty value loses to `default "ask"`'
+                  if given is not None else f'no {" or ".join(sorted(alts | {"APPROVE"}))}')
+        bad(f'{where} runs `task {callee}` with {detail}. {why}, so {callee} stops at its approval — after whatever ran before it has already spent')
+
+# The exemption must stay expensive. A script that refuses without a terminal
+# cannot also be a CI step: that job would die at second zero.
+for f in sorted(claimed):
+    used = [w for w in WORKFLOWS if re.search(re.escape(f), open(w).read())]
+    if used:
+        bad(f'{f} claims the interactive exemption yet {used[0]} runs it as a CI step — it would refuse at second zero')
+    else:
+        ok(f'{f} claims the interactive exemption and no workflow runs it')
+
+# --- G. floors: a check that measured nothing is not a green run -------------
+# This is the fix for the defect that started this: the harness read Taskfile.yml
+# and nothing else, so a tree containing only that file still printed a green
+# summary. Zero of anything below means the parser went blind, not that the
+# repository is clean.
 hdr('the analysis actually found something to measure')
-for label, n in (('tasks that read APPROVE', len(APPROVE_AWARE)), ('call edges into them', edges),
-                 ('cloud-lane applies', seen['cloud']), ('guarded prompts', prompts)):
+for label, n in (('tasks that need APPROVE', len(NEEDS)), ('call edges into them', edges),
+                 ('cloud-lane applies', seen['cloud']), ('guarded prompts', prompts),
+                 ('shell scripts read', len(SCRIPTS)), ('workflow files read', len(WORKFLOWS)),
+                 ('`task …` invocations found outside the Taskfile', len(sites)),
+                 ('of them into a task that needs APPROVE', external)):
     ok(f'{n} {label}') if n else bad(f'ZERO {label} — the parser is broken, or the journey was renamed under it')
 
 print("\n".join(f'{v}|{m}' for v, m in R))
 PY
 RC=$?
-[ "$RC" -eq 0 ] || { echo "✗ the Taskfile could not be parsed (exit $RC) — nothing was checked" >&2; exit 1; }
+[ "$RC" -eq 0 ] || { echo "✗ the sources could not be parsed (exit $RC) — nothing was checked" >&2; exit 1; }
 
 while IFS='|' read -r verdict msg; do
   case "$verdict" in
