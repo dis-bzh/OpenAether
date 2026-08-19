@@ -92,7 +92,7 @@ experimental — validate it before relying on it in prod.
 | `talosctl` | Cluster access + validation |
 | `kubectl` | App deployment |
 | `helm` | Rendering bootstrap manifests |
-| `jq` | failover, register-spoke, backup-state scripts |
+| `jq` | backup-state, tunnels, teardown scripts |
 | `gpg` (GnuPG >= 2.4) | Client-side encryption of the backed-up artifacts |
 | `aws` (CLI) | Streaming the encrypted backups to S3-compatible stores |
 
@@ -180,11 +180,12 @@ task bootstrap-phase2 ROLE=workload PROVIDER=ovh KEY=~/.ssh/yourkey
 
 ### Cross-provider failover — second management on another cloud
 
-```bash
-# If your primary management provider is unavailable, stand one up elsewhere:
-./scripts/bootstrap/failover-management.sh ovh   # or: task failover PROVIDER=ovh
-# RTO: ~30 minutes. Workload clusters are unaffected.
-```
+There is no failover command. `failover-management.sh` was deleted in 0.5.0: it
+re-implemented `task up` with a hardcoded SSH key and its own tunnel loop, had
+never been run, and a broken skeleton is a worse starting point than none. The
+prerequisite — a state and artifacts replica on a SECOND provider — is real and
+measured (`docs/backlog.md`); rebuilding a cluster from it is designed work that
+has not been done. `envs/failover-*.tfvars.example` still describes the role.
 
 ### Upgrade Cilium or Flux
 
@@ -271,9 +272,9 @@ tofu init -reconfigure \
   -backend-config="endpoint=<replica-endpoint>"
 ```
 
-> Rebuilding from scratch on another provider instead? That's the failover path
-> (`./scripts/failover-management.sh <provider>` / `task failover`) — a fresh
-> management cluster (new PKI), independent of these backups.
+> Rebuilding from scratch on another provider instead? That path has no command
+> yet — see the note under "Failover" above. The replica it would read from does
+> exist and is verified across providers.
 
 ## Module Structure
 
@@ -310,8 +311,8 @@ tofu test -filter=tests/provider-contract.tftest.hcl  # Junction point (7 tests)
 tofu test -filter=tests/proxmox.tftest.hcl        # Proxmox module + VIP + image convention (7 tests)
 tofu test -filter=tests/k8s-lb-mode.tftest.hcl     # k8s_lb_mode=vip on scw/ovh, rejected on outscale (3 tests)
 
-# Full local validation (tests + kustomize + talosctl + yamllint)
-./scripts/dev/test-local-stack.sh
+# Full local validation
+task lint && task validate && task test && task test-scripts
 ```
 
 ## Security

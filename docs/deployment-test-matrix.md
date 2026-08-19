@@ -147,7 +147,7 @@ Not reachable in this lane, and why: Scaleway root volume type, Outscale
 |---|---|---|---|
 | `OP-twophase` | `talos_bootstrap=false` then `true` | Documented `task infra` → `task bootstrap-phase2` split. | ✅ |
 | `OP-autotunnels` | `auto_tunnels=true` | EXPERIMENTAL single-apply. | ⬜ |
-| `OP-failover` | `failover-<p>.tfvars`, `task failover` | Cross-provider 2nd management; re-register spokes. | ⬜ |
+| `OP-failover` | `failover-<p>.tfvars`, no command yet | Rebuild on provider B from B's replica. The replica is verified; the rebuild is undesigned. | ⬜ |
 | `OP-destroy` | `task fleet-down` / `task destroy` | Ordered teardown (children then management). | ✅ |
 | `OP-tftest` | mocked | The unit-test suite (no credentials). | ✅ (CI) |
 | `OP-backup` | `backup_enabled=true`, cross-provider `BACKUP_AWS_*` | DR: tfstate + kube/talosconfig to primary + replica; client-encrypted restic. | ✅ *(local + real cloud SCW+OVH)* |

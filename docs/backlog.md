@@ -372,6 +372,43 @@ of Talos v1.13.8. The spec carries `secureBoot`, `selinuxState` and
 `Running` is never reached — `talosctl logs machined` on a node stuck at BOOTING
 is the next read. Rung: real cloud.
 
+### OPEN — the OVH revert, caught live, with the first hard evidence
+
+2026-08-19, and this is the entry below reproducing on a cluster that had been
+**verified uniform at v1.13.8 half an hour earlier**, node by node, from each
+node's own Talos API. Then, unprompted:
+
+    3m39s  NodeNotReady   node/openaether-dev-cp-1
+    3m43s  Rebooted       node/openaether-dev-cp-0   boot id: 20507a52-…
+    3m42s  NodeReady      node/openaether-dev-cp-0
+
+cp-0 came back reporting **v1.13.7** from its own API, `stage: booting`. Nothing
+asked it to reboot: `task infra` refuses to apply without a terminal (verified in
+the same shell), the image step was a no-op, and the roll was never reached.
+
+**The evidence worth keeping**, and it is the first concrete difference anyone has
+found between a node that kept the upgrade and one that threw it away:
+
+    cp-1  (kept v1.13.8)      META key 6 = A     (and key 9, disk encryption)
+    cp-0  (reverted, v1.13.7) NO META KEYS AT ALL
+
+Recorded as observed. **What META key 6 means is NOT established here** — the
+constant mapping was not found in an authoritative source during the session, and
+guessing it would be the failure this repository exists to avoid. Establishing it
+is the next step, and it is a reading task, not a cloud one:
+`pkg/machinery/meta` in siderolabs/talos at v1.13.8.
+
+**Honesty about the confound.** An assistant command had, minutes earlier,
+accidentally started a real `task upgrade` (a `DRY_RUN=1` passed as a Task
+variable, which the script reads from the environment and therefore never saw).
+It could not apply anything — the no-terminal guard is what stopped it, and that
+was verified rather than assumed — and nothing in the steps it did reach touches a
+node. Causation is therefore very unlikely, and unproven either way. The timing
+overlap is recorded so nobody later reads this as a clean observation.
+
+**Closes:** the mapping for META key 6, then an explanation of why one control
+plane of three loses it. Rung: reading first, then a cluster.
+
 ### OPEN — one OVH control plane boots the previous Talos version
 
 Measured 2026-08-16, and narrower than it first looked: **cp-0 only**. The

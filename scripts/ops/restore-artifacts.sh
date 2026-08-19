@@ -5,7 +5,7 @@
 # The inverse of backup-artifacts.sh, and the half that did not exist. Until
 # 2026-08-17 this repository could encrypt a kubeconfig and a talosconfig to two
 # object stores and had NO way to read them back — no script, no documented
-# command, and `task failover` (the nearest thing) stands up a brand new cluster
+# command, and the nearest thing stood up a brand new cluster
 # rather than recovering access to the one you have. A backup nobody has ever
 # restored is a hypothesis, not a backup.
 #

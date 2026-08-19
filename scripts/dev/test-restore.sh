@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The backup path had no inverse. Until 2026-08-17 this repository could encrypt
 # a kubeconfig and a talosconfig to two object stores and had no way to read them
-# back: no script, no documented command, and `task failover` — the nearest thing
+# back: no script, no documented command, and the nearest thing
 # — stands up a NEW cluster rather than recovering access to the one you have.
 #
 # A backup nobody has restored is a hypothesis. This is the round trip, offline:

@@ -148,7 +148,7 @@ Cf. `backlog.md`.
 |---|---|---|---|
 | `OP-twophase` | `talos_bootstrap=false` puis `true` | Découpage documenté `task infra` → `task bootstrap-phase2`. | ✅ |
 | `OP-autotunnels` | `auto_tunnels=true` | EXPÉRIMENTAL, apply unique. | ⬜ |
-| `OP-failover` | `failover-<p>.tfvars`, `task failover` | 2ᵉ management cross-provider ; ré-enregistrement des spokes. | ⬜ |
+| `OP-failover` | `failover-<p>.tfvars`, pas encore de commande | Reconstruire chez B depuis le réplica de B. Le réplica est vérifié ; la reconstruction reste à concevoir. | ⬜ |
 | `OP-destroy` | `task fleet-down` / `task destroy` | Chemin de destruction ordonné (enfants puis management). | ✅ |
 | `OP-tftest` | mocké | Suite de tests unitaires (sans credentials). | ✅ (CI) |
 | `OP-backup` | `backup_enabled=true`, `BACKUP_AWS_*` cross-provider | DR : tfstate + kube/talosconfig vers primaire et réplica ; restic chiffré client. | ✅ *(local + cloud réel SCW+OVH)* |
