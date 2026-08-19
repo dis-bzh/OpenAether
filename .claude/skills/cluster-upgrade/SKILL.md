@@ -71,18 +71,44 @@ deliberately has none, because a retry turns the defect green.
   and the running version have disagreed, and that plan would take the cluster
   down.
 
-## OPEN: a node that comes back on the old version
+## A node that comes back on the old version
 
-Observed on OVH, not on Scaleway: the installer logs the new version, `talosctl
-upgrade` exits 0, and later some nodes report the previous one. **Not diagnosed
-here yet** — treat every explanation below as a hypothesis with an experiment
-attached, and record the answer in `docs/backlog.md` when you have it.
+Observed on OVH and Outscale, never on Scaleway: the installer logs the new
+version, `talosctl upgrade` exits 0, and later some nodes report the previous
+one.
 
-Upstream documents a deliberate mechanism that fits: the installer writes an
-`Upgrade` tag to the META partition, a controller drops it only once the node is
-`Running` **and** `Ready` — readiness includes the CNI — and otherwise the
-bootloader is reverted to the previous partition. `talos#9088` is closed as
-intended behaviour.
+**SOLVED on 2026-08-19, and the answer was ours.** Read this before theorising:
+the mechanism below is real, but on OVH and Outscale it was being triggered by a
+system extension WE shipped.
+
+`talos-image/schematic.yaml` carried `siderolabs/qemu-guest-agent`. OpenStack
+attaches the virtio channel it waits for only when the IMAGE declares
+`hw_qemu_guest_agent`, which ours did not, and Outscale has no equivalent. So:
+
+    ext-qemu-guest-agent  Waiting … for /dev/virtio-ports/org.qemu.guest_agent.0
+    phase startEverything (9/9): waiting for 13 services — and never "done"
+
+`startAllServices` never completes → no `SequenceEvent{boot, STOP}` →
+`machine_status.go` never sets `Running` → `drop_upgrade_fallback.go` never
+deletes the META `Upgrade` tag → **the next reboot reverts the node**, and
+`talosctl upgrade --wait` never returns because it waits for `Running`. One
+cause, three symptoms. The extension is gone from the schematic.
+
+Proven by difference: a Scaleway node on the SAME schematic showed
+`ext-qemu-guest-agent Running`, `stage: running`, no tag. The hypervisor supplies
+the device or it does not.
+
+The underlying mechanism, which still applies to any future stuck service: the
+installer writes an `Upgrade` tag to the META partition (key 6), a controller
+drops it only once the node is `Running` **and** `Ready`, and otherwise the
+bootloader reverts to the previous partition. `talos#9088` is closed as intended
+behaviour.
+
+**Two gates now enforce it, so this should not recur silently.**
+`rolling-replace` refuses to call a node done until Talos reports
+`Stage == Running`, and it names the service blocking the boot when it does not.
+And every gate compares the running SCHEMATIC, not just the version tag — a node
+on the old image at the target version used to be skipped by all of them.
 
 Ask the node, in this order, before theorising:
 

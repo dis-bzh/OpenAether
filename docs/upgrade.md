@@ -225,10 +225,17 @@ exercises the same logic against a stub kubectl in seconds, with no cluster.
 
 ## Replacing a node rather than upgrading it
 
-`--upgrade` cannot carry a disk or zone change, nor a new image schematic —
-those need a new VM. Same script, without `--upgrade`: it drains, applies a
-targeted `-replace`, and waits, one node at a time. That path *does* need the
-new cloud image to exist.
+`--upgrade` cannot carry a disk or zone change — those need a new VM. Same
+script, without `--upgrade`: it drains, applies a targeted `-replace`, and waits,
+one node at a time. That path *does* need the new cloud image to exist.
+
+A new **schematic** is a different matter and `--upgrade` does carry it, since
+2026-08-19. It did not before: every gate compared the Talos version tag, so a
+node on the old schematic at the target version was greeted with "already runs
+v1.13.8 — skipping" and a change to the system extensions could be delivered by
+no supported path. The roll now reads the schematic off the node
+(`talosctl get extensions` publishes it) and rolls a node whose version matches
+but whose image does not.
 
 ⚠️ **A flavour change is not one of them on OpenStack, and that is worse.** OVH
 resizes the instance in place, so `task infra` plans it as an update rather than

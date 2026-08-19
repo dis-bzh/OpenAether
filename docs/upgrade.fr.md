@@ -240,10 +240,18 @@ cluster.
 
 ## Remplacer un nœud plutôt que le mettre à niveau
 
-`--upgrade` ne peut pas porter un changement de disque ou de zone, ni un nouveau
-schematic d'image : ceux-là exigent une nouvelle VM. Même script, sans
-`--upgrade` : il draine, applique un `-replace` ciblé et attend, un nœud à la
-fois. Ce chemin-là, lui, exige que la nouvelle image cloud existe.
+`--upgrade` ne peut pas porter un changement de disque ou de zone : ceux-là
+exigent une nouvelle VM. Même script, sans `--upgrade` : il draine, applique un
+`-replace` ciblé et attend, un nœud à la fois. Ce chemin-là, lui, exige que la
+nouvelle image cloud existe.
+
+Un nouveau **schematic**, en revanche, `--upgrade` le porte depuis le
+2026-08-19. Ce n'était pas le cas avant : toutes les portes comparaient le tag de
+version, si bien qu'un nœud sur l'ancien schematic à la version cible s'entendait
+répondre « already runs v1.13.8 — skipping », et qu'un changement d'extensions
+système n'était livrable par aucun chemin. Le roulement lit désormais le
+schematic sur le nœud (`talosctl get extensions` le publie) et fait rouler un
+nœud dont la version correspond mais pas l'image.
 
 ⚠️ **Le gabarit n'en fait pas partie sur OpenStack, et c'est pire.** OVH
 redimensionne l'instance en place : `task infra` le planifie donc comme une mise
