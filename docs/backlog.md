@@ -379,6 +379,46 @@ of Talos v1.13.8. The spec carries `secureBoot`, `selinuxState` and
 `Running` is never reached — `talosctl logs machined` on a node stuck at BOOTING
 is the next read. Rung: real cloud.
 
+### OPEN — a schematic change cannot be rolled out, and both gates call the fleet done
+
+Found 2026-08-19 by the operator, replaying the journey deliberately "as a new
+user would — not to re-prove what is proven, but to check we are actually running
+the latest changes". That instinct caught what the tests did not.
+
+On a live Scaleway cluster, minutes after the schematic was changed:
+
+    the machine config NAMES   factory.talos.dev/installer/613e1592…:v1.13.8
+    the nodes actually RUN     schematic 53513e54…  (with qemu-guest-agent)
+
+`task infra` had been applied, so the config points at the new installer — but a
+new installer reference does not reinstall a running node. Only `talosctl upgrade`
+does. Expected, and already written into the schematic commit.
+
+**What is NOT expected** is that neither gate can see it:
+
+    rolling-replace.sh:1134   [[ "$running" == "${TALOS_IMAGE##*:}" ]]
+    staging-upgrade.sh:125    [ "$TALOS_FROM" = "$TALOS_TO" ]
+
+Both compare the VERSION TAG only. A node on the old schematic at the same version
+is greeted with `already runs v1.13.8 — skipping`, and the run reports a fleet
+that needs nothing. So **a schematic change can be rolled out by no supported
+path** — only a destroy and redeploy moves nodes onto it.
+
+That matters more than it sounds: the schematic is where the system extensions
+live. Today "the fleet carries the extensions you think it does" is neither
+checkable nor actionable through the normal commands, and the fix for the OVH
+revert is sitting in a config that no node has installed.
+
+**The node already reports what it runs**, so this is cheap:
+`talosctl get extensions` lists `schematic <id>` as an ExtensionStatus. Both gates
+should compare the running schematic against `talos_installer_schematic_id`, not
+just the tag, and `task verify` should say when the two disagree.
+
+**Closes:** a node on the old schematic and the target version being upgraded
+rather than skipped, with an assertion in `test-rolling-replace.sh` that goes red
+when the comparison drops back to the version alone. Then `task verify` reporting
+the drift. Rung: offline for the gates, one real roll to confirm.
+
 ### ROOT CAUSE, FOUND — an extension we ship waits for a device OVH never creates
 
 2026-08-19. The chain below is complete and every link was read, on the node or in
