@@ -372,6 +372,64 @@ of Talos v1.13.8. The spec carries `secureBoot`, `selinuxState` and
 `Running` is never reached — `talosctl logs machined` on a node stuck at BOOTING
 is the next read. Rung: real cloud.
 
+### ROOT CAUSE — one missed event explains the hung watch, the lost upgrade and the revert
+
+2026-08-19. Three symptoms this project has chased separately for days are one
+mechanism, and all of it is readable in siderolabs/talos at v1.13.8.
+
+**1. Where `Running` comes from.** `internal/app/machined/pkg/controllers/runtime/
+machine_status.go`:
+
+    case machineapi.SequenceEvent_STOP:
+        if event.Sequence == v1alpha1runtime.SequenceBoot.String() && event.Error == nil {
+            newStage = runtime.MachineStageRunning
+        }
+
+The stage is driven by the machined EVENT STREAM, not by a poll of actual state.
+Miss that single `boot/STOP` event and the node stays `Booting` for ever while
+being perfectly healthy — which is exactly what every OVH and Outscale node
+reports: `stage: BOOTING ready: true unmetCond: []`.
+
+**2. Why the upgrade is never made permanent.** `drop_upgrade_fallback.go:74`:
+
+    if !(machineStatus.TypedSpec().Stage == runtime.MachineStageRunning &&
+         machineStatus.TypedSpec().Status.Ready) { … }
+    ok, err := ctrl.MetaProvider.Meta().DeleteTag(ctx, meta.Upgrade)
+
+The META `Upgrade` tag — key **6**, per `pkg/machinery/meta/constants.go`
+(`Upgrade = iota + 6`; key 9 is `StateEncryptionConfig`, which matches the LUKS
+JSON seen on every node) — is deleted ONLY at `Running`. No `Running`, no delete.
+
+**3. Why a node reverts.** The tag names the partition to fall back to. While it
+is set, the next reboot reverts. Measured on the live OVH cluster:
+
+    cp-0      booting/true   keys=[6,9]  Upgrade=A   v1.13.8
+    cp-1      booting/true   keys=[9]    Upgrade=—   v1.13.7   ← already fired
+    cp-2      booting/true   keys=[6,9]  Upgrade=A   v1.13.8
+    worker-0..2  booting/true keys=[6,9] Upgrade=A   v1.13.8
+
+**Five of six nodes are one reboot away from silently returning to v1.13.7.** cp-1
+is not special; it is simply the one that rebooted first.
+
+**What this costs the release.** "Talos upgrade proven" on OVH and Outscale meant
+"every node reports the new version now". It did not mean the upgrade survives a
+reboot, and on these two providers it does not. Scaleway's roll did not hit the
+hung watch, so it probably reaches `Running` and drops the tag — **probably** is
+the right word until the same three columns are read there.
+
+**The remediation exists and is one command:** `talosctl meta delete 6 -n <node>`
+does exactly what the controller would have done. It disarms the fallback and
+makes the upgrade permanent.
+
+**Still open underneath:** WHY the `boot/STOP` event is missed on OVH and Outscale
+and apparently not on Scaleway. A race between the controller's subscription and
+the event is the obvious shape, and it is a hypothesis. What is no longer a
+hypothesis is everything above it.
+
+**Closes:** the roll asserting `Stage == Running` (not just Ready) before it calls
+a node done, and either dropping the tag itself or refusing to continue. Plus the
+same three columns read on Scaleway.
+
 ### OPEN — the OVH revert, caught live, with the first hard evidence
 
 2026-08-19, and this is the entry below reproducing on a cluster that had been
