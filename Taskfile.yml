@@ -841,7 +841,26 @@ tasks:
       # talos_bootstrap=false resolves module.talos to count=0, so the plan skips
       # data.talos_cluster_health — which would otherwise read through the SSH
       # tunnels and hang if they are already closed.
-      - tofu plan -destroy -out="{{.OUT}}" -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=false
+      - |
+        # A teardown must never be blocked by a provider that will not answer.
+        # The Outscale provider's READ of a load balancer WAITS for it to become
+        # active, so an LBU stuck in `provisioning` makes every refresh — and
+        # therefore every destroy plan — time out. Measured 2026-08-19: 5m0s per
+        # attempt, and the LBU was still `provisioning` two hours later. Without
+        # a fallback the account keeps billing because it cannot be planned.
+        #
+        # The refresh is still tried FIRST: a plan built on stale state can name
+        # resources the provider already removed, and reading beats guessing.
+        # The fallback is the exit, not the default.
+        VARS="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars"
+        if tofu plan -destroy -out="{{.OUT}}" -var-file="$VARS" -var talos_bootstrap=false; then
+          exit 0
+        fi
+        echo "⚠ the refresh failed — replanning from state alone (-refresh=false)." >&2
+        echo "  Something here no longer answers its provider. The plan below is built" >&2
+        echo "  from what the STATE records, so read it: it may name resources that are" >&2
+        echo "  already gone, and it will not notice one that drifted." >&2
+        tofu plan -destroy -refresh=false -out="{{.OUT}}" -var-file="$VARS" -var talos_bootstrap=false
       - |
         echo
         echo "✓ destruction plan written to {{.OUT}}. Nothing has been destroyed."
