@@ -77,9 +77,22 @@ task talos-image PROVIDER=scaleway                 # or ovh, outscale, proxmox ;
 
 ## Customising the image
 
-Add official system extensions in [`schematic.yaml`](schematic.yaml) (e.g.
-`siderolabs/qemu-guest-agent`) and re-run. The schematic ID is deterministic, so
-the build is reproducible and auditable.
+Add official system extensions in [`schematic.yaml`](schematic.yaml) and re-run.
+The schematic ID is deterministic, so the build is reproducible and auditable —
+and because it is derived from the content, changing this file means a new image
+AND a new `installer_image`, i.e. a real upgrade of every existing node.
+
+**Every extension here must START on every provider.** One that waits for
+something a platform never supplies does not sit idle: it blocks
+`startAllServices`, the boot sequence never finishes, the node never reaches
+`Stage=Running`, Talos therefore never drops the META `Upgrade` tag, and the next
+reboot REVERTS the node. `siderolabs/qemu-guest-agent` did exactly that on OVH
+and Outscale and was removed on 2026-08-19 — the example this paragraph used to
+give was the one that cost us two days. Before adding one: name the platform it
+will not start on, or do not add it.
+
+After editing, recompute the ID and update `talos_installer_schematic_id` in
+`cluster/variables.tf`; `talos-image.sh` refuses to build while the two disagree.
 
 ## Providers
 

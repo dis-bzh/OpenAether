@@ -69,10 +69,17 @@ service interruption" is not measurable; "no consecutive outage longer than 15s
 at 1 Hz" is, and that is what 0.5.0 asserts.
 
 **Not proven, and each is an entry below**: no lane has ever run unattended to
-completion; nothing has opened a stored object to confirm the state is
-ciphertext; there is no working restore path; and the documented user journey
-(`docs/first-cluster.md`, written 2026-08-17) was assembled by reading the code,
-not by walking it.
+completion; nobody has deployed under a non-empty `bucket_suffix`; and the full
+failover — provider A treated as gone, the cluster rebuilt on B from B's replica
+alone — has never been attempted.
+
+Three claims that used to live in this paragraph are now measured and have moved
+into the table above, because a "not proven" list that lies in the safe direction
+is still a list that lies: the stored state HAS been opened and is ciphertext
+(2026-08-19, read back from another provider); the restore path DOES work, both
+artifacts byte-identical from both stores (2026-08-17), and the bucket_suffix
+defect in it is fixed; and `docs/first-cluster.md` HAS been walked end to end on
+Scaleway (2026-08-17), though from a machine that already had the toolchain.
 
 ### FIXED — the resume read the tfvars, which the run rewrites before it is true
 

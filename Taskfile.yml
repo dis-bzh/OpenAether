@@ -91,9 +91,10 @@ tasks:
       - cmd: |
           echo
           echo "✓ preflight green — every free rung passed."
-          echo "  NOT covered here, and only a cloud run can: that the provider accepts these"
-          echo "  arguments, that the state object is ciphertext, that an upgrade keeps the API up,"
-          echo "  and that the teardown leaves the account empty. See docs/first-cluster.md."
+          echo "  NOT covered here — only a cloud run can show that the provider accepts these"
+          echo "  arguments, that the stored state is ciphertext, that an upgrade keeps the API"
+          echo "  up, and that the teardown leaves the account empty. All four HAVE been shown on"
+          echo "  real clouds: see the table in docs/backlog.md for which, when, and how long."
 
   lint:
     desc: Lint and format code (OpenTofu, YAML)

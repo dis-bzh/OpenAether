@@ -5,10 +5,10 @@
 From a bare machine and an empty cloud account to a Talos cluster you can reach,
 upgrade and destroy. Scaleway is used throughout; OVH and Outscale mostly differ
 only in their credentials and their tfvars file — the exception is step 4, where
-Outscale is far slower, and step 7, where OVH is a known open defect.
+Outscale is far slower and the OVH load balancer slower still.
 
-**Read the honesty note at the bottom before you spend anything.** Parts of this
-path have never been walked end to end, and this document says which.
+**Read the honesty note at the bottom before you spend anything.** It says what
+has been measured, on which cloud and when — and what has not.
 
 ## What you get, and what you do not
 
@@ -57,21 +57,36 @@ Fill in, for Scaleway: `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`,
 `SCW_DEFAULT_PROJECT_ID`, `SCW_DEFAULT_ORGANIZATION_ID`, the region and zone,
 and `SCW_AWS_ACCESS_KEY_ID` / `SCW_AWS_SECRET_ACCESS_KEY` for S3.
 
+There is a SECOND pair, and it is easy to miss:
+`SCW_BACKUP_AWS_ACCESS_KEY_ID` / `SCW_BACKUP_AWS_SECRET_ACCESS_KEY` (or the
+generic `BACKUP_AWS_*`). `.env.example` points it at the primary's own keys,
+which is correct only while both stores sit on one provider. The moment you
+follow the production advice in step 3 and put the replica on another provider,
+these must be THAT provider's keys — they are namespaced by the CLUSTER's
+provider, not the backup's, so a Scaleway cluster backing up to OVH puts the OVH
+key in `SCW_BACKUP_AWS_*`. Counter-intuitive, and load-bearing: `task up`
+refuses to continue if the replica points elsewhere and the `-backup` buckets
+cannot be created there.
+
 And the one that matters most:
 
 ```bash
 TF_VAR_encryption_passphrase="$(openssl rand -base64 48)"
 ```
 
-Minimum 32 characters, and **the placeholder shipped in `.env.example` is long
-enough to pass that check** — nothing will stop you deploying with it. Replace
-it. Losing this passphrase means losing the state and both access artifacts.
+Minimum 32 characters. `task up` refuses outright if it is unset, and refuses
+again if it still contains `change-me` — the shipped placeholder is published in
+this repository, and that check is the only thing between you and deploying
+under a public secret. Losing this passphrase means losing the state and both
+access artifacts.
 
 Do not export `AWS_*` yourself: the flow derives them per provider from the
 namespaced variables above.
 
-Nothing verifies this file. The first command that complains about a missing
-credential runs after `task up` has already created a bucket.
+`task up` checks this file before it spends anything: the SSH key exists and is
+the private half of `bastion_ssh_keys`, the tfvars file exists, BOTH S3
+credential pairs resolve, and the passphrase is set and is not the placeholder.
+All of it runs before the first bucket.
 
 ## 3. The cluster file
 
@@ -88,12 +103,16 @@ $EDITOR management-scaleway.tfvars
 | `environment` | `dev` or `prod`, nothing else. It does not *require* anything: nothing validates the replica before you spend. `prod` with the replica on the primary's endpoint deploys fine and `task verify` calls it red afterwards |
 | `admin_ip` | `curl -s ifconfig.me` as a `/32`. It is both the SSH allow-list and the apiserver LB ACL |
 | `s3_primary_endpoint` / `_region` | S3 on the same provider as the cluster |
-| `s3_replica_endpoint` / `_region` | S3 for the backup copy. In production, **a different provider** — a state you can only read from the cloud that just failed is not a backup |
+| `s3_replica_endpoint` / `_region` | S3 for the backup copy. In production, **a different provider** — a state you can only read from the cloud that just failed is not a backup. Export that store's own `<PROV>_BACKUP_AWS_*` keys in the same edit: `task up` refuses to continue if the replica points elsewhere and the `-backup` buckets cannot be created there |
 | `bastion_ssh_keys` | the **public** half of the key you will pass as `KEY=`. `task up` refuses to start if they do not match, before spending anything |
-| `control_planes` | 3. Nothing validates this; `2` silently builds a two-member etcd |
+| `control_planes` | 3 — **inside `node_distribution.<provider>`**, not a top-level field, and `bastion_ssh_keys` is a map keyed by provider the same way. Nothing validates the count; `2` silently builds a two-member etcd |
 
 `git_repo_url`, `git_ref`, `flux_namespace` and `apps_profile` are inert while
 Flux is off. Leave them.
+
+Before you spend anything: `task preflight`. Lint, render, validate, unit tests
+and script tests — everything provable without a cloud account, in about four
+minutes. It is free and it is the cheapest bug you will ever find.
 
 ## 4. Bring it up
 
@@ -105,7 +124,9 @@ task up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
 Needs a terminal: the apply asks for approval twice, and it applies the plan it
 just showed you — do not reach for `-auto-approve`, which applies a *different*
 plan computed at that moment. (For an unattended run, save one first:
-`task plan … OUT=tfplan`, read it, then `task apply-plan PLAN=tfplan`.)
+`task plan ROLE=management PROVIDER=scaleway OUT=tfplan`, read it, then
+`task apply-plan PROVIDER=scaleway PLAN=tfplan`. PROVIDER is required on both —
+it used to default to Scaleway, which is the wrong cloud to guess.)
 
 In order it builds the Talos image and uploads it — **measured at 52 s on
 Scaleway, 2026-08-17**, for two buckets, one snapshot and one image per zone —
@@ -178,16 +199,28 @@ task verify PROVIDER=scaleway
 
 Asks the cluster, not the tool: the apiserver answers, every node is Ready, the
 number of control planes matches what you asked for, Cilium runs on each of
-them, CoreDNS serves, there is no `flux-system`, no application load balancer,
-and a state replica exists in the backup store.
+them, CoreDNS serves, there is no `flux-system`, no application load balancer, a
+state replica exists in the backup store — and the first 4 KB of that object is
+opened and must be an OpenTofu `encrypted_data` envelope rather than readable
+state. Outside `dev`, the replica must also be a different endpoint from the
+primary.
 
-Every check can fail. A verification that warns and ends green is the defect
-this file exists to avoid.
+No check ends green on a warning. Two conditions warn deliberately and neither
+passes: a control plane that is not HA, and a `dev` replica sharing the
+primary's endpoint. A check the verifier could not perform at all is counted
+apart as `?` and is equally fatal — nothing is certified on a question nobody
+could ask.
 
 ## 7. Upgrade
 
-`docs/upgrade.md` is the procedure — Kubernetes first, then Talos, one node at a
-time, in place. Start the probe before you begin: the claim this project makes
+```bash
+task upgrade ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
+```
+
+`docs/upgrade.md` is the procedure behind it — Kubernetes first, then Talos, one
+node at a time, in place. It refuses if the cluster already runs both targets:
+an upgrade can only be proven from one patch below, and it reads the CLUSTER,
+not your tfvars. Start the probe before you begin: the claim this project makes
 is not "no interruption", it is **the longest run of consecutive failed
 `/readyz` samples, one second apart, stays under 15 seconds**. Measure it.
 
@@ -238,25 +271,41 @@ second key and no reset.
 
 ## What is not proven
 
-Honest as of 0.5.0, and the reason this document exists:
+Honest as of 0.5.0, and the reason this document exists.
 
-- **This path has never been walked end to end from a clean machine.** It was
-  assembled by reading the code, not by following it.
-- `task verify` has never run against a cloud cluster. Its checks pass on a live
-  local Docker cluster (6/6, 2026-08-17), and the cloud-only branches — the
-  control-plane count against the state, the app load balancer, the state
-  replica — have never executed anywhere.
-- Nothing has ever opened a stored *state* object to confirm it is ciphertext.
-  The encryption is declared and implemented; it is not verified on S3.
-- The restore ROUND TRIP is proven offline: the real encryption function against
-  the real decryption function, byte for byte, wrong passphrase refused
-  (`scripts/dev/test-restore.sh`). What is **not** proven is the transport —
-  that the object is really in the bucket and comes back from it. That is one of
-  the things the first paid run is for.
-- The Talos upgrade is proven on Scaleway. On OVH some nodes have come back on
-  the previous version, and that is open.
-- Every bucket name derives from `cluster_name` except the Talos image ones,
-  which are hardcoded. In another account they may collide.
+What **is** measured, with dates (`docs/backlog.md`, "Where we stand"):
+
+- `task verify` scores **9/9 on Scaleway, 9/9 on Outscale, 10/10 on OVH** — the
+  tenth assertion is the replica living on another provider. The local Docker
+  cluster runs 6 of those checks.
+- **The stored state has been opened.** An `encrypted_data` envelope under
+  SSE-AES256, fetched back out of the `-backup` bucket at ANOTHER provider's
+  endpoint using that provider's credentials, 2026-08-19. Not declared —
+  downloaded and inspected.
+- Both access artifacts have been restored from both stores, byte-identical to
+  the live files, 2026-08-17.
+- **The Talos upgrade landed on all three clouds**, 6/6 nodes each. Longest
+  measured API outage: 3 s on Scaleway, 1 s on Outscale, 1 s on OVH.
+
+What is still open:
+
+- **The Scaleway path was walked end to end on 2026-08-17**, but from a machine
+  that already had the toolchain — step 1 on a bare host is unwalked. OVH and
+  Outscale were driven by their operator, not by following this page.
+- **The full failover.** Provider A treated as gone, state and artifacts fetched
+  from B alone, cluster rebuilt on B. `envs/failover-*.tfvars.example` exists for
+  exactly that and has never been run. The transport underneath it is proven; the
+  failover is not.
+- **Nobody has deployed with a non-empty `bucket_suffix`.** Six derivations agree
+  in unit tests; the day someone sets one is the first day the backend, the image
+  build and the verifier must agree on it for real.
+- **On OVH, one control plane reverted after an upgrade.** Its cause — a system
+  extension we shipped that never started, so Talos never reached `Running` and
+  never disarmed the upgrade fallback — was removed from the schematic on
+  2026-08-19. That is one non-recurrence, not yet a proof.
+- Every bucket name derives from `cluster_name` (its first segment, plus
+  `bucket_suffix`) except the Talos image ones, which are hardcoded. In another
+  account they may collide.
 
 Found something this document gets wrong? That is the most useful bug report
 this project can receive.
