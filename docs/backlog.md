@@ -28,7 +28,27 @@ nobody records is a result you pay to reproduce.
 | Docker | ✅ | ✅ 6/6 | ✅ empty plan | — | — | — |
 | Scaleway | ✅ ~8 min | ✅ 9/9 | ✅ warm and cold | ✅ 1.36.2→1.36.3 | ✅ 6/6 nodes | **3 s** / 7 fails in 1817 |
 | Outscale | ✅ 47+17 | ✅ **9/9, 0 unknown** | ✅ | ✅ 1.36.3 on 6/6 | ✅ **6/6, v1.13.8** | **1 s** / 1 fail in 470 |
-| OVH | ✅ ~6 min | ✅ 7/8 | ✅ | ✅ | ⚠ one node, see below | — |
+| OVH | ✅ | ✅ **10/10, 0 unknown** | ✅ empty plan after the upgrade | ⚠ already at target in the run I saw | ✅ **6/6, v1.13.8** | **1 s** / 1 fail in 912 |
+
+**2026-08-19 — all three clouds carry a Talos upgrade, and the backup finally
+crosses a provider.** OVH was the last unproven one; its six nodes report v1.13.8
+from their own Talos API, the post-upgrade plan is empty, and the interruption
+was 1 failed `/readyz` sample in 912 — the Talos roll alone measured **0 in 889,
+longest outage 0 s**. The "one control plane came back on the previous version"
+symptom did not recur, which is one non-recurrence, not a fix.
+
+The tenth assertion is new and it is the one that mattered: **`the replica store
+is a different endpoint from the primary`**. Confirmed underneath by reading the
+object itself — the OVH cluster's state, 1 736 273 bytes, in
+`s3-<project>-<provider>-tfstate-<env>-backup` **at s3.fr-par.scw.cloud**, fetched with
+SCALEWAY credentials, SSE-AES256, and an `encrypted_data` envelope rather than a
+readable state. A cluster on one provider whose state you can retrieve from
+another, and nobody can read without the passphrase.
+
+Honest about the Kubernetes column: the run's own summary reported
+`v1.36.3→v1.36.3`, so that phase exercised nothing in the pass that was observed.
+Whether an earlier phase of the same invocation performed it is not something
+this file can assert.
 
 **Outscale closed on 2026-08-18**, and the Talos versions were confirmed from each
 node's own API, not from Kubernetes alone. Getting there cost three real defects,
