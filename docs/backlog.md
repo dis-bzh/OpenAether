@@ -277,6 +277,140 @@ snapshot storage. Recorded so the question is not re-opened from scratch.
 **Reopen if:** a real upgrade ever needs a node created on the previous version
 while the roll is still in flight.
 
+### OPEN — one apply still throws away the plan it decided on
+
+Found 2026-08-19 by auditing every apply site against the contract the operator
+stated that day: plan → yes (human or `APPROVE=auto`) → apply THAT saved plan.
+`cluster-up`, `infra-apply`, `bootstrap-phase2` and `talos-image.sh --ensure`
+(the last one with `scripts/dev/test-talos-image.sh`, 23 offline assertions, 6
+mutations killed) were brought onto it. One was not, and it spends:
+
+- `scripts/ops/rolling-replace.sh:1267,1276` — two `-target` applies with
+  `-auto-approve`. The safety plan at :1234 has no `-out` either, and only the
+  string `N to destroy` survives it, so the guard at :1238 that refuses to
+  "apply blind" is asserting against a plan that no longer exists. The second
+  apply is neither planned nor counted.
+
+**Closes:** planning to a file, counting from that file, and applying it.
+`scripts/ops/rolling-replace.sh:1108` prints the command in `--dry-run` and must
+change in the same commit or the dry run will describe something that is gone.
+
+### OPEN — the unattended guard still counts against zero, not against what it expects
+
+`scripts/dev/test-unattended.sh` now reads `scripts/**/*.sh` and
+`.github/workflows/*.yml` as well as `Taskfile.yml`, so a caller that runs an
+APPROVE-aware task without the knob is red — a workflow `run:` always, a script
+unless it refuses to run with no terminal. Three of its four measured blind
+spots are closed with a mutation each (env-var prefix before `tofu`, a command
+chained after an `echo` on one logical line, an alternative var that is present
+but empty). Two things are still open:
+
+- `ENSURE: "{{.ENSURE}}"` passes because the check asks only that the value is
+  non-empty, never that the var it names is declared anywhere.
+- the floors assert non-zero, not the expected count, so a drop from six
+  external call sites to one is still self-concealing.
+
+**Closes:** counts asserted against expected values, and a var reference
+checked against the vars that exist.
+
+### OPEN — the API interruption doubled on two clouds in the same week
+
+Measured 2026-08-19, same probe (~1s samples) as the runs it is compared with:
+
+| | before | 2026-08-19 |
+|---|---|---|
+| Scaleway | 3 s, 7 fails in 1817 | **5 s**, 16 fails in 575 |
+| OVH | 1 s, 1 fail in 912 | **7 s**, 9-10 fails in ~540 |
+
+Two clouds moved the same way, so it is a signal rather than one bad run. The
+sample counts fell with it (the rolls are shorter), so the RATE moved further
+than the peak: roughly 0.4% of samples failing before, 2-3% now.
+
+No cause established. Candidates, none tested: the saved-plan apply path
+introduced the same day, the 30m LB timeouts added on 2026-08-18, a provider-side
+change, or a shorter roll concentrating the same disruption into fewer samples.
+
+**Closes:** one bisected run that names which of them moved it — or a measurement
+showing the comparison itself is invalid because the probe windows differ.
+
+### OPEN — one cluster root, three providers, and nothing stops a collision
+
+Nearly demonstrated 2026-08-19 while running the three-cloud campaign.
+`infrastructure/opentofu/cluster/` is shared by every provider: each target runs
+`tofu init -reconfigure` there to point the S3 backend at that provider's state.
+Two runs at once therefore steal the backend from each other, and the loser
+applies one provider's plan against another's state.
+
+It was survived by luck: the Outscale deploy was still in the `talos-image/`
+root — a different directory — while an OVH `cluster-verify` re-pointed
+`cluster/` at OVH. Had Outscale reached its cluster phase first, the verify
+would have re-inited under it.
+
+Nothing guards this: no lock file, no "already running" check, and the state
+backends take no lock either (see the entry on `use_lockfile`). The operator has
+no way to know that two `task` invocations must never overlap.
+
+**Closes:** a lock around the cluster root — `flock` on a file next to the state,
+or the backend's own locking — that makes the second run wait or refuse by name,
+with a test that starts two and watches one of them refuse.
+
+### OPEN — two guards are weaker than the sentences they print
+
+Both fixes of 2026-08-19 were REFUTED by an adversarial pass, and in both cases
+the verdict was the same: the CODE is sound — one skeptic wrote "I could not
+break it", and a real Scaleway upgrade then exercised the rebuild branch end to
+end — but the harness holding it does not measure what it claims.
+
+Closed the same day: the stub now obeys argv, so deleting `-detailed-exitcode`
+from `talos-image.sh` turns the suite red (without it a real plan answers 0 with
+changes pending, and `--ensure` would print "already up to date" while
+`cluster-up` deployed against an image that was never built); a swallowed apply
+failure is caught; and a trailing comment naming `-auto-approve` no longer
+reddens a correct line.
+
+Still open, each VERIFIED as a survivor:
+- `test-talos-image.sh` — the `-var` assertion is anchored to `-var ` with a
+  trailing space, so the `-var=` form passes while the message says it did not;
+  the `$TGT` discriminator in the plan filename is asserted by nothing.
+- `test-unattended.sh` — its "interactive exemption" is granted to any tty test
+  whose block contains `exit` anywhere, so a script that PROMPTS but does not
+  REFUSE headless is exempted, and in CI it skips the prompt and reaches the
+  spend with no approval: exactly the defect the guard exists for. A heredoc
+  opened inside `$( … )` makes its reader swallow the rest of the file in
+  silence, and the vacuity floors cannot see the loss because the count does not
+  move. `task -d <dir> <name>` resolves the flag's value as the callee. The
+  anti-abuse assertion is a substring search on the workflow text, so any other
+  spelling of the path escapes it — including invocation through a task target,
+  which this repo already does.
+
+**Closes:** a mutation for each shape above, each seen to go red before it is
+believed.
+
+### OPEN — the staging lane has never run, and the re-scope stranded part of it
+
+Measured 2026-08-19. `.github/workflows/staging.yml` had a weekly `schedule`
+(Mondays 03:17); its one recorded run, 2026-08-17, failed at "Materialise the
+tfvars" because no `STAGING_*` secret is configured. It has never reached a
+deploy. The schedule is removed — a weekly red that measures nothing teaches you
+to ignore red — and `workflow_dispatch` remains.
+
+`TF_CLI_ARGS_apply` and `TF_CLI_ARGS_destroy` are gone with it: every apply and
+destroy in that job now ends in `tofu apply <saved-plan>`, which never prompts,
+so both were inert — and keeping them would have auto-approved a REGRESSION back
+to a prompting apply, turning CI green on the defect that cost three paid runs.
+UNVERIFIED against a real run, by construction.
+
+The scope question, for 0.1.0: 1428 lines serve this lane
+(`staging-{idempotency,upgrade,verify}.sh`, `test-staging-checks.sh`, the
+workflow). `staging-verify.sh` waits for 35 Flux Kustomizations — a platform the
+0.5.0 re-scope disabled — so part of this machinery tests something the product
+no longer ships. `staging-upgrade.sh` is different: it is reachable from `task`
+and encodes the upgrade that was proven on three clouds.
+
+**Closes:** deciding, explicitly, whether 0.1.0 ships a staging lane at all; then
+either configuring the secrets and watching one green run, or deleting what the
+re-scope stranded.
+
 ### OPEN — neither state backend takes a lock
 
 Found 2026-08-18 while deciding whether it was safe to run an image rebuild
