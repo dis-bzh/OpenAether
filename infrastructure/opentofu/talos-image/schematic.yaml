@@ -1,11 +1,32 @@
 # Talos Image Factory schematic.
 # POSTed to https://factory.talos.dev/schematics to resolve a deterministic
-# schematic ID (same content => same ID). Add official system extensions here
-# (e.g. siderolabs/qemu-guest-agent for OpenStack/Outscale) and re-apply to
-# produce a new, reproducible image. Empty customization = the base platform image.
+# schematic ID (same content => same ID). Empty customization = the base image.
+#
+# ⚠️ EVERY extension here must START on EVERY provider. A system extension that
+# waits for something a platform never provides does not merely sit idle: it
+# blocks `startAllServices`, so the boot sequence never finishes, the node never
+# reaches Stage=Running, and Talos therefore never drops the META `Upgrade` tag —
+# which means the next reboot REVERTS the node to its previous version, and
+# `talosctl upgrade --wait` never returns. One stuck service, three symptoms.
+#
+# That is exactly what siderolabs/qemu-guest-agent did here, and why it is gone
+# (2026-08-19). On OVH the node sat for ever at:
+#     ext-qemu-guest-agent  Waiting
+#     "Waiting for file /dev/virtio-ports/org.qemu.guest_agent.0 to exist"
+# because OpenStack only attaches that virtio channel when the IMAGE declares
+# hw_qemu_guest_agent, and Outscale offers no equivalent at all. It bought us
+# nothing to lose: QEMU documents the agent as letting the hypervisor read files,
+# set a user's password, set the clock and freeze filesystems inside the guest —
+# on an immutable OS with no users and no shell, whose clock and lifecycle Talos
+# already owns, only the freeze/thaw matters, and only if you snapshot VMs from
+# the provider. We back up state and etcd, not VMs. Proxmox had already reached
+# this conclusion alone: modules/providers/proxmox/main.tf.
+#
+# Before adding one: name the platform it will NOT start on, or do not add it.
+# After editing: recompute the ID and update `talos_installer_schematic_id` in
+# cluster/variables.tf — talos-image.sh refuses to build while the two disagree.
 customization:
   systemExtensions:
     officialExtensions:
-      - siderolabs/qemu-guest-agent
       - siderolabs/iscsi-tools
       - siderolabs/util-linux-tools

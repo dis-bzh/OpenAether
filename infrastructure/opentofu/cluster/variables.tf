@@ -452,8 +452,11 @@ variable "emulator_api_url" {
 variable "talos_installer_schematic_id" {
   description = <<-EOT
     Image Factory schematic ID for the installer the machine config names, so a
-    node keeps its system extensions (iscsi-tools, util-linux-tools,
-    qemu-guest-agent) across `talosctl upgrade`. MUST match what
+    node keeps its system extensions (iscsi-tools, util-linux-tools) across
+    `talosctl upgrade`. qemu-guest-agent was REMOVED on 2026-08-19: it never
+    started on OVH or Outscale, and an extension that never starts blocks the boot
+    sequence, so Talos never confirms the upgrade and the next reboot reverts the
+    node — see talos-image/schematic.yaml. MUST match what
     `talos-image/schematic.yaml` resolves to — `talos-image.sh` refuses to build
     when the two disagree, which is the only place that can catch drift without
     a network call on every plan.
@@ -464,5 +467,5 @@ variable "talos_installer_schematic_id" {
         https://factory.talos.dev/schematics
   EOT
   type        = string
-  default     = "53513e54bb39202f35694412577a6bc53d484744d35a126e5d42ef34785c0d83"
+  default     = "613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245"
 }
