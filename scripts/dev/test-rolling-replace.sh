@@ -79,6 +79,36 @@ PRELUDE
 )"
 eval "$(extract 'cnpg_pod_state,cnpg_deadlocked,cnpg_installed,cnpg_pending,pdb_short,worker_cpu_requests,preflight_roll')"
 
+# --- the upgrade-confirmation gate -------------------------------------------
+# Extracted separately because it talks to talosctl, not kubectl, and needs its
+# own stub. It exists because on 2026-08-19 six OVH nodes were Ready and on the
+# new version while Talos had accepted none of the upgrades, and the roll called
+# every one of them done.
+UPGRADE_CONFIRM_TIMEOUT=2
+POLL=1
+ok_msgs="$STUB_DIR/ok"; : >"$ok_msgs"
+ok_() { printf '%s\n' "$*" >>"$ok_msgs"; }
+eval "$(extract 'assert_upgrade_confirmed' | sed -E 's/^([[:space:]]*)ok /\1ok_ /')"
+# EXIT, not return: the real die() ends the run, and a stub that merely returns
+# lets the function carry on and answer 0 — which would make the gate look like
+# it passed exactly when it refused. Each call is made in a subshell.
+die() { printf '%s\n' "$*" >&2; exit 42; }
+
+talos_stub() { # <stage> [<upgrade-tag>] [<services-block>]
+  cat >"$STUB_DIR/talosctl" <<STUB
+#!/usr/bin/env bash
+case "\$*" in
+  *"get machinestatus"*) printf '{"spec":{"stage":"%s"}}\n' '$1' ;;
+  *"get metakeys"*) [ -n '${2:-}' ] && printf '{"metadata":{"id":6},"spec":{"value":"%s"}}\n' '${2:-}'
+                    printf '{"metadata":{"id":9},"spec":{"value":"x"}}\n' ;;
+  *services*) printf '%b' '${3:-NODE SERVICE STATE\\n1 apid Running\\n}' ;;
+esac
+exit 0
+STUB
+  chmod +x "$STUB_DIR/talosctl"
+}
+
+
 plan() { STUB_PLAN="$STUB_DIR/plan"; export STUB_PLAN; printf '%b' "$1" >"$STUB_PLAN"; }
 
 echo "=== cnpg_pod_state: an unanswered query is not an absent pod ==="
@@ -278,5 +308,30 @@ L_ROLL="$(lineno 'replace_node worker')"
   || bad "call site missing or out of order (maintenance ${L_MAINT:-?}, survey ${L_PRE:-?}, roll ${L_ROLL:-?})"
 
 echo
+
+echo "=== the roll must ask Talos whether it ACCEPTED the upgrade ==="
+
+talos_stub running ""
+out="$( { assert_upgrade_confirmed ep 10.255.255.1 node-a; } 2>&1 )"; rc=$?
+[ "$rc" -eq 0 ] && ok "stage=running with no fallback tag: the node is done" \
+  || bad "a confirmed upgrade was rejected (rc=$rc): $out"
+grep -q 'upgrade confirmed' "$ok_msgs" && ok "and it says so" || bad "it stayed silent on success"
+
+talos_stub booting "" 'NODE SERVICE STATE\nx ext-qemu-guest-agent Waiting\nx kubelet Running\n'
+out="$( { assert_upgrade_confirmed ep 10.255.255.1 node-b; } 2>&1 )"; rc=$?
+[ "$rc" -ne 0 ] && ok "stage=booting STOPS the roll instead of moving to the next node" \
+  || bad "a node whose upgrade Talos never accepted was called done"
+grep -q 'WILL REVERT' <<<"$out" && ok "it says the node will revert on its next reboot" \
+  || bad "it does not warn about the revert: $out"
+grep -q 'ext-qemu-guest-agent' <<<"$out" && ok "and it NAMES the service blocking the boot" \
+  || bad "it does not name the stuck service — the diagnosis that cost an afternoon"
+
+talos_stub running "A"
+out="$( { assert_upgrade_confirmed ep 10.255.255.1 node-c; } 2>&1 )"; rc=$?
+[ "$rc" -eq 0 ] && grep -q 'still carries META Upgrade=A' <<<"$out" \
+  && ok "running but tag still set: warns, does not block" \
+  || bad "the tag-still-present case is not reported (rc=$rc): $out"
+
+
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -99,6 +99,8 @@ NODE_READY_TIMEOUT="${NODE_READY_TIMEOUT:-600}"   # seconds
 # Ceiling on `talosctl upgrade --wait`, which has none. A Talos node reboots in
 # one to three minutes; past this we stop watching and ask the node what it runs.
 UPGRADE_WATCH_TIMEOUT="${UPGRADE_WATCH_TIMEOUT:-420}"
+# Reaching stage=running takes seconds. A node that never will does not in 120.
+UPGRADE_CONFIRM_TIMEOUT="${UPGRADE_CONFIRM_TIMEOUT:-120}"
 # Set by the INT/TERM trap and by an interrupted upgrade. Checked BETWEEN nodes:
 # the node in flight finishes and returns to rotation, then the run stops. Halting
 # between drain and reboot would leave the cordoned, half-upgraded node that has
@@ -912,6 +914,45 @@ wait_etcd_healthy() { # <expected_members>
   return 1
 }
 
+# Is the upgrade CONFIRMED, or merely apparent?
+#
+# "The node reports the new version and is Ready" is not "Talos accepted the
+# upgrade". Talos boots the new system with a META `Upgrade` tag (key 6) naming
+# the partition to fall back to, and deletes it only once the node reaches
+# Stage=Running — drop_upgrade_fallback.go requires `Stage == MachineStageRunning
+# && Status.Ready`. While that tag is set, THE NEXT REBOOT REVERTS THE NODE.
+#
+# Measured 2026-08-19 on OVH: six nodes healthy, Ready, reporting v1.13.8, every
+# one stuck at Stage=Booting because a system extension never started, and five
+# still carrying Upgrade=A. One rebooted and came back on the old version. The
+# roll had called all six done.
+#
+# So this asks for the STAGE, not for readiness, and names the service holding
+# the boot sequence when it is not running.
+assert_upgrade_confirmed() { # <endpoint> <node_ip> <node_name>
+  local ep="$1" ip="$2" name="$3" stage="" tag="" deadline=$(( SECONDS + UPGRADE_CONFIRM_TIMEOUT ))
+  while (( SECONDS < deadline )); do
+    stage="$(talosctl get machinestatus -e "$ep" -n "$ip" -o json 2>/dev/null | jq -r '.spec.stage // empty')" || stage=""
+    [[ "$stage" == "running" ]] && break
+    sleep "$POLL"
+  done
+  if [[ "$stage" != "running" ]]; then
+    warn "${name} is Ready and reports the new version, but its Talos stage is '${stage:-unknown}', not 'running'."
+    warn "  Talos drops the upgrade fallback only at stage=running, so THIS NODE WILL REVERT on its next reboot."
+    warn "  The boot sequence is blocked. Services not up:"
+    talosctl services -e "$ep" -n "$ip" 2>/dev/null | awk 'NR>1 && $3 != "Running" {print "      " $2 "  " $3}' >&2 || true
+    die "refusing to continue: ${name}'s upgrade is not confirmed.
+  Every later node would be rolled on the same false signal. A system extension
+  that never starts blocks startAllServices — fix that, then re-run."
+  fi
+  tag="$(talosctl get metakeys -e "$ep" -n "$ip" -o json 2>/dev/null | jq -s -r '.[] | select(.metadata.id == 6) | .spec.value')" || tag=""
+  if [[ -n "$tag" ]]; then
+    warn "${name} reached stage=running but still carries META Upgrade=${tag} — do not trust it across a reboot."
+  else
+    ok "${name}: upgrade confirmed by Talos (stage=running, fallback dropped)"
+  fi
+}
+
 wait_node_ready() { # <node_name>
   local node="$1" deadline=$(( SECONDS + NODE_READY_TIMEOUT ))
   info "Waiting for node ${node} Ready…"
@@ -1228,6 +1269,15 @@ replace_node() { # <type: cp|worker> <index>
 
   # 5. node Ready in k8s
   wait_node_ready "$node_name" || die "node ${node_name} not Ready in time — STOP"
+
+  # 5b. and Talos must have ACCEPTED it, not merely booted it.
+  # An `if` rather than `[[ … ]] && …` for legibility. The && form was checked
+  # and is safe here — bash does not apply `set -e` to an AND-list whose test is
+  # simply false — but it stops being safe the moment it becomes the last
+  # statement of a function, and this block moves.
+  if [[ $UPGRADE -eq 1 ]]; then
+    assert_upgrade_confirmed "$ep" "$node_ip" "$node_name"
+  fi
 
   # 6. for control planes: etcd must be back to full membership before the next CP
   if [[ "$t" == "cp" ]]; then
