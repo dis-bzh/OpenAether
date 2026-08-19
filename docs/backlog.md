@@ -37,6 +37,19 @@ was 1 failed `/readyz` sample in 912 — the Talos roll alone measured **0 in 88
 longest outage 0 s**. The "one control plane came back on the previous version"
 symptom did not recur, which is one non-recurrence, not a fix.
 
+**2026-08-19 — the first cross-provider deploy refused, and the refusal was right
+for the wrong reason.** `task cluster-up` on Scaleway with the replica at Outscale
+stopped after a full plan: `ensure-buckets` could not create the `-backup` buckets.
+Two defects, both ours. The keys were namespaced by the CLUSTER's provider, so a
+Scaleway cluster backing up to Outscale needed Outscale keys inside
+`SCW_BACKUP_AWS_*` — the variable name argued for the wrong value and got one. And
+`cluster-up`'s credential precheck asked only whether a key was non-empty, which it
+always is (the backup keys fall back to the primary's): a check that had never been
+seen to fail, and could not. Now the endpoint decides whose keys open a store
+(`lib/common.sh::s3_cred`, 26 offline assertions, 3 mutations killed), and the gate
+that actually TALKS to both stores runs before anything is built — measured: 0
+`tofu plan`, 0 `image-build`, seconds instead of four minutes.
+
 The tenth assertion is new and it is the one that mattered: **`the replica store
 is a different endpoint from the primary`**. Confirmed underneath by reading the
 object itself — the OVH cluster's state, 1 736 273 bytes, in
@@ -226,11 +239,9 @@ first provider. Checked, and it is worse than that.
   project's own checker calls red. FIXED here — every prod example now shows a
   replica on another provider.
 - **`first-cluster.md` claimed `prod` "requires" it.** It does not. FIXED.
-- **The credential plumbing already exists and has never been used in anger:**
-  `<PROV>_BACKUP_AWS_ACCESS_KEY_ID` / `_SECRET_ACCESS_KEY`, then a generic
-  `BACKUP_AWS_*`, then a fallback to the primary keys (`lib/common.sh::s3_cred`).
-  `.env.example` sets them to the primary's own keys for all three providers,
-  with a comment to repoint them "for real DR". Nobody has.
+- **The credential plumbing was namespaced by the wrong thing.** FIXED 2026-08-19:
+  keys are now resolved from the cloud that HOLDS the bucket (`s3_replica_endpoint`
+  → `<STORE>_AWS_*`), not from the cluster's provider. See below.
 
 **The two shapes to support, in the operator's words.** Either one provider and
 no cross-store pretence, or store on A and backup on B, deliberately. The second
@@ -265,39 +276,6 @@ snapshot storage. Recorded so the question is not re-opened from scratch.
 
 **Reopen if:** a real upgrade ever needs a node created on the previous version
 while the roll is still in flight.
-
-### OPEN — the emulated Scaleway lane is pinned a release behind, and knows it
-
-CI's `Emulated Cloud (scaleway)` went red on 2026-08-18 with
-
-    501 Not Implemented: feint does not serve
-    /instance/v2alpha1/zones/fr-par-1/private-network-interfaces
-
-Diagnosed by asking the emulator itself (`/_feint/routes`): feint v0.8.0 serves
-**130 instance routes, all under `/instance/v1`**, including
-`/instance/v1/zones/{zone}/servers/{id}/private_nics` — the OLD private-NIC API.
-Scaleway moved that call to `instance/v2alpha1 · private-network-interfaces` and
-provider **v2.81.0, released 2026-08-17**, follows it. Our `~> 2.68` constraint
-picked it up the next day.
-
-**v0.8.0 is the newest feint published** — release and tag both, checked against
-the API, and the installed binary is v0.8.0. There is no version to bump to.
-
-Pinned `~> 2.80.0` in `opentofu-feint/versions.tf` only: measured, the emulated
-Scaleway lane then applies 8 and destroys 8, and the Outscale lane is unaffected
-(27/27). The cluster roots keep 2.81.0 and deploy fine on real Scaleway.
-
-**The cost, stated rather than hidden:** this lane no longer emulates the provider
-the clusters run. It still catches what it was built for — our own module shapes,
-at rung zero — but it can no longer catch a break introduced by a provider
-release, which is precisely the break that just happened. That is a real
-reduction in what CI proves.
-
-**Closes:** feint serving the v2alpha1 route (an upstream issue to
-stephrobert/feint, and the report is small: the provider now calls
-CreatePrivateNIC/ListPrivateNICs under `instance/v2alpha1` as
-`private-network-interfaces`; feint only implements the `instance/v1` form).
-Then restore `~> 2.68` and bump `FEINT_VERSION` in the same commit.
 
 ### OPEN — neither state backend takes a lock
 

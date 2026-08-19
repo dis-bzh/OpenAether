@@ -150,7 +150,7 @@ Not reachable in this lane, and why: Scaleway root volume type, Outscale
 | `OP-failover` | `failover-<p>.tfvars`, no command yet | Rebuild on provider B from B's replica. The replica is verified; the rebuild is undesigned. | ⬜ |
 | `OP-destroy` | `task cluster-down` / `task infra-down` | Ordered teardown (children then management). | ✅ |
 | `OP-tftest` | mocked | The unit-test suite (no credentials). | ✅ (CI) |
-| `OP-backup` | `backup_enabled=true`, cross-provider `BACKUP_AWS_*` | DR: tfstate + kube/talosconfig to primary + replica; client-encrypted restic. | ✅ *(local + real cloud SCW+OVH)* |
+| `OP-backup` | `backup_enabled=true`, cross-provider replica (`<STORE>_AWS_*`) | DR: tfstate + kube/talosconfig to primary + replica; client-encrypted restic. | ✅ *(local + real cloud SCW+OVH)* |
 | `OP-rolling-replace` | `task cluster-roll` | Zero-downtime node replacement (etcd evict, one node at a time). | ✅ *(Scaleway)* |
 
 ## C) Priority (highest-value untested, real apply)

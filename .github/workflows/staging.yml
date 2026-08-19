@@ -102,10 +102,17 @@ jobs:
       STAGES: ${{ needs.scope.outputs.stages }}
       TF_IN_AUTOMATION: "1"
       TF_INPUT: "0"
-      # `task infra` and `bootstrap-phase2` apply WITHOUT -auto-approve, on
-      # purpose: a human running `task cluster-up` should be asked before spending. With
-      # TF_INPUT=0 and no tty that same apply just aborts, so this job could
-      # never have deployed anything. Same mechanism fleet-down uses for destroy.
+      # NO LONGER what makes this job able to deploy. infra-apply and
+      # bootstrap-phase2 now plan to a file and apply THAT file, and applying a
+      # saved plan never prompts — APPROVE=auto answers our own gate, above the
+      # tofu layer. VERIFIED: -auto-approve alongside a plan file is accepted
+      # and inert.
+      #
+      # It stays for the applies still computed and applied in one step
+      # (talos-image.sh without ENSURE, the rolling replace). The cost is real
+      # and recorded in docs/backlog.md: it would also auto-approve a
+      # REGRESSION back to a prompting apply, so CI would go green on exactly
+      # the defect that cost three paid runs on 2026-08-19.
       TF_CLI_ARGS_apply: -auto-approve
       # And the destroy needs its OWN variable. Only `apply` was set here, so the
       # teardown step — the one thing that must never be skipped — would have hit
@@ -201,7 +208,7 @@ jobs:
 
       - name: Deploy
         id: deploy
-        run: task cluster-up ROLE="$ROLE" PROVIDER="$PROVIDER" YES=1
+        run: task cluster-up ROLE="$ROLE" PROVIDER="$PROVIDER" APPROVE=auto
 
       # A deploy is not finished when OpenTofu is. Without the Day-1 backup and
       # observability secrets, six Kustomizations never leave not-Ready and the

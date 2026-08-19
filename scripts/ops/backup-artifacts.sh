@@ -26,7 +26,9 @@ command -v gpg >/dev/null 2>&1 || { echo "✗ gpg required for client-side encry
 oa_aws_compat
 
 PRIMARY_AK="$(s3_cred "$PROVIDER" primary ak)"; PRIMARY_SK="$(s3_cred "$PROVIDER" primary sk)"
-BACKUP_AK="$(s3_cred "$PROVIDER" backup ak)";   BACKUP_SK="$(s3_cred "$PROVIDER" backup sk)"
+# The replica endpoint decides whose keys these are — see s3_cred.
+BACKUP_AK="$(s3_cred "$PROVIDER" backup ak "${REPLICA_EP:-}")"
+BACKUP_SK="$(s3_cred "$PROVIDER" backup sk "${REPLICA_EP:-}")"
 
 # Isolated GnuPG home (symmetric mode uses no keyring, but keep ~/.gnupg untouched).
 GNUPGHOME="$(mktemp -d)"; export GNUPGHOME

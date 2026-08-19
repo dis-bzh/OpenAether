@@ -253,7 +253,7 @@ report_probe() {
 if [ "$K8S_DONE" = 0 ]; then
   echo "--- Kubernetes ${K8S_FROM} → ${K8S_TO} ---"
   tfvar_set kubernetes_version "$K8S_TO"
-  task infra-apply ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY" YES=1
+  task infra-apply ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY" APPROVE=auto
 
   # Talos reconciles the static pods and the kubelets; the node's reported
   # version is the observable end of that, and it is not instant.
@@ -286,15 +286,15 @@ if [ "$TALOS_DONE" = 0 ]; then
   task image-build PROVIDER="$PROVIDER" VERSION="$TALOS_TO" ENSURE=1
 
   tfvar_set talos_version "$TALOS_TO"
-  task infra-apply ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY" YES=1
+  task infra-apply ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY" APPROVE=auto
 
   # One node at a time, health-gated between each; control planes first because
   # a worker's upgrade needs a healthy control plane to drain against.
   # --yes: there is no terminal here, and without it rolling-replace stops at its
   # confirmation prompt and exits 1 — which is how an unattended lane discovers
   # that a script it depends on was only ever run by hand.
-  task cluster-roll PROVIDER="$PROVIDER" KEY="$KEY" YES=1 -- --cp-only --upgrade
-  task cluster-roll PROVIDER="$PROVIDER" KEY="$KEY" YES=1 -- --workers-only --upgrade
+  task cluster-roll PROVIDER="$PROVIDER" KEY="$KEY" APPROVE=auto -- --cp-only --upgrade
+  task cluster-roll PROVIDER="$PROVIDER" KEY="$KEY" APPROVE=auto -- --workers-only --upgrade
 
   # Same trap as the kubelet count above: with no nodes returned, `grep -cv`
   # answers 0 and a dead cluster reports a clean Talos upgrade.

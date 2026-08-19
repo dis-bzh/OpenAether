@@ -36,8 +36,14 @@ PU="$(provider_pu "$PROVIDER")" || { echo "✗ could not detect provider from no
 PROJECT="$(oa_project "$CLUSTER" "$(tfv "$TFVARS" bucket_suffix)")"
 PRIMARY_AK="$(s3_cred "$PROVIDER" primary ak)"
 PRIMARY_SK="$(s3_cred "$PROVIDER" primary sk)"
-BACKUP_AK="$(s3_cred "$PROVIDER" backup ak)"
-BACKUP_SK="$(s3_cred "$PROVIDER" backup sk)"
+# The endpoint decides whose keys these are: a bucket on another cloud needs
+# that cloud's credentials, not this cluster's. See s3_cred.
+BACKUP_AK="$(s3_cred "$PROVIDER" backup ak "$REPLICA_EP")"
+BACKUP_SK="$(s3_cred "$PROVIDER" backup sk "$REPLICA_EP")"
+BACKUP_SRC="$(s3_cred_source "$PROVIDER" backup ak "$REPLICA_EP")"
+RPROV="$(provider_of_endpoint "$REPLICA_EP")"
+RPU=""
+if [ -n "$RPROV" ]; then RPU="$(provider_pu "$RPROV")"; fi
 [ -n "$PRIMARY_AK" ] || {
   echo "✗ no S3 creds for '${PROVIDER}': export ${PU}_AWS_ACCESS_KEY_ID + ${PU}_AWS_SECRET_ACCESS_KEY"; exit 1; }
 
@@ -86,15 +92,28 @@ if [ "$CROSS" = no ]; then
   [ "$REPL_OK" = yes ] || echo "  ⚠ the -backup buckets are not ready"
 elif [ "$REPL_OK" = yes ]; then
   echo "  ✓ backup store is a DIFFERENT provider: ${REPLICA_EP}"
+  if [ -n "$RPU" ]; then echo "    authenticated with the ${RPU}_* credentials"; fi
 else
   echo "✗ s3_replica_endpoint points at another provider (${REPLICA_EP}) and the" >&2
   echo "  -backup buckets could not be created there. Refusing to continue: a copy" >&2
   echo "  you asked for and did not get is worse than no copy at all." >&2
-  echo "  That store needs ITS OWN keys — they are namespaced by the CLUSTER's" >&2
-  echo "  provider, not the backup's, so set ${PU}_BACKUP_AWS_ACCESS_KEY_ID and" >&2
-  echo "  ${PU}_BACKUP_AWS_SECRET_ACCESS_KEY to the credentials of ${REPLICA_EP}." >&2
-  echo "  Without them s3_cred falls back to the primary's, which cannot" >&2
-  echo "  authenticate against another provider." >&2
+  if [ -z "$BACKUP_AK" ]; then
+    echo "  No variable in this shell holds a credential for it." >&2
+  else
+    echo "  The key it tried came from \$${BACKUP_SRC}, and that endpoint rejected it." >&2
+  fi
+  echo "  That store needs the credentials of the cloud that HOLDS it. Export" >&2
+  if [ -n "$RPU" ]; then
+    echo "  either of these pairs — the first is the one you already have if you" >&2
+    echo "  also run a ${RPROV} cluster:" >&2
+    echo "    ${RPU}_AWS_ACCESS_KEY_ID + ${RPU}_AWS_SECRET_ACCESS_KEY" >&2
+    echo "    ${RPU}_BACKUP_AWS_ACCESS_KEY_ID + ${RPU}_BACKUP_AWS_SECRET_ACCESS_KEY" >&2
+  else
+    echo "  them under this cluster's namespace — the endpoint is not one of the" >&2
+    echo "  clouds this repo knows, so it cannot be named for you:" >&2
+    echo "    ${PU}_BACKUP_AWS_ACCESS_KEY_ID + ${PU}_BACKUP_AWS_SECRET_ACCESS_KEY" >&2
+  fi
+  echo "  Or point s3_replica_endpoint back at ${PRIMARY_EP} to keep one cloud." >&2
   exit 1
 fi
 

@@ -91,8 +91,9 @@ git_ref          = "refs/heads/main"
 # and each has a "-backup" twin:
 #   state            -> s3-<cluster_name>-ovh-tfstate-<environment>
 #   kube/talosconfig -> s3-<cluster_name>-ovh-management-<environment>
-# PRIMARY = OVH (AWS_*). REPLICA = the "-backup" store; in prod point it at a
-# DIFFERENT provider (e.g. Scaleway) + export BACKUP_AWS_* for it.
+# PRIMARY = this cluster's own store. REPLICA = its "-backup" twin, opened with
+# the keys of the cloud s3_replica_endpoint names — a Scaleway replica needs
+# SCW_AWS_* in .env.sh, never this cluster's own keys.
 s3_primary_endpoint = "https://s3.gra.io.cloud.ovh.net"
 s3_primary_region   = "gra"
 s3_replica_endpoint = "https://s3.gra.io.cloud.ovh.net" # prod: e.g. SCW https://s3.fr-par.scw.cloud

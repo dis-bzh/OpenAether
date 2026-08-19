@@ -93,6 +93,10 @@ infrastructure/opentofu/cluster/zz-feint-backend_override.tf
 *.swo
 .DS_Store
 
+# Transcript of the last plan/apply, read by explain-failure.sh to quote the
+# provider on a failure. It holds real addresses and ids — never commit it.
+.tofu-run.log
+
 # Phase 2 SSH tunnel PIDs (Talos API via bastion)
 infrastructure/opentofu/.talos-tunnels.pids
 infrastructure/opentofu/cluster/.talos-tunnels.pids

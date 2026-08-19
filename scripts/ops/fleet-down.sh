@@ -172,7 +172,7 @@ if [ "$PLAN_ONLY" = 1 ]; then
   exit 0
 fi
 
-# No plan file, no destruction. YES, --yes, force and TF_CLI_ARGS_destroy are all
+# No plan file, no destruction. APPROVE, --yes, force and TF_CLI_ARGS_destroy are all
 # deliberately powerless here: the only way past this line is a plan somebody read.
 if [ -z "$PLAN_FILE" ]; then
   printf '✗ refusing to destroy without a plan you have read.\n' >&2

@@ -393,11 +393,11 @@ called 'task image-build PROVIDER=stubcloud VERSION=v0.0.2 ENSURE=1' \
 { [ "$(first_at 'task image-build')" -lt "$(last_at 'task infra-apply')" ]; } \
   && ok "…before the apply that needs the image data source to resolve" \
   || bad "the image was ensured after the apply, which is the plan failure it exists to avoid"
-# YES=1 now, not `-- --yes`: one spelling of "do not ask me" across the whole
+# APPROVE=auto now, not `-- --yes`: one spelling of "do not ask me" across the whole
 # repository instead of three (--yes, TF_CLI_ARGS_apply, and a prompt).
-{ called 'YES=1 -- --cp-only --upgrade' && called 'YES=1 -- --workers-only --upgrade'; } \
-  && ok "the roll is driven non-interactively with YES=1, control planes first" \
-  || bad "the roll was not called with YES=1 (an unattended lane would hang on its prompt)"
+{ called 'APPROVE=auto -- --cp-only --upgrade' && called 'APPROVE=auto -- --workers-only --upgrade'; } \
+  && ok "the roll is driven non-interactively with APPROVE=auto, control planes first" \
+  || bad "the roll was not called with APPROVE=auto (an unattended lane would hang on its prompt)"
 
 # --- and the branch a 1.0.0 cluster takes -------------------------------------
 # The upgrade must not demand a platform the release does not ship. Asked of the

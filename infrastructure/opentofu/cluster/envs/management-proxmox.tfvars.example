@@ -89,8 +89,8 @@ git_ref          = "refs/heads/main"
 
 # --- Backup / DR object stores (any S3-compatible store) ----------------------
 # Proxmox has no native object storage — point these at an external S3 (e.g. a
-# Scaleway/OVH bucket). PRIMARY = AWS_*; REPLICA = the "-backup" store, ideally a
-# different provider + BACKUP_AWS_* in prod.
+# Scaleway/OVH bucket). Each store is opened with the keys of the cloud that
+# HOLDS it, named by its endpoint below — so an OVH replica reads OVH_AWS_*.
 s3_primary_endpoint = "https://s3.fr-par.scw.cloud"
 s3_primary_region   = "fr-par"
 s3_replica_endpoint = "https://s3.fr-par.scw.cloud"

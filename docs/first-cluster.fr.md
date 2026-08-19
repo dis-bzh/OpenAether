@@ -58,16 +58,36 @@ source .env.sh
 `SCW_DEFAULT_PROJECT_ID`, `SCW_DEFAULT_ORGANIZATION_ID`, la région et la zone,
 puis `SCW_AWS_ACCESS_KEY_ID` / `SCW_AWS_SECRET_ACCESS_KEY` pour S3.
 
-Il existe une SECONDE paire, facile à manquer :
-`SCW_BACKUP_AWS_ACCESS_KEY_ID` / `SCW_BACKUP_AWS_SECRET_ACCESS_KEY` (ou la
-générique `BACKUP_AWS_*`). `.env.example` la fait pointer sur les clés du
-primaire, ce qui n'est juste que tant que les deux magasins vivent chez le même
-fournisseur. Dès que tu suis le conseil de production de l'étape 3 et places le
-réplica ailleurs, ce doivent être les clés de CE fournisseur-là — elles sont
-nommées d'après le provider du CLUSTER, pas du backup, si bien qu'un cluster
-Scaleway sauvegardant chez OVH met la clé OVH dans `SCW_BACKUP_AWS_*`.
-Contre-intuitif, et déterminant : `task cluster-up` refuse de continuer si le réplica
-pointe ailleurs et que les buckets `-backup` n'y sont pas créables.
+Il n'y a pas de seconde paire à inventer. **Les clés sont nommées d'après le
+cloud qui héberge le bucket.** Deux fichiers se partagent le travail : le
+`.tfvars` dit OÙ est chaque magasin, `.env.sh` dit avec QUELLES clés on l'ouvre.
+Pointe le réplica chez Outscale et le magasin `-backup` s'ouvre avec
+`OUTSCALE_AWS_*` — exactement les clés qu'utiliserait un cluster Outscale.
+`<PROV>_BACKUP_AWS_*` reste disponible pour donner à un magasin sa propre paire,
+et n'est nécessaire à personne qui ne le souhaite pas.
+
+Un exemple complet — cluster chez Scaleway, sauvegardes chez Outscale :
+
+```bash
+# .env.sh — le magasin principal est celui de Scaleway, le -backup celui d'Outscale
+export SCW_AWS_ACCESS_KEY_ID="$SCW_ACCESS_KEY"
+export SCW_AWS_SECRET_ACCESS_KEY="$SCW_SECRET_KEY"
+export OUTSCALE_AWS_ACCESS_KEY_ID="$OUTSCALE_ACCESS_KEY_ID"
+export OUTSCALE_AWS_SECRET_ACCESS_KEY="$OUTSCALE_SECRET_KEY"
+```
+
+```hcl
+# envs/management-scaleway.tfvars — et c'est ceci qui en fait une vraie sauvegarde
+s3_primary_endpoint = "https://s3.fr-par.scw.cloud"
+s3_primary_region   = "fr-par"
+s3_replica_endpoint = "https://oos.eu-west-2.outscale.com"
+s3_replica_region   = "eu-west-2"
+```
+
+`task cluster-up` ouvre les deux magasins avant de construire quoi que ce soit.
+Si le réplica n'est pas inscriptible, il refuse en quelques secondes — et nomme
+la variable dont la clé a été rejetée, au lieu de te laisser une erreur du
+fournisseur et six paires à deviner.
 
 Et celle qui compte le plus :
 
@@ -105,7 +125,7 @@ $EDITOR management-scaleway.tfvars
 | `environment` | `dev` ou `prod`, rien d'autre. Il n'*exige* rien : aucune validation ne regarde le réplica avant que tu dépenses. Un `prod` dont le réplica pointe sur l'endpoint primaire se déploie sans broncher, et `task cluster-verify` le déclare rouge après coup |
 | `admin_ip` | `curl -s ifconfig.me` en `/32`. C'est à la fois la liste d'autorisation SSH et l'ACL du LB apiserver |
 | `s3_primary_endpoint` / `_region` | le S3 sur le même provider que le cluster |
-| `s3_replica_endpoint` / `_region` | le S3 de la copie de sauvegarde. En production, **un autre provider** : un état qu'on ne peut lire que depuis le cloud qui vient de tomber n'est pas une sauvegarde. Exporte dans la même édition les clés `<PROV>_BACKUP_AWS_*` de CE magasin : `task cluster-up` refuse de continuer si le réplica pointe ailleurs et que les buckets `-backup` n'y sont pas créables |
+| `s3_replica_endpoint` / `_region` | le S3 de la copie de sauvegarde. En production, **un autre provider** : un état qu'on ne peut lire que depuis le cloud qui vient de tomber n'est pas une sauvegarde. Ce magasin s'ouvre avec les clés de SON propre cloud (`OUTSCALE_AWS_*` pour un réplica Outscale) — voir l'étape 2. `task cluster-up` refuse avant de construire quoi que ce soit si les buckets `-backup` n'y sont pas créables |
 | `bastion_ssh_keys` | la moitié **publique** de la clé passée en `KEY=`. `task cluster-up` refuse de démarrer si elles ne correspondent pas, avant toute dépense |
 | `control_planes` | 3 — **à l'intérieur de `node_distribution.<provider>`**, pas un champ de premier niveau, et `bastion_ssh_keys` est une map indexée par provider de la même façon. Rien ne valide le nombre ; `2` construit silencieusement un etcd à deux membres |
 
@@ -249,7 +269,7 @@ python3 scripts/ops/purge-orphans/scaleway.py
 **Détruire prend deux commandes et ne peut pas se réduire à une** — c'est le but,
 pas une gêne. La première calcule la destruction et ne détruit rien ; la seconde
 applique exactement ce que tu as lu. Ni `--yes`, ni `TF_CLI_ARGS_destroy`, ni
-`YES=1` ne passent la première.
+`APPROVE=auto` ne passent la première.
 
 `--force-no-edges` est obligatoire et le `--` nu ne l'est pas moins. `fleet-down`
 refuse de détruire tant qu'il n'a pas écarté l'existence de clusters enfants

@@ -50,29 +50,72 @@ provider_pu() {
 # where PU = SCW|OVH|OUTSCALE.  Both _ID and non-_ID name forms accepted.
 # Native API keys: Scaleway & Outscale S3 == API keys (SCW_*/OSC_*); OVH needs
 # dedicated S3 keys (no native fallback).
-s3_cred() {
-  local prov="$1" kind="$2" type="$3" pu suffix alt val v1 v2 g
+# Which provider owns an S3 endpoint. The BACKUP store is often not the cluster's
+# own cloud, and its keys belong to whoever holds the bucket — see s3_cred.
+# Empty (not an error) for anything unrecognised: a custom or self-hosted S3.
+provider_of_endpoint() {
+  case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+    *.scw.cloud*)        printf 'scaleway' ;;
+    *.outscale.com*)     printf 'outscale' ;;
+    *.io.cloud.ovh.net*) printf 'ovh' ;;
+    *) return 0 ;;
+  esac
+}
+
+# Picks the credential AND names the variable it came from, tab-separated, so a
+# failure can say "OUTSCALE_BACKUP_AWS_ACCESS_KEY_ID is rejected" instead of
+# leaving the operator to guess which of six pairs was tried.
+_s3_cred_pick() {
+  local prov="$1" kind="$2" type="$3" ep="${4:-}" pu suffix alt v1 v2 g rprov rpu
   pu="$(provider_pu "$prov")" || { echo "s3_cred: unknown provider '$prov'" >&2; return 1; }
   if [ "$type" = ak ]; then suffix=ACCESS_KEY_ID; alt=ACCESS_KEY
   else suffix=SECRET_ACCESS_KEY; alt=SECRET_KEY; fi
 
   if [ "$kind" = primary ]; then
     v1="${pu}_AWS_${suffix}"; v2="${pu}_AWS_${alt}"
-    val="${!v1:-${!v2:-}}"
-    if [ -z "$val" ]; then
-      case "$pu" in
-        SCW)      [ "$type" = ak ] && val="${SCW_ACCESS_KEY:-}" || val="${SCW_SECRET_KEY:-}" ;;
-        OUTSCALE) [ "$type" = ak ] && val="${OSC_ACCESS_KEY:-}" || val="${OSC_SECRET_KEY:-}" ;;
-      esac
-    fi
-  else # backup
-    v1="${pu}_BACKUP_AWS_${suffix}"; v2="${pu}_BACKUP_AWS_${alt}"
-    val="${!v1:-${!v2:-}}"
-    [ -n "$val" ] || { g="BACKUP_AWS_${suffix}"; val="${!g:-}"; }
-    [ -n "$val" ] || val="$(s3_cred "$prov" primary "$type")"
+    if [ -n "${!v1:-}" ]; then printf '%s\t%s' "$v1" "${!v1}"; return 0; fi
+    if [ -n "${!v2:-}" ]; then printf '%s\t%s' "$v2" "${!v2}"; return 0; fi
+    case "$pu" in
+      SCW)      v1=SCW_ACCESS_KEY;  v2=SCW_SECRET_KEY ;;
+      OUTSCALE) v1=OSC_ACCESS_KEY;  v2=OSC_SECRET_KEY ;;
+      *)        printf '\t'; return 0 ;;
+    esac
+    [ "$type" = ak ] || v1="$v2"
+    printf '%s\t%s' "$v1" "${!v1:-}"
+    return 0
   fi
-  printf '%s' "$val"
+
+  # BACKUP. Keys are named after the cloud that HOLDS THE BUCKET, not the cloud
+  # the cluster runs on. Naming them after the cluster meant a Scaleway cluster
+  # replicating to Outscale needed Outscale keys inside SCW_BACKUP_* — so the
+  # variable name argued for the wrong value, and on 2026-08-19 it got one.
+  # Given the endpoint, the store's own provider is asked FIRST.
+  rprov="$(provider_of_endpoint "$ep")"
+  rpu=""
+  if [ -n "$rprov" ]; then rpu="$(provider_pu "$rprov")"; fi
+  # Compared on the canonical prefix, so scw and scaleway are one provider.
+  if [ -n "$rpu" ] && [ "$rpu" != "$pu" ]; then
+    v1="${rpu}_BACKUP_AWS_${suffix}"; v2="${rpu}_BACKUP_AWS_${alt}"
+    if [ -n "${!v1:-}" ]; then printf '%s\t%s' "$v1" "${!v1}"; return 0; fi
+    if [ -n "${!v2:-}" ]; then printf '%s\t%s' "$v2" "${!v2}"; return 0; fi
+    _s3_cred_pick "$rprov" primary "$type"
+    return 0
+  fi
+  # Then the cluster-namespaced override, the generic one, and finally the
+  # primary keys — which only authenticate when the store is the same cloud.
+  v1="${pu}_BACKUP_AWS_${suffix}"; v2="${pu}_BACKUP_AWS_${alt}"
+  if [ -n "${!v1:-}" ]; then printf '%s\t%s' "$v1" "${!v1}"; return 0; fi
+  if [ -n "${!v2:-}" ]; then printf '%s\t%s' "$v2" "${!v2}"; return 0; fi
+  g="BACKUP_AWS_${suffix}"
+  if [ -n "${!g:-}" ]; then printf '%s\t%s' "$g" "${!g}"; return 0; fi
+  _s3_cred_pick "$prov" primary "$type"
 }
+
+# s3_cred <provider> <primary|backup> <ak|sk> [endpoint]
+s3_cred() { local r; r="$(_s3_cred_pick "$@")" || return 1; printf '%s' "${r#*$'\t'}"; }
+
+# s3_cred_source <provider> <primary|backup> <ak|sk> [endpoint] -> variable name
+s3_cred_source() { local r; r="$(_s3_cred_pick "$@")" || return 1; printf '%s' "${r%%$'\t'*}"; }
 
 # --- Bucket-name convention (mirrors cluster/backup.tf locals).
 #   project = cluster_name's first segment, plus bucket_suffix when set.
