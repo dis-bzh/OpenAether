@@ -11,8 +11,8 @@ This is the OpenAether commands and the traps this project has actually met.
 ## The sequence
 
 ```
-task down PROVIDER=<p> -- --plan --force-no-edges       # computes, destroys nothing
-task down PROVIDER=<p> -- --plan-file destroy-<role>-<p>.tfplan --force-no-edges --yes
+task cluster-down PROVIDER=<p> -- --plan --force-no-edges       # computes, destroys nothing
+task cluster-down PROVIDER=<p> -- --plan-file destroy-<role>-<p>.tfplan --force-no-edges --yes
 python3 scripts/ops/purge-orphans/<p>.py
 ```
 
@@ -31,8 +31,8 @@ workflow, a README line) will refuse and leave the cloud running.
 Destroying takes two deliberate commands and cannot be collapsed into one:
 
 ```
-task down PROVIDER=<p> -- --plan                              computes, destroys nothing
-task down PROVIDER=<p> -- --plan-file <f> --force-no-edges --yes    lands exactly that
+task cluster-down PROVIDER=<p> -- --plan                              computes, destroys nothing
+task cluster-down PROVIDER=<p> -- --plan-file <f> --force-no-edges --yes    lands exactly that
 ```
 
 `--yes`, `YES=1` and `TF_CLI_ARGS_destroy` are deliberately powerless on the first

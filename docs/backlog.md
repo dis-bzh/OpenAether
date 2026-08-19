@@ -726,7 +726,7 @@ Rung: real cloud, and free once the cluster exists.
 
 S3 bucket names are unique across a whole provider, not per account (Scaleway
 "in our whole platform", OVH "within OVHcloud", Outscale per region), so the
-hardcoded names made `task up`'s first billable step unrepeatable by any second
+hardcoded names made `task cluster-up`'s first billable step unrepeatable by any second
 account. `bucket_suffix` (2026-08-17) is the discriminator; it is empty by
 default, which keeps the existing names, and `task bucket-suffix` prints one.
 
@@ -794,7 +794,7 @@ proven sufficient one**: nobody has watched an OVH Octavia LB reach ACTIVE, so
 whether 30m is enough is a HYPOTHESIS.
 
 **The cost is not the wait, it is the loop.** A create timeout leaves the resource
-`tainted` in state, so re-running `task up` DESTROYS the load balancer that was
+`tainted` in state, so re-running `task cluster-up` DESTROYS the load balancer that was
 nearly ready and begins again. Anyone who reacts to the timeout by re-running pays
 twice and learns nothing. Check first:
 
@@ -841,21 +841,21 @@ is an entry that gets picked up and put back down. **Decide:** replaces
 **Closes:** when a question has to be settled first — a task-shaped entry
 invites someone to build what nobody decided.
 
-- [ ] **`task up` cannot add a node to a cluster it already bootstrapped.** Its
+- [ ] **`task cluster-up` cannot add a node to a cluster it already bootstrapped.** Its
       `infra` step applies with `talos_bootstrap=true` once the cluster is
       bootstrapped (correctly — forcing false zeroes the counts), so it waits for
-      the NEW node's Talos API through a tunnel that `task up` only opens on the
+      the NEW node's Talos API through a tunnel that `task cluster-up` only opens on the
       NEXT step. Measured on Outscale and OVH 2026-08-15 scaling 1→3 and 3→4
       workers: the apply retries for its full 900s and gives up. The workaround
       is ugly and works — let the apply fail, open the tunnels once the state
       holds the new node, re-run — but it means the documented "re-run to resume"
       is untrue for any change that adds a node, and it would bite a cold shell
-      re-running `task up` on an existing cluster too, since nothing has the
+      re-running `task cluster-up` on an existing cluster too, since nothing has the
       tunnels open then either.
       **Decide:** open the tunnels before `infra` when the state is already
       bootstrapped, or split the apply so node creation and Talos configuration
       are separate phases again.
-      **Closes:** `workers = N+1` in a tfvars, one `task up`, exit 0, N+1 nodes
+      **Closes:** `workers = N+1` in a tfvars, one `task cluster-up`, exit 0, N+1 nodes
       Ready. Rung: real cloud.
 
 - [ ] **The installer fix is written and not proven.** The machine config now
@@ -1308,7 +1308,7 @@ One line each; the detail lives in the referenced file.
   `cnpg/networkpolicy-db-restricted.yaml`.
 - **A resource-count driven by a phase variable is not idempotent** — gating
   `module.talos`'s `control_plane_count`/`worker_count` on `var.talos_bootstrap`
-  meant every re-run of `task infra-apply` (talos_bootstrap=false, part of `task up`)
+  meant every re-run of `task infra-apply` (talos_bootstrap=false, part of `task cluster-up`)
   zeroed them and dropped `talos_machine_bootstrap` from state, which then got
   RECREATED by `bootstrap-phase2` — re-sending the bootstrap RPC to a live
   etcd. Fixed by reading `tofu state list` first (`Taskfile.yml`'s `infra`

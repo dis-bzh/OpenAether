@@ -21,7 +21,7 @@ body:
     attributes:
       label: What you ran
       description: The command, copied rather than described.
-      placeholder: task up ROLE=management PROVIDER=scaleway
+      placeholder: task cluster-up ROLE=management PROVIDER=scaleway
     validations:
       required: true
 

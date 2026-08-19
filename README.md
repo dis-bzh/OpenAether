@@ -158,7 +158,7 @@ else in the example already has a working value.
 | `s3_replica_endpoint` / `s3_replica_region` | S3 for the **backup copy**. In production put it on a **different provider** — a state you can only read from the cloud that just failed is not a backup |
 
 Also `bastion_ssh_keys`: the **public** half of the key you will pass as `KEY=`.
-They are a pair, and `task up` refuses to start if they do not match — before it
+They are a pair, and `task cluster-up` refuses to start if they do not match — before it
 spends anything. And `git_repo_url` + `git_ref` if you run your own fork of
 OpenAether-apps; the defaults point at ours, and its `apps/clusters` is not yours.
 
@@ -168,11 +168,11 @@ OpenAether-apps; the defaults point at ours, and its `apps/clusters` is not your
 # of the type in your tfvars, and a new account may be capped at 1.
 task preflight-quotas PROVIDER=ovh
 
-task up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
+task cluster-up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
 task cluster-verify PROVIDER=scaleway               # ask the cluster, not the tool
 ```
 
-`task up` is the one command, and it is idempotent: it builds the Talos image if
+`task cluster-up` is the one command, and it is idempotent: it builds the Talos image if
 the account lacks it, renders the bootstrap manifests, applies the
 infrastructure, opens the tunnels and bootstraps Talos. Re-run it after fixing
 any failure and it resumes. It is also the command CI runs, so it is the path
@@ -192,8 +192,8 @@ Order matters: the management owns its children's CRs.
 ```bash
 source .env.sh
 task edge-down CLUSTER=edge-1 -- --yes      # each CAPI child first
-task down PROVIDER=ovh -- --plan      # then the management: compute it first
-task down PROVIDER=ovh -- --plan-file destroy-management-ovh.tfplan --yes
+task cluster-down PROVIDER=ovh -- --plan      # then the management: compute it first
+task cluster-down PROVIDER=ovh -- --plan-file destroy-management-ovh.tfplan --yes
 python3 scripts/ops/purge-orphans/ovh.py    # dry-run: confirm nothing is left
 ```
 

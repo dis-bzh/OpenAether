@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# What a PURE-INFRA cluster must prove once `task up` returns.
+# What a PURE-INFRA cluster must prove once `task cluster-up` returns.
 #
 # staging-verify.sh is the full-platform check: it waits for 35 Flux
 # Kustomizations, the Gateway, the OpenAether-apps ref. On a 1.0.0 cluster none
@@ -51,7 +51,7 @@ K() { timeout 60 kubectl "$@"; }
 
 info "The cluster answers"
 
-# WAIT, do not sample once. `task up` returns when the Talos bootstrap RPC
+# WAIT, do not sample once. `task cluster-up` returns when the Talos bootstrap RPC
 # succeeded, which is before the apiserver serves — and on the tfvars that set
 # skip_health_check it returns even earlier. Measured on OVH 2026-08-16: nodes
 # five seconds old and the API load balancer answering EOF because it has no
@@ -70,7 +70,7 @@ else
   bad "apiserver never answered /readyz within ${API_TIMEOUT}s"
 fi
 
-# Bounded wait, not an instant assertion: `task up` returns when OpenTofu is
+# Bounded wait, not an instant assertion: `task cluster-up` returns when OpenTofu is
 # done, which is before the last worker has finished joining.
 NODES_TIMEOUT="${NODES_TIMEOUT:-300}"
 deadline=$((SECONDS + NODES_TIMEOUT))

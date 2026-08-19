@@ -32,18 +32,18 @@ tasks:
         OpenAether — one Talos cluster, on any provider.
 
         Deploy and operate, in order:
-          task setup                         install the toolchain
-          task bucket-suffix                 a discriminator for your bucket names
-          task infra-plan     PROVIDER=…     what would be created, before spending
-          task up             PROVIDER=… KEY=…  the journey: image → infra → bootstrap
-          task cluster-verify PROVIDER=…     ask the cluster whether it is what we promise
-          task cluster-upgrade PROVIDER=… KEY=…  Kubernetes then Talos, measuring the outage
+          task setup                              install the toolchain
+          task bucket-suffix                      a discriminator for your bucket names
+          task infra-plan      PROVIDER=…         what would be created, before spending
+          task cluster-up      PROVIDER=… KEY=…   the journey: image → infra → bootstrap
+          task cluster-verify  PROVIDER=…         ask the cluster whether it is what we promise
+          task cluster-upgrade PROVIDER=… KEY=…   Kubernetes then Talos, measuring the outage
 
         Destroying takes TWO commands, on purpose — no single line can do it:
-          task down PROVIDER=… -- --plan                     compute it, destroy nothing
-          task down PROVIDER=… -- --plan-file F --yes        land exactly that plan
+          task cluster-down PROVIDER=… -- --plan                  computes, destroys nothing
+          task cluster-down PROVIDER=… -- --plan-file F --yes     lands exactly that plan
 
-        Nothing asks you a question except `up`, once, before it spends. Add YES=1
+        Nothing asks you a question except `cluster-up`, once, before it spends. Add YES=1
         to answer it in advance — for CI, and for a shell that cannot be asked.
         YES=1 is deliberately powerless on anything that destroys.
 
@@ -359,9 +359,10 @@ tasks:
     cmds:
       - './scripts/bootstrap/talos-image.sh {{.PROVIDER}} {{.IMAGE_VERSION}}{{if .ENSURE}} --ensure{{end}}'
 
-  up:
+  cluster-up:
+    aliases: [up]
     desc: >-
-      Idempotent one-shot bring-up: image -> render manifests -> infra -> tunnels -> bootstrap. Usage: task up
+      Idempotent one-shot bring-up: image -> render manifests -> infra -> tunnels -> bootstrap. Usage: task cluster-up
       ROLE=management|workload PROVIDER=… [KEY=~/.ssh/yourkey] [VERSION=v1.13.4] [FORCE=1] [YES=1].
       It shows the plan and asks once before it spends; YES=1 answers for you, for CI and for a
       shell that cannot be asked.
@@ -468,7 +469,7 @@ tasks:
             echo "✗ no terminal, and no YES=1 — nothing was applied." >&2
             echo "  The plan above is saved. Read it, then land exactly it:" >&2
             echo "    task infra-apply ROLE={{.ROLE}} PROVIDER={{.PROVIDER}} KEY={{.KEY}} PLAN=$PLANFILE" >&2
-            echo "  Or re-run the whole journey unattended: task up … YES=1" >&2
+            echo "  Or re-run the whole journey unattended: task cluster-up … YES=1" >&2
             exit 1
           fi
         fi
@@ -478,7 +479,9 @@ tasks:
           ROLE: "{{.ROLE}}"
           PROVIDER: "{{.PROVIDER}}"
           KEY: "{{.KEY}}"
-      - echo "✓ task up complete — every step above is idempotent, re-run 'task up' after fixing any failure to resume."
+      - |
+        echo "✓ cluster-up complete — every step above is idempotent."
+        echo "  Re-run 'task cluster-up' after fixing any failure to resume."
 
   # ===========================================================================
   # Cluster Lifecycle
@@ -495,7 +498,7 @@ tasks:
       Apply the infrastructure. Give it a PLAN you have read — `task infra-plan PROVIDER=… OUT=f`
       then `task infra-apply PROVIDER=… PLAN=f` — or YES=1 to compute and apply in one step
       without a question. With neither it refuses: it will not guess, and it will not prompt.
-      Usage: task infra-apply PROVIDER=… [ROLE=management] [PLAN=f | YES=1] [KEY=~/.ssh/yourkey]
+      Usage: task infra-apply PROVIDER=… [ROLE=…] [PLAN=f | YES=1] [KEY=…]
     dir: infrastructure/opentofu/cluster
     # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
     # scaleway in silence — including destroy and down — so a command typed
@@ -847,14 +850,14 @@ tasks:
         export KUBECONFIG="${KUBECONFIG:-$PWD/infrastructure/opentofu/cluster/kubeconfig}"
         ./scripts/ops/edge-down.sh {{.CLUSTER}} --namespace {{.NS}} --timeout {{.TIMEOUT}} {{.CLI_ARGS}}
 
-  down:
-    aliases: [fleet-down]
+  cluster-down:
+    aliases: [down, fleet-down]
     desc: >-
       COMPLETE, idempotent fleet teardown: every CAPI child cluster (edge-down,
       clean cascade) THEN the management (tofu destroy), then a report of what is
       left to purge by hand (buckets, images, keypairs). The order is not
       negotiable: a child outliving the management means orphaned, billed VMs.
-      Usage: task down PROVIDER=ovh [ROLE=management] [-- --yes]
+      Usage: task cluster-down PROVIDER=ovh [ROLE=management] [-- --yes]
     # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
     # scaleway in silence — including destroy and down — so a command typed
     # while working on another cloud aimed at the wrong account. The refusal is

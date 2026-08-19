@@ -44,7 +44,7 @@ tfvar() { # <key> — read a top-level string from the env file
 
 # --- Where the secrets go -----------------------------------------------------
 
-# `task up` leaves the kubeconfig in the state, not necessarily on disk, and this
+# `task cluster-up` leaves the kubeconfig in the state, not necessarily on disk, and this
 # runs before anything else fetches it. Without this the script died at the first
 # kubectl call — see the `|| true` note directly below for why it died silently.
 if [ ! -s "$KUBECONFIG" ]; then
@@ -52,7 +52,7 @@ if [ ! -s "$KUBECONFIG" ]; then
     fail "could not fetch the kubeconfig for ${ROLE}-${PROVIDER}"
 fi
 
-# WAIT for OpenBao to exist. Day-1 seeding runs right after `task up`, and at
+# WAIT for OpenBao to exist. Day-1 seeding runs right after `task cluster-up`, and at
 # that moment Flux has barely started: `foundation-vault` is several
 # Kustomizations down the DAG and its init Job has not produced the recovery
 # Secret yet. Failing here was just being early — measured twice on 2026-08-14.

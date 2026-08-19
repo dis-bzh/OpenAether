@@ -375,6 +375,6 @@ echo "  3. cp infrastructure/opentofu/cluster/envs/management-scaleway.tfvars.ex
 echo "        infrastructure/opentofu/cluster/envs/management-scaleway.tfvars   # then edit it"
 echo "     Six fields have no default: environment, admin_ip, s3_primary_endpoint,"
 echo "     s3_primary_region, s3_replica_endpoint, s3_replica_region. See README.md."
-echo "  4. task up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey"
+echo "  4. task cluster-up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey"
 echo "     One idempotent command: image, manifests, infra, tunnels, Talos bootstrap."
 echo "     KEY must be the private half of a key listed in bastion_ssh_keys."

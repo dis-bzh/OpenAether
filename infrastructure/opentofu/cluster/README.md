@@ -48,17 +48,17 @@ and junction point work without modification.
 
 Between phases, establish SSH tunnels via the bastion for Talos API access (port 50000).
 
-### One-shot bring-up: `task up`
+### One-shot bring-up: `task cluster-up`
 
 ```bash
-task up ROLE=management                    # or: ROLE=workload PROVIDER=ovh KEY=~/.ssh/yourkey
+task cluster-up ROLE=management                    # or: ROLE=workload PROVIDER=ovh KEY=~/.ssh/yourkey
 ```
 
 Chains image → render manifests → Phase 1 (`infra`) → tunnels → Phase 2
 (`bootstrap-phase2`) in one command. Every step is idempotent (image build
 skips if already published/downloaded, manifests skip re-rendering unless
 `FORCE=1`, `infra`/`bootstrap-phase2` are plain `tofu apply`s) — if any step
-fails, fix the issue and re-run `task up`; completed steps are no-ops. This
+fails, fix the issue and re-run `task cluster-up`; completed steps are no-ops. This
 doesn't replace the two-phase flow above, it just automates running both
 phases back to back — same tasks, same `tofu apply`s underneath.
 
@@ -181,7 +181,7 @@ task bootstrap-phase2 ROLE=workload PROVIDER=ovh KEY=~/.ssh/yourkey
 ### Cross-provider failover — second management on another cloud
 
 There is no failover command. `failover-management.sh` was deleted in 0.5.0: it
-re-implemented `task up` with a hardcoded SSH key and its own tunnel loop, had
+re-implemented `task cluster-up` with a hardcoded SSH key and its own tunnel loop, had
 never been run, and a broken skeleton is a worse starting point than none. The
 prerequisite — a state and artifacts replica on a SECOND provider — is real and
 measured (`docs/backlog.md`); rebuilding a cluster from it is designed work that

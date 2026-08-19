@@ -122,11 +122,11 @@ source .env.sh
 cp infrastructure/opentofu/cluster/envs/management-scaleway.tfvars{.example,}
 $EDITOR infrastructure/opentofu/cluster/envs/management-scaleway.tfvars
 task image-build PROVIDER=scaleway
-task up ROLE=management PROVIDER=scaleway KEY=~/.ssh/your-key
+task cluster-up ROLE=management PROVIDER=scaleway KEY=~/.ssh/your-key
 ```
 
 `preflight-quotas` has no Scaleway backend — it takes `ovh` or `outscale` only.
-`task up` now refuses before spending if the env file or the SSH key is missing;
+`task cluster-up` now refuses before spending if the env file or the SSH key is missing;
 it used to check the key in phase 2, i.e. after `infra` had created VMs.
 
 - [x] **`SCW-mgmt-ha`** — 3 CP across 3 AZs, run instead of the cheaper non-HA
@@ -158,13 +158,13 @@ it used to check the key in phase 2, i.e. after `infra` had created VMs.
 - [x] **no Longhorn HTTPRoute**: `kubectl -n longhorn-system get httproute`
       → empty, and Longhorn runs anyway (23 pods). Both Gateways came up with
       their LB-IPAM VIPs. Adding the route back by hand is still untested.
-- [x] **idempotency**: `task up` a second time → 0 changes, node ages unchanged,
+- [x] **idempotency**: `task cluster-up` a second time → 0 changes, node ages unchanged,
       kubeconfig still valid → "0 added, 0 changed, 0 destroyed" on both phases,
       nodes aged only by the elapsed minute.
 - [x] `task etcd-snapshot PROVIDER=scaleway` writes to both buckets → 49 MB,
       encrypted, in the primary and its `-backup` twin. Pass `KEY=` if your key
       is not `~/.ssh/id_ed25519`.
-- [x] **teardown**: `task fleet-down PROVIDER=scaleway -- --yes`, then
+- [x] **teardown**: `task cluster-down PROVIDER=scaleway -- --yes`, then
       `python3 scripts/ops/purge-orphans/scaleway.py` reports nothing left
       → 62 destroyed, "no child cluster" from the fail-safe, project clean.
 
@@ -187,7 +187,7 @@ untested cases. Take as many as the budget allows, top down:
 
 ```bash
 task preflight-quotas PROVIDER=ovh
-task up ROLE=management PROVIDER=ovh
+task cluster-up ROLE=management PROVIDER=ovh
 ```
 
 - [x] **`OVH-mgmt-ha`** — Octavia LB, floating IP, SNAT router → 3 CP + 3
@@ -223,7 +223,7 @@ task up ROLE=management PROVIDER=ovh
 
 ```bash
 task preflight-quotas PROVIDER=outscale -- --add-vms 2 --add-cores 4 --add-ram-gb 16
-task up ROLE=management PROVIDER=outscale
+task cluster-up ROLE=management PROVIDER=outscale
 ```
 
 - [~] **`OSC-mgmt-ha`** — the LB returns a **DNS name**, not an IP; that path is
@@ -287,7 +287,7 @@ three providers, this section is already answered — say so and move on.
 - [ ] a management with CAPI picked, then one child through `apps/clusters`
       (rename `example-scaleway.yaml.example` — **it does not build as shipped**,
       see `backlog.md`; fixing it is part of this test)
-- [ ] `task edge-down CLUSTER=<name> -- --yes` then `task fleet-down` — in that
+- [ ] `task edge-down CLUSTER=<name> -- --yes` then `task cluster-down` — in that
       order, always
 - [ ] **`OP-failover`** — the DR path has never been proven. If you only do one
       thing from this section, restore something from a backup and write down

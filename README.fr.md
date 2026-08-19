@@ -158,7 +158,7 @@ eux. Tout le reste de l'exemple a déjà une valeur qui fonctionne.
 | `s3_replica_endpoint` / `s3_replica_region` | le S3 de la **copie de sauvegarde**. En production, chez un **autre provider** — un état qu'on ne peut lire que depuis le cloud qui vient de tomber n'est pas une sauvegarde |
 
 Et `bastion_ssh_keys` : la moitié **publique** de la clé que tu passeras en `KEY=`.
-Les deux forment une paire, et `task up` refuse de démarrer si elles ne
+Les deux forment une paire, et `task cluster-up` refuse de démarrer si elles ne
 correspondent pas — avant toute dépense. Ainsi que `git_repo_url` + `git_ref` si
 tu utilises ton propre fork d'OpenAether-apps ; les défauts pointent sur le
 nôtre, et son `apps/clusters` n'est pas le tien.
@@ -169,11 +169,11 @@ nôtre, et son `apps/clusters` n'est pas le tien.
 # 5 instances du type de ton tfvars, et un compte neuf peut être plafonné à 1.
 task preflight-quotas PROVIDER=ovh
 
-task up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
+task cluster-up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
 task cluster-verify PROVIDER=scaleway               # demander au cluster, pas à l'outil
 ```
 
-`task up` est la commande unique, et elle est idempotente : elle construit
+`task cluster-up` est la commande unique, et elle est idempotente : elle construit
 l'image Talos si le compte ne l'a pas, rend les manifests de bootstrap, applique
 l'infrastructure, ouvre les tunnels et amorce Talos. Relance-la après avoir
 corrigé une erreur, elle reprend. C'est aussi la commande que joue la CI, donc
@@ -193,8 +193,8 @@ L'ordre compte : le management détient les CR de ses enfants.
 ```bash
 source .env.sh
 task edge-down CLUSTER=edge-1 -- --yes      # chaque enfant CAPI d'abord
-task down PROVIDER=ovh -- --plan      # puis le management : d'abord le plan
-task down PROVIDER=ovh -- --plan-file destroy-management-ovh.tfplan --yes
+task cluster-down PROVIDER=ovh -- --plan      # puis le management : d'abord le plan
+task cluster-down PROVIDER=ovh -- --plan-file destroy-management-ovh.tfplan --yes
 python3 scripts/ops/purge-orphans/ovh.py    # dry-run : vérifier qu'il ne reste rien
 ```
 

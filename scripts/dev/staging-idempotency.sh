@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Re-run the bring-up on a cluster that is already up, and assert nothing moved.
 #
-# `task up` is documented as idempotent and was proven so by hand on 2026-07-30,
+# `task cluster-up` is documented as idempotent and was proven so by hand on 2026-07-30,
 # after a re-run had silently re-sent the bootstrap RPC to a live etcd and
 # invalidated the operator's kubeconfig. Nothing has re-proven it since, on any
 # provider — which is the gap this closes.
@@ -37,7 +37,7 @@ BEFORE="$(node_identities)"
 echo "$BEFORE" | sed 's/^/  /'
 
 echo "--- second bring-up ---"
-task up ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY"
+task cluster-up ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY"
 
 # STRICT=1 turns a non-empty plan into exit 2. This is the assertion; the apply
 # above merely has to not fail.

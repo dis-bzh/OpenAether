@@ -2,7 +2,7 @@
 
 **Last resort**, for when a cluster's resources outlive their controller: a
 management destroyed before its CAPI children, a failed `edge-down`, a lost
-OpenTofu state. Every other case goes through `task fleet-down` / `task
+OpenTofu state. Every other case goes through `task cluster-down` / `task
 edge-down` / `task infra-down`, which delete cleanly **and** update the state.
 
 These scripts talk to the provider API directly: they ignore the OpenTofu state

@@ -90,7 +90,7 @@ if [ ! -r "$KUBECONFIG" ] || ! kubectl cluster-info >/dev/null 2>&1; then
         (or  talosctl -e <tunnel> -n <cp-ip> kubeconfig ./kubeconfig --force)
     • children already deleted, or a bootstrap that never reached Kubernetes
       (so no CAPI controller ever ran)? re-run asserting there is none:
-        task fleet-down PROVIDER=<provider> -- --force-no-edges --yes
+        task cluster-down PROVIDER=<provider> -- --force-no-edges --yes
       The bare -- is not optional: without it Task keeps the flags itself.
     • when in doubt: inventory on the provider side FIRST (look for the child
       clusters' prefix among VMs, LBs, networks) — see docs/backlog.md
@@ -168,7 +168,7 @@ if [ "$PLAN_ONLY" = 1 ]; then
   ( cd "$ROOT" && task infra-down-plan ROLE="$ROLE" PROVIDER="$PROVIDER" OUT="$PLAN_OUT" ) || {
     warn "could not compute the destruction plan"; exit 1; }
   printf '\n✓ nothing was destroyed. Read the plan above, then land exactly it:\n'
-  printf '    task down PROVIDER=%s ROLE=%s -- --plan-file %s --yes\n\n' "$PROVIDER" "$ROLE" "$PLAN_OUT"
+  printf '    task cluster-down PROVIDER=%s ROLE=%s -- --plan-file %s --yes\n\n' "$PROVIDER" "$ROLE" "$PLAN_OUT"
   exit 0
 fi
 
@@ -177,8 +177,8 @@ fi
 if [ -z "$PLAN_FILE" ]; then
   printf '✗ refusing to destroy without a plan you have read.\n' >&2
   printf '  This takes two commands, always:\n' >&2
-  printf '    task down PROVIDER=%s ROLE=%s -- --plan\n' "$PROVIDER" "$ROLE" >&2
-  printf '    task down PROVIDER=%s ROLE=%s -- --plan-file destroy-%s-%s.tfplan --yes\n' \
+  printf '    task cluster-down PROVIDER=%s ROLE=%s -- --plan\n' "$PROVIDER" "$ROLE" >&2
+  printf '    task cluster-down PROVIDER=%s ROLE=%s -- --plan-file destroy-%s-%s.tfplan --yes\n' \
     "$PROVIDER" "$ROLE" "$ROLE" "$PROVIDER" >&2
   exit 1
 fi

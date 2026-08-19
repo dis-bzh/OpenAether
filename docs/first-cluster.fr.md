@@ -66,7 +66,7 @@ fournisseur. Dès que tu suis le conseil de production de l'étape 3 et places l
 réplica ailleurs, ce doivent être les clés de CE fournisseur-là — elles sont
 nommées d'après le provider du CLUSTER, pas du backup, si bien qu'un cluster
 Scaleway sauvegardant chez OVH met la clé OVH dans `SCW_BACKUP_AWS_*`.
-Contre-intuitif, et déterminant : `task up` refuse de continuer si le réplica
+Contre-intuitif, et déterminant : `task cluster-up` refuse de continuer si le réplica
 pointe ailleurs et que les buckets `-backup` n'y sont pas créables.
 
 Et celle qui compte le plus :
@@ -75,7 +75,7 @@ Et celle qui compte le plus :
 TF_VAR_encryption_passphrase="$(openssl rand -base64 48)"
 ```
 
-Minimum 32 caractères. `task up` refuse net si elle n'est pas définie, et refuse
+Minimum 32 caractères. `task cluster-up` refuse net si elle n'est pas définie, et refuse
 encore si elle contient toujours `change-me` : le texte d'exemple est publié dans
 ce dépôt, et ce contrôle est la seule chose entre toi et un déploiement sous un
 secret public. Perdre cette passphrase, c'est perdre l'état et les deux artefacts
@@ -84,7 +84,7 @@ d'accès.
 N'exporte pas `AWS_*` toi-même : le flux les dérive par provider à partir des
 variables préfixées ci-dessus.
 
-`task up` vérifie ce fichier avant de dépenser quoi que ce soit : la clé SSH
+`task cluster-up` vérifie ce fichier avant de dépenser quoi que ce soit : la clé SSH
 existe et est bien la moitié privée de `bastion_ssh_keys`, le fichier tfvars
 existe, les DEUX paires d'identifiants S3 se résolvent, et la passphrase est
 définie et n'est pas le texte d'exemple. Tout cela tourne avant le premier
@@ -105,8 +105,8 @@ $EDITOR management-scaleway.tfvars
 | `environment` | `dev` ou `prod`, rien d'autre. Il n'*exige* rien : aucune validation ne regarde le réplica avant que tu dépenses. Un `prod` dont le réplica pointe sur l'endpoint primaire se déploie sans broncher, et `task cluster-verify` le déclare rouge après coup |
 | `admin_ip` | `curl -s ifconfig.me` en `/32`. C'est à la fois la liste d'autorisation SSH et l'ACL du LB apiserver |
 | `s3_primary_endpoint` / `_region` | le S3 sur le même provider que le cluster |
-| `s3_replica_endpoint` / `_region` | le S3 de la copie de sauvegarde. En production, **un autre provider** : un état qu'on ne peut lire que depuis le cloud qui vient de tomber n'est pas une sauvegarde. Exporte dans la même édition les clés `<PROV>_BACKUP_AWS_*` de CE magasin : `task up` refuse de continuer si le réplica pointe ailleurs et que les buckets `-backup` n'y sont pas créables |
-| `bastion_ssh_keys` | la moitié **publique** de la clé passée en `KEY=`. `task up` refuse de démarrer si elles ne correspondent pas, avant toute dépense |
+| `s3_replica_endpoint` / `_region` | le S3 de la copie de sauvegarde. En production, **un autre provider** : un état qu'on ne peut lire que depuis le cloud qui vient de tomber n'est pas une sauvegarde. Exporte dans la même édition les clés `<PROV>_BACKUP_AWS_*` de CE magasin : `task cluster-up` refuse de continuer si le réplica pointe ailleurs et que les buckets `-backup` n'y sont pas créables |
+| `bastion_ssh_keys` | la moitié **publique** de la clé passée en `KEY=`. `task cluster-up` refuse de démarrer si elles ne correspondent pas, avant toute dépense |
 | `control_planes` | 3 — **à l'intérieur de `node_distribution.<provider>`**, pas un champ de premier niveau, et `bastion_ssh_keys` est une map indexée par provider de la même façon. Rien ne valide le nombre ; `2` construit silencieusement un etcd à deux membres |
 
 `git_repo_url`, `git_ref`, `flux_namespace` et `apps_profile` sont inertes tant
@@ -121,7 +121,7 @@ cher que tu trouveras jamais.
 
 ```bash
 cd ../../../..
-task up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
+task cluster-up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
 ```
 
 Demande un terminal : l'apply sollicite une approbation deux fois, et il applique
@@ -154,7 +154,7 @@ au provider, et garde la ressource s'il la dit saine.
 Et s'il est réellement coincé, ce n'est pas réparable de ton côté : un LB managé
 réserve un port **dans ton propre sous-réseau** avant que son backend existe, si
 bien qu'un LB bloqué ne peut plus être supprimé et retient le sous-réseau, le
-réseau, et tout ton teardown derrière lui. `task down` le reconnaît et te le dit,
+réseau, et tout ton teardown derrière lui. `task cluster-down` le reconnaît et te le dit,
 au lieu de te conseiller de réessayer. C'est un ticket support.
 
 **Sur Outscale, cette première étape se compte en minutes voire en heure, pas en
@@ -241,8 +241,8 @@ terre.
 
 ```bash
 task infra-down ROLE=management PROVIDER=scaleway
-task down PROVIDER=scaleway -- --plan --force-no-edges          # ne détruit rien
-task down PROVIDER=scaleway -- --plan-file destroy-management-scaleway.tfplan --force-no-edges --yes
+task cluster-down PROVIDER=scaleway -- --plan --force-no-edges          # ne détruit rien
+task cluster-down PROVIDER=scaleway -- --plan-file destroy-management-scaleway.tfplan --force-no-edges --yes
 python3 scripts/ops/purge-orphans/scaleway.py
 ```
 

@@ -64,7 +64,7 @@ which is correct only while both stores sit on one provider. The moment you
 follow the production advice in step 3 and put the replica on another provider,
 these must be THAT provider's keys — they are namespaced by the CLUSTER's
 provider, not the backup's, so a Scaleway cluster backing up to OVH puts the OVH
-key in `SCW_BACKUP_AWS_*`. Counter-intuitive, and load-bearing: `task up`
+key in `SCW_BACKUP_AWS_*`. Counter-intuitive, and load-bearing: `task cluster-up`
 refuses to continue if the replica points elsewhere and the `-backup` buckets
 cannot be created there.
 
@@ -74,7 +74,7 @@ And the one that matters most:
 TF_VAR_encryption_passphrase="$(openssl rand -base64 48)"
 ```
 
-Minimum 32 characters. `task up` refuses outright if it is unset, and refuses
+Minimum 32 characters. `task cluster-up` refuses outright if it is unset, and refuses
 again if it still contains `change-me` — the shipped placeholder is published in
 this repository, and that check is the only thing between you and deploying
 under a public secret. Losing this passphrase means losing the state and both
@@ -83,7 +83,7 @@ access artifacts.
 Do not export `AWS_*` yourself: the flow derives them per provider from the
 namespaced variables above.
 
-`task up` checks this file before it spends anything: the SSH key exists and is
+`task cluster-up` checks this file before it spends anything: the SSH key exists and is
 the private half of `bastion_ssh_keys`, the tfvars file exists, BOTH S3
 credential pairs resolve, and the passphrase is set and is not the placeholder.
 All of it runs before the first bucket.
@@ -103,8 +103,8 @@ $EDITOR management-scaleway.tfvars
 | `environment` | `dev` or `prod`, nothing else. It does not *require* anything: nothing validates the replica before you spend. `prod` with the replica on the primary's endpoint deploys fine and `task cluster-verify` calls it red afterwards |
 | `admin_ip` | `curl -s ifconfig.me` as a `/32`. It is both the SSH allow-list and the apiserver LB ACL |
 | `s3_primary_endpoint` / `_region` | S3 on the same provider as the cluster |
-| `s3_replica_endpoint` / `_region` | S3 for the backup copy. In production, **a different provider** — a state you can only read from the cloud that just failed is not a backup. Export that store's own `<PROV>_BACKUP_AWS_*` keys in the same edit: `task up` refuses to continue if the replica points elsewhere and the `-backup` buckets cannot be created there |
-| `bastion_ssh_keys` | the **public** half of the key you will pass as `KEY=`. `task up` refuses to start if they do not match, before spending anything |
+| `s3_replica_endpoint` / `_region` | S3 for the backup copy. In production, **a different provider** — a state you can only read from the cloud that just failed is not a backup. Export that store's own `<PROV>_BACKUP_AWS_*` keys in the same edit: `task cluster-up` refuses to continue if the replica points elsewhere and the `-backup` buckets cannot be created there |
+| `bastion_ssh_keys` | the **public** half of the key you will pass as `KEY=`. `task cluster-up` refuses to start if they do not match, before spending anything |
 | `control_planes` | 3 — **inside `node_distribution.<provider>`**, not a top-level field, and `bastion_ssh_keys` is a map keyed by provider the same way. Nothing validates the count; `2` silently builds a two-member etcd |
 
 `git_repo_url`, `git_ref`, `flux_namespace` and `apps_profile` are inert while
@@ -118,7 +118,7 @@ minutes. It is free and it is the cheapest bug you will ever find.
 
 ```bash
 cd ../../../..
-task up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
+task cluster-up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
 ```
 
 Needs a terminal: the apply asks for approval twice, and it applies the plan it
@@ -149,7 +149,7 @@ the resource if the provider says it is fine.
 And if it is genuinely stuck, that is not something you can fix: a managed load
 balancer reserves a port inside your own subnet before its backend exists, so a
 wedged one cannot be deleted and it pins the subnet, the network, and your whole
-teardown behind it. `task down` recognises this and says so rather than telling
+teardown behind it. `task cluster-down` recognises this and says so rather than telling
 you to retry. It is a support ticket.
 
 **On Outscale that first step is minutes to an hour, not seconds**, and it is the
@@ -234,8 +234,8 @@ consecutive ones are the API being down.
 
 ```bash
 task infra-down ROLE=management PROVIDER=scaleway
-task down PROVIDER=scaleway -- --plan --force-no-edges          # destroys nothing
-task down PROVIDER=scaleway -- --plan-file destroy-management-scaleway.tfplan --force-no-edges --yes
+task cluster-down PROVIDER=scaleway -- --plan --force-no-edges          # destroys nothing
+task cluster-down PROVIDER=scaleway -- --plan-file destroy-management-scaleway.tfplan --force-no-edges --yes
 python3 scripts/ops/purge-orphans/scaleway.py
 ```
 

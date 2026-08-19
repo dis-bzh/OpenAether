@@ -13,7 +13,7 @@
 #   ./scripts/bootstrap/talos-image.sh <provider> [talos_version] [--ensure]
 #   task image-build PROVIDER=ovh [VERSION=v1.13.4]
 #
-# --ensure: idempotence gate for `task up` — plans first and only applies on a
+# --ensure: idempotence gate for `task cluster-up` — plans first and only applies on a
 #   real change, so a rerun with the image already published costs nothing.
 set -euo pipefail
 
@@ -104,7 +104,7 @@ fi
 # The image buckets follow the same namespace as every other bucket, read from
 # the cluster tfvars for this provider. They used to be the literal string
 # "openaether", overridable by nothing — and since S3 names are unique across a
-# whole provider (not per account), that made `task up`'s FIRST billable step
+# whole provider (not per account), that made `task cluster-up`'s FIRST billable step
 # unrepeatable by anyone else. See oa_project in scripts/lib/common.sh.
 IMG_TFVARS="${OA_TFVARS:-$(dirname "${BASH_SOURCE[0]}")/../../infrastructure/opentofu/cluster/envs/${OA_ROLE:-management}-${TGT}.tfvars}"
 if [ -f "$IMG_TFVARS" ]; then
@@ -173,7 +173,7 @@ if [ "$ENSURE" = true ]; then
   tofu plan -detailed-exitcode "${APPLY_VARS[@]}" || PLAN_EXIT=$?
   case "$PLAN_EXIT" in
     0) echo "✓ image already up to date — skipping apply" ;;
-    # --ensure is the non-interactive idempotence gate for `task up`, so the
+    # --ensure is the non-interactive idempotence gate for `task cluster-up`, so the
     # apply must not stop to prompt for approval (it would EOF and abort the
     # pipeline). The plain `task image-build` path below stays interactive.
     2) tofu apply -auto-approve "${APPLY_VARS[@]}" ;;
@@ -197,7 +197,7 @@ echo "   talos_image_file_id follows the same convention.)"
 # ──────────────────────────────────────────────────────────────────────────────
 # A pinned image_id is OPTIONAL on OVH and Outscale (null looks the name up, the
 # same way Scaleway does) and it is a trap: nothing compared the pin to the image
-# this lane publishes, so a rebuild left a stale id behind and `task up` — which
+# this lane publishes, so a rebuild left a stale id behind and `task cluster-up` — which
 # runs this script first, learns the right id, prints it, then deploys with the
 # wrong one — failed at server creation with "Can not find requested image",
 # after the network and the bastion had been created. Refuse before the spend.

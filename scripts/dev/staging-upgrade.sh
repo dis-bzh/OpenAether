@@ -171,7 +171,7 @@ if [ "$K8S_DONE" = 1 ] && [ "$TALOS_DONE" = 1 ]; then
 
     1. set talos_version / kubernetes_version one patch below in
        envs/${ROLE}-${PROVIDER}.tfvars
-    2. deploy that cluster (task up …)
+    2. deploy that cluster (task cluster-up …)
     3. task cluster-upgrade …, which moves it to the targets in cluster/variables.tf
 
   UPGRADE_TALOS_TO / UPGRADE_K8S_TO override the targets upward instead, but only

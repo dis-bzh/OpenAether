@@ -1,4 +1,4 @@
-# Jour 1 — initialisation admin après `task up` (management)
+# Jour 1 — initialisation admin après `task cluster-up` (management)
 
 🇬🇧 [English version](admin-access.md)
 

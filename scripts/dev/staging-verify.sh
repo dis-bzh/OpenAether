@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# What a staging run asserts once `task up` returns.
+# What a staging run asserts once `task cluster-up` returns.
 #
-# `task up` succeeding means OpenTofu and the Talos bootstrap were happy. It does
+# `task cluster-up` succeeding means OpenTofu and the Talos bootstrap were happy. It does
 # not mean the cluster works: the whole reason this rung exists is to ask the
 # cluster itself, the way `feint.sh` asks the API instead of the state.
 #
@@ -26,7 +26,7 @@ ok()   { echo "✓ $*"; }
 kubectl get --raw='/readyz' >/dev/null || fail "apiserver is not ready"
 ok "apiserver ready"
 
-# Bounded wait, not an instant assertion. `task up` returns when OpenTofu is
+# Bounded wait, not an instant assertion. `task cluster-up` returns when OpenTofu is
 # done, which is BEFORE the last workers finish joining and Cilium finishes
 # rolling — measured 2026-08-14 on Scaleway, where this failed the run with "2
 # node(s) not Ready" on a cluster that was healthy a minute later. The bound is

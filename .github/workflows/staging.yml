@@ -103,7 +103,7 @@ jobs:
       TF_IN_AUTOMATION: "1"
       TF_INPUT: "0"
       # `task infra` and `bootstrap-phase2` apply WITHOUT -auto-approve, on
-      # purpose: a human running `task up` should be asked before spending. With
+      # purpose: a human running `task cluster-up` should be asked before spending. With
       # TF_INPUT=0 and no tty that same apply just aborts, so this job could
       # never have deployed anything. Same mechanism fleet-down uses for destroy.
       TF_CLI_ARGS_apply: -auto-approve
@@ -181,7 +181,7 @@ jobs:
           printf '%s' "$blob" | base64 -d \
             > "infrastructure/opentofu/cluster/envs/${ROLE}-${PROVIDER}.tfvars"
 
-      # `task up` refuses before it bills if the key is missing, and every later
+      # `task cluster-up` refuses before it bills if the key is missing, and every later
       # stage needs it too (bootstrap-phase2, the tunnels, rolling-replace). Its
       # public half belongs in the tfvars above, or the bastion will not take it.
       - name: Install the bastion SSH key
@@ -201,7 +201,7 @@ jobs:
 
       - name: Deploy
         id: deploy
-        run: task up ROLE="$ROLE" PROVIDER="$PROVIDER" YES=1
+        run: task cluster-up ROLE="$ROLE" PROVIDER="$PROVIDER" YES=1
 
       # A deploy is not finished when OpenTofu is. Without the Day-1 backup and
       # observability secrets, six Kustomizations never leave not-Ready and the
@@ -236,12 +236,12 @@ jobs:
       # what it tore down — which the one-shot destroy never did.
       - name: Plan the teardown
         if: always() && !(inputs.keep && github.event_name == 'workflow_dispatch')
-        run: task fleet-down PROVIDER="$PROVIDER" ROLE="$ROLE" -- --plan --force-no-edges
+        run: task cluster-down PROVIDER="$PROVIDER" ROLE="$ROLE" -- --plan --force-no-edges
 
       - name: Destroy
         if: always() && !(inputs.keep && github.event_name == 'workflow_dispatch')
         run: |
-          task fleet-down PROVIDER="$PROVIDER" ROLE="$ROLE" -- \
+          task cluster-down PROVIDER="$PROVIDER" ROLE="$ROLE" -- \
             --plan-file "destroy-${ROLE}-${PROVIDER}.tfplan" --force-no-edges --yes
 
       # This asserts now. The purge scripts printed what they found and exited 0
