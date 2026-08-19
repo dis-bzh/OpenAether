@@ -145,7 +145,7 @@ OUTPUTS="$(tofu output -json 2>/dev/null || echo '{}')"
 BASTION="$(jq -r '.bastion_ip.value // empty' <<<"$OUTPUTS")"
 if [[ -z "$BASTION" || "$BASTION" == "<bastion-ip>" ]]; then
   echo "✗ No bastion_ip in the state — deploy the infrastructure first:"
-  echo "    task infra-apply ROLE=management PROVIDER=... YES=1   (or ROLE=workload)"
+  echo "    task infra-apply ROLE=management PROVIDER=... APPROVE=auto   (or ROLE=workload)"
   exit 1
 fi
 BUSER="$(jq -r '.bastion_user.value // "root"' <<<"$OUTPUTS")"

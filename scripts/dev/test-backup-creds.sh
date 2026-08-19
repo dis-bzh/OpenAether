@@ -8,9 +8,12 @@
 # wrong for a cross-provider one — the copy then authenticates as provider A
 # against provider B, and the only trace used to be one ⚠ in a wall of output.
 #
-# The variables are namespaced by the CLUSTER's provider, not the backup's:
-# a Scaleway cluster backing up to OVH puts the OVH key in SCW_BACKUP_AWS_*.
-# Counter-intuitive, load-bearing, and asserted here so it cannot drift.
+# The variables are namespaced by the cloud that HOLDS THE BUCKET. They used to
+# be namespaced by the CLUSTER — a Scaleway cluster backing up to Outscale had
+# to put Outscale keys in SCW_BACKUP_AWS_*. The name argued for the wrong value
+# and on 2026-08-19 it got one: Scaleway keys, rejected by Outscale, after a
+# full plan. The endpoint now decides, and that is asserted here so it cannot
+# drift back. The cluster-namespaced form still works as a fallback.
 #
 # Offline. No cloud, no account, no bill.
 # ==============================================================================
@@ -29,6 +32,9 @@ clear_env() {
   unset SCW_AWS_ACCESS_KEY_ID SCW_AWS_SECRET_ACCESS_KEY SCW_ACCESS_KEY SCW_SECRET_KEY \
         SCW_BACKUP_AWS_ACCESS_KEY_ID SCW_BACKUP_AWS_SECRET_ACCESS_KEY \
         OVH_AWS_ACCESS_KEY_ID OVH_BACKUP_AWS_ACCESS_KEY_ID \
+        OUTSCALE_AWS_ACCESS_KEY_ID OUTSCALE_AWS_SECRET_ACCESS_KEY \
+        OUTSCALE_BACKUP_AWS_ACCESS_KEY_ID OUTSCALE_BACKUP_AWS_SECRET_ACCESS_KEY \
+        OSC_ACCESS_KEY OSC_SECRET_KEY \
         BACKUP_AWS_ACCESS_KEY_ID BACKUP_AWS_SECRET_ACCESS_KEY 2>/dev/null || true
 }
 
@@ -122,6 +128,61 @@ OUT="$(run_ensure "$TF")"; RC=$?
 [ "$RC" -eq 0 ] && grep -q 'DIFFERENT provider' <<<"$OUT" \
   && ok "a cross-provider backup that works: allowed, and reported as elsewhere" \
   || bad "a working cross-provider backup was refused (exit ${RC}) — the guard fires on the normal case"
+
+
+SCW_EP=https://s3.fr-par.scw.cloud
+OSC_EP=https://oos.eu-west-2.outscale.com
+OVH_EP=https://s3.eu-west-par.io.cloud.ovh.net
+
+echo "--- the endpoint says who owns the bucket ---"
+is "a Scaleway host maps to scaleway" "scaleway" "$(provider_of_endpoint "$SCW_EP")"
+is "an Outscale host maps to outscale" "outscale" "$(provider_of_endpoint "$OSC_EP")"
+is "an OVH host maps to ovh"           "ovh"      "$(provider_of_endpoint "$OVH_EP")"
+is "anything else maps to nothing, and is not an error" \
+   "" "$(provider_of_endpoint https://minio.example.internal)"
+
+echo "--- the store's own keys outrank the cluster's backup namespace ---"
+clear_env
+export SCW_AWS_ACCESS_KEY_ID=KEY-OF-SCW
+export SCW_BACKUP_AWS_ACCESS_KEY_ID=WRONG-CLOUDS-KEY
+export OUTSCALE_BACKUP_AWS_ACCESS_KEY_ID=KEY-OF-OSC
+# The regression that cost the 2026-08-19 deploy: SCW_BACKUP_* is set, and it is
+# the WRONG cloud's key. Naming the store is what makes the right one reachable.
+is "a bucket on Outscale is opened with the Outscale key, not the SCW_BACKUP_ one" \
+   "KEY-OF-OSC" "$(s3_cred scaleway backup ak "$OSC_EP")"
+is "and the failure can name which variable it used" \
+   "OUTSCALE_BACKUP_AWS_ACCESS_KEY_ID" "$(s3_cred_source scaleway backup ak "$OSC_EP")"
+
+echo "--- with no *_BACKUP_* for the store, its PRIMARY keys are used ---"
+clear_env
+export SCW_AWS_ACCESS_KEY_ID=KEY-OF-SCW OUTSCALE_AWS_ACCESS_KEY_ID=PRIMARY-OF-OSC
+is "the Outscale bucket is opened with OUTSCALE_AWS_* — no new variable to invent" \
+   "PRIMARY-OF-OSC" "$(s3_cred scaleway backup ak "$OSC_EP")"
+is "and it says so" \
+   "OUTSCALE_AWS_ACCESS_KEY_ID" "$(s3_cred_source scaleway backup ak "$OSC_EP")"
+
+echo "--- same cloud, and unknown clouds, keep the old chain ---"
+clear_env
+export SCW_AWS_ACCESS_KEY_ID=KEY-OF-SCW SCW_BACKUP_AWS_ACCESS_KEY_ID=SECOND-BUCKET-KEY
+is "a replica on the SAME cloud still uses SCW_BACKUP_AWS_*" \
+   "SECOND-BUCKET-KEY" "$(s3_cred scaleway backup ak "$SCW_EP")"
+is "an endpoint this repo does not know falls back to the cluster namespace" \
+   "SECOND-BUCKET-KEY" "$(s3_cred scaleway backup ak https://minio.example.internal)"
+is "and calling it with NO endpoint behaves exactly as before" \
+   "SECOND-BUCKET-KEY" "$(s3_cred scaleway backup ak)"
+
+echo "--- a named store with no keys yields NOTHING, not the wrong cloud's key ---"
+clear_env
+export SCW_AWS_ACCESS_KEY_ID=KEY-OF-SCW OVH_BACKUP_AWS_ACCESS_KEY_ID=KEY-OF-OVH
+# Neither key belongs to Outscale. The old chain ended at the cluster's primary,
+# so the copy authenticated as Scaleway against Outscale and failed with a
+# provider error naming no variable. Empty is the honest answer: ensure-buckets
+# turns it into a refusal that names the pair to export.
+is "an OVH backup key is not handed to an Outscale bucket" \
+   "" "$(s3_cred scaleway backup ak "$OSC_EP")"
+is "and the Scaleway primary is not silently reused either" \
+   "" "$(s3_cred scaleway backup ak "$OSC_EP")"
+
 
 echo
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"

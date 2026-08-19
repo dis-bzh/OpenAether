@@ -18,6 +18,12 @@
 #   3. Update DNS for management endpoints (if using ExternalDNS — automated in Phase 4)
 # ==============================================================================
 
+# ⚠️ NEVER EXECUTED. This describes the disaster-recovery drill (primary provider
+# gone, cluster rebuilt on another) that is still an OPEN item in docs/backlog.md.
+# Nothing here has been deployed, so read it as a design intent, not as a proven
+# procedure. Note also that `ROLE=failover` only picks THIS FILE: the Flux overlay
+# and the bucket segment come from cluster_role below, which is "management".
+
 cluster_name       = "openaether"
 environment        = "prod"
 cluster_role       = "management"
@@ -75,8 +81,8 @@ git_ref          = "refs/heads/main"
 # --- Backup / DR object stores ------------------------------------------------
 # This failover cluster runs when your primary provider is DOWN, so its PRIMARY
 # state lives on OVH (reachable), and it replicates BACK to the primary once it
-# recovers. Export BACKUP_AWS_* with the primary provider's creds for the
-# replica. Derived buckets (parts come from this file, each with a "-backup"
+# recovers. That replica is opened with the primary provider's own keys — the
+# cloud s3_replica_endpoint names, not this one. Derived buckets (parts come from this file, each with a "-backup"
 # twin):
 #   state            -> s3-<cluster_name>-ovh-tfstate-<environment>
 #   kube/talosconfig -> s3-<cluster_name>-ovh-management-<environment>

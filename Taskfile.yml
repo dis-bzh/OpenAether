@@ -43,9 +43,9 @@ tasks:
           task cluster-down PROVIDER=… -- --plan                  computes, destroys nothing
           task cluster-down PROVIDER=… -- --plan-file F --yes     lands exactly that plan
 
-        Nothing asks you a question except `cluster-up`, once, before it spends. Add YES=1
+        Nothing asks you a question except `cluster-up`, once, before it spends. Add APPROVE=auto
         to answer it in advance — for CI, and for a shell that cannot be asked.
-        YES=1 is deliberately powerless on anything that destroys.
+        APPROVE=auto is deliberately powerless on anything that destroys.
 
         When you need them:
           task kubeconfig        PROVIDER=…   get access back
@@ -299,6 +299,10 @@ tasks:
       # Nothing said "tainted", so re-running destroyed a load balancer the
       # provider was still building. This keeps that sentence on screen.
       - ./scripts/dev/test-explain-failure.sh
+      # `cluster-up … APPROVE=auto` did not pass APPROVE to phase 2, so an "unattended"
+      # journey stopped for an approval after spending. Nothing read the call
+      # graph; this does.
+      - ./scripts/dev/test-unattended.sh
 
   test:
     desc: Run OpenTofu tests (cluster root)
@@ -363,8 +367,8 @@ tasks:
     aliases: [up]
     desc: >-
       Idempotent one-shot bring-up: image -> render manifests -> infra -> tunnels -> bootstrap. Usage: task cluster-up
-      ROLE=management|workload PROVIDER=… [KEY=~/.ssh/yourkey] [VERSION=v1.13.4] [FORCE=1] [YES=1].
-      It shows the plan and asks once before it spends; YES=1 answers for you, for CI and for a
+      ROLE=management|workload PROVIDER=… [KEY=~/.ssh/yourkey] [VERSION=v1.13.4] [FORCE=1] [APPROVE=auto].
+      It shows the plan and asks once before it spends; APPROVE=auto answers for you, for CI and for a
       shell that cannot be asked.
     # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
     # scaleway in silence — including destroy and down — so a command typed
@@ -375,9 +379,9 @@ tasks:
     vars:
       ROLE: '{{.ROLE | default "management"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
-      # QUOTED: bare YES is the boolean true in YAML 1.1, so the key became
-      # `true` and {{.YES}} never resolved. Caught by reading the parsed tree.
-      "YES": '{{.YES | default ""}}'
+      # ask | auto — the value names WHO answers the approval, never whether
+      # there is one: every apply still plans, then applies that saved plan.
+      APPROVE: '{{.APPROVE | default "ask"}}'
       # renovate: datasource=github-releases depName=siderolabs/talos
       VERSION:
         sh: ./scripts/internal/talos-version.sh {{.ROLE}}-{{.PROVIDER}}.tfvars
@@ -417,18 +421,23 @@ tasks:
         fi
         # The S3 credentials, HERE, not twenty lines into talos-image. Demonstrated
         # twice in three minutes on 2026-08-17: a shell that had not sourced .env.sh
-        # passed both guards above and died in the image build. Nothing was created
-        # either time, so this costs nothing but the round trip — and the round trip
-        # is what a first-time reader pays, twice, before finding the sentence in
-        # the README that explains it.
-        for kind in primary backup; do
-          if [ -z "$(./scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak "$kind" 2>/dev/null)" ]; then
-            echo "✗ no ${kind} S3 credentials for '{{.PROVIDER}}'." >&2
-            echo "  Did you 'source .env.sh'? Every cloud task needs it, and nothing" >&2
-            echo "  else in this shell will tell you it is missing until it costs time." >&2
-            exit 1
-          fi
-        done
+        # passed both guards above and died in the image build.
+        #
+        # This used to ask s3_cred whether a key was non-empty — which it ALWAYS is,
+        # because the backup keys fall back to the primary's. A check that cannot
+        # fail: on 2026-08-19 it passed a cluster whose replica pointed at another
+        # cloud with a stale key, and the deploy died four minutes later, after a
+        # full plan, on the same subject. ensure-buckets actually TALKS to both
+        # stores, so "the credentials work" is measured rather than assumed. It is
+        # idempotent and runs again inside infra-apply; here it costs a few HEAD
+        # requests and moves the refusal before anything is built.
+        if [ -z "$(./scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak primary 2>/dev/null)" ]; then
+          echo "✗ no S3 credentials for '{{.PROVIDER}}'." >&2
+          echo "  Did you 'source .env.sh'? Every cloud task needs it, and nothing" >&2
+          echo "  else in this shell will tell you it is missing until it costs time." >&2
+          exit 1
+        fi
+        ./scripts/internal/ensure-buckets.sh "$TFVARS" || exit 1
         # The passphrase encrypts the state and both access artifacts, and NOTHING
         # else checks it: without it `tofu` stops to prompt, and with the shipped
         # placeholder — long enough to pass the only validation there is — it
@@ -452,24 +461,24 @@ tasks:
         fi
       # ONE human checkpoint on the whole journey, and it is here — the step that
       # spends. `up` plans, shows it, asks once, then applies EXACTLY that plan:
-      # never two different plans, and never a silent apply. YES=1 skips the
+      # never two different plans, and never a silent apply. APPROVE=auto skips the
       # question, which is what CI and a shell with no terminal need; without a
-      # terminal and without YES it stops with the plan saved and names the one
+      # terminal and without APPROVE it stops with the plan saved and names the one
       # command that lands it.
       - |
         PLANFILE="up-{{.ROLE}}-{{.PROVIDER}}.tfplan"
         task infra-plan ROLE={{.ROLE}} PROVIDER={{.PROVIDER}} KEY={{.KEY}} OUT="$PLANFILE" || exit 1
-        if [ "{{.YES}}" != 1 ]; then
+        if [ "{{.APPROVE}}" != auto ]; then
           if [ -t 0 ]; then
             printf '\nApply this plan? Only "yes" is accepted: '
             read -r reply
             [ "$reply" = yes ] || {
               echo "✗ not applied. The plan is kept at cluster/$PLANFILE"; exit 1; }
           else
-            echo "✗ no terminal, and no YES=1 — nothing was applied." >&2
+            echo "✗ no terminal, and no APPROVE=auto — nothing was applied." >&2
             echo "  The plan above is saved. Read it, then land exactly it:" >&2
             echo "    task infra-apply ROLE={{.ROLE}} PROVIDER={{.PROVIDER}} KEY={{.KEY}} PLAN=$PLANFILE" >&2
-            echo "  Or re-run the whole journey unattended: task cluster-up … YES=1" >&2
+            echo "  Or re-run the whole journey unattended: task cluster-up … APPROVE=auto" >&2
             exit 1
           fi
         fi
@@ -479,6 +488,9 @@ tasks:
           ROLE: "{{.ROLE}}"
           PROVIDER: "{{.PROVIDER}}"
           KEY: "{{.KEY}}"
+          # Not passing this was the whole defect: cluster-up answered its own
+          # gate and then let phase 2 ask a question nobody could hear.
+          APPROVE: "{{.APPROVE}}"
       - |
         echo "✓ cluster-up complete — every step above is idempotent."
         echo "  Re-run 'task cluster-up' after fixing any failure to resume."
@@ -487,7 +499,15 @@ tasks:
   # Cluster Lifecycle
   #
   # infra / bootstrap-phase2 / destroy each take ROLE=management|workload (the
-  # tfvars file is envs/<ROLE>-<PROVIDER>.tfvars) — these used to be six
+  # tfvars file is envs/<ROLE>-<PROVIDER>.tfvars).
+  #
+  # ROLE picks the FILE, and nothing else. The Flux overlay and the artifact
+  # bucket segment come from `cluster_role` INSIDE that file — they coincide for
+  # management/workload and diverge on purpose for the failover examples, which
+  # are DR scenarios declaring cluster_role = "management". Any prefix with a
+  # matching env file works; these two are simply the ones that ship.
+  #
+  # These used to be six
   # separate tasks (infra-management/infra-workload, management/workload,
   # destroy-management/destroy-workload) differing only in that filename.
   # ===========================================================================
@@ -496,9 +516,9 @@ tasks:
     aliases: [infra, apply-plan]
     desc: >-
       Apply the infrastructure. Give it a PLAN you have read — `task infra-plan PROVIDER=… OUT=f`
-      then `task infra-apply PROVIDER=… PLAN=f` — or YES=1 to compute and apply in one step
+      then `task infra-apply PROVIDER=… PLAN=f` — or APPROVE=auto to compute and apply in one step
       without a question. With neither it refuses: it will not guess, and it will not prompt.
-      Usage: task infra-apply PROVIDER=… [ROLE=…] [PLAN=f | YES=1] [KEY=…]
+      Usage: task infra-apply PROVIDER=… [ROLE=…] [PLAN=f | APPROVE=auto] [KEY=…]
     dir: infrastructure/opentofu/cluster
     # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
     # scaleway in silence — including destroy and down — so a command typed
@@ -512,9 +532,9 @@ tasks:
       # cluster whose tunnels are healthy never reads it.
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
       PLAN: '{{.PLAN | default ""}}'
-      # QUOTED: bare YES is the boolean true in YAML 1.1, so the key became
-      # `true` and {{.YES}} never resolved. Caught by reading the parsed tree.
-      "YES": '{{.YES | default ""}}'
+      # ask | auto — the value names WHO answers the approval, never whether
+      # there is one: every apply still plans, then applies that saved plan.
+      APPROVE: '{{.APPROVE | default "ask"}}'
     env: &provider-env
       AWS_ACCESS_KEY_ID:
         sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak
@@ -529,19 +549,22 @@ tasks:
         # Two ways in, and NEITHER of them is a prompt.
         #
         # PLAN= applies a file you have already read, and OpenTofu refuses it if
-        # the state moved since — so what you reviewed is what runs. YES=1 says
+        # the state moved since — so what you reviewed is what runs. APPROVE=auto says
         # "compute it and apply it, do not ask", which is what CI and a shell
         # with no terminal need. With neither, this refuses: an apply that can
         # replace nodes should never happen because a default was convenient.
-        if [ -z "{{.PLAN}}" ] && [ "{{.YES}}" != 1 ]; then
+        if [ -z "{{.PLAN}}" ] && [ "{{.APPROVE}}" != auto ]; then
           echo "✗ nothing told me to apply anything." >&2
           echo "  Read a plan first, then apply exactly it:" >&2
           echo "    task infra-plan  PROVIDER={{.PROVIDER}} ROLE={{.ROLE}} OUT=tfplan" >&2
           echo "    task infra-apply PROVIDER={{.PROVIDER}} ROLE={{.ROLE}} PLAN=tfplan" >&2
           echo "  Or, for CI and unattended runs, compute and apply in one step:" >&2
-          echo "    task infra-apply PROVIDER={{.PROVIDER}} ROLE={{.ROLE}} YES=1" >&2
+          echo "    task infra-apply PROVIDER={{.PROVIDER}} ROLE={{.ROLE}} APPROVE=auto" >&2
           exit 1
         fi
+      # FIRST, before anything that can fail: the explainer below reads this
+      # file, and a transcript left by the previous run would diagnose that one.
+      - rm -f .tofu-run.log
       # Only on failure — EXIT_CODE is empty when the task succeeded (verified on
       # Task 3.52). An apply that times out mid-creation leaves the resource
       # TAINTED, so the obvious "just re-run" destroys what the provider was
@@ -551,6 +574,10 @@ tasks:
       - ../../../scripts/internal/ensure-buckets.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars
       - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
       - |
+        # tee, so the defer above can quote the provider on a failure state alone
+        # cannot explain (a 404 on an object it still holds). pipefail is what
+        # stops tee reporting success for a failed plan — measured on Task 3.52.
+        set -o pipefail
         # Idempotency guard: control_plane_count/worker_count (cluster/main.tf) are
         # gated by talos_bootstrap, so forcing =false here on an ALREADY-bootstrapped
         # cluster zeroes them and drops talos_machine_bootstrap et al. from state —
@@ -584,10 +611,20 @@ tasks:
             echo "    task infra-plan PROVIDER={{.PROVIDER}} ROLE={{.ROLE}} OUT={{.PLAN}}" >&2
             exit 1
           }
-          tofu apply "{{.PLAN}}"
+          tofu apply "{{.PLAN}}" 2>&1 | tee -a .tofu-run.log
           rm -f "{{.PLAN}}"
         else
-          tofu apply -auto-approve -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=$TB
+          # APPROVE=auto without a PLAN. It still PLANS, and it still applies THAT
+          # plan — APPROVE answers the question, it does not delete the question.
+          # -auto-approve would: there would be no plan artifact, nothing frozen
+          # between the reading and the doing, and no way for OpenTofu to refuse
+          # a plan whose state has moved. The saved-plan path gives all three,
+          # and `tofu apply <file>` never prompts, so the only yes is ours.
+          P="auto-{{.ROLE}}-{{.PROVIDER}}.tfplan"
+          tofu plan -out="$P" -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" \
+            -var talos_bootstrap=$TB 2>&1 | tee -a .tofu-run.log
+          tofu apply "$P" 2>&1 | tee -a .tofu-run.log
+          rm -f "$P"
         fi
       - task: _backup-state
         vars: {PROVIDER: "{{.PROVIDER}}"}
@@ -610,6 +647,15 @@ tasks:
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
     env: *provider-env
     cmds:
+      # Dropped first, for the same reason as in `infra-apply`: a stale
+      # transcript would make the explainer diagnose the run before this one.
+      - rm -f .tofu-run.log
+      # A PLAN fails too, and until 2026-08-19 only `infra-apply` explained it.
+      # That day a plan died on a load balancer OpenTofu still had in state and
+      # Scaleway had already deleted — "waiting for lb failed: 404" — naming
+      # neither the ghost nor `tofu state rm`. Nothing tried to explain it,
+      # because the explainer was wired to the other target.
+      - defer: '{{if .EXIT_CODE}}../../../scripts/internal/explain-failure.sh .{{else}}true{{end}}'
       - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
       - |
         # Same talos_bootstrap resolution as `infra`: passing the phase-1 value to
@@ -643,8 +689,12 @@ tasks:
         # review, and `-auto-approve` after a separate plan is exactly that.
         # Interactive `tofu apply` is sound because it shows and applies the SAME
         # in-memory plan; this is for every case where nobody is watching.
+        # tee + pipefail: the transcript is the only record of the provider's
+        # own words, and pipefail keeps -detailed-exitcode's 0/1/2 intact
+        # through the pipe (measured on Task 3.52, including the 2).
+        set -o pipefail
         tofu plan {{if eq .STRICT "1"}}-detailed-exitcode{{end}} {{if .OUT}}-out="{{.OUT}}"{{end}} \
-          -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=$TB
+          -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=$TB 2>&1 | tee -a .tofu-run.log
 
   tunnels-up:
     aliases: [tunnels]
@@ -675,18 +725,57 @@ tasks:
 
   bootstrap-phase2:
     desc: >-
-      Phase 2: open SSH tunnels (from state) + bootstrap Talos. Usage: task bootstrap-phase2
-      ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox] [KEY=~/.ssh/yourkey]
+      Phase 2: open SSH tunnels (from state) + bootstrap Talos. It computes its OWN plan and
+      needs an approval — APPROVE=auto answers it, for CI and for a shell that cannot be asked.
+      Usage: task bootstrap-phase2 ROLE=management|workload
+      [PROVIDER=scaleway|ovh|outscale|proxmox] [KEY=~/.ssh/yourkey] [APPROVE=auto]
     dir: infrastructure/opentofu/cluster
     vars:
       ROLE: '{{.ROLE | default "management"}}'
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
+      # ask | auto — the value names WHO answers the approval, never whether
+      # there is one: every apply still plans, then applies that saved plan.
+      APPROVE: '{{.APPROVE | default "ask"}}'
     env: *provider-env
     cmds:
       - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
       - SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh open .
-      - tofu apply -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=true
+      - |
+        # Phase 2 cannot reuse the phase-1 plan: that one was computed with
+        # talos_bootstrap=false, which gates the node counts to zero. So it
+        # plans again, and the approval lives HERE.
+        #
+        # Without APPROVE and without a terminal this used to die on OpenTofu's
+        # "error asking for approval: EOF", which names neither the cause nor
+        # the knob. MEASURED 2026-08-19: three runs of `cluster-up … APPROVE=auto`
+        # stopped exactly here, each AFTER phase 1 had already spent — because
+        # cluster-up did not pass APPROVE down. A journey advertised as unattended
+        # could not complete unattended.
+        # PLAN, then apply THAT plan, and the yes in between is answered by a
+        # human or by APPROVE=auto. Never -auto-approve: that removes the approval
+        # rather than answering it. `tofu apply <saved-plan>` does not prompt,
+        # so this gate is the only one — and OpenTofu refuses a saved plan whose
+        # state has moved, which is what makes "what I read is what ran" true.
+        PLANFILE="phase2-{{.ROLE}}-{{.PROVIDER}}.tfplan"
+        tofu plan -out="$PLANFILE" -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=true
+        if [ "{{.APPROVE}}" != auto ]; then
+          if [ -t 0 ]; then
+            printf '\nApply this plan? Only "yes" is accepted: '
+            read -r reply
+            [ "$reply" = yes ] || {
+              echo "✗ not applied. The plan is kept at cluster/$PLANFILE"; exit 1; }
+          else
+            echo "✗ no terminal, and no APPROVE=auto — nothing was applied." >&2
+            echo "  Phase 1 is already applied; this only bootstraps Talos on it." >&2
+            echo "  The plan above is saved. Read it, then land exactly it:" >&2
+            echo "    cd infrastructure/opentofu/cluster && tofu apply $PLANFILE" >&2
+            echo "  Or re-run the journey unattended: task cluster-up PROVIDER={{.PROVIDER}} … APPROVE=auto" >&2
+            exit 1
+          fi
+        fi
+        tofu apply "$PLANFILE"
+        rm -f "$PLANFILE"
       - task: _backup-state
         vars: {PROVIDER: "{{.PROVIDER}}"}
 
@@ -697,7 +786,7 @@ tasks:
       (instance_type / Talos image) instead of infra, which replaces all nodes in parallel and breaks etcd
       quorum. Management clusters only (see scripts/ops/rolling-replace.sh). Targets are derived from `tofu
       state list` — provider-agnostic; --upgrade exercised live on Scaleway, OVH and Outscale.
-      Usage: task cluster-roll PROVIDER=… [KEY=~/.ssh/key] [YES=1]
+      Usage: task cluster-roll PROVIDER=… [KEY=~/.ssh/key] [APPROVE=auto]
       [-- --workers-only|--cp-only|--dry-run|--upgrade]
     dir: infrastructure/opentofu/cluster
     # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
@@ -711,14 +800,14 @@ tasks:
       # One word for "do not ask me", the same one infra-apply uses. It used to be
       # a `--yes` buried in CLI_ARGS, which meant three different spellings of the
       # same intent across the repository.
-      # QUOTED: bare YES is the boolean true in YAML 1.1, so the key became
-      # `true` and {{.YES}} never resolved. Caught by reading the parsed tree.
-      "YES": '{{.YES | default ""}}'
+      # ask | auto — the value names WHO answers the approval, never whether
+      # there is one: every apply still plans, then applies that saved plan.
+      APPROVE: '{{.APPROVE | default "ask"}}'
     env: *provider-env
     cmds:
       - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
       - SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh open .
-      - ../../../scripts/ops/rolling-replace.sh {{.PROVIDER}} {{if eq .YES "1"}}--yes {{end}}{{.CLI_ARGS}}
+      - ../../../scripts/ops/rolling-replace.sh {{.PROVIDER}} {{if eq .APPROVE "auto"}}--yes {{end}}{{.CLI_ARGS}}
       - task: _backup-state
         vars: {PROVIDER: "{{.PROVIDER}}"}
 
@@ -762,7 +851,7 @@ tasks:
     aliases: [destroy]
     desc: >-
       Destroy a cluster by applying a plan you have already read. REQUIRES PLAN= — there is no
-      one-command destroy, and YES=1, --yes, force and TF_CLI_ARGS_destroy cannot create one.
+      one-command destroy, and APPROVE=auto, --yes, force and TF_CLI_ARGS_destroy cannot create one.
       Usage: task infra-down-plan PROVIDER=…, read it, then task infra-down PROVIDER=… PLAN=f
     dir: infrastructure/opentofu/cluster
     requires:
@@ -775,14 +864,14 @@ tasks:
       - |
         # THE POINT OF THIS TARGET. Destroying a cluster must take two deliberate
         # commands, so that no single mistyped line — and no environment variable
-        # inherited from somewhere else — can do it. YES=1 works on infra-apply
+        # inherited from somewhere else — can do it. APPROVE=auto works on infra-apply
         # and is DELIBERATELY inert here.
         if [ -z "{{.PLAN}}" ]; then
           echo "✗ refusing to destroy without a plan you have read." >&2
           echo "  This takes two commands, always:" >&2
           echo "    task infra-down-plan PROVIDER={{.PROVIDER}} ROLE={{.ROLE}}" >&2
           echo "    task infra-down      PROVIDER={{.PROVIDER}} ROLE={{.ROLE}} PLAN=destroy.tfplan" >&2
-          echo "  YES=1 does not apply here, and neither does TF_CLI_ARGS_destroy." >&2
+          echo "  APPROVE=auto does not apply here, and neither does TF_CLI_ARGS_destroy." >&2
           exit 1
         fi
         [ -f "{{.PLAN}}" ] || { echo "✗ no plan file {{.PLAN}} — run task infra-down-plan first." >&2; exit 1; }

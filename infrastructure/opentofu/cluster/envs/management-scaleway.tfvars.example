@@ -68,10 +68,13 @@ git_ref          = "refs/heads/main"
 # and each has a "-backup" twin:
 #   state            -> s3-<cluster_name>-scaleway-tfstate-<environment>
 #   kube/talosconfig -> s3-<cluster_name>-scaleway-management-<environment>
-# PRIMARY = this cluster's provider (uses AWS_*). REPLICA = the "-backup" store.
-# In PROD, point the replica at a DIFFERENT provider and export
-# BACKUP_AWS_ACCESS_KEY_ID / BACKUP_AWS_SECRET_ACCESS_KEY for it. In dev, leave
-# the replica equal to the primary (replica creds then default to AWS_*).
+# PRIMARY = this cluster's own object store. REPLICA = its "-backup" twin.
+# Each is opened with the credentials of the cloud that HOLDS it: the replica
+# uses the keys of whatever s3_replica_endpoint points at. So a Scaleway cluster
+# backing up to Outscale needs OUTSCALE_AWS_* in .env.sh — and no SCW_BACKUP_*.
+# Leaving the replica equal to the primary is the single-provider shape: legal,
+# stated out loud at deploy, and it survives a deleted bucket but not a lost
+# provider. `prod` refuses that shape (scripts/dev/infra-verify.sh).
 s3_primary_endpoint = "https://s3.fr-par.scw.cloud"
 s3_primary_region   = "fr-par"
 s3_replica_endpoint = "https://s3.fr-par.scw.cloud" # prod: e.g. OVH https://s3.gra.io.cloud.ovh.net

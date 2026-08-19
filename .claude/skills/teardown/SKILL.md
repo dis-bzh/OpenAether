@@ -35,7 +35,7 @@ task cluster-down PROVIDER=<p> -- --plan                              computes, 
 task cluster-down PROVIDER=<p> -- --plan-file <f> --force-no-edges --yes    lands exactly that
 ```
 
-`--yes`, `YES=1` and `TF_CLI_ARGS_destroy` are deliberately powerless on the first
+`--yes`, `APPROVE=auto` and `TF_CLI_ARGS_destroy` are deliberately powerless on the first
 step, and the second refuses a plan file that contains no deletions. The point is
 that no single mistyped line, and no variable inherited from somewhere else, can
 destroy a cluster.

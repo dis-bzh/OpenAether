@@ -1,15 +1,23 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Say what a FAILED apply left behind, and what re-running would cost.
+# Say what a FAILED run left behind, and what re-running would cost.
 #
-# WHY. On 2026-08-18 an OVH load balancer timed out at 9m51s while the provider
-# was still building it. OpenTofu marks such a resource TAINTED, so the obvious
-# reaction — re-run — DESTROYS the thing that was nearly ready and starts the
-# wait again. An hour went into that loop, and nothing on screen mentioned the
-# word "tainted". This is that hour, spent once.
+# WHY. Two shapes that named neither their cause nor their fix:
+#   TAINTED — a create that times out is marked tainted, so the obvious reaction
+#   (re-run) DESTROYS what the provider was nearly finished building. An hour
+#   went into that loop, and nothing on screen ever said the word "tainted".
+#   GONE — a load balancer the provider deleted behind OpenTofu's back left its
+#   ip in state; every plan then died on "http error 404 Not Found", naming
+#   neither the ghost nor `tofu state rm`. Forty minutes, three paid runs.
+#
+# State cannot tell the second shape by itself — it records what OpenTofu
+# BELIEVES. Only the provider's own words say otherwise, and they survive in the
+# transcript the Taskfile tees ($LOG): no transcript, no such diagnosis, never a
+# guess. An address is named only when both sources agree — the provider said
+# "not found" about it AND the state still holds it.
 #
 # Run from a Taskfile `defer:` guarded on {{.EXIT_CODE}}, so it costs nothing
-# when the apply succeeded. Never fails the caller: it is a diagnosis, and a
+# when the run succeeded. Never fails the caller: it is a diagnosis, and a
 # diagnosis that breaks the build is worse than no diagnosis.
 #
 # Usage: explain-failure.sh <tofu_dir>
@@ -17,24 +25,57 @@
 set -uo pipefail
 cd "${1:-.}" 2>/dev/null || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
+LOG=.tofu-run.log
 
 STATE="$(timeout 90 tofu state pull 2>/dev/null)" || exit 0
 [ -n "$STATE" ] || exit 0
 
-TAINTED="$(jq -r '
+# One "<status><TAB><address>" per instance, addressed the way OpenTofu prints
+# it — a data source carries a "data." segment (measured). Data rows are kept
+# and marked, not dropped: `mode == "data"` is absent from some states, and a
+# missing field must not silently empty the list.
+ROWS="$(jq -r '
   .resources[]? as $r | $r.instances[]? |
-  select(.status == "tainted") |
-  ($r.module // "") as $m |
-  (if $m == "" then "" else $m + "." end) + $r.type + "." + $r.name +
-  (if .index_key == null then "" else "[" + (.index_key|tostring) + "]" end)
+  (if $r.mode == "data" then "data" else (.status // "ok") end) + "\t" +
+  ($r.module // "" | if . == "" then "" else . + "." end) +
+  (if $r.mode == "data" then "data." else "" end) + $r.type + "." + $r.name +
+  (if .index_key == null then ""
+   elif (.index_key|type) == "string" then "[\"" + .index_key + "\"]"
+   else "[" + (.index_key|tostring) + "]" end)
 ' <<<"$STATE" 2>/dev/null)"
+TAINTED="$(awk -F'\t' '$1 == "tainted" { print $2 }' <<<"$ROWS")"
 
-[ -n "$TAINTED" ] || exit 0
+# Diagnostics are boxed and coloured even when redirected to a file (measured on
+# OpenTofu 1.12.5), so match inside the line rather than anchoring it. Scoped to
+# ONE box: an address quoted by some other error is not a ghost.
+# Data sources are excluded: they are re-read on every plan, so `state rm` is
+# never their fix, however loudly the provider 404s about one.
+GONE=""
+[ -f "$LOG" ] && GONE="$(awk -v addrs="$(awk -F'\t' '$1 != "data" { print $2 }' <<<"$ROWS")" '
+  function flush(  n, a, i) {
+    if (tolower(box) ~ /404|not[ _]?found/) {
+      n = split(addrs, a, "\n")
+      for (i = 1; i <= n; i++) if (a[i] != "" && index(box, a[i])) print a[i]
+    }
+    box = ""
+  }
+  { l = $0; gsub(/\033\[[0-9;]*m/, "", l) }
+  index(l, "Error:") { flush(); box = l; next }
+  index(l, "╵")      { flush(); next }
+  box != ""          { box = box "\n" l }
+  END { flush() }
+' "$LOG" 2>/dev/null | sort -u)"
 
-printf '\n\033[33m─── what the failure left behind ───\033[0m\n' >&2
-printf 'OpenTofu marked %s resource(s) TAINTED:\n\n' "$(wc -l <<<"$TAINTED")" >&2
-sed 's/^/    /' <<<"$TAINTED" >&2
-cat >&2 <<'TXT'
+[ -n "$TAINTED$GONE" ] || exit 0
+hdr()  { printf '\n\033[33m─── %s ───\033[0m\n' "$1" >&2; }
+list() { sed 's/^/    /' >&2; }
+cmds() { while IFS= read -r a; do [ -n "$a" ] && printf "    tofu %s '%s'\n" "$1" "$a" >&2; done; }
+
+if [ -n "$TAINTED" ]; then
+  hdr 'what the failure left behind'
+  printf 'OpenTofu marked %s resource(s) TAINTED:\n\n' "$(wc -l <<<"$TAINTED")" >&2
+  list <<<"$TAINTED"
+  cat >&2 <<'TXT'
 
   A tainted resource is DESTROYED AND REBUILT on the next apply. If it timed out
   while the provider was still creating it — the usual case for a load balancer —
@@ -44,10 +85,25 @@ cat >&2 <<'TXT'
   resource is fine, keep it instead of rebuilding:
 
 TXT
-while IFS= read -r addr; do
-  [ -n "$addr" ] && printf "    tofu untaint '%s'\n" "$addr" >&2
-done <<<"$TAINTED"
-printf '\n  Then re-run. If the provider says it is genuinely stuck, leave it tainted.\n' >&2
-printf '  A managed load balancer stuck mid-creation cannot be deleted by anyone but\n' >&2
-printf '  the provider, and it pins the network behind it — see .claude/skills/teardown.\n\n' >&2
+  cmds untaint <<<"$TAINTED"
+  printf '\n  Then re-run. If the provider says it is genuinely stuck, leave it tainted.\n' >&2
+  printf '  A managed load balancer stuck mid-creation cannot be deleted by anyone but\n' >&2
+  printf '  the provider, and it pins the network behind it — see .claude/skills/teardown.\n\n' >&2
+fi
+
+if [ -n "$GONE" ]; then
+  hdr 'the provider says it is already gone'
+  printf 'The run failed with a "not found" about object(s) still held in state:\n\n' >&2
+  list <<<"$GONE"
+  cat >&2 <<'TXT'
+
+  Retrying cannot fix that: every plan re-reads the same dead id. Confirm with
+  the provider that the object is REALLY gone — `state rm` only makes OpenTofu
+  forget it, and if it does still exist you have just made an orphan nobody
+  will ever destroy. Once confirmed, drop it and re-run:
+
+TXT
+  cmds 'state rm' <<<"$GONE"
+  printf '\n' >&2
+fi
 exit 0

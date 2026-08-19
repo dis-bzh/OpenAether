@@ -31,6 +31,12 @@
 #   3. Update DNS for management endpoints (if using ExternalDNS — automated in Phase 4)
 # ==============================================================================
 
+# ⚠️ NEVER EXECUTED. This describes the disaster-recovery drill (primary provider
+# gone, cluster rebuilt on another) that is still an OPEN item in docs/backlog.md.
+# Nothing here has been deployed, so read it as a design intent, not as a proven
+# procedure. Note also that `ROLE=failover` only picks THIS FILE: the Flux overlay
+# and the bucket segment come from cluster_role below, which is "management".
+
 cluster_name       = "openaether"
 environment        = "prod"
 cluster_role       = "management"
@@ -92,7 +98,8 @@ git_ref          = "refs/heads/main"
 # This failover cluster runs when your primary provider is DOWN, so its PRIMARY
 # state lives on an external S3 (Proxmox has no native object storage — point
 # these at a Scaleway/OVH bucket), and it replicates BACK to the primary once it
-# recovers. Export BACKUP_AWS_* with the primary provider's creds for the replica.
+# recovers. That replica is opened with the primary provider's own keys — the
+# cloud s3_replica_endpoint names, not this one.
 s3_primary_endpoint = "https://s3.fr-par.scw.cloud" # failover state store (primary is down)
 s3_primary_region   = "fr-par"
 s3_replica_endpoint = "https://s3.gra.io.cloud.ovh.net" # OVH: prod crosses providers, or drop to environment = "dev"

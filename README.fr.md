@@ -155,7 +155,7 @@ eux. Tout le reste de l'exemple a déjà une valeur qui fonctionne.
 | `environment` | `dev` ou `prod` — rien d'autre n'est accepté. Il nomme les buckets et les ressources, et `prod` exige en plus que `s3_replica_endpoint` soit sur un **autre** provider |
 | `admin_ip` | ton IP publique en CIDR. C'est la liste d'autorisation SSH **et** l'ACL du LB apiserver |
 | `s3_primary_endpoint` / `s3_primary_region` | le S3 du tfstate chiffré, chez le **même** provider que le cluster (ex. `https://s3.fr-par.scw.cloud` / `fr-par`) |
-| `s3_replica_endpoint` / `s3_replica_region` | le S3 de la **copie de sauvegarde**. En production, chez un **autre provider** — un état qu'on ne peut lire que depuis le cloud qui vient de tomber n'est pas une sauvegarde |
+| `s3_replica_endpoint` / `s3_replica_region` | le S3 de la **copie de sauvegarde**. En production, chez un **autre provider** — un état qu'on ne peut lire que depuis le cloud qui vient de tomber n'est pas une sauvegarde. Il s'ouvre avec les clés `<PU>_AWS_*` de CE cloud-là : un réplica Outscale lit `OUTSCALE_AWS_*` |
 
 Et `bastion_ssh_keys` : la moitié **publique** de la clé que tu passeras en `KEY=`.
 Les deux forment une paire, et `task cluster-up` refuse de démarrer si elles ne

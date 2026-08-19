@@ -54,8 +54,8 @@ PROVIDER="$(jq -r '.provider // empty' <<<"$T")"
 [ -n "$PROVIDER" ] || PROVIDER="$(sed -E 's/^s3-[^-]+-([a-z]+)-tfstate-.*/\1/' <<<"$PRIMARY_BUCKET")"
 
 # Replica creds = the cluster provider's BACKUP creds (cross-provider in prod).
-BACKUP_AK="$(s3_cred "$PROVIDER" backup ak)"
-BACKUP_SK="$(s3_cred "$PROVIDER" backup sk)"
+BACKUP_AK="$(s3_cred "$PROVIDER" backup ak "$REPLICA_EP")"
+BACKUP_SK="$(s3_cred "$PROVIDER" backup sk "$REPLICA_EP")"
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 

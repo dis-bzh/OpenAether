@@ -60,8 +60,9 @@ git_ref          = "refs/heads/main"
 # and each has a "-backup" twin:
 #   state            -> s3-<cluster_name>-outscale-tfstate-<environment>
 #   kube/talosconfig -> s3-<cluster_name>-outscale-workload-<environment>
-# PRIMARY = Outscale (AWS_*). REPLICA = the "-backup" store; in prod point it at
-# a DIFFERENT provider (e.g. Scaleway) + export BACKUP_AWS_* for it.
+# PRIMARY = this cluster's own store. REPLICA = its "-backup" twin, opened with
+# the keys of the cloud s3_replica_endpoint names — a Scaleway replica needs
+# SCW_AWS_* in .env.sh, never this cluster's own keys.
 s3_primary_endpoint = "https://oos.eu-west-2.outscale.com"
 s3_primary_region   = "eu-west-2"
 s3_replica_endpoint = "https://s3.fr-par.scw.cloud" # Scaleway: prod crosses providers, or drop to environment = "dev"

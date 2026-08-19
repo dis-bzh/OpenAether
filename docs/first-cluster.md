@@ -57,16 +57,35 @@ Fill in, for Scaleway: `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`,
 `SCW_DEFAULT_PROJECT_ID`, `SCW_DEFAULT_ORGANIZATION_ID`, the region and zone,
 and `SCW_AWS_ACCESS_KEY_ID` / `SCW_AWS_SECRET_ACCESS_KEY` for S3.
 
-There is a SECOND pair, and it is easy to miss:
-`SCW_BACKUP_AWS_ACCESS_KEY_ID` / `SCW_BACKUP_AWS_SECRET_ACCESS_KEY` (or the
-generic `BACKUP_AWS_*`). `.env.example` points it at the primary's own keys,
-which is correct only while both stores sit on one provider. The moment you
-follow the production advice in step 3 and put the replica on another provider,
-these must be THAT provider's keys — they are namespaced by the CLUSTER's
-provider, not the backup's, so a Scaleway cluster backing up to OVH puts the OVH
-key in `SCW_BACKUP_AWS_*`. Counter-intuitive, and load-bearing: `task cluster-up`
-refuses to continue if the replica points elsewhere and the `-backup` buckets
-cannot be created there.
+There is no second pair to invent. **Credentials are named after the cloud that
+holds the bucket.** Two files divide the job: the `.tfvars` says WHERE each store
+is, `.env.sh` says with WHICH keys it is opened. Point the replica at Outscale
+and the `-backup` store is opened with `OUTSCALE_AWS_*` — the very keys an
+Outscale cluster would use. `<PROV>_BACKUP_AWS_*` remains available to give one
+store its own separate pair, and is needed by nobody who does not want that.
+
+A worked example — cluster on Scaleway, backups on Outscale:
+
+```bash
+# .env.sh — the primary store is Scaleway's, the -backup store is Outscale's
+export SCW_AWS_ACCESS_KEY_ID="$SCW_ACCESS_KEY"
+export SCW_AWS_SECRET_ACCESS_KEY="$SCW_SECRET_KEY"
+export OUTSCALE_AWS_ACCESS_KEY_ID="$OUTSCALE_ACCESS_KEY_ID"
+export OUTSCALE_AWS_SECRET_ACCESS_KEY="$OUTSCALE_SECRET_KEY"
+```
+
+```hcl
+# envs/management-scaleway.tfvars — and this is what makes it a real backup
+s3_primary_endpoint = "https://s3.fr-par.scw.cloud"
+s3_primary_region   = "fr-par"
+s3_replica_endpoint = "https://oos.eu-west-2.outscale.com"
+s3_replica_region   = "eu-west-2"
+```
+
+`task cluster-up` opens both stores before it builds anything. If the replica
+cannot be written it refuses in seconds — and names the variable whose key was
+rejected, rather than leaving you with a provider error and six pairs to guess
+between.
 
 And the one that matters most:
 
@@ -103,7 +122,7 @@ $EDITOR management-scaleway.tfvars
 | `environment` | `dev` or `prod`, nothing else. It does not *require* anything: nothing validates the replica before you spend. `prod` with the replica on the primary's endpoint deploys fine and `task cluster-verify` calls it red afterwards |
 | `admin_ip` | `curl -s ifconfig.me` as a `/32`. It is both the SSH allow-list and the apiserver LB ACL |
 | `s3_primary_endpoint` / `_region` | S3 on the same provider as the cluster |
-| `s3_replica_endpoint` / `_region` | S3 for the backup copy. In production, **a different provider** — a state you can only read from the cloud that just failed is not a backup. Export that store's own `<PROV>_BACKUP_AWS_*` keys in the same edit: `task cluster-up` refuses to continue if the replica points elsewhere and the `-backup` buckets cannot be created there |
+| `s3_replica_endpoint` / `_region` | S3 for the backup copy. In production, **a different provider** — a state you can only read from the cloud that just failed is not a backup. That store is opened with ITS OWN cloud's keys (`OUTSCALE_AWS_*` for an Outscale replica) — see step 2. `task cluster-up` refuses before it builds anything if the `-backup` buckets cannot be created there |
 | `bastion_ssh_keys` | the **public** half of the key you will pass as `KEY=`. `task cluster-up` refuses to start if they do not match, before spending anything |
 | `control_planes` | 3 — **inside `node_distribution.<provider>`**, not a top-level field, and `bastion_ssh_keys` is a map keyed by provider the same way. Nothing validates the count; `2` silently builds a two-member etcd |
 
@@ -242,7 +261,7 @@ python3 scripts/ops/purge-orphans/scaleway.py
 **Destroying takes two commands and cannot be collapsed into one** — that is the
 point, not an inconvenience. The first computes the destruction and destroys
 nothing; the second lands exactly what you read. Neither `--yes` nor
-`TF_CLI_ARGS_destroy` nor `YES=1` gets past the first.
+`TF_CLI_ARGS_destroy` nor `APPROVE=auto` gets past the first.
 
 `--force-no-edges` is required and the bare `--` is not optional. `fleet-down`
 refuses to destroy a cluster until it has ruled out CAPI children; a

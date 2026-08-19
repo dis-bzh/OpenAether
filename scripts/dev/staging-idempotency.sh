@@ -37,7 +37,9 @@ BEFORE="$(node_identities)"
 echo "$BEFORE" | sed 's/^/  /'
 
 echo "--- second bring-up ---"
-task cluster-up ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY"
+# APPROVE=auto or this stops for an approval no CI runner can answer — after
+# the first deploy has already been paid for.
+task cluster-up ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY" APPROVE=auto
 
 # STRICT=1 turns a non-empty plan into exit 2. This is the assertion; the apply
 # above merely has to not fail.
