@@ -45,7 +45,7 @@ It reboots nothing, so it isolates the control-plane roll from the node roll.
 
 ```bash
 # edit kubernetes_version in envs/<role>-<provider>.tfvars, then
-task infra ROLE=management PROVIDER=<p>
+task infra-apply ROLE=management PROVIDER=<p>
 ```
 
 Talos reconciles the static pods and the kubelets; wait for every node to report
@@ -58,11 +58,11 @@ Bump `talos_version`, build the image for the new version (the node resources
 ignore the image, but the *data source* still has to resolve), apply, then roll.
 
 ```bash
-task talos-image PROVIDER=<p> VERSION=<new> ENSURE=1
+task image-build PROVIDER=<p> VERSION=<new> ENSURE=1
 # edit talos_version in the tfvars, then
-task infra ROLE=management PROVIDER=<p>
-task rolling-replace PROVIDER=<p> KEY=~/.ssh/<key> -- --cp-only --upgrade
-task rolling-replace PROVIDER=<p> KEY=~/.ssh/<key> -- --workers-only --upgrade
+task infra-apply ROLE=management PROVIDER=<p>
+task cluster-roll PROVIDER=<p> KEY=~/.ssh/<key> -- --cp-only --upgrade
+task cluster-roll PROVIDER=<p> KEY=~/.ssh/<key> -- --workers-only --upgrade
 ```
 
 **On Outscale the first line dominates the whole upgrade.** The image is
@@ -186,7 +186,7 @@ After each node, and again at the end:
   and read § Node image drift before running anything else.
 
 ```bash
-task plan ROLE=management PROVIDER=<p> STRICT=1   # exit 2 = not converged
+task infra-plan ROLE=management PROVIDER=<p> STRICT=1   # exit 2 = not converged
 ```
 
 ## Iterating on the roll itself, without rebuilding the cluster
@@ -238,7 +238,7 @@ no supported path. The roll now reads the schematic off the node
 but whose image does not.
 
 ⚠️ **A flavour change is not one of them on OpenStack, and that is worse.** OVH
-resizes the instance in place, so `task infra` plans it as an update rather than
+resizes the instance in place, so `task infra-apply` plans it as an update rather than
 a replacement and applies it to **every node at once** — measured 2026-08-15,
 where six nodes went into `VERIFY_RESIZE` together and the apiserver was
 unreachable for several minutes. `rolling-replace`'s "one node at a time" guard

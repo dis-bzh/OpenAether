@@ -172,7 +172,7 @@ if [ "$K8S_DONE" = 1 ] && [ "$TALOS_DONE" = 1 ]; then
     1. set talos_version / kubernetes_version one patch below in
        envs/${ROLE}-${PROVIDER}.tfvars
     2. deploy that cluster (task up …)
-    3. task upgrade …, which moves it to the targets in cluster/variables.tf
+    3. task cluster-upgrade …, which moves it to the targets in cluster/variables.tf
 
   UPGRADE_TALOS_TO / UPGRADE_K8S_TO override the targets upward instead, but only
   if a newer patch actually exists upstream. In CI the pin lives in
@@ -253,7 +253,7 @@ report_probe() {
 if [ "$K8S_DONE" = 0 ]; then
   echo "--- Kubernetes ${K8S_FROM} → ${K8S_TO} ---"
   tfvar_set kubernetes_version "$K8S_TO"
-  task infra ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY"
+  task infra-apply ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY" YES=1
 
   # Talos reconciles the static pods and the kubelets; the node's reported
   # version is the observable end of that, and it is not instant.
@@ -283,18 +283,18 @@ if [ "$TALOS_DONE" = 0 ]; then
   # The nodes ignore their image attribute, but the image DATA SOURCE still has
   # to resolve, and it derives its name from talos_version. Without this the
   # plan fails on an image the account does not have.
-  task talos-image PROVIDER="$PROVIDER" VERSION="$TALOS_TO" ENSURE=1
+  task image-build PROVIDER="$PROVIDER" VERSION="$TALOS_TO" ENSURE=1
 
   tfvar_set talos_version "$TALOS_TO"
-  task infra ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY"
+  task infra-apply ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY" YES=1
 
   # One node at a time, health-gated between each; control planes first because
   # a worker's upgrade needs a healthy control plane to drain against.
   # --yes: there is no terminal here, and without it rolling-replace stops at its
   # confirmation prompt and exits 1 — which is how an unattended lane discovers
   # that a script it depends on was only ever run by hand.
-  task rolling-replace PROVIDER="$PROVIDER" KEY="$KEY" -- --cp-only --upgrade --yes
-  task rolling-replace PROVIDER="$PROVIDER" KEY="$KEY" -- --workers-only --upgrade --yes
+  task cluster-roll PROVIDER="$PROVIDER" KEY="$KEY" YES=1 -- --cp-only --upgrade
+  task cluster-roll PROVIDER="$PROVIDER" KEY="$KEY" YES=1 -- --workers-only --upgrade
 
   # Same trap as the kubelet count above: with no nodes returned, `grep -cv`
   # answers 0 and a dead cluster reports a clean Talos upgrade.
@@ -312,7 +312,7 @@ fi
 # Zero destroys. A plan that wants to replace nodes means the boot image and the
 # running version have disagreed — that plan would take the cluster down.
 # See modules/providers/provider-contract.md § "Node image drift".
-task plan ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY" STRICT=1 ||
+task infra-plan ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY" STRICT=1 ||
   fail "the plan is not empty after the upgrade — read provider-contract.md § Node image drift before re-running anything"
 ok "plan empty after the upgrade"
 
@@ -337,7 +337,7 @@ else
   # Both failures were the guards added that morning refusing to conclude from
   # an unanswered question — the old code would have read the empty output as
   # "no application load balancer" and gone green.
-  task verify PROVIDER="$PROVIDER" ROLE="$ROLE"
+  task cluster-verify PROVIDER="$PROVIDER" ROLE="$ROLE"
 fi
 
 report_probe

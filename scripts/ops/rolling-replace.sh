@@ -154,7 +154,7 @@ if [[ $UPGRADE -eq 1 && -z "${TALOS_IMAGE:-}" ]]; then
     TV="$(grep -E '^[[:space:]]*talos_version[[:space:]]*=' "$TFVARS" | head -1 | sed -E 's/^[^=]*=[[:space:]]*"?([^"#]*)"?.*/\1/' | tr -d '[:space:]')"
     [[ -n "$TV" ]] || die "--upgrade: no installer_image output and no talos_version in ${TFVARS}."
     die "--upgrade: the state has no installer_image output (pre-2026-08-15 apply).
-  Re-run \`task infra\` so the root republishes it, or pass it explicitly:
+  Re-run \`task infra-apply\` so the root republishes it, or pass it explicitly:
     TALOS_IMAGE=factory.talos.dev/installer/<schematic-id>:${TV}
   Do NOT fall back to ghcr.io/siderolabs/installer — it has no extensions."
   fi
@@ -1143,7 +1143,7 @@ replace_node() { # <type: cp|worker> <index>
       die "${node_name}: nothing is answering on ${ep}.
   The Talos tunnels are down. Reopen them and re-run — an upgrade is re-runnable
   and skips every node already on the target version:
-    task tunnels PROVIDER=<provider> KEY=<your key>"
+    task tunnels-up PROVIDER=<provider> KEY=<your key>"
     fi
     if [[ "$running" == "${TALOS_IMAGE##*:}" ]]; then
       # Same version is not the same image. Ask for the schematic too, or a

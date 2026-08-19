@@ -42,7 +42,7 @@ task up ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY"
 # STRICT=1 turns a non-empty plan into exit 2. This is the assertion; the apply
 # above merely has to not fail.
 echo "--- the plan after it must be empty ---"
-task plan ROLE="$ROLE" PROVIDER="$PROVIDER" STRICT=1 ||
+task infra-plan ROLE="$ROLE" PROVIDER="$PROVIDER" STRICT=1 ||
   fail "the plan is not empty after a second bring-up — the configuration does not converge"
 ok "plan empty: the second bring-up changed nothing"
 

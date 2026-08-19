@@ -169,14 +169,14 @@ OpenAether-apps; the defaults point at ours, and its `apps/clusters` is not your
 task preflight-quotas PROVIDER=ovh
 
 task up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
-task verify PROVIDER=scaleway               # ask the cluster, not the tool
+task cluster-verify PROVIDER=scaleway               # ask the cluster, not the tool
 ```
 
 `task up` is the one command, and it is idempotent: it builds the Talos image if
 the account lacks it, renders the bootstrap manifests, applies the
 infrastructure, opens the tunnels and bootstraps Talos. Re-run it after fixing
 any failure and it resumes. It is also the command CI runs, so it is the path
-that gets validated. The individual steps (`task talos-image`, `task infra`,
+that gets validated. The individual steps (`task image-build`, `task infra-apply`,
 `task bootstrap-phase2`) still exist for when you want to drive one of them
 alone.
 
@@ -192,7 +192,8 @@ Order matters: the management owns its children's CRs.
 ```bash
 source .env.sh
 task edge-down CLUSTER=edge-1 -- --yes      # each CAPI child first
-task down PROVIDER=ovh -- --yes       # then the management
+task down PROVIDER=ovh -- --plan      # then the management: compute it first
+task down PROVIDER=ovh -- --plan-file destroy-management-ovh.tfplan --yes
 python3 scripts/ops/purge-orphans/ovh.py    # dry-run: confirm nothing is left
 ```
 

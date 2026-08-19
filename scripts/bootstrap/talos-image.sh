@@ -11,7 +11,7 @@
 #
 # Usage:
 #   ./scripts/bootstrap/talos-image.sh <provider> [talos_version] [--ensure]
-#   task talos-image PROVIDER=ovh [VERSION=v1.13.4]
+#   task image-build PROVIDER=ovh [VERSION=v1.13.4]
 #
 # --ensure: idempotence gate for `task up` — plans first and only applies on a
 #   real change, so a rerun with the image already published costs nothing.
@@ -175,7 +175,7 @@ if [ "$ENSURE" = true ]; then
     0) echo "✓ image already up to date — skipping apply" ;;
     # --ensure is the non-interactive idempotence gate for `task up`, so the
     # apply must not stop to prompt for approval (it would EOF and abort the
-    # pipeline). The plain `task talos-image` path below stays interactive.
+    # pipeline). The plain `task image-build` path below stays interactive.
     2) tofu apply -auto-approve "${APPLY_VARS[@]}" ;;
     *)
       echo "✗ tofu plan failed (exit ${PLAN_EXIT})"

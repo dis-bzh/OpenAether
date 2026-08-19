@@ -170,15 +170,15 @@ nôtre, et son `apps/clusters` n'est pas le tien.
 task preflight-quotas PROVIDER=ovh
 
 task up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
-task verify PROVIDER=scaleway               # demander au cluster, pas à l'outil
+task cluster-verify PROVIDER=scaleway               # demander au cluster, pas à l'outil
 ```
 
 `task up` est la commande unique, et elle est idempotente : elle construit
 l'image Talos si le compte ne l'a pas, rend les manifests de bootstrap, applique
 l'infrastructure, ouvre les tunnels et amorce Talos. Relance-la après avoir
 corrigé une erreur, elle reprend. C'est aussi la commande que joue la CI, donc
-le chemin qui est réellement validé. Les étapes séparées (`task talos-image`,
-`task infra`, `task bootstrap-phase2`) restent disponibles pour n'en piloter
+le chemin qui est réellement validé. Les étapes séparées (`task image-build`,
+`task infra-apply`, `task bootstrap-phase2`) restent disponibles pour n'en piloter
 qu'une.
 
 **Après le déploiement** : suivre le parcours jour-1
@@ -193,7 +193,8 @@ L'ordre compte : le management détient les CR de ses enfants.
 ```bash
 source .env.sh
 task edge-down CLUSTER=edge-1 -- --yes      # chaque enfant CAPI d'abord
-task down PROVIDER=ovh -- --yes       # puis le management
+task down PROVIDER=ovh -- --plan      # puis le management : d'abord le plan
+task down PROVIDER=ovh -- --plan-file destroy-management-ovh.tfplan --yes
 python3 scripts/ops/purge-orphans/ovh.py    # dry-run : vérifier qu'il ne reste rien
 ```
 

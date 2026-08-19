@@ -48,7 +48,7 @@ nœuds.
 
 ```bash
 # modifier kubernetes_version dans envs/<role>-<provider>.tfvars, puis
-task infra ROLE=management PROVIDER=<p>
+task infra-apply ROLE=management PROVIDER=<p>
 ```
 
 Talos réconcilie les static pods et les kubelets ; attendre que chaque nœud
@@ -63,11 +63,11 @@ de nœud ignorent l'image, mais la *data source*, elle, doit résoudre), appliqu
 puis dérouler.
 
 ```bash
-task talos-image PROVIDER=<p> VERSION=<new> ENSURE=1
+task image-build PROVIDER=<p> VERSION=<new> ENSURE=1
 # modifier talos_version dans le tfvars, puis
-task infra ROLE=management PROVIDER=<p>
-task rolling-replace PROVIDER=<p> KEY=~/.ssh/<clé> -- --cp-only --upgrade
-task rolling-replace PROVIDER=<p> KEY=~/.ssh/<clé> -- --workers-only --upgrade
+task infra-apply ROLE=management PROVIDER=<p>
+task cluster-roll PROVIDER=<p> KEY=~/.ssh/<clé> -- --cp-only --upgrade
+task cluster-roll PROVIDER=<p> KEY=~/.ssh/<clé> -- --workers-only --upgrade
 ```
 
 **Sur Outscale, la première ligne domine tout l'upgrade.** L'image est
@@ -199,7 +199,7 @@ Après chaque nœud, puis à la fin :
   lire § Node image drift avant de lancer quoi que ce soit d'autre.
 
 ```bash
-task plan ROLE=management PROVIDER=<p> STRICT=1   # sortie 2 = non convergé
+task infra-plan ROLE=management PROVIDER=<p> STRICT=1   # sortie 2 = non convergé
 ```
 
 ## Itérer sur le roll lui-même, sans reconstruire le cluster
@@ -254,7 +254,7 @@ schematic sur le nœud (`talosctl get extensions` le publie) et fait rouler un
 nœud dont la version correspond mais pas l'image.
 
 ⚠️ **Le gabarit n'en fait pas partie sur OpenStack, et c'est pire.** OVH
-redimensionne l'instance en place : `task infra` le planifie donc comme une mise
+redimensionne l'instance en place : `task infra-apply` le planifie donc comme une mise
 à jour et non un remplacement, et l'applique à **tous les nœuds en même temps** —
 mesuré le 2026-08-15, six nœuds passés ensemble en `VERIFY_RESIZE` et l'apiserver
 injoignable plusieurs minutes. La garde « un nœud à la fois » de

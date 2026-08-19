@@ -162,7 +162,7 @@ echo "=== fleet-down: an unanswered child-cluster query is not an absence ==="
 # identical to `mapfile`, and the very next step destroys the management —
 # the only thing that could ever delete the children.
 plan "${CLUSTER_INFO_OK}get clusters.cluster.x-k8s.io -A\t1\terror: the server doesn't have a resource type \"clusters\"\n"
-run "$FLEET_DOWN" stubcloud --yes
+run "$FLEET_DOWN" stubcloud --plan-file "$STUB_DIR/d.tfplan" --yes
 expect_rc 1 "a failing enumeration aborts fleet-down"
 refute_destroyed "the management destroy is NOT reached after a failed enumeration"
 refute_out "no child cluster" "a failed query is not reported as 'no child cluster'"
@@ -175,7 +175,7 @@ refute_out "fleet-down complete" "it does not report success"
 # pathological case and not against the normal one, which is the sentence in
 # that commit's own message.
 plan "${CLUSTER_INFO_OK}get clusters.cluster.x-k8s.io -A\t1\terror: the server doesn't have a resource type \"clusters\"\n"
-run "$FLEET_DOWN" stubcloud --yes --force-no-edges
+run "$FLEET_DOWN" stubcloud --plan-file "$STUB_DIR/d.tfplan" --yes --force-no-edges
 expect_rc 0 "--force-no-edges proceeds when the CAPI CRDs are absent"
 expect_out "CAPI CRDs are absent" "it says why it is allowed to continue"
 expect_destroyed "the management destroy IS reached"
@@ -185,13 +185,13 @@ expect_out "fleet-down complete" "it reports success"
 # nothing. This must proceed, or the fail-safe above is just a script that
 # never works.
 plan "${CLUSTER_INFO_OK}get clusters.cluster.x-k8s.io -A\t0\t\n"
-run "$FLEET_DOWN" stubcloud --yes
+run "$FLEET_DOWN" stubcloud --plan-file "$STUB_DIR/d.tfplan" --yes
 expect_rc 0 "an empty-but-successful enumeration proceeds"
 expect_out "no child cluster" "it says 'no child cluster'"
 expect_destroyed "the management destroy IS reached"
-if grep -q '^destroy ' "$STUB_TASK_LOG"
+if grep -q '^infra-down ' "$STUB_TASK_LOG"
   then ok "it is 'task destroy' that ran"
-  else bad "task ran, but not destroy: $(tr '\n' ';' <"$STUB_TASK_LOG")"
+  else bad "task ran, but not infra-down: $(tr '\n' ';' <"$STUB_TASK_LOG")"
 fi
 
 # Same run, checked for the CRD collision.
@@ -208,7 +208,9 @@ echo "=== fleet-down: the destroy retries a race, and stops ==="
 # one that never stops, would be worse than the race.
 export STUB_TASK_COUNT_FILE="$STUB_DIR/task.count"
 export DESTROY_BACKOFF=0
-destroys() { grep -c '^destroy ' "$STUB_TASK_LOG" 2>/dev/null || echo 0; }
+# `infra-down`, not `destroy`: the target was renamed and the alias would let a
+# harness keyed on the old name pass while asserting nothing.
+destroys() { grep -c '^infra-down ' "$STUB_TASK_LOG" 2>/dev/null || echo 0; }
 expect_destroys() { # <n> <label>
   local got; got="$(destroys)"
   if [ "$got" = "$1" ]; then ok "$2"; else bad "$2 (ran $got destroy/destroys, expected $1)"; fi
@@ -219,7 +221,7 @@ plan "${CLUSTER_INFO_OK}get clusters.cluster.x-k8s.io -A\t0\t\n"
 # 1. Transient, the case that actually happened.
 : >"$STUB_TASK_COUNT_FILE"
 export STUB_TASK_FAIL_TIMES=2
-run "$FLEET_DOWN" stubcloud --yes
+run "$FLEET_DOWN" stubcloud --plan-file "$STUB_DIR/d.tfplan" --yes
 expect_rc 0 "two failed destroys then a success still completes the teardown"
 expect_out "attempt 3/3" "it names the attempt that succeeded"
 expect_destroys 3 "it retried exactly twice"
@@ -230,7 +232,7 @@ expect_out "fleet-down complete" "it reports success once the destroy worked"
 #    own header is about.
 : >"$STUB_TASK_COUNT_FILE"
 export STUB_TASK_FAIL_TIMES=99
-run "$FLEET_DOWN" stubcloud --yes
+run "$FLEET_DOWN" stubcloud --plan-file "$STUB_DIR/d.tfplan" --yes
 expect_rc 1 "a destroy that never succeeds still fails the run"
 expect_out "after 3 attempt(s)" "it says how many attempts it made"
 refute_out "fleet-down complete" "it does not report success after exhausting the retries"
@@ -248,7 +250,7 @@ for MSG in \
   "Error: Invalid state PENDING_CREATE of loadbalancer resource 0000-1111"; do
   : >"$STUB_TASK_COUNT_FILE"
   export STUB_TASK_FAIL_TIMES=99 STUB_TASK_MSG="$MSG"
-  run "$FLEET_DOWN" stubcloud --yes
+  run "$FLEET_DOWN" stubcloud --plan-file "$STUB_DIR/d.tfplan" --yes
   expect_rc 1 "a provider-held teardown still fails the run"
   expect_out "this is not yours to fix" "it names the wedged load balancer: ${MSG:7:38}…"
   expect_out "support ticket" "and sends the operator to a ticket rather than a retry"
@@ -260,7 +262,7 @@ unset STUB_TASK_MSG
 #    three times in this repository.
 : >"$STUB_TASK_COUNT_FILE"
 export STUB_TASK_FAIL_TIMES=99 STUB_TASK_MSG="Error: quota exceeded for instances"
-run "$FLEET_DOWN" stubcloud --yes
+run "$FLEET_DOWN" stubcloud --plan-file "$STUB_DIR/d.tfplan" --yes
 expect_rc 1 "an ordinary failure still fails"
 refute_out "this is not yours to fix" "it does NOT blame the provider for an ordinary failure"
 expect_out "INCOMPLETE" "it gives the ordinary message instead"
@@ -270,7 +272,7 @@ unset STUB_TASK_MSG
 #    three chances to destroy something that came back.
 : >"$STUB_TASK_COUNT_FILE"
 unset STUB_TASK_FAIL_TIMES
-run "$FLEET_DOWN" stubcloud --yes
+run "$FLEET_DOWN" stubcloud --plan-file "$STUB_DIR/d.tfplan" --yes
 expect_rc 0 "a destroy that works first time completes"
 expect_destroys 1 "it does not retry a destroy that succeeded"
 refute_out "attempt" "no attempt counter is printed on the happy path"
@@ -280,14 +282,14 @@ unset STUB_TASK_COUNT_FILE DESTROY_BACKOFF
 echo "=== fleet-down: an unreachable management is not a childless one ==="
 
 plan 'no line matches, so cluster-info fails\t1\t\n'
-run "$FLEET_DOWN" stubcloud --yes
+run "$FLEET_DOWN" stubcloud --plan-file "$STUB_DIR/d.tfplan" --yes
 expect_rc 1 "an unreachable management aborts"
 refute_destroyed "it does not destroy a management it could not query"
 expect_out "STOP" "it explains why it stopped"
 
 # The operator can assert there is no child. That is a decision, not a default.
 plan 'no line matches, so cluster-info fails\t1\t\n'
-run "$FLEET_DOWN" stubcloud --yes --force-no-edges
+run "$FLEET_DOWN" stubcloud --plan-file "$STUB_DIR/d.tfplan" --yes --force-no-edges
 expect_rc 0 "--force-no-edges lets an unreachable management be destroyed"
 expect_destroyed "the destroy is reached under --force-no-edges"
 
@@ -297,13 +299,13 @@ echo "=== fleet-down: a child that did not go down blocks the management ==="
 # fleet-down runs the real edge-down.sh here, so this covers the handoff too.
 EDGE_LIST='get clusters.cluster.x-k8s.io -A\t0\tedge-a capi-clusters\n'
 plan "${CLUSTER_INFO_OK}${EDGE_LIST}get clusters.cluster.x-k8s.io edge-a\t1\terror: You must be logged in to the server (Unauthorized)\n"
-run "$FLEET_DOWN" stubcloud --yes
+run "$FLEET_DOWN" stubcloud --plan-file "$STUB_DIR/d.tfplan" --yes
 expect_rc 1 "a child whose state is unknown aborts fleet-down"
 refute_destroyed "the management is not destroyed while a child is unaccounted for"
 expect_out "STOPPING before touching the management" "it names the child that blocked it"
 
 plan "${CLUSTER_INFO_OK}${EDGE_LIST}get clusters.cluster.x-k8s.io edge-a\t1\tError from server (NotFound): clusters.cluster.x-k8s.io \"edge-a\" not found\n"
-run "$FLEET_DOWN" stubcloud --yes
+run "$FLEET_DOWN" stubcloud --plan-file "$STUB_DIR/d.tfplan" --yes
 expect_rc 0 "a child already absent does not block fleet-down"
 expect_destroyed "the destroy is reached once the child is accounted for"
 if [ -s "$STUB_TOFU_LOG" ]
@@ -419,12 +421,45 @@ bucket_suffix = "a1b2c3"
 environment   = "dev"
 TFV
 plan "${CLUSTER_INFO_OK}get clusters.cluster.x-k8s.io -A\t0\t\n"
-run "$FLEET_DOWN" stubcloud --yes --force-no-edges
+run "$FLEET_DOWN" stubcloud --plan-file "$STUB_DIR/d.tfplan" --yes --force-no-edges
 rm -f "$ROOT/infrastructure/opentofu/cluster/envs/management-stubcloud.tfvars"
 expect_out "s3-example-a1b2c3-stubcloud-tfstate-dev" \
   "the reported bucket keeps the suffix and the first segment only"
 refute_out "s3-example-dev-stubcloud-tfstate-dev" \
   "it does not print the raw cluster_name, which names nothing"
+
+
+echo "=== destroying takes TWO commands, and nothing may collapse them into one ==="
+
+# The requirement: it must be IMPOSSIBLE to destroy in a single command. A macro
+# that plans and applies internally puts the single line back one level up, so
+# fleet-down enforces the two steps too.
+plan "${CLUSTER_INFO_OK}get clusters.cluster.x-k8s.io -A\t0\t\n"
+: >"$STUB_TASK_LOG"
+run "$FLEET_DOWN" stubcloud --yes --force-no-edges
+expect_rc 1 "no plan file: the teardown refuses"
+expect_out "refusing to destroy without a plan you have read" "and says why"
+expect_out "This takes two commands, always" "and names both"
+[ ! -s "$STUB_TASK_LOG" ] && ok "…having called nothing at all" \
+  || bad "it invoked something before refusing: $(tr '\n' ';' <"$STUB_TASK_LOG")"
+
+# --yes is the confirmation flag and must NOT be a way past the plan requirement.
+: >"$STUB_TASK_LOG"
+run env TF_CLI_ARGS_destroy=-auto-approve "$FLEET_DOWN" stubcloud --yes --force-no-edges
+expect_rc 1 "TF_CLI_ARGS_destroy does not buy a way past it either"
+[ ! -s "$STUB_TASK_LOG" ] && ok "…still having called nothing" \
+  || bad "an environment variable got past the plan requirement"
+
+# --plan computes and STOPS.
+: >"$STUB_TASK_LOG"
+run "$FLEET_DOWN" stubcloud --plan --force-no-edges
+expect_rc 0 "--plan succeeds"
+expect_out "nothing was destroyed" "and says so plainly"
+grep -q '^infra-down-plan ' "$STUB_TASK_LOG" && ok "it computed a destruction plan" \
+  || bad "no plan was computed: $(tr '\n' ';' <"$STUB_TASK_LOG")"
+grep -q '^infra-down ROLE' "$STUB_TASK_LOG" \
+  && bad "--plan also applied it — that is the single command this forbids" \
+  || ok "…and applied nothing"
 
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

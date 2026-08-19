@@ -19,14 +19,22 @@
 # ==============================================================================
 set -uo pipefail
 
-PROVIDER="${1:?usage: fleet-down.sh <scaleway|ovh|outscale|proxmox> [--role management] [--yes]}"
+PROVIDER="${1:?usage: fleet-down.sh <provider> [--role management] [--plan | --plan-file F] [--yes]}"
 shift
 ROLE=management
 ASSUME_YES=0
 FORCE_NO_EDGES=0
+# TWO COMMANDS, ALWAYS. Destroying a fleet must not be one line anyone can type
+# by accident, and making the macro do plan-then-apply internally would put the
+# single line back one level up. --plan computes and stops; --plan-file applies
+# exactly what was computed. Nothing else destroys anything.
+PLAN_ONLY=0
+PLAN_FILE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --role) ROLE="$2"; shift 2 ;;
+    --plan) PLAN_ONLY=1; shift ;;
+    --plan-file) PLAN_FILE="$2"; shift 2 ;;
     --yes | -y) ASSUME_YES=1; shift ;;
     --force-no-edges) FORCE_NO_EDGES=1; shift ;;
     --keep-images) shift ;;   # accepted for symmetry, no effect here
@@ -145,6 +153,28 @@ fi
 
 # -------------------------------------------------------- 2. the management
 info "Step 2/3 — management cluster ($ROLE / $PROVIDER)"
+
+# --plan: compute the destruction and STOP. This is the first of the two
+# commands, and it is the one an operator reads.
+if [ "$PLAN_ONLY" = 1 ]; then
+  PLAN_OUT="destroy-${ROLE}-${PROVIDER}.tfplan"
+  ( cd "$ROOT" && task infra-down-plan ROLE="$ROLE" PROVIDER="$PROVIDER" OUT="$PLAN_OUT" ) || {
+    warn "could not compute the destruction plan"; exit 1; }
+  printf '\n✓ nothing was destroyed. Read the plan above, then land exactly it:\n'
+  printf '    task down PROVIDER=%s ROLE=%s -- --plan-file %s --yes\n\n' "$PROVIDER" "$ROLE" "$PLAN_OUT"
+  exit 0
+fi
+
+# No plan file, no destruction. YES, --yes, force and TF_CLI_ARGS_destroy are all
+# deliberately powerless here: the only way past this line is a plan somebody read.
+if [ -z "$PLAN_FILE" ]; then
+  printf '✗ refusing to destroy without a plan you have read.\n' >&2
+  printf '  This takes two commands, always:\n' >&2
+  printf '    task down PROVIDER=%s ROLE=%s -- --plan\n' "$PROVIDER" "$ROLE" >&2
+  printf '    task down PROVIDER=%s ROLE=%s -- --plan-file destroy-%s-%s.tfplan --yes\n' \
+    "$PROVIDER" "$ROLE" "$ROLE" "$PROVIDER" >&2
+  exit 1
+fi
 if [ "$ASSUME_YES" -eq 0 ]; then
   read -rp "Destroy the $ROLE-$PROVIDER management? [y/N] " a
   [ "$a" = y ] || [ "$a" = Y ] || { echo "aborted"; exit 1; }
@@ -171,7 +201,7 @@ while :; do
   # A PIPE, not a process substitution: `set -o pipefail` above makes the `if`
   # see the destroy's own status, and the pipeline does not return until tee has
   # finished writing — so the transcript is complete when it is read below.
-  if ( cd "$ROOT" && TF_CLI_ARGS_destroy=-auto-approve task destroy ROLE="$ROLE" PROVIDER="$PROVIDER" ) 2>&1 | tee "$DESTROY_LOG"; then
+  if ( cd "$ROOT" && task infra-down ROLE="$ROLE" PROVIDER="$PROVIDER" PLAN="$PLAN_FILE" ) 2>&1 | tee "$DESTROY_LOG"; then
     if [ "$attempt" -gt 1 ]; then
       ok "management destroyed (attempt ${attempt}/${DESTROY_ATTEMPTS})"
     else

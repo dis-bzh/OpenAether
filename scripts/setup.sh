@@ -306,7 +306,7 @@ if ! check_cmd checkov; then
     install_checkov
 fi
 
-# 6. Check Talos image + backup tools (used by `task talos-image` and the S3 backups)
+# 6. Check Talos image + backup tools (used by `task image-build` and the S3 backups)
 MISSING_IMG_TOOLS=0
 for t in curl zstd qemu-img aws gpg jq; do
     check_cmd "$t" || MISSING_IMG_TOOLS=1

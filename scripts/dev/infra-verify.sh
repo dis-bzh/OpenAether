@@ -162,7 +162,7 @@ fi
 # never dropped the upgrade fallback, and reverted on their next reboot — while
 # its own config named the fixed one. Every gate said "already runs v1.13.8".
 #
-# `warn`, not `unk`, when no tunnel answers: `task verify` is legitimately run
+# `warn`, not `unk`, when no tunnel answers: `task cluster-verify` is legitimately run
 # without tunnels, and a check that turns the normal case red is the defect this
 # file keeps catching in others. A mismatch actually READ is a hard failure.
 # The local Docker cluster has no Image Factory schematic at all — asserting one
@@ -179,11 +179,11 @@ else
   HAVE_SCH="$(timeout 20 talosctl get extensions -e "$TUN" -n 127.0.0.1 -o json 2>/dev/null |
               jq -s -r '.[] | select(.spec.metadata.name == "schematic") | .spec.metadata.version' 2>/dev/null | head -1)" || HAVE_SCH=""
   if [ -z "$HAVE_SCH" ]; then
-    warn "could not read the running schematic (no Talos tunnel on ${TUN}) — run 'task tunnels PROVIDER=${PROVIDER}' to make this checkable"
+    warn "could not read the running schematic (no Talos tunnel on ${TUN}) — run 'task tunnels-up PROVIDER=${PROVIDER}' to make this checkable"
   elif [ "$HAVE_SCH" = "$WANT_SCH" ]; then
     ok "the fleet runs the pinned schematic (${WANT_SCH:0:12}…)"
   else
-    bad "the fleet runs schematic ${HAVE_SCH:0:12}…, the config pins ${WANT_SCH:0:12}… — the nodes do NOT carry the extensions this release ships. Roll them: task upgrade PROVIDER=${PROVIDER}"
+    bad "the fleet runs schematic ${HAVE_SCH:0:12}…, the config pins ${WANT_SCH:0:12}… — the nodes do NOT carry the extensions this release ships. Roll them: task cluster-upgrade PROVIDER=${PROVIDER}"
   fi
 fi
 fi
@@ -269,7 +269,7 @@ else
   # The distinction that matters at 2am: nothing is known to be wrong.
   printf '✗ %s/%s: nothing failed, but %s check(s) could not be performed, so this run\n' "$PROVIDER" "$ROLE" "$UNKNOWN" >&2
   printf '  proves less than it looks. Usually the S3 credentials: run it as\n' >&2
-  printf '    task verify PROVIDER=%s ROLE=%s\n' "$PROVIDER" "$ROLE" >&2
+  printf '    task cluster-verify PROVIDER=%s ROLE=%s\n' "$PROVIDER" "$ROLE" >&2
   printf '  rather than calling this script directly — the Taskfile derives AWS_* per provider.\n' >&2
 fi
 exit 1

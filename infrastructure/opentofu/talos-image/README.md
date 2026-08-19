@@ -59,7 +59,7 @@ What this builder needs:
 ## Usage
 
 ```bash
-task talos-image PROVIDER=scaleway                 # or ovh, outscale, proxmox ; [VERSION=v1.13.3]
+task image-build PROVIDER=scaleway                 # or ovh, outscale, proxmox ; [VERSION=v1.13.3]
 # equivalent: ./scripts/talos-image.sh scaleway v1.13.3
 ```
 

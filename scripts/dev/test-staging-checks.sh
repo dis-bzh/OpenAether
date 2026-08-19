@@ -387,15 +387,17 @@ upgrade
   && said 'plan empty after the upgrade'; } \
   && ok "an upgrade whose nodes report the target passes end to end" \
   || bad "the all-green upgrade control does not pass (rc=$RUN_RC)"
-called 'task talos-image PROVIDER=stubcloud VERSION=v0.0.2 ENSURE=1' \
+called 'task image-build PROVIDER=stubcloud VERSION=v0.0.2 ENSURE=1' \
   && ok "the Talos image is ensured for the TARGET version" \
-  || bad "task talos-image was not called with the target version"
-{ [ "$(first_at 'task talos-image')" -lt "$(last_at 'task infra')" ]; } \
+  || bad "task image-build was not called with the target version"
+{ [ "$(first_at 'task image-build')" -lt "$(last_at 'task infra-apply')" ]; } \
   && ok "…before the apply that needs the image data source to resolve" \
   || bad "the image was ensured after the apply, which is the plan failure it exists to avoid"
-{ called '-- --cp-only --upgrade --yes' && called '-- --workers-only --upgrade --yes'; } \
-  && ok "rolling-replace is driven non-interactively, control planes first" \
-  || bad "rolling-replace was not called with --yes (an unattended lane would hang on its prompt)"
+# YES=1 now, not `-- --yes`: one spelling of "do not ask me" across the whole
+# repository instead of three (--yes, TF_CLI_ARGS_apply, and a prompt).
+{ called 'YES=1 -- --cp-only --upgrade' && called 'YES=1 -- --workers-only --upgrade'; } \
+  && ok "the roll is driven non-interactively with YES=1, control planes first" \
+  || bad "the roll was not called with YES=1 (an unattended lane would hang on its prompt)"
 
 # --- and the branch a 1.0.0 cluster takes -------------------------------------
 # The upgrade must not demand a platform the release does not ship. Asked of the

@@ -32,18 +32,25 @@ tasks:
         OpenAether — one Talos cluster, on any provider.
 
         Deploy and operate, in order:
-          task setup                      install the toolchain
-          task bucket-suffix              a discriminator for your bucket names
-          task plan     PROVIDER=…        what would be created, before spending
-          task up       PROVIDER=… KEY=…  deploy, or converge an existing cluster
-          task verify   PROVIDER=…        ask the cluster whether it is what we promise
-          task upgrade  PROVIDER=… KEY=…  Kubernetes then Talos, measuring the outage
-          task down     PROVIDER=…        destroy, and prove the account is empty
+          task setup                         install the toolchain
+          task bucket-suffix                 a discriminator for your bucket names
+          task infra-plan     PROVIDER=…     what would be created, before spending
+          task up             PROVIDER=… KEY=…  the journey: image → infra → bootstrap
+          task cluster-verify PROVIDER=…     ask the cluster whether it is what we promise
+          task cluster-upgrade PROVIDER=… KEY=…  Kubernetes then Talos, measuring the outage
+
+        Destroying takes TWO commands, on purpose — no single line can do it:
+          task down PROVIDER=… -- --plan                     compute it, destroy nothing
+          task down PROVIDER=… -- --plan-file F --yes        land exactly that plan
+
+        Nothing asks you a question except `up`, once, before it spends. Add YES=1
+        to answer it in advance — for CI, and for a shell that cannot be asked.
+        YES=1 is deliberately powerless on anything that destroys.
 
         When you need them:
           task kubeconfig        PROVIDER=…   get access back
           task restore-artifacts PROVIDER=…   recover access from the encrypted backups
-          task tunnels           PROVIDER=…   open the Talos API tunnels
+          task tunnels-up        PROVIDER=…   open the Talos API tunnels
 
         Before you push:
           task preflight                  everything provable without a cloud account
@@ -325,7 +332,8 @@ tasks:
   # Talos image (decoupled — build once per Talos version, reused by clusters)
   # ===========================================================================
 
-  talos-image:
+  image-build:
+    aliases: [talos-image]
     desc: >-
       Build + publish the Talos image for a provider. Usage: task talos-image
       PROVIDER=scaleway|ovh|outscale|proxmox [VERSION=v1.13.4] [ENSURE=1]
@@ -354,8 +362,9 @@ tasks:
   up:
     desc: >-
       Idempotent one-shot bring-up: image -> render manifests -> infra -> tunnels -> bootstrap. Usage: task up
-      ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox] [KEY=~/.ssh/yourkey] [VERSION=v1.13.4]
-      [FORCE=1]
+      ROLE=management|workload PROVIDER=… [KEY=~/.ssh/yourkey] [VERSION=v1.13.4] [FORCE=1] [YES=1].
+      It shows the plan and asks once before it spends; YES=1 answers for you, for CI and for a
+      shell that cannot be asked.
     # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
     # scaleway in silence — including destroy and down — so a command typed
     # while working on another cloud aimed at the wrong account. The refusal is
@@ -365,6 +374,9 @@ tasks:
     vars:
       ROLE: '{{.ROLE | default "management"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
+      # QUOTED: bare YES is the boolean true in YAML 1.1, so the key became
+      # `true` and {{.YES}} never resolved. Caught by reading the parsed tree.
+      "YES": '{{.YES | default ""}}'
       # renovate: datasource=github-releases depName=siderolabs/talos
       VERSION:
         sh: ./scripts/internal/talos-version.sh {{.ROLE}}-{{.PROVIDER}}.tfvars
@@ -425,7 +437,7 @@ tasks:
           *change-me*) echo "✗ TF_VAR_encryption_passphrase is still the example from .env.example." >&2
                        echo "  It is public. Replace it: openssl rand -base64 48" >&2; exit 1 ;;
         esac
-      - task: talos-image
+      - task: image-build
         vars:
           PROVIDER: "{{.PROVIDER}}"
           VERSION: "{{.VERSION}}"
@@ -437,13 +449,30 @@ tasks:
         else
           echo "✓ bootstrap manifests already rendered — skipping (FORCE=1 to re-render)"
         fi
-      - task: infra
-        vars:
-          ROLE: "{{.ROLE}}"
-          PROVIDER: "{{.PROVIDER}}"
-          # A re-run of `task up` on an existing cluster reaches the Talos API in
-          # this step; the guard inside `infra` needs the key to repair a tunnel.
-          KEY: "{{.KEY}}"
+      # ONE human checkpoint on the whole journey, and it is here — the step that
+      # spends. `up` plans, shows it, asks once, then applies EXACTLY that plan:
+      # never two different plans, and never a silent apply. YES=1 skips the
+      # question, which is what CI and a shell with no terminal need; without a
+      # terminal and without YES it stops with the plan saved and names the one
+      # command that lands it.
+      - |
+        PLANFILE="up-{{.ROLE}}-{{.PROVIDER}}.tfplan"
+        task infra-plan ROLE={{.ROLE}} PROVIDER={{.PROVIDER}} KEY={{.KEY}} OUT="$PLANFILE" || exit 1
+        if [ "{{.YES}}" != 1 ]; then
+          if [ -t 0 ]; then
+            printf '\nApply this plan? Only "yes" is accepted: '
+            read -r reply
+            [ "$reply" = yes ] || {
+              echo "✗ not applied. The plan is kept at cluster/$PLANFILE"; exit 1; }
+          else
+            echo "✗ no terminal, and no YES=1 — nothing was applied." >&2
+            echo "  The plan above is saved. Read it, then land exactly it:" >&2
+            echo "    task infra-apply ROLE={{.ROLE}} PROVIDER={{.PROVIDER}} KEY={{.KEY}} PLAN=$PLANFILE" >&2
+            echo "  Or re-run the whole journey unattended: task up … YES=1" >&2
+            exit 1
+          fi
+        fi
+        task infra-apply ROLE={{.ROLE}} PROVIDER={{.PROVIDER}} KEY={{.KEY}} PLAN="$PLANFILE"
       - task: bootstrap-phase2
         vars:
           ROLE: "{{.ROLE}}"
@@ -460,10 +489,13 @@ tasks:
   # destroy-management/destroy-workload) differing only in that filename.
   # ===========================================================================
 
-  infra:
+  infra-apply:
+    aliases: [infra, apply-plan]
     desc: >-
-      Phase 1: deploy infra (VMs/network, no Talos yet). Usage: task infra ROLE=management|workload
-      [PROVIDER=scaleway|ovh|outscale|proxmox] [KEY=~/.ssh/yourkey]
+      Apply the infrastructure. Give it a PLAN you have read — `task infra-plan PROVIDER=… OUT=f`
+      then `task infra-apply PROVIDER=… PLAN=f` — or YES=1 to compute and apply in one step
+      without a question. With neither it refuses: it will not guess, and it will not prompt.
+      Usage: task infra-apply PROVIDER=… [ROLE=management] [PLAN=f | YES=1] [KEY=~/.ssh/yourkey]
     dir: infrastructure/opentofu/cluster
     # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
     # scaleway in silence — including destroy and down — so a command typed
@@ -476,6 +508,10 @@ tasks:
       # Only used to REBUILD a tunnel the guard below finds broken; an apply on a
       # cluster whose tunnels are healthy never reads it.
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
+      PLAN: '{{.PLAN | default ""}}'
+      # QUOTED: bare YES is the boolean true in YAML 1.1, so the key became
+      # `true` and {{.YES}} never resolved. Caught by reading the parsed tree.
+      "YES": '{{.YES | default ""}}'
     env: &provider-env
       AWS_ACCESS_KEY_ID:
         sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak
@@ -487,13 +523,20 @@ tasks:
         sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale sk || true'
     cmds:
       - |
-        # A `tofu apply` with no terminal asks for approval, reads EOF, and dies as
-        # "error asking for approval: EOF" — exit 201, naming nothing you can act
-        # on. Say what to set instead. NOT auto-approved for you: an apply that
-        # replaces nodes should not confirm itself because nobody was watching.
-        if [ ! -t 0 ] && [[ "${TF_CLI_ARGS_apply:-}" != *-auto-approve* ]]; then
-          echo "✗ no terminal, and tofu apply needs approval — it would fail on EOF." >&2
-          echo "  Re-run with: TF_CLI_ARGS_apply=-auto-approve task {{.TASK}} ..." >&2
+        # Two ways in, and NEITHER of them is a prompt.
+        #
+        # PLAN= applies a file you have already read, and OpenTofu refuses it if
+        # the state moved since — so what you reviewed is what runs. YES=1 says
+        # "compute it and apply it, do not ask", which is what CI and a shell
+        # with no terminal need. With neither, this refuses: an apply that can
+        # replace nodes should never happen because a default was convenient.
+        if [ -z "{{.PLAN}}" ] && [ "{{.YES}}" != 1 ]; then
+          echo "✗ nothing told me to apply anything." >&2
+          echo "  Read a plan first, then apply exactly it:" >&2
+          echo "    task infra-plan  PROVIDER={{.PROVIDER}} ROLE={{.ROLE}} OUT=tfplan" >&2
+          echo "    task infra-apply PROVIDER={{.PROVIDER}} ROLE={{.ROLE}} PLAN=tfplan" >&2
+          echo "  Or, for CI and unattended runs, compute and apply in one step:" >&2
+          echo "    task infra-apply PROVIDER={{.PROVIDER}} ROLE={{.ROLE}} YES=1" >&2
           exit 1
         fi
       # Only on failure — EXIT_CODE is empty when the task succeeded (verified on
@@ -530,11 +573,24 @@ tasks:
         if [ "$TB" = true ] && [ "${OA_SKIP_TUNNEL_GUARD:-}" != 1 ]; then
           SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh ensure . || exit 1
         fi
-        tofu apply -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=$TB
+        if [ -n "{{.PLAN}}" ]; then
+          # A saved plan carries its own variables; passing -var-file with one is
+          # an error, and the backend must be the one it was planned against.
+          [ -f "{{.PLAN}}" ] || {
+            echo "✗ no plan file {{.PLAN}} — create one with:" >&2
+            echo "    task infra-plan PROVIDER={{.PROVIDER}} ROLE={{.ROLE}} OUT={{.PLAN}}" >&2
+            exit 1
+          }
+          tofu apply "{{.PLAN}}"
+          rm -f "{{.PLAN}}"
+        else
+          tofu apply -auto-approve -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=$TB
+        fi
       - task: _backup-state
         vars: {PROVIDER: "{{.PROVIDER}}"}
 
-  plan:
+  infra-plan:
+    aliases: [plan]
     desc: >-
       Plan a cluster root without applying. STRICT=1 makes a non-empty plan an ERROR (exit 2) — that is the
       "converged" assertion an idempotency or post-upgrade check needs. Usage: task plan
@@ -587,7 +643,8 @@ tasks:
         tofu plan {{if eq .STRICT "1"}}-detailed-exitcode{{end}} {{if .OUT}}-out="{{.OUT}}"{{end}} \
           -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=$TB
 
-  tunnels:
+  tunnels-up:
+    aliases: [tunnels]
     desc: >-
       Open the per-node Talos API tunnels through the bastion (control planes on 50000+i, workers on
       50100+i). Needed by `task plan` and by talosctl on a bootstrapped cluster. Usage:
@@ -613,35 +670,6 @@ tasks:
       - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
       - SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh open .
 
-  apply-plan:
-    desc: >-
-      Apply a plan file saved by `task plan OUT=…` — exactly those actions, nothing recomputed.
-      Usage: task plan ROLE=management PROVIDER=scaleway OUT=tfplan, review it, then
-      task apply-plan PROVIDER=scaleway PLAN=tfplan
-    dir: infrastructure/opentofu/cluster
-    # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
-    # scaleway in silence — including destroy and down — so a command typed
-    # while working on another cloud aimed at the wrong account. The refusal is
-    # the documentation: it names the variable instead of guessing.
-    requires:
-      vars: [PROVIDER]
-    vars:
-      ROLE: '{{.ROLE | default "management"}}'
-      PLAN: '{{.PLAN | default "tfplan"}}'
-    env: *provider-env
-    cmds:
-      - |
-        [ -f "{{.PLAN}}" ] || {
-          echo "✗ no plan file {{.PLAN}} — create one with:" >&2
-          echo "    task plan ROLE={{.ROLE}} PROVIDER={{.PROVIDER}} OUT={{.PLAN}}" >&2
-          exit 1
-        }
-        # A saved plan carries its own variables; passing -var-file here is an
-        # error, and the backend must be the one it was made against.
-        tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
-        tofu apply "{{.PLAN}}"
-        rm -f "{{.PLAN}}"
-
   bootstrap-phase2:
     desc: >-
       Phase 2: open SSH tunnels (from state) + bootstrap Talos. Usage: task bootstrap-phase2
@@ -659,14 +687,15 @@ tasks:
       - task: _backup-state
         vars: {PROVIDER: "{{.PROVIDER}}"}
 
-  rolling-replace:
+  cluster-roll:
+    aliases: [rolling-replace]
     desc: >-
       Replace nodes one at a time (drain→targeted apply→wait) with NO downtime. Use after a ForceNew change
       (instance_type / Talos image) instead of infra, which replaces all nodes in parallel and breaks etcd
       quorum. Management clusters only (see scripts/ops/rolling-replace.sh). Targets are derived from `tofu
       state list` — provider-agnostic; --upgrade exercised live on Scaleway, OVH and Outscale.
-      Usage: task rolling-replace PROVIDER=scaleway|ovh|outscale|proxmox [KEY=~/.ssh/key]
-      [-- --workers-only|--cp-only|--dry-run]
+      Usage: task cluster-roll PROVIDER=… [KEY=~/.ssh/key] [YES=1]
+      [-- --workers-only|--cp-only|--dry-run|--upgrade]
     dir: infrastructure/opentofu/cluster
     # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
     # scaleway in silence — including destroy and down — so a command typed
@@ -676,51 +705,104 @@ tasks:
       vars: [PROVIDER]
     vars:
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
+      # One word for "do not ask me", the same one infra-apply uses. It used to be
+      # a `--yes` buried in CLI_ARGS, which meant three different spellings of the
+      # same intent across the repository.
+      # QUOTED: bare YES is the boolean true in YAML 1.1, so the key became
+      # `true` and {{.YES}} never resolved. Caught by reading the parsed tree.
+      "YES": '{{.YES | default ""}}'
     env: *provider-env
     cmds:
       - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
       - SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh open .
-      - ../../../scripts/ops/rolling-replace.sh {{.PROVIDER}} {{.CLI_ARGS}}
+      - ../../../scripts/ops/rolling-replace.sh {{.PROVIDER}} {{if eq .YES "1"}}--yes {{end}}{{.CLI_ARGS}}
       - task: _backup-state
         vars: {PROVIDER: "{{.PROVIDER}}"}
 
-  destroy:
-    desc: "Destroy a cluster. Usage: task destroy ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox]"
+  infra-down-plan:
+    desc: >-
+      Compute the DESTRUCTION plan and write it to a file. Read it, then apply exactly it with
+      `task infra-down PROVIDER=… PLAN=f`. There is no one-command destroy, on purpose.
+      Usage: task infra-down-plan PROVIDER=… [ROLE=management] [OUT=destroy.tfplan]
     dir: infrastructure/opentofu/cluster
-    # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
-    # scaleway in silence — including destroy and down — so a command typed
-    # while working on another cloud aimed at the wrong account. The refusal is
-    # the documentation: it names the variable instead of guessing.
     requires:
       vars: [PROVIDER]
     vars:
       ROLE: '{{.ROLE | default "management"}}'
+      OUT: '{{.OUT | default "destroy.tfplan"}}'
+    env: *provider-env
+    cmds:
+      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
+      # ⚠️ NOT purely read-only, and the one wart in this two-step design.
+      # machine_secrets carries prevent_destroy — the PKI is the cluster's root of
+      # trust — and OpenTofu enforces that at PLAN time, not at apply. So the plan
+      # cannot be computed while the resource is tracked. This detaches it from
+      # state, exactly as the old one-shot destroy did, only now it happens at the
+      # planning step. If you read the plan and change your mind, the cluster still
+      # runs and its PKI is untouched on the nodes — but the state no longer tracks
+      # that resource.
+      - |
+        echo "⚠ untracking module.talos.talos_machine_secrets so the destroy plan can be computed."
+        echo "  The PKI on the nodes is untouched; the state stops tracking it."
+      - tofu state rm module.talos.talos_machine_secrets.this 2>/dev/null || true
+      # talos_bootstrap=false resolves module.talos to count=0, so the plan skips
+      # data.talos_cluster_health — which would otherwise read through the SSH
+      # tunnels and hang if they are already closed.
+      - tofu plan -destroy -out="{{.OUT}}" -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=false
+      - |
+        echo
+        echo "✓ destruction plan written to {{.OUT}}. Nothing has been destroyed."
+        echo "  Read it, then apply exactly it:"
+        echo "    task infra-down PROVIDER={{.PROVIDER}} ROLE={{.ROLE}} PLAN={{.OUT}}"
+
+  infra-down:
+    aliases: [destroy]
+    desc: >-
+      Destroy a cluster by applying a plan you have already read. REQUIRES PLAN= — there is no
+      one-command destroy, and YES=1, --yes, force and TF_CLI_ARGS_destroy cannot create one.
+      Usage: task infra-down-plan PROVIDER=…, read it, then task infra-down PROVIDER=… PLAN=f
+    dir: infrastructure/opentofu/cluster
+    requires:
+      vars: [PROVIDER]
+    vars:
+      ROLE: '{{.ROLE | default "management"}}'
+      PLAN: '{{.PLAN | default ""}}'
     env: *provider-env
     cmds:
       - |
-        # Same as `infra`: a destroy with no terminal dies on EOF, not on a message.
-        if [ ! -t 0 ] && [[ "${TF_CLI_ARGS_destroy:-}" != *-auto-approve* ]]; then
-          echo "✗ no terminal, and tofu destroy needs approval — it would fail on EOF." >&2
-          echo "  Re-run with: TF_CLI_ARGS_destroy=-auto-approve task destroy ..." >&2
+        # THE POINT OF THIS TARGET. Destroying a cluster must take two deliberate
+        # commands, so that no single mistyped line — and no environment variable
+        # inherited from somewhere else — can do it. YES=1 works on infra-apply
+        # and is DELIBERATELY inert here.
+        if [ -z "{{.PLAN}}" ]; then
+          echo "✗ refusing to destroy without a plan you have read." >&2
+          echo "  This takes two commands, always:" >&2
+          echo "    task infra-down-plan PROVIDER={{.PROVIDER}} ROLE={{.ROLE}}" >&2
+          echo "    task infra-down      PROVIDER={{.PROVIDER}} ROLE={{.ROLE}} PLAN=destroy.tfplan" >&2
+          echo "  YES=1 does not apply here, and neither does TF_CLI_ARGS_destroy." >&2
+          exit 1
+        fi
+        [ -f "{{.PLAN}}" ] || { echo "✗ no plan file {{.PLAN}} — run task infra-down-plan first." >&2; exit 1; }
+        # A plan file that CREATES things is not a destroy plan, and applying one
+        # here would be the opposite of what the operator asked for.
+        if ! tofu show -json "{{.PLAN}}" 2>/dev/null | grep -q '"actions":\["delete"\]'; then
+          echo "✗ {{.PLAN}} contains no deletions — this is not a destruction plan." >&2
+          echo "  Regenerate it: task infra-down-plan PROVIDER={{.PROVIDER}} ROLE={{.ROLE}}" >&2
           exit 1
         fi
       - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
-      # machine_secrets carries prevent_destroy (the PKI is the cluster's root
-      # of trust) — untrack it first so `tofu destroy` doesn't refuse.
-      - tofu state rm module.talos.talos_machine_secrets.this 2>/dev/null || true
-      # talos_bootstrap=false resolves module.talos to count=0, so the destroy
-      # plan skips data.talos_cluster_health — which would otherwise re-read
-      # through the SSH tunnels and hang if they're already closed (see
-      # cluster/README.md's Teardown section).
-      - tofu destroy -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=false
+      # Exactly the plan that was read. OpenTofu refuses a saved plan whose state
+      # has moved since, so nothing can have changed under it in the meantime.
+      - tofu apply "{{.PLAN}}"
+      - rm -f "{{.PLAN}}"
       # The cluster is gone; its tunnels are not. Twelve were still listening
       # after three teardowns on 2026-08-15, forwarding to bastions that no
-      # longer existed — and a stale listener reads as "up" to the `nc -z` check
-      # the next deploy makes, which is how a healthy bastion produced 4/6
-      # tunnels. Scoped to this cluster's own port block by TALOS_TUNNEL_OFFSET.
+      # longer existed — and a stale listener reads as "up" to the next deploy's
+      # check. Scoped to this cluster's own port block by TALOS_TUNNEL_OFFSET.
       - ../../../scripts/bootstrap/talos-tunnels.sh close .
 
-  close-tunnels:
+  tunnels-down:
+    aliases: [close-tunnels]
     desc: "Close the Talos API SSH tunnels opened for Phase 2"
     cmds:
       - ./scripts/bootstrap/talos-tunnels.sh close infrastructure/opentofu/cluster
@@ -884,7 +966,8 @@ tasks:
         ../../../scripts/ops/restore-artifacts.sh {{.PROVIDER}}
         --role {{.ROLE}} --from {{.FROM}}{{if .FORCE}} --force{{end}}
 
-  upgrade:
+  cluster-upgrade:
+    aliases: [upgrade]
     desc: >-
       Upgrade Kubernetes then Talos on a running cluster, MEASURING the interruption instead of
       asserting there was none. Targets come from cluster/variables.tf; the tfvars is expected to pin
@@ -905,7 +988,8 @@ tasks:
       # what an upgrade must prove could only be run by typing its path.
       - ./scripts/dev/staging-upgrade.sh {{.PROVIDER}} {{.ROLE}} {{.KEY}}
 
-  verify:
+  cluster-verify:
+    aliases: [verify]
     desc: >-
       Ask the CLUSTER whether it is what this release promises: apiserver up, every node Ready, the
       requested number of control planes, Cilium on each, CoreDNS serving, no Flux, no app load

@@ -11,7 +11,8 @@ This is the OpenAether commands and the traps this project has actually met.
 ## The sequence
 
 ```
-task down PROVIDER=<p> -- --force-no-edges --yes
+task down PROVIDER=<p> -- --plan --force-no-edges       # computes, destroys nothing
+task down PROVIDER=<p> -- --plan-file destroy-<role>-<p>.tfplan --force-no-edges --yes
 python3 scripts/ops/purge-orphans/<p>.py
 ```
 

@@ -43,7 +43,7 @@ Deux couches de réglages orthogonales :
 | Zones / AZ | scw `.zone`+`.zones` ; ovh/outscale `.availability_zones` ; proxmox `.node_names` (round-robin) | ex. scw `["fr-par-1","fr-par-2","fr-par-3"]` | selon exemple | cloud + proxmox | Mono vs multi-AZ. Proxmox : 1 hôte = non-HA, 3 hôtes = **vraie** HA ; 3 CP sur 1 hôte = fausse HA (à éviter). |
 | Bastion | proxmox `enable_bastion` | `true` (VM) / `false` (hôte-bastion) | `false` | bascule proxmox ; scw/ovh/outscale = toujours une VM dédiée ; local = aucun | Le contrat exige `bastion_ip`. |
 | Stockage workers | `worker_storage.disks[]` + `worker_storage.volumes[]` (LUKS2 `UserVolumeConfig`) | aucun, ou disques+volumes | `{disks=[],volumes=[]}` | scw/ovh/outscale/proxmox ; local forcé à off | `disks` → module provider ; `volumes` → `modules/talos`. |
-| Phase d'amorçage | `talos_bootstrap` | `false` (phase 1 infra), `true` (phase 2 config+etcd+Flux) | `true` | tous | `task infra` → `task bootstrap-phase2`. |
+| Phase d'amorçage | `talos_bootstrap` | `false` (phase 1 infra), `true` (phase 2 config+etcd+Flux) | `true` | tous | `task infra-apply` → `task bootstrap-phase2`. |
 | auto_tunnels | `auto_tunnels` (+ `ssh_key_path`) | `true`/`false` | `false` | cloud/proxmox | EXPÉRIMENTAL, apply unique ; jamais testé sur machine réelle. |
 | Bloc de ports des tunnels | `TALOS_TUNNEL_OFFSET` → `talos_tunnel_port_offset` | multiple de 200, positif ou nul | `0` | cloud/proxmox | Décale les CP en `50000+off+i` et les workers en `50100+off+i`, pour monter plusieurs clusters depuis un même poste. Ne poser que la variable d'environnement ; `Taskfile.yml` alimente la variable tofu. |
 | secrets_prevent_destroy | `secrets_prevent_destroy` | `true`/`false` | `true` | tous | `false` réservé au nettoyage de `tofu test`. |
@@ -146,13 +146,13 @@ Cf. `backlog.md`.
 
 | ID | Variables clés | Ce qu'il exerce en propre | Statut |
 |---|---|---|---|
-| `OP-twophase` | `talos_bootstrap=false` puis `true` | Découpage documenté `task infra` → `task bootstrap-phase2`. | ✅ |
+| `OP-twophase` | `talos_bootstrap=false` puis `true` | Découpage documenté `task infra-apply` → `task bootstrap-phase2`. | ✅ |
 | `OP-autotunnels` | `auto_tunnels=true` | EXPÉRIMENTAL, apply unique. | ⬜ |
 | `OP-failover` | `failover-<p>.tfvars`, pas encore de commande | Reconstruire chez B depuis le réplica de B. Le réplica est vérifié ; la reconstruction reste à concevoir. | ⬜ |
-| `OP-destroy` | `task fleet-down` / `task destroy` | Chemin de destruction ordonné (enfants puis management). | ✅ |
+| `OP-destroy` | `task fleet-down` / `task infra-apply-down` | Chemin de destruction ordonné (enfants puis management). | ✅ |
 | `OP-tftest` | mocké | Suite de tests unitaires (sans credentials). | ✅ (CI) |
 | `OP-backup` | `backup_enabled=true`, `BACKUP_AWS_*` cross-provider | DR : tfstate + kube/talosconfig vers primaire et réplica ; restic chiffré client. | ✅ *(local + cloud réel SCW+OVH)* |
-| `OP-rolling-replace` | `task rolling-replace` | Remplacement d'un nœud sans coupure (evict etcd, 1 nœud à la fois). | ✅ *(Scaleway)* |
+| `OP-rolling-replace` | `task cluster-roll` | Remplacement d'un nœud sans coupure (evict etcd, 1 nœud à la fois). | ✅ *(Scaleway)* |
 
 ## C) Priorités (plus forte valeur, non testé, apply réel)
 

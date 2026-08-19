@@ -120,7 +120,7 @@ bao token create -policy=openaether-reader -ttl=8h -display-name=<prénom>
 sceller, rekey et rotation — ces gestes restent au root token hors ligne,
 délibérés et rares.
 
-⚠️ Si ton IP publique change : mettre à jour `admin_ip` puis `task infra`, sinon
+⚠️ Si ton IP publique change : mettre à jour `admin_ip` puis `task infra-apply`, sinon
 le bastion devient injoignable.
 
 ## 7. SSO Grafana via Zitadel (OIDC)

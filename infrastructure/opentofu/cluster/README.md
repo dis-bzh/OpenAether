@@ -69,7 +69,7 @@ the SSH tunnels itself (`talos-tunnels.sh open-direct`) between the provider
 module and `modules/talos`, using node/bastion IPs unknown until the VMs
 exist. Default `false`: not exercised against a real host yet, validate on a
 disposable environment before relying on it. `talos_bootstrap` remains the
-break-glass/two-phase path either way (e.g. for `task destroy`).
+break-glass/two-phase path either way (e.g. for `task infra-apply-down`).
 
 ### apiserver VIP / `k8s_lb_mode` (Scaleway, OVH)
 
@@ -148,14 +148,14 @@ credentials never get committed.
 
 ```bash
 # Phase 0 — build the Talos image once per version (separate state, reused by all clusters)
-task talos-image PROVIDER=scaleway               # -> image "talos-scaleway-amd64-v1.13.3" (or PROVIDER=ovh)
+task image-build PROVIDER=scaleway               # -> image "talos-scaleway-amd64-v1.13.3" (or PROVIDER=ovh)
 
 # Generate bootstrap manifests (Cilium, Flux)
 ./scripts/bootstrap/render-bootstrap-manifests.sh
 
 # Phase 1 — infra (IPs land in the state). The task ensures the buckets + inits the
 # per-cluster backend for you. PROVIDER defaults to scaleway (also ovh, outscale, proxmox).
-task infra ROLE=management                 # or: task infra ROLE=management PROVIDER=ovh
+task infra-apply ROLE=management                 # or: task infra-apply ROLE=management PROVIDER=ovh
 #   manual equivalent:
 #     ./scripts/internal/ensure-buckets.sh envs/management-scaleway.tfvars
 #     tofu init -reconfigure $(./scripts/internal/tf-backend.sh envs/management-scaleway.tfvars)
@@ -168,13 +168,13 @@ task bootstrap-phase2 ROLE=management KEY=~/.ssh/yourkey   # or: ROLE=management
 #  tofu apply -var-file=envs/management-scaleway.tfvars -var talos_bootstrap=true)
 
 # Close the tunnels when done
-task close-tunnels
+task tunnels-up-down
 ```
 
 ### Deploy workload cluster
 
 ```bash
-task infra ROLE=workload PROVIDER=ovh
+task infra-apply ROLE=workload PROVIDER=ovh
 task bootstrap-phase2 ROLE=workload PROVIDER=ovh KEY=~/.ssh/yourkey
 ```
 
@@ -199,7 +199,7 @@ tofu apply -var-file=envs/management-scaleway.tfvars -var talos_bootstrap=true
 ### Teardown (destroy)
 
 ```bash
-task destroy ROLE=management                # or: ROLE=workload PROVIDER=ovh
+task infra-apply-down ROLE=management                # or: ROLE=workload PROVIDER=ovh
 ```
 
 Manual equivalent (two steps are required):
@@ -240,8 +240,8 @@ the Phase-2 apply (`backup-artifacts.sh`); the state is replicated **after** the
 apply (`backup-state.sh` / `task backup-state`), because the backend only flushes
 the new state on apply exit.
 
-The four buckets are **auto-provisioned** (idempotent) by `task infra ROLE=management` /
-`task infra ROLE=workload` before `tofu init` — `scripts/ensure-buckets.sh` derives their
+The four buckets are **auto-provisioned** (idempotent) by `task infra-apply ROLE=management` /
+`task infra-apply ROLE=workload` before `tofu init` — `scripts/ensure-buckets.sh` derives their
 names from the cluster's tfvars and `aws s3 mb`s any that are missing (primary with
 `<PU>_AWS_*`, replicas with `<PU>_BACKUP_AWS_*`). Manual equivalent:
 `./scripts/ensure-buckets.sh envs/<cluster>.tfvars`.

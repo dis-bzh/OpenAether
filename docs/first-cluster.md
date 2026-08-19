@@ -100,7 +100,7 @@ $EDITOR management-scaleway.tfvars
 |---|---|
 | `cluster_name` | yours. **It has a default, so no checker will tell you to change it** — and its first segment names all four cluster buckets |
 | `bucket_suffix` | **set it unless you are the original author.** S3 bucket names are unique across a whole provider, not per account — Scaleway documents them unique "in our whole platform", OVH "within OVHcloud". Without one you will collide with names somebody already took. `task bucket-suffix` prints one; pick it once, changing it later orphans every bucket you have |
-| `environment` | `dev` or `prod`, nothing else. It does not *require* anything: nothing validates the replica before you spend. `prod` with the replica on the primary's endpoint deploys fine and `task verify` calls it red afterwards |
+| `environment` | `dev` or `prod`, nothing else. It does not *require* anything: nothing validates the replica before you spend. `prod` with the replica on the primary's endpoint deploys fine and `task cluster-verify` calls it red afterwards |
 | `admin_ip` | `curl -s ifconfig.me` as a `/32`. It is both the SSH allow-list and the apiserver LB ACL |
 | `s3_primary_endpoint` / `_region` | S3 on the same provider as the cluster |
 | `s3_replica_endpoint` / `_region` | S3 for the backup copy. In production, **a different provider** — a state you can only read from the cloud that just failed is not a backup. Export that store's own `<PROV>_BACKUP_AWS_*` keys in the same edit: `task up` refuses to continue if the replica points elsewhere and the `-backup` buckets cannot be created there |
@@ -124,8 +124,8 @@ task up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
 Needs a terminal: the apply asks for approval twice, and it applies the plan it
 just showed you — do not reach for `-auto-approve`, which applies a *different*
 plan computed at that moment. (For an unattended run, save one first:
-`task plan ROLE=management PROVIDER=scaleway OUT=tfplan`, read it, then
-`task apply-plan PROVIDER=scaleway PLAN=tfplan`. PROVIDER is required on both —
+`task infra-plan ROLE=management PROVIDER=scaleway OUT=tfplan`, read it, then
+`task infra-apply-apply PROVIDER=scaleway PLAN=tfplan`. PROVIDER is required on both —
 it used to default to Scaleway, which is the wrong cloud to guess.)
 
 In order it builds the Talos image and uploads it — **measured at 52 s on
@@ -142,7 +142,7 @@ managed service that builds asynchronously: measured at **over 30 minutes still
 
 If it does time out, **do not just re-run.** OpenTofu marks the resource
 `tainted`, so the next apply DESTROYS the load balancer the provider was still
-building and starts the wait over. `task infra` now prints the tainted addresses
+building and starts the wait over. `task infra-apply` now prints the tainted addresses
 and the `tofu untaint` command when it fails — ask the provider first, and keep
 the resource if the provider says it is fine.
 
@@ -188,13 +188,13 @@ cd infrastructure/opentofu/cluster
 talosctl --talosconfig talosconfig -n "$(tofu output -json control_plane_private_ips | jq -r '.[0]')" etcd members
 ```
 
-Those endpoints are **local tunnels**. `task close-tunnels` makes the talosconfig
+Those endpoints are **local tunnels**. `task tunnels-up-down` makes the talosconfig
 unusable until you reopen them.
 
 ## 6. Ask the cluster whether it worked
 
 ```bash
-task verify PROVIDER=scaleway
+task cluster-verify PROVIDER=scaleway
 ```
 
 Asks the cluster, not the tool: the apiserver answers, every node is Ready, the
@@ -215,7 +215,7 @@ that is usually missing S3 credentials.
 ## 7. Upgrade
 
 ```bash
-task upgrade ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
+task cluster-upgrade ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
 ```
 
 `docs/upgrade.md` is the procedure behind it — Kubernetes first, then Talos, one
@@ -233,10 +233,16 @@ consecutive ones are the API being down.
 ## 8. Tear it down
 
 ```bash
-task destroy ROLE=management PROVIDER=scaleway
-task down PROVIDER=scaleway -- --force-no-edges --yes
+task infra-apply-down ROLE=management PROVIDER=scaleway
+task down PROVIDER=scaleway -- --plan --force-no-edges          # destroys nothing
+task down PROVIDER=scaleway -- --plan-file destroy-management-scaleway.tfplan --force-no-edges --yes
 python3 scripts/ops/purge-orphans/scaleway.py
 ```
+
+**Destroying takes two commands and cannot be collapsed into one** — that is the
+point, not an inconvenience. The first computes the destruction and destroys
+nothing; the second lands exactly what you read. Neither `--yes` nor
+`TF_CLI_ARGS_destroy` nor `YES=1` gets past the first.
 
 `--force-no-edges` is required and the bare `--` is not optional. `fleet-down`
 refuses to destroy a cluster until it has ruled out CAPI children; a
@@ -276,7 +282,7 @@ Honest as of 0.5.0, and the reason this document exists.
 
 What **is** measured, with dates (`docs/backlog.md`, "Where we stand"):
 
-- `task verify` scores **9/9 on Scaleway, 9/9 on Outscale, 10/10 on OVH** — the
+- `task cluster-verify` scores **9/9 on Scaleway, 9/9 on Outscale, 10/10 on OVH** — the
   tenth assertion is the replica living on another provider. The local Docker
   cluster runs 6 of those checks.
 - **The stored state has been opened.** An `encrypted_data` envelope under

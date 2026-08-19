@@ -201,7 +201,7 @@ jobs:
 
       - name: Deploy
         id: deploy
-        run: task up ROLE="$ROLE" PROVIDER="$PROVIDER"
+        run: task up ROLE="$ROLE" PROVIDER="$PROVIDER" YES=1
 
       # A deploy is not finished when OpenTofu is. Without the Day-1 backup and
       # observability secrets, six Kustomizations never leave not-Ready and the

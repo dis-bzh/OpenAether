@@ -23,7 +23,7 @@ encrypted tfstate replicated to a second store. Flux is disabled, not amputated
 **Where the five pillars actually stand, walked by the operator.** A result
 nobody records is a result you pay to reproduce.
 
-| | deploy | task verify | idempotency | k8s upgrade | Talos upgrade | longest outage |
+| | deploy | task cluster-verify | idempotency | k8s upgrade | Talos upgrade | longest outage |
 |---|---|---|---|---|---|---|
 | Docker | ✅ | ✅ 6/6 | ✅ empty plan | — | — | — |
 | Scaleway | ✅ ~8 min | ✅ 9/9 | ✅ warm and cold | ✅ 1.36.2→1.36.3 | ✅ 6/6 nodes | **3 s** / 7 fails in 1817 |
@@ -163,13 +163,13 @@ replaces the subnet and everything attached to it: it can only be done on a fres
 deploy, never on a live cluster.
 
 **Closes:** an Outscale deploy whose `kubectl get nodes -o wide` shows control
-planes in at least two subregions, and `task verify` green. Rung: real cloud, and
+planes in at least two subregions, and `task cluster-verify` green. Rung: real cloud, and
 it must be a new cluster. Until then the documentation says one subregion, which
 it now does.
 
 ### FIXED — the Outscale image rebuild deleted a snapshot its own OMI still used
 
-2026-08-18, upgrading the live Outscale cluster v1.13.7 → v1.13.8. `task upgrade`
+2026-08-18, upgrading the live Outscale cluster v1.13.7 → v1.13.8. `task cluster-upgrade`
 died before touching a single node:
 
     Error: Unable to delete Snapshot
@@ -390,7 +390,7 @@ On a live Scaleway cluster, minutes after the schematic was changed:
     the machine config NAMES   factory.talos.dev/installer/613e1592…:v1.13.8
     the nodes actually RUN     schematic 53513e54…  (with qemu-guest-agent)
 
-`task infra` had been applied, so the config points at the new installer — but a
+`task infra-apply` had been applied, so the config points at the new installer — but a
 new installer reference does not reinstall a running node. Only `talosctl upgrade`
 does. Expected, and already written into the schematic commit.
 
@@ -412,7 +412,7 @@ revert is sitting in a config that no node has installed.
 **The node already reports what it runs**, so this is cheap:
 `talosctl get extensions` lists `schematic <id>` as an ExtensionStatus. Both gates
 should compare the running schematic against `talos_installer_schematic_id`, not
-just the tag, and `task verify` should say when the two disagree.
+just the tag, and `task cluster-verify` should say when the two disagree.
 
 **FIXED 2026-08-19, in the three places that were blind:**
 
@@ -424,9 +424,9 @@ just the tag, and `task verify` should say when the two disagree.
   therefore no kubectl, no tofu and no credentials. BEST EFFORT: with no tunnel
   it says `? the running schematic could not be read` rather than guessing in
   either direction.
-- `task verify` compares the fleet against `talos_installer_schematic_id`. A
+- `task cluster-verify` compares the fleet against `talos_installer_schematic_id`. A
   mismatch READ is `✗` and fatal; a mismatch it could not read is `~`, because
-  `task verify` is legitimately run without tunnels and a guard that reddens the
+  `task cluster-verify` is legitimately run without tunnels and a guard that reddens the
   normal case is the defect this file keeps catching in others.
 
 Mutation-tested in each place: drop back to the version tag → red in
@@ -435,7 +435,7 @@ answer when talosctl failed → red. 215 offline assertions green.
 
 **Still open, and it is the honest remainder:** none of this has been exercised
 by a real roll onto a new schematic. The next OVH or Outscale upgrade is that
-test — the node should be picked up rather than skipped, and `task verify` should
+test — the node should be picked up rather than skipped, and `task cluster-verify` should
 go from `✗` to `✓` afterwards.
 
 ### ROOT CAUSE, FOUND — an extension we ship waits for a device OVH never creates
@@ -577,7 +577,7 @@ node's own Talos API. Then, unprompted:
     3m42s  NodeReady      node/openaether-dev-cp-0
 
 cp-0 came back reporting **v1.13.7** from its own API, `stage: booting`. Nothing
-asked it to reboot: `task infra` refuses to apply without a terminal (verified in
+asked it to reboot: `task infra-apply` refuses to apply without a terminal (verified in
 the same shell), the image step was a no-op, and the roll was never reached.
 
 **The evidence worth keeping**, and it is the first concrete difference anyone has
@@ -593,7 +593,7 @@ is the next step, and it is a reading task, not a cloud one:
 `pkg/machinery/meta` in siderolabs/talos at v1.13.8.
 
 **Honesty about the confound.** An assistant command had, minutes earlier,
-accidentally started a real `task upgrade` (a `DRY_RUN=1` passed as a Task
+accidentally started a real `task cluster-upgrade` (a `DRY_RUN=1` passed as a Task
 variable, which the script reads from the environment and therefore never saw).
 It could not apply anything — the no-terminal guard is what stopped it, and that
 was verified rather than assumed — and nothing in the steps it did reach touches a
@@ -633,12 +633,12 @@ quietly upgraded again.
 `.github/workflows/staging.yml:109` sets `TF_CLI_ARGS_apply: -auto-approve`. That
 is not the same weakness as approving interactively: `tofu apply` with no plan
 file computes a plan, shows it and applies THAT one, in the same run. With
-`-auto-approve` after a separate `task plan`, the plan that was reviewed and the
+`-auto-approve` after a separate `task infra-plan`, the plan that was reviewed and the
 plan that runs are two different computations — OpenTofu says so itself, "you
 didn't use the -out option, so OpenTofu can't guarantee to take exactly these
 actions".
 
-`task plan OUT=…` and `task apply-plan PLAN=…` now exist (2026-08-17) so the lane
+`task infra-plan OUT=…` and `task infra-apply-apply PLAN=…` now exist (2026-08-17) so the lane
 can review and apply the same bytes. It still does not use them.
 
 **Closes:** staging.yml plans with `OUT=`, prints the plan, and applies it with
@@ -653,7 +653,7 @@ Walked end to end on a live cluster by following `docs/first-cluster.md`.
 |---|---|
 | Talos image build | **52 s** (the repo had only "~1 h on Outscale") |
 | Deploy | 43 + 17 resources, 3 CP + 3 workers + bastion, 2 zones |
-| Healthy | `task verify` **9/9** — first run of infra-verify against any cloud |
+| Healthy | `task cluster-verify` **9/9** — first run of infra-verify against any cloud |
 | State encrypted | envelope keys `encrypted_data, encryption_version, lineage, meta, serial`; none of four known state strings in clear across 1.7 MB |
 | Artifacts restorable | both stores, byte-identical to the live files |
 | Idempotency | "No changes", exit 0 — warm AND cold |
@@ -681,10 +681,10 @@ skipping volume gate" on every one of the six nodes. The decision to leave those
 runtime probes; it now rests on watching them.
 
 
-### MEASURED — `task plan` needed the tunnels, and took 15 minutes to say so
+### MEASURED — `task infra-plan` needed the tunnels, and took 15 minutes to say so
 
 No longer a hypothesis. On a live Scaleway cluster, 2026-08-17, tunnels closed:
-`task plan STRICT=1` ran for **15m10s** and died on
+`task infra-plan STRICT=1` ran for **15m10s** and died on
 
     Error: cluster health check failed
     waiting for etcd to be healthy: rpc error: code = Unavailable …
@@ -695,7 +695,7 @@ cause. This is the command docs/first-cluster.md calls the idempotency
 assertion, so a reader in a fresh terminal paid a quarter of an hour for a
 diagnosis they then had to guess.
 
-Fixed: a port probe before planning (4s instead of 15m), and `task tunnels`,
+Fixed: a port probe before planning (4s instead of 15m), and `task tunnels-up`,
 which did not exist — running `talos-tunnels.sh` by hand has no backend and no
 credentials, falls back to `{}`, and reports "No bastion_ip in the state —
 deploy the infrastructure first" against a cluster that is running.
@@ -736,7 +736,7 @@ every one of them is arithmetic on strings — **no deployment has ever run with
 non-empty suffix**, so the day someone sets one is the day the backend, the
 image build and the verifier are first asked to agree on it for real.
 
-**Closes:** one deploy with `bucket_suffix` set, reaching `task verify` green.
+**Closes:** one deploy with `bucket_suffix` set, reaching `task cluster-verify` green.
 Rung: real cloud. Cheap to fold into a run that is happening anyway.
 
 ### FIXED — the hour was not the load balancer, it was not being told
@@ -747,7 +747,7 @@ things, each one an hour that was actually spent:
 
 1. **Nothing said the word "tainted".** A create that times out leaves the
    resource tainted, so re-running DESTROYS what the provider was still building.
-   `task infra` now runs `scripts/internal/explain-failure.sh` from a Taskfile
+   `task infra-apply` now runs `scripts/internal/explain-failure.sh` from a Taskfile
    `defer:` guarded on `{{.EXIT_CODE}}` — verified on Task 3.52 that EXIT_CODE is
    populated on failure and empty on success, so it costs nothing when the apply
    works. It names the tainted addresses, says re-running destroys and rebuilds
@@ -879,7 +879,7 @@ invites someone to build what nobody decided.
       talosconfig freshly regenerated from `talos_machine_secrets`, which was
       never destroyed and is `prevent_destroy`. Kubernetes stayed healthy
       throughout — six nodes Ready — so nothing else reported a problem, and
-      `task infra` sat for 11 of its 15 minutes trying to reach nodes that would
+      `task infra-apply` sat for 11 of its 15 minutes trying to reach nodes that would
       not trust it. Not diagnosed; the cluster was torn down.
       It matters because `talos_machine_secrets` takes `talos_version` and the
       provider replaces it when that changes: `prevent_destroy` turns that into a
@@ -1051,7 +1051,7 @@ invites someone to build what nobody decided.
       **Decide:** whether the lane deregisters the OMI itself (a destroy-time step
       that waits for it to disappear) or whether replacing an image is documented
       as a two-step manual operation.
-      **Closes:** `task talos-image PROVIDER=outscale` replacing an existing image
+      **Closes:** `task image-build PROVIDER=outscale` replacing an existing image
       in one run, exit 0. Rung: real cloud — it reproduces in about seven minutes,
       so this is cheap to iterate on.
       Noted alongside: `purge-orphans/outscale.py` reported "account is clean"
@@ -1308,7 +1308,7 @@ One line each; the detail lives in the referenced file.
   `cnpg/networkpolicy-db-restricted.yaml`.
 - **A resource-count driven by a phase variable is not idempotent** — gating
   `module.talos`'s `control_plane_count`/`worker_count` on `var.talos_bootstrap`
-  meant every re-run of `task infra` (talos_bootstrap=false, part of `task up`)
+  meant every re-run of `task infra-apply` (talos_bootstrap=false, part of `task up`)
   zeroed them and dropped `talos_machine_bootstrap` from state, which then got
   RECREATED by `bootstrap-phase2` — re-sending the bootstrap RPC to a live
   etcd. Fixed by reading `tofu state list` first (`Taskfile.yml`'s `infra`

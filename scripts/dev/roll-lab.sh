@@ -407,7 +407,7 @@ do_resume() {
   if [[ -n "$missing" && $DRY_RUN -eq 0 ]]; then
     die "no Talos tunnel listening on ${missing}— open them first:
     SSH_KEY=~/.ssh/<key> ${ROOT}/scripts/bootstrap/talos-tunnels.sh open ${CLUSTER_DIR}
-  (or run the roll through \`task rolling-replace\`, which opens them for you)."
+  (or run the roll through \`task cluster-roll\`, which opens them for you)."
   fi
 
   announce "run: ${cmd[*]}" \

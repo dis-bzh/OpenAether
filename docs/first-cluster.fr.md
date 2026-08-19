@@ -102,7 +102,7 @@ $EDITOR management-scaleway.tfvars
 |---|---|
 | `cluster_name` | le tien. **Il a une valeur par défaut, donc aucun contrôle ne te dira de le changer** — et son premier segment nomme les quatre buckets du cluster |
 | `bucket_suffix` | **à renseigner sauf si tu es l'auteur d'origine.** Les noms de bucket S3 sont uniques à l'échelle d'un fournisseur entier, pas d'un compte — Scaleway les documente uniques « in our whole platform », OVH « within OVHcloud ». Sans lui tu entreras en collision avec des noms déjà pris. `task bucket-suffix` en imprime un ; choisis-le une fois, le changer ensuite orpheline tous tes buckets |
-| `environment` | `dev` ou `prod`, rien d'autre. Il n'*exige* rien : aucune validation ne regarde le réplica avant que tu dépenses. Un `prod` dont le réplica pointe sur l'endpoint primaire se déploie sans broncher, et `task verify` le déclare rouge après coup |
+| `environment` | `dev` ou `prod`, rien d'autre. Il n'*exige* rien : aucune validation ne regarde le réplica avant que tu dépenses. Un `prod` dont le réplica pointe sur l'endpoint primaire se déploie sans broncher, et `task cluster-verify` le déclare rouge après coup |
 | `admin_ip` | `curl -s ifconfig.me` en `/32`. C'est à la fois la liste d'autorisation SSH et l'ACL du LB apiserver |
 | `s3_primary_endpoint` / `_region` | le S3 sur le même provider que le cluster |
 | `s3_replica_endpoint` / `_region` | le S3 de la copie de sauvegarde. En production, **un autre provider** : un état qu'on ne peut lire que depuis le cloud qui vient de tomber n'est pas une sauvegarde. Exporte dans la même édition les clés `<PROV>_BACKUP_AWS_*` de CE magasin : `task up` refuse de continuer si le réplica pointe ailleurs et que les buckets `-backup` n'y sont pas créables |
@@ -127,8 +127,8 @@ task up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
 Demande un terminal : l'apply sollicite une approbation deux fois, et il applique
 le plan qu'il vient de montrer — n'utilise pas `-auto-approve`, qui en applique
 un *autre*, recalculé à cet instant. (Pour un run non supervisé, enregistre-le
-d'abord : `task plan ROLE=management PROVIDER=scaleway OUT=tfplan`, relis-le,
-puis `task apply-plan PROVIDER=scaleway PLAN=tfplan`. `PROVIDER` est exigé sur
+d'abord : `task infra-plan ROLE=management PROVIDER=scaleway OUT=tfplan`, relis-le,
+puis `task infra-apply-apply PROVIDER=scaleway PLAN=tfplan`. `PROVIDER` est exigé sur
 les deux — il retombait avant sur Scaleway, ce qui est le mauvais cloud à
 deviner.)
 
@@ -147,7 +147,7 @@ est dans l'API du provider.
 
 En cas de timeout, **ne relance pas bêtement.** OpenTofu marque la ressource
 `tainted`, donc l'apply suivant **détruit** le load balancer que le provider était
-en train de finir et recommence l'attente. `task infra` imprime désormais les
+en train de finir et recommence l'attente. `task infra-apply` imprime désormais les
 adresses tainted et la commande `tofu untaint` quand il échoue : demande d'abord
 au provider, et garde la ressource s'il la dit saine.
 
@@ -193,13 +193,13 @@ cd infrastructure/opentofu/cluster
 talosctl --talosconfig talosconfig -n "$(tofu output -json control_plane_private_ips | jq -r '.[0]')" etcd members
 ```
 
-Ces endpoints sont des **tunnels locaux**. `task close-tunnels` rend le
+Ces endpoints sont des **tunnels locaux**. `task tunnels-up-down` rend le
 talosconfig inutilisable jusqu'à leur réouverture.
 
 ## 6. Demander au cluster si ça a marché
 
 ```bash
-task verify PROVIDER=scaleway
+task cluster-verify PROVIDER=scaleway
 ```
 
 Interroge le cluster, pas l'outil : l'apiserver répond, chaque nœud est Ready, le
@@ -220,7 +220,7 @@ que personne n'a pu poser, et c'est en général des identifiants S3 manquants.
 ## 7. Mettre à jour
 
 ```bash
-task upgrade ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
+task cluster-upgrade ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
 ```
 
 `docs/upgrade.md` est la procédure derrière — Kubernetes d'abord, puis Talos, un
@@ -240,10 +240,16 @@ terre.
 ## 8. Détruire
 
 ```bash
-task destroy ROLE=management PROVIDER=scaleway
-task down PROVIDER=scaleway -- --force-no-edges --yes
+task infra-apply-down ROLE=management PROVIDER=scaleway
+task down PROVIDER=scaleway -- --plan --force-no-edges          # ne détruit rien
+task down PROVIDER=scaleway -- --plan-file destroy-management-scaleway.tfplan --force-no-edges --yes
 python3 scripts/ops/purge-orphans/scaleway.py
 ```
+
+**Détruire prend deux commandes et ne peut pas se réduire à une** — c'est le but,
+pas une gêne. La première calcule la destruction et ne détruit rien ; la seconde
+applique exactement ce que tu as lu. Ni `--yes`, ni `TF_CLI_ARGS_destroy`, ni
+`YES=1` ne passent la première.
 
 `--force-no-edges` est obligatoire et le `--` nu ne l'est pas moins. `fleet-down`
 refuse de détruire tant qu'il n'a pas écarté l'existence de clusters enfants
@@ -283,7 +289,7 @@ Honnête au moment de la 0.5.0, et c'est la raison d'être de ce document.
 
 Ce qui **est** mesuré, avec les dates (`docs/backlog.md`, « Where we stand ») :
 
-- `task verify` donne **9/9 sur Scaleway, 9/9 sur Outscale, 10/10 sur OVH** — la
+- `task cluster-verify` donne **9/9 sur Scaleway, 9/9 sur Outscale, 10/10 sur OVH** — la
   dixième assertion étant le réplica hébergé chez un autre fournisseur. Le
   cluster Docker local exécute 6 de ces contrôles.
 - **L'état stocké a été ouvert.** Une enveloppe `encrypted_data` sous SSE-AES256,

@@ -121,7 +121,7 @@ bill down unless the line says otherwise.
 source .env.sh
 cp infrastructure/opentofu/cluster/envs/management-scaleway.tfvars{.example,}
 $EDITOR infrastructure/opentofu/cluster/envs/management-scaleway.tfvars
-task talos-image PROVIDER=scaleway
+task image-build PROVIDER=scaleway
 task up ROLE=management PROVIDER=scaleway KEY=~/.ssh/your-key
 ```
 
@@ -180,7 +180,7 @@ untested cases. Take as many as the budget allows, top down:
       child reconciles.
 - [ ] **`SCW-storage`** — `worker_storage` disks + LUKS2 `UserVolumeConfig`,
       never applied anywhere.
-- [ ] **`task rolling-replace`** — proven on Scaleway before; re-run it since the
+- [ ] **`task cluster-roll`** — proven on Scaleway before; re-run it since the
       Talos version moved.
 
 ## 5. Cloud — OVH
@@ -252,7 +252,7 @@ task up ROLE=management PROVIDER=outscale
       the load balancer re-pooling around each apiserver restart, not a
       control-plane outage. `tofu plan` clean afterwards.
       The image lane still cannot rebuild here (409 on the snapshot, backlog), so
-      this ran `task infra` + `task bootstrap-phase2` directly, on the OMI already
+      this ran `task infra-apply` + `task bootstrap-phase2` directly, on the OMI already
       pinned in the tfvars. That is now a supported way round: the boot image is
       the install medium, and `--upgrade` never needs a new one.
 - [x] teardown + `purge-orphans/outscale.py` clean → 57 destroyed, account clean.
@@ -274,7 +274,7 @@ and does not belong here twice. What a *release* adds to it:
       failure (upstream #352) reproduces there and nowhere else
 - [ ] every node upgraded **in place**, none replaced, every one back under its
       own name
-- [ ] `task plan ... STRICT=1` exits 0 afterwards
+- [ ] `task infra-plan ... STRICT=1` exits 0 afterwards
 - [ ] whatever it shook out is in `backlog.md` before the tag, including what you
       chose not to fix
 

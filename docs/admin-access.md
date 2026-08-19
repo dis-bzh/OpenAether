@@ -126,7 +126,7 @@ bao token create -policy=openaether-reader -ttl=8h -display-name=<name>
 `openaether-admin` covers daily operations but explicitly denies seal, rekey and
 key rotation — those stay with the offline root token, deliberate and rare.
 
-⚠️ If your public IP changes: update `admin_ip` then `task infra`, or the bastion
+⚠️ If your public IP changes: update `admin_ip` then `task infra-apply`, or the bastion
 becomes unreachable.
 
 ## 7. Grafana SSO through Zitadel (OIDC)
