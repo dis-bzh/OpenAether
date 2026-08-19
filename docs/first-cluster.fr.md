@@ -210,11 +210,12 @@ applicatif, un réplica de l'état existe dans le magasin de sauvegarde — et l
 `encrypted_data`, pas un état lisible. Hors `dev`, le réplica doit en outre être
 un endpoint différent du primaire.
 
-Aucune vérification ne finit verte sur un avertissement. Deux situations
-avertissent délibérément, et aucune ne passe : un control plane qui n'est pas HA,
-et un réplica de `dev` partageant l'endpoint du primaire. Un contrôle que le
-vérificateur n'a pas pu effectuer du tout est compté à part en `?` et reste tout
-aussi fatal — rien n'est certifié sur une question que personne n'a pu poser.
+Quatre issues, pas deux. `✓` réussi. `✗` échoué, et le run est rouge. `~` est un
+avertissement — un fait à lire, qui ne certifie rien et ne rend pas le run
+rouge : un control plane qui n'est pas HA, ou un réplica de `dev` partageant
+l'endpoint du primaire. Et `?` signifie que le vérificateur n'a pas pu effectuer
+le contrôle du tout, ce qui **est** fatal — rien n'est certifié sur une question
+que personne n'a pu poser, et c'est en général des identifiants S3 manquants.
 
 ## 7. Mettre à jour
 

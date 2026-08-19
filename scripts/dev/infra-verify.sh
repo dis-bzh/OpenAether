@@ -154,6 +154,40 @@ if [ "$PROVIDER" != local ]; then
   fi
 fi
 
+# --- The fleet runs the image the config names ----------------------------------
+#
+# The version tag is not the image. The schematic carries the system extensions,
+# and until 2026-08-19 nothing compared it: a fleet ran the schematic whose
+# qemu-guest-agent never started on OVH — so nodes never reached Stage=Running,
+# never dropped the upgrade fallback, and reverted on their next reboot — while
+# its own config named the fixed one. Every gate said "already runs v1.13.8".
+#
+# `warn`, not `unk`, when no tunnel answers: `task verify` is legitimately run
+# without tunnels, and a check that turns the normal case red is the defect this
+# file keeps catching in others. A mismatch actually READ is a hard failure.
+# The local Docker cluster has no Image Factory schematic at all — asserting one
+# there would be a guard that cannot pass where it runs, which gets muted, and a
+# muted guard protects nothing anywhere.
+if [ "$PROVIDER" != local ]; then
+info "The fleet runs the image the config names"
+WANT_SCH="$(awk '/variable "talos_installer_schematic_id"/,/^}/' \
+              "$CLUSTER_DIR/variables.tf" 2>/dev/null | grep -oE '[0-9a-f]{64}' | head -1)" || WANT_SCH=""
+if [ -z "$WANT_SCH" ]; then
+  warn "no talos_installer_schematic_id pinned — nothing to compare the fleet against"
+else
+  TUN="127.0.0.1:$((50000 + ${TF_VAR_talos_tunnel_port_offset:-0}))"
+  HAVE_SCH="$(timeout 20 talosctl get extensions -e "$TUN" -n 127.0.0.1 -o json 2>/dev/null |
+              jq -s -r '.[] | select(.spec.metadata.name == "schematic") | .spec.metadata.version' 2>/dev/null | head -1)" || HAVE_SCH=""
+  if [ -z "$HAVE_SCH" ]; then
+    warn "could not read the running schematic (no Talos tunnel on ${TUN}) — run 'task tunnels PROVIDER=${PROVIDER}' to make this checkable"
+  elif [ "$HAVE_SCH" = "$WANT_SCH" ]; then
+    ok "the fleet runs the pinned schematic (${WANT_SCH:0:12}…)"
+  else
+    bad "the fleet runs schematic ${HAVE_SCH:0:12}…, the config pins ${WANT_SCH:0:12}… — the nodes do NOT carry the extensions this release ships. Roll them: task upgrade PROVIDER=${PROVIDER}"
+  fi
+fi
+fi
+
 info "The state is backed up"
 
 if [ "$PROVIDER" = local ]; then

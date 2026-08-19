@@ -86,6 +86,20 @@ done <"$STUB_PLAN"
 exit 1
 STUB
 chmod +x "$STUB_DIR/kubectl"
+
+# A stub talosctl serving one ExtensionStatus: the SCHEMATIC the fleet runs.
+# STUB_SCHEMATIC unset = the node cannot be asked, which is its own case.
+cat >"$STUB_DIR/talosctl" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  *"get extensions"*)
+    [ -n "${STUB_SCHEMATIC:-}" ] &&
+      printf '{"spec":{"metadata":{"name":"schematic","version":"%s"}}}\n' "$STUB_SCHEMATIC"
+    ;;
+esac
+exit 0
+STUB
+chmod +x "$STUB_DIR/talosctl"
 ln -s kubectl "$STUB_DIR/task"
 ln -s kubectl "$STUB_DIR/flux"
 
@@ -126,6 +140,9 @@ KEYFILE="$STUB_DIR/ssh-key-fixture"; : >"$KEYFILE"
 # The versions staging-upgrade upgrades TOWARD. Fictional on purpose: nothing in
 # a fixture should read like a pin someone could copy into a real environment.
 cat >"$CLUSTER/variables.tf" <<'TF'
+variable "talos_installer_schematic_id" {
+  default = "1111111111111111111111111111111111111111111111111111111111111111"
+}
 variable "talos_version" {
   default = "v0.0.2"
 }
@@ -310,6 +327,38 @@ run env DRY_RUN=1 "$UPGRADE" "$PROVIDER" "$ROLE" "$KEYFILE"
 { [ "$RUN_RC" -ne 0 ] && said 'upgrade nothing'; } \
   && ok "a run that would upgrade nothing FAILS instead of quietly passing" \
   || bad "a no-op upgrade ended green — indistinguishable from one that worked"
+
+# SAME VERSION, DIFFERENT SCHEMATIC. The schematic carries the system extensions,
+# so this is a real reinstall — and until 2026-08-19 every gate compared the
+# version tag alone and called the fleet done. A fleet then sat on the image that
+# broke OVH while its own config named the fixed one, reachable by no command.
+tfvars v0.0.2 v0.0.2
+# export, not a VAR=x prefix: that prefix does not reach the child of a shell
+# function, so the stub answered nothing and the case tested itself.
+export STUB_SCHEMATIC=2222222222222222222222222222222222222222222222222222222222222222
+run env DRY_RUN=1 "$UPGRADE" "$PROVIDER" "$ROLE" "$KEYFILE"
+said 'DIFFERENT schematic' \
+  && ok "a schematic change is seen even though the versions match" \
+  || bad "a schematic change is invisible — it can be rolled out by no path"
+said 'upgrade nothing' \
+  && bad "it still called the fleet done" \
+  || ok "…and the run is not refused as a no-op"
+
+# THE SAME SCHEMATIC must stay a no-op: a guard written for the pathological case
+# and never run against the normal one has turned red on the happy path three
+# times in this repository.
+export STUB_SCHEMATIC=1111111111111111111111111111111111111111111111111111111111111111
+run env DRY_RUN=1 "$UPGRADE" "$PROVIDER" "$ROLE" "$KEYFILE"
+{ [ "$RUN_RC" -ne 0 ] && said 'upgrade nothing'; } \
+  && ok "a matching schematic is still nothing to do" \
+  || bad "the schematic check fires when the fleet already matches"
+
+# AND IT MUST NOT GUESS. No tunnel, no answer — say so rather than assume either way.
+unset STUB_SCHEMATIC
+run env DRY_RUN=1 "$UPGRADE" "$PROVIDER" "$ROLE" "$KEYFILE"
+said 'could not be read' \
+  && ok "a schematic it could not read is reported, not assumed" \
+  || bad "it stayed silent about a comparison it never made"
 
 # THE DISAGREEMENT. An interrupted run rewrites the tfvars BEFORE the apply lands,
 # so the file can claim a version no node is running — and the next run used to

@@ -35,6 +35,10 @@ while [ $# -gt 0 ]; do
 done
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# For oa_project(): the bucket-name convention lives in one place, and step 3 of
+# this script reports those names to an operator who is about to trust them.
+# shellcheck source=../lib/common.sh
+source "$ROOT/scripts/lib/common.sh"
 CLUSTER_DIR="$ROOT/infrastructure/opentofu/cluster"
 export KUBECONFIG="${KUBECONFIG:-$CLUSTER_DIR/kubeconfig}"
 
@@ -187,8 +191,16 @@ done
 
 # ------------------------------------------------ 3. what is left (report)
 info "Step 3/3 — left to purge MANUALLY (deliberately survives the teardown)"
-CN="$(grep -E '^[[:space:]]*cluster_name' "$CLUSTER_DIR/envs/$ROLE-$PROVIDER.tfvars" 2>/dev/null | sed -E 's/.*"([^"]+)".*/\1/')"
-ENVN="$(grep -E '^[[:space:]]*environment' "$CLUSTER_DIR/envs/$ROLE-$PROVIDER.tfvars" 2>/dev/null | sed -E 's/.*"([^"]+)".*/\1/')"
+# oa_project(), not cluster_name verbatim. The convention is the FIRST SEGMENT of
+# cluster_name plus bucket_suffix — `openaether-dev` gives `openaether`, and a
+# suffix is appended. Interpolating the raw value printed names that do not exist
+# for anyone who set a suffix or put a hyphen in their cluster name, which is
+# every reader of docs/first-cluster.md step 3. The report is the deliverable of
+# this step, so a report that names the wrong buckets is the whole step wasted.
+TFV="$CLUSTER_DIR/envs/$ROLE-$PROVIDER.tfvars"
+_tfv() { grep -E "^[[:space:]]*$1[[:space:]]*=" "$TFV" 2>/dev/null | head -1 | sed -E 's/.*"([^"]*)".*/\1/'; }
+CN="$(oa_project "$(_tfv cluster_name)" "$(_tfv bucket_suffix)")"
+ENVN="$(_tfv environment)"
 cat <<EOT
   S3 buckets (state, artifacts, backups) — destroying them also removes any
   possibility of restoring:

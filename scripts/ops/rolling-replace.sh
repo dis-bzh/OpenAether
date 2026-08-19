@@ -208,6 +208,20 @@ node_talos_version() { # <endpoint> <node_ip>  → version, or empty
   printf '%s' "$out"
 }
 
+# Which SCHEMATIC is this node actually running? Empty when it cannot be asked.
+#
+# The version tag is not the whole identity. The schematic carries the system
+# extensions, and the node publishes it as an ExtensionStatus named "schematic"
+# — verified against a live node 2026-08-19. Two nodes can report the same Talos
+# version from entirely different images, which is how a schematic change became
+# undeliverable: every gate compared the tag and called the fleet done.
+node_schematic() { # <endpoint> <node_ip>  → schematic id, or empty
+  local out
+  out="$(talosctl get extensions -e "$1" -n "$2" -o json 2>/dev/null |
+         jq -s -r '.[] | select(.spec.metadata.name == "schematic") | .spec.metadata.version' 2>/dev/null)" || out=""
+  printf '%s' "${out%%$'\n'*}"
+}
+
 # Find a healthy CP endpoint OTHER than the one being replaced.
 # Echoes "ep ip" for the first CP (index != exclude) whose etcd service is OK.
 healthy_peer_cp() { # <exclude_index>
@@ -1132,8 +1146,19 @@ replace_node() { # <type: cp|worker> <index>
     task tunnels PROVIDER=<provider> KEY=<your key>"
     fi
     if [[ "$running" == "${TALOS_IMAGE##*:}" ]]; then
-      ok "${node_name} already runs ${running} — skipping"
-      return 0
+      # Same version is not the same image. Ask for the schematic too, or a
+      # change to the extensions can never be rolled out: on 2026-08-19 a fleet
+      # sat on the schematic that broke OVH while its config named the fixed
+      # one, and this line greeted every node with "already runs — skipping".
+      local want_sch have_sch
+      want_sch="${TALOS_IMAGE#*/installer/}"; want_sch="${want_sch%%:*}"
+      have_sch="$(node_schematic "$ep" "$node_ip")"
+      if [[ -n "$want_sch" && -n "$have_sch" && "$want_sch" != "$have_sch" ]]; then
+        info "${node_name} runs ${running} but from schematic ${have_sch:0:12}…, not ${want_sch:0:12}… — rolling it to align"
+      else
+        ok "${node_name} already runs ${running} — skipping"
+        return 0
+      fi
     fi
     # The endpoint must be a CONTROL PLANE, even when the target is a worker.
     # talosctl fetches a kubeconfig from the endpoint to drain the node, and a

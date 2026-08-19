@@ -379,7 +379,7 @@ of Talos v1.13.8. The spec carries `secureBoot`, `selinuxState` and
 `Running` is never reached — `talosctl logs machined` on a node stuck at BOOTING
 is the next read. Rung: real cloud.
 
-### OPEN — a schematic change cannot be rolled out, and both gates call the fleet done
+### FIXED — a schematic change cannot be rolled out, and both gates call the fleet done
 
 Found 2026-08-19 by the operator, replaying the journey deliberately "as a new
 user would — not to re-prove what is proven, but to check we are actually running
@@ -414,10 +414,29 @@ revert is sitting in a config that no node has installed.
 should compare the running schematic against `talos_installer_schematic_id`, not
 just the tag, and `task verify` should say when the two disagree.
 
-**Closes:** a node on the old schematic and the target version being upgraded
-rather than skipped, with an assertion in `test-rolling-replace.sh` that goes red
-when the comparison drops back to the version alone. Then `task verify` reporting
-the drift. Rung: offline for the gates, one real roll to confirm.
+**FIXED 2026-08-19, in the three places that were blind:**
+
+- `rolling-replace.sh` reads the node's schematic (`get extensions` publishes it
+  as an ExtensionStatus named `schematic` — confirmed against a live node) and
+  rolls a node whose version matches but whose image does not.
+- `staging-upgrade.sh` no longer calls the fleet done on the version alone. It
+  reads through the tunnel with `-n 127.0.0.1`, which needs no node address and
+  therefore no kubectl, no tofu and no credentials. BEST EFFORT: with no tunnel
+  it says `? the running schematic could not be read` rather than guessing in
+  either direction.
+- `task verify` compares the fleet against `talos_installer_schematic_id`. A
+  mismatch READ is `✗` and fatal; a mismatch it could not read is `~`, because
+  `task verify` is legitimately run without tunnels and a guard that reddens the
+  normal case is the defect this file keeps catching in others.
+
+Mutation-tested in each place: drop back to the version tag → red in
+test-rolling-replace; stop setting TALOS_DONE=0 → red in test-staging-checks;
+answer when talosctl failed → red. 215 offline assertions green.
+
+**Still open, and it is the honest remainder:** none of this has been exercised
+by a real roll onto a new schematic. The next OVH or Outscale upgrade is that
+test — the node should be picked up rather than skipped, and `task verify` should
+go from `✗` to `✓` afterwards.
 
 ### ROOT CAUSE, FOUND — an extension we ship waits for a device OVH never creates
 

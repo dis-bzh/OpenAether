@@ -405,5 +405,26 @@ expect_out "MANUAL ACTION REQUIRED" "it asks for a manual check on the provider 
 refute_log "$UNQUALIFIED" "no unqualified 'cluster' verb in the delete/finalizer path"
 
 echo
+
+echo "=== the buckets it names must be the buckets that exist ==="
+
+# Step 3 is a REPORT, and its whole value is that an operator can act on it. It
+# interpolated cluster_name verbatim, so anyone who set a bucket_suffix — which
+# docs/first-cluster.md step 3 tells every new user to do — or whose cluster_name
+# contains a hyphen was handed names that do not exist.
+mkdir -p "$STUB_DIR/root/infrastructure/opentofu/cluster/envs"
+cat >"$ROOT/infrastructure/opentofu/cluster/envs/management-stubcloud.tfvars" <<'TFV'
+cluster_name  = "example-dev"
+bucket_suffix = "a1b2c3"
+environment   = "dev"
+TFV
+plan "${CLUSTER_INFO_OK}get clusters.cluster.x-k8s.io -A\t0\t\n"
+run "$FLEET_DOWN" stubcloud --yes --force-no-edges
+rm -f "$ROOT/infrastructure/opentofu/cluster/envs/management-stubcloud.tfvars"
+expect_out "s3-example-a1b2c3-stubcloud-tfstate-dev" \
+  "the reported bucket keeps the suffix and the first segment only"
+refute_out "s3-example-dev-stubcloud-tfstate-dev" \
+  "it does not print the raw cluster_name, which names nothing"
+
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

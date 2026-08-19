@@ -205,11 +205,12 @@ opened and must be an OpenTofu `encrypted_data` envelope rather than readable
 state. Outside `dev`, the replica must also be a different endpoint from the
 primary.
 
-No check ends green on a warning. Two conditions warn deliberately and neither
-passes: a control plane that is not HA, and a `dev` replica sharing the
-primary's endpoint. A check the verifier could not perform at all is counted
-apart as `?` and is equally fatal — nothing is certified on a question nobody
-could ask.
+Four outcomes, not two. `✓` passed. `✗` failed, and the run is red. `~` is a
+warning — a fact you must read that does not certify anything and does not turn
+the run red: a control plane that is not HA, or a `dev` replica sharing the
+primary's endpoint. And `?` means the verifier could not perform the check at
+all, which IS fatal — nothing is certified on a question nobody could ask, and
+that is usually missing S3 credentials.
 
 ## 7. Upgrade
 

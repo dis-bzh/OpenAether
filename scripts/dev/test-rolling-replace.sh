@@ -89,6 +89,7 @@ POLL=1
 ok_msgs="$STUB_DIR/ok"; : >"$ok_msgs"
 ok_() { printf '%s\n' "$*" >>"$ok_msgs"; }
 eval "$(extract 'assert_upgrade_confirmed' | sed -E 's/^([[:space:]]*)ok /\1ok_ /')"
+eval "$(extract 'node_schematic')"
 # EXIT, not return: the real die() ends the run, and a stub that merely returns
 # lets the function carry on and answer 0 — which would make the gate look like
 # it passed exactly when it refused. Each call is made in a subshell.
@@ -102,6 +103,7 @@ case "\$*" in
   *"get metakeys"*) [ -n '${2:-}' ] && printf '{"metadata":{"id":6},"spec":{"value":"%s"}}\n' '${2:-}'
                     printf '{"metadata":{"id":9},"spec":{"value":"x"}}\n' ;;
   *services*) printf '%b' '${3:-NODE SERVICE STATE\\n1 apid Running\\n}' ;;
+  *"get extensions"*) printf '{"spec":{"metadata":{"name":"schematic","version":"%s"}}}\n' "\${STUB_SCHEMATIC:-aaaa}" ;;
 esac
 exit 0
 STUB
@@ -332,6 +334,30 @@ out="$( { assert_upgrade_confirmed ep 10.255.255.1 node-c; } 2>&1 )"; rc=$?
   && ok "running but tag still set: warns, does not block" \
   || bad "the tag-still-present case is not reported (rc=$rc): $out"
 
+
+
+echo "=== a node on the right version but the WRONG schematic is not done ==="
+
+# The schematic carries the system extensions. Comparing the version tag alone
+# made a schematic change undeliverable by any supported path: every gate said
+# "already runs v1.13.8 — skipping" while the fleet sat on the image that broke
+# OVH. Measured on a live Scaleway cluster, 2026-08-19.
+talos_stub running ""
+export STUB_SCHEMATIC=53513e54
+out="$(node_schematic ep 10.255.255.1)"
+[ "$out" = 53513e54 ] && ok "the running schematic is read off the node" \
+  || bad "node_schematic returned '$out'"
+
+printf '#!/usr/bin/env bash\nexit 1\n' >"$STUB_DIR/talosctl"; chmod +x "$STUB_DIR/talosctl"
+out="$(node_schematic ep 10.255.255.1)"; rc=$?
+[ "$rc" -eq 0 ] && [ -z "$out" ] \
+  && ok "an unreachable node yields empty, and does not fail the caller" \
+  || bad "node_schematic propagated a failure (rc=$rc, out='$out')"
+unset STUB_SCHEMATIC
+
+grep -q 'want_sch != .*have_sch\|want_sch" != "\$have_sch' "$ROOT/scripts/ops/rolling-replace.sh" \
+  && ok "the skip compares the schematic as well as the tag" \
+  || bad "the skip is back to comparing the version tag alone"
 
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

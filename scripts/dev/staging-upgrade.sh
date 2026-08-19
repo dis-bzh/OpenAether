@@ -125,11 +125,39 @@ fi
 K8S_DONE=0;   [ "$K8S_FROM" = "$K8S_TO" ] && K8S_DONE=1
 TALOS_DONE=0; [ "$TALOS_FROM" = "$TALOS_TO" ] && TALOS_DONE=1
 
+# Same version is NOT the same image. The schematic carries the system
+# extensions, and a version comparison is blind to it: on 2026-08-19 a fleet ran
+# the schematic that broke OVH while its own config named the fixed one, and
+# this gate called the work done. So ask a node which schematic it runs.
+#
+# BEST EFFORT, deliberately. The tunnels are usually shut this early, and a
+# check that cannot run must SAY so — not block a legitimate upgrade, and not
+# wave a stale fleet through in silence.
+SCHEMATIC_NOTE=""
+if [ "$TALOS_DONE" = 1 ]; then
+  WANT_SCH="$(awk '/variable "talos_installer_schematic_id"/,/^}/' \
+                "$ROOT/infrastructure/opentofu/cluster/variables.tf" 2>/dev/null |
+              grep -oE '[0-9a-f]{64}' | head -1)" || WANT_SCH=""
+  # -n 127.0.0.1 through the tunnel: apid answers for the node behind it, so this
+  # needs no node address and therefore no kubectl, no tofu and no credentials.
+  TUN="127.0.0.1:$((50000 + ${TF_VAR_talos_tunnel_port_offset:-0}))"
+  HAVE_SCH="$(talosctl get extensions -e "$TUN" -n 127.0.0.1 -o json 2>/dev/null |
+              jq -s -r '.[] | select(.spec.metadata.name == "schematic") | .spec.metadata.version' 2>/dev/null | head -1)" || HAVE_SCH=""
+  if [ -n "$WANT_SCH" ] && [ -n "$HAVE_SCH" ] && [ "$WANT_SCH" != "$HAVE_SCH" ]; then
+    TALOS_DONE=0
+    SCHEMATIC_NOTE="  ⚠ same version, DIFFERENT schematic — the fleet runs ${HAVE_SCH:0:12}…, the config pins ${WANT_SCH:0:12}…
+    The system extensions differ, so this IS a reinstall and the Talos step will run."
+  elif [ -z "$HAVE_SCH" ]; then
+    SCHEMATIC_NOTE="  ? the running schematic could not be read (no tunnel open yet) — only the version was compared."
+  fi
+fi
+
 echo "  Talos      ${TALOS_FROM} → ${TALOS_TO}   (read from ${SOURCE})"
 echo "  Kubernetes ${K8S_FROM} → ${K8S_TO}"
 case "${K8S_FROM}${TALOS_FROM}" in
   *,*) echo "  ⚠ the fleet is MIXED — this is a resume, and every step below will run." ;;
 esac
+[ -n "$SCHEMATIC_NOTE" ] && echo "$SCHEMATIC_NOTE"
 
 if [ "$K8S_DONE" = 1 ] && [ "$TALOS_DONE" = 1 ]; then
   # Loud, and a failure — not a skip. A lane that quietly exercises nothing is
