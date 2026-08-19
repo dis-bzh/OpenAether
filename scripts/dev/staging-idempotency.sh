@@ -44,7 +44,9 @@ task cluster-up ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY" APPROVE=auto
 # STRICT=1 turns a non-empty plan into exit 2. This is the assertion; the apply
 # above merely has to not fail.
 echo "--- the plan after it must be empty ---"
-task infra-plan ROLE="$ROLE" PROVIDER="$PROVIDER" STRICT=1 ||
+# KEY too: on a bootstrapped cluster infra-plan opens the Talos tunnels, and
+# without it they are looked for under the default key that does not exist.
+task infra-plan ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY" STRICT=1 ||
   fail "the plan is not empty after a second bring-up — the configuration does not converge"
 ok "plan empty: the second bring-up changed nothing"
 
