@@ -109,19 +109,34 @@ else
   # outlives the thing that could delete it and bills forever. That is the
   # scenario this script's own header calls non-negotiable.
   if ! EDGES_RAW="$(kubectl get clusters.cluster.x-k8s.io -A -o jsonpath='{range .items[*]}{.metadata.name} {.metadata.namespace}{"\n"}{end}' 2>/dev/null)"; then
-    # …and HONOUR the flag the message tells the operator to use. The fail-closed
-    # guard added on 2026-08-15 ignored it here, so on an infrastructure-only
-    # cluster — where the CAPI CRDs are legitimately absent and the query cannot
-    # succeed — every teardown refused, with a message naming the escape hatch it
-    # was itself declining to take. Found on 2026-08-16 with two clusters running
-    # and billing.
-    if [ "$FORCE_NO_EDGES" -eq 1 ]; then
-      warn "the CAPI CRDs are absent, so there are no child clusters by definition (--force-no-edges)."
-    else
-      die "cannot enumerate child clusters (clusters.cluster.x-k8s.io) — refusing to
-  destroy the management. If the CAPI CRDs are genuinely absent, there are no
-  children by definition and --force-no-edges says so explicitly."
-    fi
+    # The query fails in two ways that mean OPPOSITE things, and stderr is the
+    # only thing that tells them apart — so ask again, keeping the reason. The
+    # second call happens only on the failure path.
+    WHY="$(kubectl get clusters.cluster.x-k8s.io -A 2>&1 >/dev/null || true)"
+    case "$WHY" in
+      # The CRDs are absent: a management with no CAPI has no children BY
+      # DEFINITION. Refusing here made --force-no-edges mandatory on every
+      # cluster this release builds, and the cost of that refusal is a cloud
+      # left billing — measured twice on 2026-08-19, on a teardown that was
+      # itself trying to stop the bill.
+      *"doesn't have a resource type"*|*"could not find the requested resource"*|*"server could not find"*)
+        ok "no CAPI CRDs on this cluster — no child clusters by definition"
+        ;;
+      # Anything else — unreachable, unauthorized, timed out — is a question we
+      # could not answer, and an unanswered question is NOT an absence of
+      # children. This is the case the guard was written for, and it still
+      # refuses: a child that outlives its management bills for ever.
+      *)
+        if [ "$FORCE_NO_EDGES" -eq 1 ]; then
+          warn "the child-cluster query failed and --force-no-edges says to proceed: ${WHY%%$'\n'*}"
+        else
+          die "cannot enumerate child clusters (clusters.cluster.x-k8s.io), and the
+  reason is NOT that the CAPI CRDs are absent — refusing to destroy the
+  management. The provider said: ${WHY%%$'\n'*}
+  Fix the access, or pass --force-no-edges to assert there are no children."
+        fi
+        ;;
+    esac
     EDGES_RAW=""
   fi
   mapfile -t EDGES < <(printf '%s' "$EDGES_RAW")

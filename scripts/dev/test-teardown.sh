@@ -158,28 +158,34 @@ refute_log() {
 
 echo "=== fleet-down: an unanswered child-cluster query is not an absence ==="
 
-# THE billing defect. A failing enumeration and a childless management look
-# identical to `mapfile`, and the very next step destroys the management —
-# the only thing that could ever delete the children.
+# THE billing defect, and it is UNREACHABILITY that causes it. A query we could
+# not answer looks identical to a childless management, and the very next step
+# destroys the management — the only thing that could ever delete the children.
+plan "${CLUSTER_INFO_OK}get clusters.cluster.x-k8s.io -A\t1\tUnable to connect to the server: dial tcp 10.0.0.1:6443: connect: connection refused\n"
+run "$FLEET_DOWN" stubcloud --plan-file "$STUB_DIR/d.tfplan" --yes
+expect_rc 1 "an unanswerable query aborts fleet-down"
+refute_destroyed "the management destroy is NOT reached after an unanswerable query"
+refute_out "no child cluster" "an unanswered query is not reported as 'no child cluster'"
+refute_out "fleet-down complete" "it does not report success"
+expect_out "connection refused" "and it quotes what the provider actually said"
+
+# The OTHER failure, which means the opposite. A management with no CAPI has no
+# children BY DEFINITION, and every cluster this release builds is that shape.
+# Refusing here made --force-no-edges mandatory on all of them, and the cost of
+# that refusal is a cloud left billing — paid twice on 2026-08-19, on a teardown
+# that was itself trying to stop the bill. NO FLAG is needed now.
 plan "${CLUSTER_INFO_OK}get clusters.cluster.x-k8s.io -A\t1\terror: the server doesn't have a resource type \"clusters\"\n"
 run "$FLEET_DOWN" stubcloud --plan-file "$STUB_DIR/d.tfplan" --yes
-expect_rc 1 "a failing enumeration aborts fleet-down"
-refute_destroyed "the management destroy is NOT reached after a failed enumeration"
-refute_out "no child cluster" "a failed query is not reported as 'no child cluster'"
-refute_out "fleet-down complete" "it does not report success"
-
-# …and the escape hatch that same refusal names. On an infrastructure-only
-# cluster the CAPI CRDs are legitimately absent, so the query above can NEVER
-# succeed and this is the branch every 1.0.0 teardown takes. It shipped in
-# 70aa053 with no assertion of its own — the guard was exercised against the
-# pathological case and not against the normal one, which is the sentence in
-# that commit's own message.
-plan "${CLUSTER_INFO_OK}get clusters.cluster.x-k8s.io -A\t1\terror: the server doesn't have a resource type \"clusters\"\n"
-run "$FLEET_DOWN" stubcloud --plan-file "$STUB_DIR/d.tfplan" --yes --force-no-edges
-expect_rc 0 "--force-no-edges proceeds when the CAPI CRDs are absent"
-expect_out "CAPI CRDs are absent" "it says why it is allowed to continue"
+expect_rc 0 "absent CAPI CRDs proceed on their own, with no flag"
+expect_out "no CAPI CRDs" "it says why it is allowed to continue"
 expect_destroyed "the management destroy IS reached"
 expect_out "fleet-down complete" "it reports success"
+
+# …and the flag stays accepted, because the skill, CI and the printed
+# next-step command all still pass it. It must not become an error.
+plan "${CLUSTER_INFO_OK}get clusters.cluster.x-k8s.io -A\t1\terror: the server doesn't have a resource type \"clusters\"\n"
+run "$FLEET_DOWN" stubcloud --plan-file "$STUB_DIR/d.tfplan" --yes --force-no-edges
+expect_rc 0 "--force-no-edges is still accepted and still proceeds"
 
 # The command it PRINTS must be one it will itself accept. The flags were
 # hard-coded, so on a cluster whose CAPI CRDs are absent it told the operator to

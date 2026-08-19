@@ -11,20 +11,26 @@ This is the OpenAether commands and the traps this project has actually met.
 ## The sequence
 
 ```
-task cluster-down PROVIDER=<p> -- --plan --force-no-edges       # computes, destroys nothing
-task cluster-down PROVIDER=<p> -- --plan-file destroy-<role>-<p>.tfplan --force-no-edges --yes
+task cluster-down PROVIDER=<p> -- --plan       # computes, destroys nothing
+task cluster-down PROVIDER=<p> -- --plan-file destroy-<role>-<p>.tfplan --yes
 python3 scripts/ops/purge-orphans/<p>.py
 ```
 
 The bare `--` is not optional: without it Task keeps the flags for itself.
 
-**`--force-no-edges` is required on every cluster 0.1.0 builds**, and the reason is
-structural rather than incidental. `fleet-down.sh` refuses to destroy the
-management until it has enumerated CAPI child clusters, because a child that
-outlives its management bills for ever. On a pure-infra cluster the CAPI CRDs are
-legitimately absent, so that query can never succeed — the flag is how the
-operator asserts there are no children. Anything that invokes the bare form (a
-workflow, a README line) will refuse and leave the cloud running.
+**`--force-no-edges` is no longer needed on a pure-infra cluster.** `fleet-down.sh`
+still refuses to destroy the management until it has accounted for CAPI child
+clusters — a child that outlives its management bills for ever — but it now reads
+WHY the query failed. "The server doesn't have a resource type" means the CRDs are
+absent, and a management with no CAPI has no children by definition: it says so and
+continues. Anything else — unreachable, unauthorized, timed out — is a question it
+could not answer, and an unanswered question is not an absence: it still refuses,
+quoting what the provider said.
+
+The flag remains accepted and overrides that refusal. Until 2026-08-19 it was
+required on every cluster this release builds, so the bare form refused and left
+the cloud running — twice, on teardowns that were themselves trying to stop the
+bill.
 
 ## Two commands, always — and who is allowed to run them
 
