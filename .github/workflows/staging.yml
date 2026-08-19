@@ -231,9 +231,18 @@ jobs:
       # precisely the case that leaves billed resources standing, so the teardown
       # must run when the deploy did NOT succeed — and it must not be skipped by
       # a cancelled job either.
+      # TWO STEPS, because destroying takes two commands everywhere including here.
+      # The plan lands in the log, so a run that tore something down says exactly
+      # what it tore down — which the one-shot destroy never did.
+      - name: Plan the teardown
+        if: always() && !(inputs.keep && github.event_name == 'workflow_dispatch')
+        run: task fleet-down PROVIDER="$PROVIDER" ROLE="$ROLE" -- --plan --force-no-edges
+
       - name: Destroy
         if: always() && !(inputs.keep && github.event_name == 'workflow_dispatch')
-        run: task fleet-down PROVIDER="$PROVIDER" ROLE="$ROLE" -- --yes
+        run: |
+          task fleet-down PROVIDER="$PROVIDER" ROLE="$ROLE" -- \
+            --plan-file "destroy-${ROLE}-${PROVIDER}.tfplan" --force-no-edges --yes
 
       # This asserts now. The purge scripts printed what they found and exited 0
       # regardless, so this step passed while ten Scaleway resources were billing

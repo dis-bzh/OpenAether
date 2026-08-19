@@ -69,7 +69,7 @@ the SSH tunnels itself (`talos-tunnels.sh open-direct`) between the provider
 module and `modules/talos`, using node/bastion IPs unknown until the VMs
 exist. Default `false`: not exercised against a real host yet, validate on a
 disposable environment before relying on it. `talos_bootstrap` remains the
-break-glass/two-phase path either way (e.g. for `task infra-apply-down`).
+break-glass/two-phase path either way (e.g. for `task infra-down`).
 
 ### apiserver VIP / `k8s_lb_mode` (Scaleway, OVH)
 
@@ -168,7 +168,7 @@ task bootstrap-phase2 ROLE=management KEY=~/.ssh/yourkey   # or: ROLE=management
 #  tofu apply -var-file=envs/management-scaleway.tfvars -var talos_bootstrap=true)
 
 # Close the tunnels when done
-task tunnels-up-down
+task tunnels-down
 ```
 
 ### Deploy workload cluster
@@ -199,7 +199,7 @@ tofu apply -var-file=envs/management-scaleway.tfvars -var talos_bootstrap=true
 ### Teardown (destroy)
 
 ```bash
-task infra-apply-down ROLE=management                # or: ROLE=workload PROVIDER=ovh
+task infra-down ROLE=management                # or: ROLE=workload PROVIDER=ovh
 ```
 
 Manual equivalent (two steps are required):

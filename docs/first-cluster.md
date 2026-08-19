@@ -125,7 +125,7 @@ Needs a terminal: the apply asks for approval twice, and it applies the plan it
 just showed you — do not reach for `-auto-approve`, which applies a *different*
 plan computed at that moment. (For an unattended run, save one first:
 `task infra-plan ROLE=management PROVIDER=scaleway OUT=tfplan`, read it, then
-`task infra-apply-apply PROVIDER=scaleway PLAN=tfplan`. PROVIDER is required on both —
+`task infra-apply PROVIDER=scaleway PLAN=tfplan`. PROVIDER is required on both —
 it used to default to Scaleway, which is the wrong cloud to guess.)
 
 In order it builds the Talos image and uploads it — **measured at 52 s on
@@ -188,7 +188,7 @@ cd infrastructure/opentofu/cluster
 talosctl --talosconfig talosconfig -n "$(tofu output -json control_plane_private_ips | jq -r '.[0]')" etcd members
 ```
 
-Those endpoints are **local tunnels**. `task tunnels-up-down` makes the talosconfig
+Those endpoints are **local tunnels**. `task tunnels-down` makes the talosconfig
 unusable until you reopen them.
 
 ## 6. Ask the cluster whether it worked
@@ -233,7 +233,7 @@ consecutive ones are the API being down.
 ## 8. Tear it down
 
 ```bash
-task infra-apply-down ROLE=management PROVIDER=scaleway
+task infra-down ROLE=management PROVIDER=scaleway
 task down PROVIDER=scaleway -- --plan --force-no-edges          # destroys nothing
 task down PROVIDER=scaleway -- --plan-file destroy-management-scaleway.tfplan --force-no-edges --yes
 python3 scripts/ops/purge-orphans/scaleway.py

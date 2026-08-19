@@ -131,6 +131,13 @@ else
     printf '  %s child clusters: %s\n' "${#EDGES[@]}" "$(printf '%s ' "${EDGES[@]%% *}")"
     for e in "${EDGES[@]}"; do
       name="${e%% *}"; ns="${e##* }"
+      # --plan destroys NOTHING, and a child cluster is something. Reporting it
+      # here and deleting it below would make the first of the two commands
+      # destructive, which is the whole thing this split exists to prevent.
+      if [ "$PLAN_ONLY" = 1 ]; then
+        warn "child cluster ${name} would be destroyed first (not touched by --plan)"
+        continue
+      fi
       if ! "$ROOT/scripts/ops/edge-down.sh" "$name" --namespace "$ns" --timeout 900 \
              $([ "$ASSUME_YES" -eq 1 ] && echo --yes); then
         warn "edge-down $name FAILED."

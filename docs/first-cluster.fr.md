@@ -128,7 +128,7 @@ Demande un terminal : l'apply sollicite une approbation deux fois, et il appliqu
 le plan qu'il vient de montrer — n'utilise pas `-auto-approve`, qui en applique
 un *autre*, recalculé à cet instant. (Pour un run non supervisé, enregistre-le
 d'abord : `task infra-plan ROLE=management PROVIDER=scaleway OUT=tfplan`, relis-le,
-puis `task infra-apply-apply PROVIDER=scaleway PLAN=tfplan`. `PROVIDER` est exigé sur
+puis `task infra-apply PROVIDER=scaleway PLAN=tfplan`. `PROVIDER` est exigé sur
 les deux — il retombait avant sur Scaleway, ce qui est le mauvais cloud à
 deviner.)
 
@@ -193,7 +193,7 @@ cd infrastructure/opentofu/cluster
 talosctl --talosconfig talosconfig -n "$(tofu output -json control_plane_private_ips | jq -r '.[0]')" etcd members
 ```
 
-Ces endpoints sont des **tunnels locaux**. `task tunnels-up-down` rend le
+Ces endpoints sont des **tunnels locaux**. `task tunnels-down` rend le
 talosconfig inutilisable jusqu'à leur réouverture.
 
 ## 6. Demander au cluster si ça a marché
@@ -240,7 +240,7 @@ terre.
 ## 8. Détruire
 
 ```bash
-task infra-apply-down ROLE=management PROVIDER=scaleway
+task infra-down ROLE=management PROVIDER=scaleway
 task down PROVIDER=scaleway -- --plan --force-no-edges          # ne détruit rien
 task down PROVIDER=scaleway -- --plan-file destroy-management-scaleway.tfplan --force-no-edges --yes
 python3 scripts/ops/purge-orphans/scaleway.py

@@ -638,7 +638,7 @@ plan that runs are two different computations — OpenTofu says so itself, "you
 didn't use the -out option, so OpenTofu can't guarantee to take exactly these
 actions".
 
-`task infra-plan OUT=…` and `task infra-apply-apply PLAN=…` now exist (2026-08-17) so the lane
+`task infra-plan OUT=…` and `task infra-apply PLAN=…` now exist (2026-08-17) so the lane
 can review and apply the same bytes. It still does not use them.
 
 **Closes:** staging.yml plans with `OUT=`, prints the plan, and applies it with
@@ -707,9 +707,9 @@ infrastructure matches the configuration.", exit 0.
 
 `scripts/ops/restore-artifacts.sh` and `task restore-artifacts` are new on
 2026-08-17: until then the repository could encrypt a kubeconfig and a
-talosconfig to two stores and had no way to read them back, and `task failover`
-— the nearest thing — stands up a NEW cluster rather than recovering access to
-the one you have. Its four script paths were also broken (it resolved
+talosconfig to two stores and had no way to read them back, and the nearest
+thing — `task failover`, since deleted — stood up a NEW cluster rather than
+recovering access to the one you have. Its four script paths were also broken (it resolved
 `scripts/infrastructure/...`), so it died at its own guard for every provider.
 
 What is proven: the round trip, offline, real `enc()` against real `dec()`, byte
