@@ -78,7 +78,7 @@ Deux couches de réglages orthogonales :
 
 | ID | CP/W | Ce qu'il exerce en propre | Statut |
 |---|---|---|---|
-| `L-ha` | 3+3 | Vrai quorum etcd à 3 nœuds, workers dédiés ordonnançables, Cilium, livraison par `userdata` — preuve principale de `modules/talos` sans credentials. | ✅ (`task local-up`, 2026-07-28) |
+| `L-ha` | 3+3 | Vrai quorum etcd à 3 nœuds, workers dédiés ordonnançables, Cilium, livraison par `userdata` — preuve principale de `modules/talos` sans credentials. | ✅ (`task local-up`, rejoué le 2026-08-20 : manifeste rendu quand absent, Cilium 6/6, 3 membres etcd, `local-test` vert) |
 | `L-smoke` | 1+0 | Smoke test mono-nœud ; repli d'ordonnancement sur CP non taché. | ⬜ |
 
 ### Scaleway (provider de référence)
@@ -86,10 +86,11 @@ Deux couches de réglages orthogonales :
 | ID | Rôle | CP/W | k8s_lb_mode | Zones | Stockage | Ce qu'il exerce en propre | Statut |
 |---|---|---|---|---|---|---|---|
 | `SCW-mgmt-nonha` | mgmt | 1+1 | managed | mono | aucun | Chemin cloud le moins cher ; taint CP non-HA ; ACL du LB managé. | ✅ |
-| `SCW-mgmt-ha` | mgmt | 3+2 | managed | 3 AZ | aucun | etcd sur 3 zones ; distribution multi-AZ. | ⬜ |
+| `SCW-mgmt-ha` | mgmt | 3+2 | managed | 3 AZ | aucun | etcd sur 3 zones ; distribution multi-AZ. | ⬜ — voir la ligne suivante : ce qui tourne est sur **2 zones**, la troisième n'ayant aucun type d'instance utilisé par ce projet |
+| `SCW-mgmt-ha-2az` | mgmt | 3+3 | managed | 2 AZ | **disques+volumes** | Ce sur quoi repose réellement la 0.1.0. etcd sur 2 zones, en round-robin. | ✅ 2026-08-19, puis 2026-08-20 |
 | `SCW-vip` | mgmt | 3+1 | **vip** | multi-AZ | aucun | Supprime le LB ; VIP Talos Layer2 ; API privée via tunnel ; anti-spoofing. | ✅ *(2026-07-15)* |
 | `SCW-work-ha` | workload | 3+3 | managed | 3 AZ | aucun | Chemin d'amorçage Flux du rôle workload. | ⬜ |
-| `SCW-storage` | workload | 3+3 | managed | 3 AZ | **disques+volumes** | Volumes blocs SBS + `UserVolumeConfig` chiffré (LUKS2). | ⬜ |
+| `SCW-storage` | workload | 3+3 | managed | 3 AZ | **disques+volumes** | Volumes blocs SBS + `UserVolumeConfig` chiffré (LUKS2). | ⬜ sur le rôle *workload*. Les volumes blocs et les patchs UserVolumeConfig ONT bien été appliqués sur `SCW-mgmt-ha-2az` — 3 × `scaleway_block_volume.worker_data` dans l'état — mais **rien n'a relu qu'ils étaient formatés en LUKS2 et montés** : `cluster-verify` n'interroge aucun volume |
 
 ### OVH (OpenStack)
 

@@ -257,6 +257,19 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
       **Closes:** a mutation for each shape, each seen to go red before it is
       believed; counts asserted against expected values. Rung: `task test`.
 
+- [ ] **Encrypted worker volumes are applied and never verified.** The reference
+      Scaleway cluster declares `worker_storage`, three `scaleway_block_volume`
+      resources are in its state, and `modules/talos/main.tf:181` renders a LUKS2
+      `UserVolumeConfig` per declared volume. Nothing asks a node whether those
+      volumes exist, are encrypted, or are mounted at `/var/mnt/<name>` —
+      `cluster-verify` has no volume check of any kind, so a UserVolumeConfig
+      that silently failed to apply would look exactly like one that worked.
+      The matrix said this was never applied at all, which was worse than
+      untested: it was wrong (corrected 2026-08-20).
+      **Closes:** a `cluster-verify` check that reads the volume back from the
+      node's own Talos API, seen to fail on a cluster without them. Rung: real
+      cloud, and the local Docker rung has no block volumes to stand in.
+
 - [ ] **ovh.py cannot tell a refused question from an empty account.**
       `scaleway.py` and `outscale.py` both count refused calls and exit 2 when
       they found nothing but nothing was actually asked; `ovh.py` has no such

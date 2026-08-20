@@ -77,7 +77,7 @@ Two orthogonal layers of knobs:
 
 | ID | CP/W | Uniquely exercises | Status |
 |---|---|---|---|
-| `L-ha` | 3+3 | Real 3-node etcd quorum, dedicated schedulable workers, Cilium, `userdata` delivery — primary credential-free proof of `modules/talos`. | ✅ (`task local-up`, 2026-07-28) |
+| `L-ha` | 3+3 | Real 3-node etcd quorum, dedicated schedulable workers, Cilium, `userdata` delivery — primary credential-free proof of `modules/talos`. | ✅ (`task local-up`, re-run 2026-08-20: manifest rendered when absent, Cilium 6/6, etcd 3 members, `local-test` green) |
 | `L-smoke` | 1+0 | Fast single-node smoke; untainted-CP scheduling fallback. | ⬜ |
 
 ### Scaleway (reference provider)
@@ -85,10 +85,11 @@ Two orthogonal layers of knobs:
 | ID | Role | CP/W | k8s_lb_mode | Zones | Storage | Uniquely exercises | Status |
 |---|---|---|---|---|---|---|---|
 | `SCW-mgmt-nonha` | mgmt | 1+1 | managed | single | none | Cheapest cloud path; non-HA CP taint; managed LB ACL. | ✅ |
-| `SCW-mgmt-ha` | mgmt | 3+2 | managed | 3-AZ | none | etcd across 3 zones; multi-AZ distribution. | ⬜ |
+| `SCW-mgmt-ha` | mgmt | 3+2 | managed | 3-AZ | none | etcd across 3 zones; multi-AZ distribution. | ⬜ — see the row below: what runs is **2 zones**, because the third has no instance type this project uses |
+| `SCW-mgmt-ha-2az` | mgmt | 3+3 | managed | 2-AZ | **disks+volumes** | What 0.1.0 actually rests on. etcd across 2 zones, round-robinned. | ✅ 2026-08-19, again 2026-08-20 |
 | `SCW-vip` | mgmt | 3+1 | **vip** | multi-AZ | none | Drops the LB; Talos Layer2 VIP; private API via tunnel; anti-spoofing. | ✅ *(2026-07-15)* |
 | `SCW-work-ha` | workload | 3+3 | managed | 3-AZ | none | Workload-role Flux bootstrap path. | ⬜ |
-| `SCW-storage` | workload | 3+3 | managed | 3-AZ | **disks+volumes** | SBS block volumes + encrypted `UserVolumeConfig` (LUKS2). | ⬜ |
+| `SCW-storage` | workload | 3+3 | managed | 3-AZ | **disks+volumes** | SBS block volumes + encrypted `UserVolumeConfig` (LUKS2). | ⬜ on the *workload* role. The block volumes and the UserVolumeConfig patches DID apply on `SCW-mgmt-ha-2az` — 3 × `scaleway_block_volume.worker_data` in state — but **nothing read back that they were formatted LUKS2 and mounted**: `cluster-verify` asks about no volume at all |
 
 ### OVH (OpenStack)
 

@@ -74,18 +74,25 @@ task local-test
 task local-down
 ```
 
-- [ ] `local-up` renders `cilium-local.yaml` itself when the manifest is absent
-- [ ] **Cilium is actually running** — `kubectl -n kube-system get pods -l k8s-app=cilium`.
-      A cluster whose pods are Pending with no CNI still looks like a successful apply.
-- [ ] `local-status` prints etcd members
-- [ ] `local-test` reaches its green banner **and** its checks are fatal.
-      Do NOT test this by stopping a container: the script re-applies before it
-      checks, so tofu simply recreates it. Break something the apply will not
-      put back — `kubectl -n kube-system delete daemonset cilium`.
-- [ ] `local-down` leaves no container, volume or network behind. Diff against a
-      snapshot taken before `local-up`; a bare `docker ps -a` on a workstation
-      lists every other project you have ever run.
-- [ ] a second `local-up`, with the manifest already rendered, does not re-render it
+Run 2026-08-20 on a cluster torn down first, so the Docker snapshot is a
+baseline and not a picture of what was already there.
+
+- [x] `local-up` renders `cilium-local.yaml` itself when the manifest is absent
+      → removed, then rendered at 57374 bytes.
+- [x] **Cilium is actually running** — 6/6 pods `1/1 Running`, one per node, on a
+      cluster whose 6 nodes all reached Ready.
+- [x] `local-status` prints etcd members → 3.
+- [x] `local-test` reaches its green banner **and** its checks are fatal. Green
+      first; then `kubectl -n kube-system delete daemonset cilium` and it went
+      RED — `✗ Cilium pods running: 0/6 — the cluster has no working CNI`, exit
+      201. The CNI check is fatal; `backlog.md` still has the two next to it that
+      are only warnings.
+- [x] `local-down` leaves no container, volume or network behind → 1/0/4 before,
+      1/0/4 after, nothing added. The diff was itself checked against two
+      deliberately different snapshots, because the first version of it compared
+      a file that did not exist and reported zero for that reason.
+- [x] a second `local-up`, with the manifest already rendered, does not re-render
+      it → same mtime, same size, same **inode**.
 
 ## 3. Emulated cloud — no account, real provider binaries
 
@@ -169,8 +176,12 @@ untested cases. Take as many as the budget allows, top down:
 
 - [ ] **`SCW-work-ha`** — the `workload` role on real cloud; only `management`
       has ever been exercised.
-- [ ] **`SCW-storage`** — `worker_storage` disks + LUKS2 `UserVolumeConfig`,
-      never applied anywhere.
+- [ ] **`SCW-storage`** — on the **workload** role. "Never applied anywhere" was
+      wrong: the reference management cluster carries `worker_storage`, and its
+      three block volumes and UserVolumeConfig patches applied on 2026-08-19 and
+      again on 2026-08-20. What has never been done is READING BACK that they are
+      formatted LUKS2 and mounted at `/var/mnt/<name>` — `cluster-verify` asks
+      about no volume at all.
 - [ ] **`task cluster-roll`** — re-run it since the Talos version moved.
 
 ## 5. Cloud — OVH
