@@ -108,15 +108,25 @@ task feint-plan PROVIDER=scaleway FEINT_ENDPOINT=https://api.scaleway.com   # mu
 task feint-down
 ```
 
-- [ ] both providers green on plan and on the apply/destroy cycle, each with an
-      empty re-plan and a destroy confirmed against the API
-- [ ] the ranking still shows the four known operations and no new one —
-      3 on Scaleway (`ipam BookIP`, `lb ips`, `vpc-gw ips`), 1 on Outscale
-      (`CreateLoadBalancer`). A fifth means a module started calling something
-      nothing serves.
-- [ ] the guard refuses a non-loopback endpoint — check it both ways, as a Task
+- [x] both providers green on plan and on the apply/destroy cycle, each with an
+      empty re-plan and a destroy confirmed against the API → 2026-08-20, feint
+      0.9.0: Scaleway 8 added / empty re-plan / 8 destroyed, Outscale 27 / empty
+      / 27, both confirmed against the API, no credentials in the shell.
+- [x] the ranking shows no operation that was not there before — but there are
+      now **three**, not four: 2 on Scaleway (`lb ips`, `vpc-gw ips`) and 1 on
+      Outscale (`CreateLoadBalancer`), all answering 501 or 404. `ipam BookIP`
+      left the list because feint 0.9.0 **serves** it now — it appears under
+      "already served" with 3 calls in 200/201. Fewer is not the alarm; a new one
+      would be, and there is none. Update this line, not the count, when the
+      emulator gains another.
+- [x] the guard refuses a non-loopback endpoint — check it both ways, as a Task
       variable and as an environment variable. A Task variable is not an
       environment variable, and this test once passed without testing anything.
+      → 2026-08-20, both refused with exit 201 and the same sentence: `endpoint
+      https://api.scaleway.com is not local; this lane drives an emulator, never a
+      real cloud`. **And the normal case was checked too**: the loopback endpoint
+      is accepted, exit 0. A guard written for the pathological case has to be run
+      against the ordinary one before it ships.
 
 ## 4. Cloud — Scaleway first, it is the reference
 
@@ -175,7 +185,9 @@ The matrix (`docs/deployment-test-matrix.md` §C) ranks these as the highest-val
 untested cases. Take as many as the budget allows, top down:
 
 - [ ] **`SCW-work-ha`** — the `workload` role on real cloud; only `management`
-      has ever been exercised.
+      has ever been exercised. **Skipped for 0.1.0 by decision** — the checklist
+      ranks these as worth the spend, not as gates, and none is in the announced
+      scope.
 - [ ] **`SCW-storage`** — on the **workload** role. "Never applied anywhere" was
       wrong: the reference management cluster carries `worker_storage`, and its
       three block volumes and UserVolumeConfig patches applied on 2026-08-19 and
@@ -285,8 +297,13 @@ and does not belong here twice. What a *release* adds to it:
 - [x] `task infra-plan ... STRICT=1` exits 0 afterwards → `plan empty after the
       upgrade`, and a full `task cluster-up` after it printed `No changes.` on all
       three roots.
-- [ ] whatever it shook out is in `backlog.md` before the tag, including what you
-      chose not to fix
+- [x] whatever it shook out is in `backlog.md` before the tag, including what you
+      chose not to fix → this cycle added: the purge scripts' uncounted deletions
+      (fixed), `ovh.py`'s missing refused-call counter (not fixed), encrypted
+      worker volumes applied and never read back, no way to ask what is in the
+      state, two harnesses that went red then green unchanged, the bucket this
+      release's own rename orphaned, and what deleting the staging lane stopped
+      covering.
 
 `scripts/dev/cluster-upgrade.sh` does all of the above unattended and does not
 retry the failing apply, on purpose.
@@ -295,10 +312,16 @@ retry the failing apply, on purpose.
 
 Only once everything above is green.
 
-- [ ] `docs/deployment-test-matrix.md` updated with what you actually ran —
-      including the ones that failed
-- [ ] `docs/backlog.md` — drop what is now done, add what this shook out
-- [ ] `CHANGELOG.md` names what 0.1.0 claims **and** what it does not
+- [x] `docs/deployment-test-matrix.md` updated with what you actually ran —
+      including the ones that failed → `L-ha` re-run, the new `SCW-mgmt-ha-2az`
+      row that is what 0.1.0 rests on, and `SCW-storage` corrected: it said
+      "never applied anywhere", which was wrong.
+- [x] `docs/backlog.md` — drop what is now done, add what this shook out →
+      idempotency-after-upgrade and the staging-lane decision removed as done;
+      seven entries added.
+- [x] `CHANGELOG.md` names what 0.1.0 claims **and** what it does not → four
+      Known limits carry the honest half, including the two checklist lines below
+      that are NOT met.
 - [ ] a GitHub Release, with notes that name the open items
 - [ ] `git describe --tags` clean
 - [x] the `envs/*.tfvars.example` carry `git_ref = "refs/heads/main"` — infra
@@ -309,11 +332,14 @@ Only once everything above is green.
 
 - [ ] clone the repo **as a stranger would** — no local state, no `.env.sh` —
       and do §1 and §2 one more time
-- [ ] read `README.md` top to bottom as someone who has never seen it: the
+- [x] read `README.md` top to bottom as someone who has never seen it: the
       disclaimers (Proxmox never applied on hardware, the undeletable Outscale
       Net, the emulator proving nothing about a real deploy, no applications
       above Cilium) are the reason a knowledgeable reader will trust the rest.
-      Do not soften them.
+      Do not soften them. → all four present. Checked on flattened text, because
+      the first pass matched nothing at all: the sentences wrap across lines. The
+      control is that the phrase §9 forbids — "validated on three providers" — is
+      absent.
 - [ ] decide what the announcement claims, and check each claim against the
       matrix. "Validated on three clouds" holds — Scaleway, OVH and Outscale.
       "Validated on three providers" does not: Proxmox has never touched real
