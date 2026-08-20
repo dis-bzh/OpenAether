@@ -118,6 +118,28 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
       **Closes:** a roll whose kept samples show zero consecutive failures, and
       the before/after to go with it. Rung: real cloud.
 
+- [ ] **Idempotency has never been checked AFTER an upgrade.** The three runs of
+      2026-08-19/20 all re-ran `cluster-up` on a cluster at its pinned version.
+      Nobody has re-run it on a cluster that was just upgraded. The mechanism
+      looks right — `staging-upgrade.sh:67` writes the new pin back into the
+      tfvars with `sed -i`, and the Outscale file now reads v1.13.8 / v1.36.3
+      exactly as its nodes report — so a bring-up should converge. Looking right
+      is not the same as measured, and the failure mode if it is wrong is a roll
+      back to the previous version on a healthy cluster.
+      **Closes:** `task infra-plan … STRICT=1` empty on a freshly upgraded
+      cluster, then a full `cluster-up` that changes nothing. Rung: real cloud,
+      and it costs one plan.
+
+- [ ] **An infrastructure change must not break a running cluster.** Nothing has
+      ever changed `vcpu`, `ram` or a disk size on a live cluster and watched
+      what happens. Some of those force the provider to replace the instance,
+      which on a control plane is an etcd member disappearing — the same event
+      the roll now handles deliberately, except here it would come from a plain
+      `cluster-up`. Whether the plan even routes such a change through
+      rolling-replace, or applies it to all six nodes at once, is unverified.
+      **Closes:** one bump of a node size on a live cluster, with the probe
+      running, and the answer recorded either way. Rung: real cloud.
+
 - [ ] **One apply still throws away the plan it decided on.** Everything else
       plans to a file and applies that file. `scripts/ops/rolling-replace.sh:1272`
       and `:1281` are two `-target` applies with `-auto-approve`; the safety plan
