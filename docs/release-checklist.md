@@ -263,9 +263,17 @@ and does not belong here twice. What a *release* adds to it:
       the seconds has not been measured. Do not present it as the explanation.
 - [x] run on **three clouds**, not only the reference one: the known first-apply
       failure (upstream #352) reproduces on OVH and not on Scaleway.
-- [ ] every node upgraded **in place**, none replaced, every one back under its
-      own name — and the running SCHEMATIC compared, not just the version tag
-- [ ] `task infra-plan ... STRICT=1` exits 0 afterwards
+- [x] every node upgraded **in place**, none replaced, every one back under its
+      own name — and the running SCHEMATIC compared, not just the version tag.
+      2026-08-20 Scaleway: 6/6 confirmed by each node's own Talos API
+      (`stage=running`, META fallback dropped) and `cluster-verify` answered
+      `✓ the fleet runs the pinned schematic (613e1592b2da…)` — an assertion, not
+      the warning it degrades to when no tunnel is open. The control planes rolled
+      in the designed order for the first time: the two followers, then
+      `etcd forfeit-leadership`, then the former leader.
+- [x] `task infra-plan ... STRICT=1` exits 0 afterwards → `plan empty after the
+      upgrade`, and a full `task cluster-up` after it printed `No changes.` on all
+      three roots.
 - [ ] whatever it shook out is in `backlog.md` before the tag, including what you
       chose not to fix
 
@@ -282,9 +290,9 @@ Only once everything above is green.
 - [ ] `CHANGELOG.md` names what 0.1.0 claims **and** what it does not
 - [ ] a GitHub Release, with notes that name the open items
 - [ ] `git describe --tags` clean
-- [ ] the `envs/*.tfvars.example` carry `git_ref = "refs/heads/main"` — infra
+- [x] the `envs/*.tfvars.example` carry `git_ref = "refs/heads/main"` — infra
       pins no `OpenAether-apps` tag, so there is no ordering constraint between
-      the two repositories and no matching-version rule to honour
+      the two repositories and no matching-version rule to honour → 12/12 files.
 
 ## 9. Before communicating
 

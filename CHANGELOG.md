@@ -21,8 +21,8 @@ Infrastructure only — nothing above that layer. Start at
 ### Added
 
 - **Every task is `<noun>-<verb>`**: `cluster-up`, `infra-plan`, `infra-apply`,
-  `tunnels-up`, `cluster-verify`, `cluster-upgrade`, `cluster-roll`,
-  `infra-down`, `cluster-down`. Upgrades:
+  `tunnels-up`, `cluster-verify`, `cluster-upgrade`, `cluster-idempotency`,
+  `cluster-roll`, `infra-down`, `cluster-down`. Upgrades:
   [`docs/upgrade.md`](docs/upgrade.md). Day-1 access:
   [`docs/admin-access.md`](docs/admin-access.md).
 - **An approval you cannot lose by accident.** `APPROVE=auto|ask` names *who*
@@ -50,13 +50,28 @@ Talos API, never from the tool that performed the upgrade.
 - **Outscale**: the same five pillars again, measured the same way — deploy (51
   resources, then 17), `cluster-verify` 11/11, idempotency 3/3, the same two
   upgrades on 6/6 nodes. It had to go onto a **fresh Net**: see the known limits.
-- **Idempotency is three assertions, not one**: an empty plan, the *same* nodes
-  (name and `creationTimestamp`), and a kubeconfig that still reaches the
-  apiserver. An empty plan alone would not catch a node replaced underneath it.
+- **Idempotency is a property of the command.** Run `task cluster-up` once or a
+  hundred times and you land in the state you asked for; the evidence is the
+  command's own plan, which prints `No changes.` on a cluster that already
+  matches. `task cluster-idempotency` adds the two assertions OpenTofu cannot
+  make — the *same* nodes (name and `creationTimestamp`), and a kubeconfig that
+  still reaches the apiserver — because an empty plan alone would not catch a
+  node replaced underneath it.
+- **A second Scaleway cycle on 2026-08-20**: `cluster-up`, `cluster-up`,
+  `cluster-upgrade`, `cluster-up`, all four green, both re-runs applying nothing
+  on all three roots. **Idempotency after an upgrade had never been checked**; it
+  holds because `cluster-upgrade` writes the new pin back into the tfvars. Talos
+  v1.13.8 → v1.13.9 on 6/6 nodes, and `cluster-verify` compared the running
+  *schematic*, not just the version tag.
 - **An upgrade is not seamless.** Longest apiserver outage 5 s on Scaleway (16
   failed probes out of 575), 7 s on OVH (9-10 out of ~540) and 8 s on Outscale.
   All three are *worse* than the best figures this project ever recorded (3 s,
   1 s and 1 s), and why has not been established. Plan for a gap.
+  A later Scaleway run measured **2 s**, with the roll taking the etcd leader
+  last and handing leadership over first. **That does not establish the fix**:
+  that run moved Talos alone, while the 5 s run also moved Kubernetes, which
+  restarts an apiserver per control plane by itself. Two workloads, two numbers
+  that do not compare — quote the 5/7/8 figures.
 - **353 offline assertions across 14 harnesses**, every one mutation-tested
   (`task test-scripts`). The emulated lane runs feint 0.9.0 against Scaleway provider
   2.81.0 — the same version the clusters run.
@@ -69,6 +84,29 @@ Talos API, never from the tool that performed the upgrade.
   completed, Stage never became Running, the META Upgrade key was never dropped,
   and the next reboot reverted the upgrade the tool had just reported as
   successful. Root cause, not a workaround.
+- **A failed purge no longer exits 0 saying "purge complete".** The teardown for
+  this release found six Outscale resources, was refused on all six, and the
+  script still reported success — the refusals were printed but never counted, so
+  the exit code every caller reads said the account was clean. All three
+  `purge-orphans` scripts now count failed deletions and end on one of three
+  verdicts, the third being *N of M failed, NOT clean*.
+
+### Removed
+
+- **The staging CI lane.** 479 lines that never deployed anything: the workflow's
+  one recorded run died for want of secrets that were never set, and part of it
+  verified a platform this release disables (35 Flux Kustomizations). A weekly
+  red that measures nothing teaches you to ignore red. 0.1.0 ships **no CI lane
+  that deploys** — the credentialed rung is run by hand, by someone watching. The
+  code is on the `archive/staging-lane` branch.
+
+### Changed
+
+- **`talos-image`'s "staging" bucket is now the "import" bucket.** This repository
+  already spends that word on environments (`environment = "dev"`), and reading
+  it as one here is what it cost. The variable is `import_bucket`, the bucket is
+  `…-talos-import`, and the default is no longer a literal name with the project
+  and the provider baked into it — it is empty, and refused where it is named.
 
 ### Known limits
 
@@ -97,3 +135,17 @@ Read these before deploying something that matters. Open items:
   never been applied on real hardware; the local Docker rung proves
   `modules/talos` without credentials and nothing about a cloud. Anything else is
   code, not a claim.
+- **Two release-checklist lines were not met, and are not ticked.** The OVH
+  teardown was run once where the checklist asks for twice — an Octavia load
+  balancer orphaned by one teardown was once silently reused by the next deploy,
+  and only a second teardown proves the check that now covers it. And the
+  Outscale purge is not clean: the pre-fix Net above is still there and no
+  deletion is accepted for it.
+- **One image bucket is orphaned by this release's own rename.** The old
+  `…-talos-staging` still holds every QCOW2 it was given, on every cloud built
+  from. `purge-orphans` lists it; emptying it is by hand.
+- **`ovh.py` cannot tell a refused question from an empty account.** Its two
+  siblings count refused calls and exit 2 when they found nothing but asked
+  nothing; it has no such counter. A total auth failure crashes it rather than
+  reporting clean, so this is a gap and not the same defect — but a partial
+  refusal would shrink its findings in silence.
