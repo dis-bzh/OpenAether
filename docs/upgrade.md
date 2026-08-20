@@ -9,10 +9,10 @@
 > Earlier runs on Outscale and on OVH reverted on the next reboot, and
 > `backlog.md` says why.
 >
-> The unattended version of this same procedure is
-> [`scripts/dev/cluster-upgrade.sh`](../scripts/dev/cluster-upgrade.sh), which
-> `.github/workflows/staging.yml` crons weekly — a lane that has never reached a
-> deploy (`backlog.md`). Until it does, this page is what was actually run.
+> The scripted version of this same procedure is `task cluster-upgrade`
+> ([`scripts/dev/cluster-upgrade.sh`](../scripts/dev/cluster-upgrade.sh)). It is
+> run by hand, by someone watching: no CI lane deploys anything. This page is
+> what was actually run.
 
 ## The two facts everything here follows from
 

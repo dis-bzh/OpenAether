@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Unit tests for the LAST sentence between a failed teardown and a bill.
 #
-# `purge-orphans/<provider>.py` is what staging.yml calls "Confirm the provider
-# is clean", what docs/first-cluster.md ends on, and what an operator reads to
+# `purge-orphans/<provider>.py` is what docs/first-cluster.md ends on, and what
+# an operator reads to
 # decide a session cost nothing more. It answers a question — "is anything still
 # there?" — and the dangerous answer is not "yes". It is "no" said by a script
 # that was never allowed to look.

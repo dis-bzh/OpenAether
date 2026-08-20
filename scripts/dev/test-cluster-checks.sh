@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Unit tests for the assertions that decide a staging run is GREEN, against a
+# Unit tests for the assertions that decide an upgrade run is GREEN, against a
 # stub kubectl — same shape as test-rolling-replace.sh, one rung below the cloud.
 #
-# flux-verify.sh and cluster-upgrade.sh are what turn "the apply returned"
-# into "the cluster works", and every conclusion they reach comes out of a
+# cluster-upgrade.sh is what turns "the apply returned" into "the cluster
+# works", and every conclusion it reaches comes out of a
 # kubectl query. The class of defect that cost 25 to 90 minutes of paid cloud
 # time each on 2026-08-15 was never the cloud: it was a query that FAILED and a
 # counter that read the failure as zero. `grep -c` on empty input prints 0, and
@@ -126,14 +126,11 @@ FAKE="$STUB_DIR/root"
 CLUSTER="$FAKE/infrastructure/opentofu/cluster"
 TFVARS="$CLUSTER/envs/${ROLE}-${PROVIDER}.tfvars"
 mkdir -p "$FAKE/scripts/dev" "$CLUSTER/envs"
-ln -s "$ROOT/scripts/dev/flux-verify.sh" "$FAKE/scripts/dev/flux-verify.sh"
 ln -s "$ROOT/scripts/dev/cluster-upgrade.sh" "$FAKE/scripts/dev/cluster-upgrade.sh"
-# cluster-upgrade now picks its verifier from the cluster: flux-verify.sh when
-# flux-system exists, infra-verify.sh when it does not. Both have to be reachable
-# from the fake root, or the all-green control dies on rc 127 — which is how this
-# harness caught the change five minutes after it was written.
+# cluster-upgrade chains into infra-verify at the end, which has to be reachable
+# from the fake root or the all-green control dies on rc 127 — which is how this
+# harness caught the verifier change five minutes after it was written.
 ln -s "$ROOT/scripts/dev/infra-verify.sh" "$FAKE/scripts/dev/infra-verify.sh"
-VERIFY="$FAKE/scripts/dev/flux-verify.sh"
 UPGRADE="$FAKE/scripts/dev/cluster-upgrade.sh"
 KEYFILE="$STUB_DIR/ssh-key-fixture"; : >"$KEYFILE"
 
@@ -179,14 +176,10 @@ run() { # <cmd...> — RUN_OUT gets stdout+stderr, RUN_RC the status
   case "$RUN_RC" in 124 | 137) RUN_HUNG=1 ;; esac
   RUN_OUT="$(cat "$STUB_DIR/out")"
 }
-verify()  { run env FLUX_READY_TIMEOUT="${FLUX_READY_TIMEOUT:-2}" "$VERIFY" "$PROVIDER" "$ROLE"; }
 # A real run rewrites the pins, so every scenario starts from a fresh env file a
 # patch below the target — otherwise the second one aborts on "upgrades nothing"
 # and each assertion after it silently measures the wrong run.
-# FLUX_READY_TIMEOUT reaches the flux-verify.sh this script chains into at the
-# end; without it that one waits out its 1500s default and the run dies on the
-# harness timeout instead of on an assertion.
-upgrade() { tfvars v0.0.1 v0.0.1; run env FLUX_READY_TIMEOUT=2 "$UPGRADE" "$PROVIDER" "$ROLE" "$KEYFILE"; }
+upgrade() { tfvars v0.0.1 v0.0.1; run "$UPGRADE" "$PROVIDER" "$ROLE" "$KEYFILE"; }
 said()    { case "$RUN_OUT" in *"$1"*) return 0 ;; esac; return 1; }
 called()  { grep -qF -- "$1" "$STUB_LOG"; }
 # awk, not `grep -c`: this file exists because of what `grep -c` returns on input
@@ -199,20 +192,14 @@ slept() { awk -v d="${1:-}" '/^sleep /{ if (d == "" || $2 == d) n++ } END{print 
 first_at() { awk -v pat="$1" 'index($0,pat){n=NR; exit} END{print (n ? n : 999999)}' "$STUB_LOG"; }
 last_at()  { awk -v pat="$1" 'index($0,pat){n=NR} END{print n+0}' "$STUB_LOG"; }
 
-# Every query flux-verify makes, all answered green. Scenarios prepend the one
-# line they want to change, because the first match wins.
-# cluster-upgrade asks the CLUSTER which verifier applies. This scenario is the
-# full platform, so flux-system must answer present or the upgrade would verify
-# against the infrastructure floor and the checks below would never run.
+# Every query the tail of a clean upgrade makes, all answered green. Scenarios
+# prepend the one line they want to change, because the first match wins.
+# `task ` is stubbed because cluster-upgrade chains into `task cluster-verify`
+# rather than calling the verifier directly — see the comment where it does.
 VERIFY_OK='get --raw=/readyz\t0\tok\n'
-VERIFY_OK+='get namespace flux-system\t0\tflux-system Active 9m\n'
+VERIFY_OK+='get namespace flux-system\t1\tError from server (NotFound): namespaces "flux-system" not found\n'
 VERIFY_OK+='get nodes --no-headers\t0\tnode-a Ready control-plane 9m v0.0.1%%node-b Ready <none> 9m v0.0.1\n'
-VERIFY_OK+='flux check\t0\t\n'
 VERIFY_OK+='k8s-app=cilium\t0\tcilium-aaaaa 1/1 Running 0 9m%%cilium-bbbbb 1/1 Running 0 9m\n'
-VERIFY_OK+='conditions[?(@.type=="Ready")]\t0\tnamespaces@@True%%sources@@True\n'
-VERIFY_OK+='spec.suspend==true\t0\t\n'
-VERIFY_OK+='get httproute longhorn\t1\tError from server (NotFound): httproutes "longhorn" not found\n'
-VERIFY_OK+="get gitrepository openaether\t0\t${GIT_REF}\n"
 VERIFY_OK+='task \t0\t\n'
 
 # Nodes and kubelets already on the target, for cluster-upgrade.
@@ -229,88 +216,6 @@ UPGRADE_OK="$SURVEY_PRE"
 UPGRADE_OK+='nodeInfo.kubeletVersion\t0\tv0.0.2%%v0.0.2\n'
 UPGRADE_OK+='nodeInfo.osImage\t0\tTalos (v0.0.2)%%Talos (v0.0.2)\n'
 
-echo "=== flux-verify: an unanswered query must not read as a healthy cluster ==="
-
-plan "$VERIFY_OK"
-verify
-# The control every negative below depends on. Without it, "the script never said
-# it was ready" is satisfied just as well by a harness that never ran the script.
-{ [ "$RUN_RC" -eq 0 ] && said '2 node(s) Ready' && said 'all 2 Flux Kustomizations Ready' \
-  && said 'no Kustomization is suspended' && said "tracked at ${GIT_REF}"; } \
-  && ok "an all-green cluster passes, and the harness reaches every check" \
-  || bad "the all-green control does not pass (rc=$RUN_RC) — every assertion below is meaningless until it does"
-
-plan "get nodes --no-headers\t1\tError from server (Forbidden): nodes is forbidden\n${VERIFY_OK}"
-verify
-{ [ "$RUN_RC" -ne 0 ] && ! said 'node(s) Ready'; } \
-  && ok "a failing node query does not read as a Ready cluster" \
-  || bad "a failing node query passed — 'no node is not-Ready' is not 'the nodes are Ready'"
-# The five-minute bounded wait is a fiction as soon as the query ERRORS rather
-# than returning an unready node: `TOTAL="$(kubectl … | wc -l)"` carries no
-# `|| true`, pipefail makes it rc 1, and set -e exits AT the assignment.
-if [ "$(slept 10)" -ge 25 ] && said 'not Ready after'; then
-  defect_gone "the node wait now survives a transient query error"
-else
-  defect "flux-verify.sh:37 ends the run at the FIRST failed node query — $(slept 10) of the 30 retries, and not one word about nodes on stdout or stderr"
-fi
-
-plan "conditions[?(@.type==\"Ready\")]\t1\terror: the server could not find the requested resource\n${VERIFY_OK}"
-verify
-{ [ "$RUN_RC" -ne 0 ] && ! said 'Flux Kustomizations Ready'; } \
-  && ok "a failing Kustomization query does not read as a converged DAG" \
-  || bad "a failing Kustomization query read as converged"
-# Correct here is to keep polling until FLUX_READY_TIMEOUT and then say what
-# stalled. `STATUS="$(kustomization_status)"` under `set -e` exits AT the
-# assignment instead: one transient API error ends the run, silently.
-if [ "$(slept 15)" -ge 1 ] && said 'not Ready after'; then
-  defect_gone "the Kustomization wait now survives a transient query error"
-else
-  defect "flux-verify.sh:85 aborts the whole run on the FIRST failed Kustomization query — $(slept 15) retries, no message, rc=$RUN_RC"
-fi
-
-plan "conditions[?(@.type==\"Ready\")]\t0\t\n${VERIFY_OK}"
-verify
-{ [ "$RUN_RC" -ne 0 ] && said '0 of 0 Kustomizations not Ready'; } \
-  && ok "an EMPTY Kustomization list waits, then fails: zero is not converged" \
-  || bad "an empty Kustomization list read as converged (rc=$RUN_RC)"
-
-plan "conditions[?(@.type==\"Ready\")]\t0\tnamespaces@@True%%sources@@False\n${VERIFY_OK}"
-verify
-{ [ "$RUN_RC" -ne 0 ] && said '1 of 2 Kustomizations not Ready' && said 'sources'; } \
-  && ok "one stalled Kustomization fails the run, by name" \
-  || bad "a stalled Kustomization passed — the Ready CONDITION is not being read"
-
-plan "spec.suspend==true\t0\tflux-system/foundation-databases \n${VERIFY_OK}"
-verify
-{ [ "$RUN_RC" -ne 0 ] && said 'suspended'; } \
-  && ok "a suspended Kustomization fails the run (its Ready status is stale)" \
-  || bad "a suspended Kustomization passed — a frozen DAG would read green"
-
-plan "get httproute longhorn\t0\tlonghorn 9m\n${VERIFY_OK}"
-verify
-{ [ "$RUN_RC" -ne 0 ] && said 'no authN'; } \
-  && ok "a published Longhorn HTTPRoute fails the run" \
-  || bad "the unauthenticated storage UI passed the regression gate"
-
-echo
-echo "=== flux-verify: the apps ref is the one the tfvars asked for ==="
-
-plan "get gitrepository openaether\t1\tError from server: connection refused\n${VERIFY_OK}"
-verify
-[ "$RUN_RC" -ne 0 ] && ok "an unresolvable ref fails the run" || bad "no ref at all passed"
-
-# What a fix would compare against — read from the tfvars, the way the script
-# does not. `refs/tags/X` on the object, or `X` when Flux fills ref.tag alone.
-PINNED="$(grep -E '^[[:space:]]*git_ref[[:space:]]*=' "$TFVARS" | sed -E 's/.*"([^"]+)".*/\1/')"
-plan "get gitrepository openaether\t0\tmain\n${VERIFY_OK}"
-verify
-if [ "$RUN_RC" -ne 0 ] && said 'main'; then
-  defect_gone "the ref check now compares against git_ref (${PINNED})"
-else
-  defect "flux-verify.sh:124 only asserts the ref is NON-EMPTY: the cluster tracks branch 'main' while the tfvars pins '${PINNED}', and the run ends green"
-fi
-
-echo
 echo "=== cluster-upgrade: resolving the target, without a cluster ==="
 
 tfvars v0.0.1 v0.0.1
@@ -399,14 +304,15 @@ called 'task image-build PROVIDER=stubcloud VERSION=v0.0.2 ENSURE=1' \
   && ok "the roll is driven non-interactively with APPROVE=auto, control planes first" \
   || bad "the roll was not called with APPROVE=auto (an unattended lane would hang on its prompt)"
 
-# --- and the branch a 1.0.0 cluster takes -------------------------------------
-# The upgrade must not demand a platform the release does not ship. Asked of the
-# cluster, so the answer cannot drift from a variable someone forgot to set.
-plan 'get namespace flux-system\t1\tNotFound\n'"${UPGRADE_OK}${VERIFY_OK}"
+# --- and what it verifies at the end ------------------------------------------
+# One verifier, because the release ships one floor. This asserts the chain is
+# still made at all: an upgrade that skipped its verify would look identical up
+# to here, which is how a broken cluster once passed for a working one.
+plan "${UPGRADE_OK}${VERIFY_OK}"
 upgrade
-{ said 'no flux-system' && said 'infrastructure floor'; } \
-  && ok "no flux-system: the upgrade verifies against the infrastructure floor" \
-  || bad "an apps-free cluster still had flux-verify demanded of it"
+{ said 'infrastructure floor' && called 'cluster-verify'; } \
+  && ok "the upgrade ends by verifying against the infrastructure floor" \
+  || bad "the upgrade never chained into cluster-verify"
 
 plan "nodeInfo.kubeletVersion\t0\tv0.0.2%%v0.0.1\n${UPGRADE_OK}${VERIFY_OK}"
 upgrade
@@ -540,8 +446,8 @@ YAML
       sed -E 's/^"?jsonpath="?//; s/"$//; s/\\(["$`\\])/\1/g'
   }
   # Read out of the scripts, so a template added tomorrow is covered too — and
-  # from all THREE, cluster-idempotency.sh included.
-  TPL_FILES=("$ROOT/scripts/dev/flux-verify.sh" "$ROOT/scripts/dev/cluster-upgrade.sh"
+  # from BOTH, cluster-idempotency.sh included.
+  TPL_FILES=("$ROOT/scripts/dev/cluster-upgrade.sh"
     "$ROOT/scripts/dev/cluster-idempotency.sh")
   n_tpl=0
   while read -r tpl; do

@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# Upgrade Kubernetes, then Talos, on a running staging cluster — and measure the
+# Upgrade Kubernetes, then Talos, on a running cluster — and measure the
 # interruption instead of asserting there was none.
 #
-# 1.0.0 shipped the upgrade path unverified. It was then proven by hand on all
-# three clouds (2026-08-13) and has had no unattended coverage since, which is
-# the same position 1.0.0 was in.
+# This is `task cluster-upgrade`. It was proven by hand on all three clouds
+# (2026-08-13, again 2026-08-19/20) and has never had unattended coverage.
 #
 # WHERE THE TARGET COMES FROM. Not from upstream's newest release: from
-# `cluster/variables.tf`, the pair this repository actually ships. The staging
+# `cluster/variables.tf`, the pair this repository actually ships. A cluster's
 # tfvars is expected to pin a patch BELOW it, so a run upgrades toward what a
 # reader deploying today would land on, and Renovate bumping the defaults is what
-# keeps the lane fed. Override with UPGRADE_TALOS_TO / UPGRADE_K8S_TO.
+# keeps a target to move to. Override with UPGRADE_TALOS_TO / UPGRADE_K8S_TO.
 #
 # NOTHING HERE RETRIES. The first apply after a `talos_version` bump is known to
 # fail on OVH and Outscale (backlog: "Provider produced inconsistent final plan").
@@ -175,8 +174,7 @@ if [ "$K8S_DONE" = 1 ] && [ "$TALOS_DONE" = 1 ]; then
     3. task cluster-upgrade …, which moves it to the targets in cluster/variables.tf
 
   UPGRADE_TALOS_TO / UPGRADE_K8S_TO override the targets upward instead, but only
-  if a newer patch actually exists upstream. In CI the pin lives in
-  STAGING_TFVARS_B64."
+  if a newer patch actually exists upstream."
 fi
 
 if [ "${DRY_RUN:-}" = "1" ]; then
@@ -325,29 +323,25 @@ task infra-plan ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY" STRICT=1 ||
   fail "the plan is not empty after the upgrade — read provider-contract.md § Node image drift before re-running anything"
 ok "plan empty after the upgrade"
 
-# Verify what this cluster ACTUALLY is, not what the upgrade lane assumes it is.
-# flux-verify.sh waits for 35 Flux Kustomizations; a 1.0.0 cluster is Talos
-# and Cilium and has none, so calling it unconditionally failed an upgrade that
-# had just succeeded on every count — nodes on the target version, three seconds
-# of API outage, empty plan. Asked of the cluster rather than of a variable,
-# because that is the only source that cannot drift from reality.
-if kubectl get namespace flux-system >/dev/null 2>&1; then
-  "$ROOT/scripts/dev/flux-verify.sh" "$PROVIDER" "$ROLE"
-else
-  ok "no flux-system — verifying against the infrastructure floor"
-  # Through the TASK, not the script. infra-verify reads `tofu output` for the
-  # topology, the app LB and the bucket names, and that needs AWS_* — which this
-  # repository deliberately never sets ambiently: the Taskfile's provider-env
-  # anchor derives them per provider. Called directly from here, the verifier
-  # cannot read the state and reports two checks it could not perform.
-  #
-  # Measured on a live Scaleway cluster 2026-08-17: 7 passed / 2 failed from
-  # here, 9 passed / 0 failed through `task verify`, same cluster, same second.
-  # Both failures were the guards added that morning refusing to conclude from
-  # an unanswered question — the old code would have read the empty output as
-  # "no application load balancer" and gone green.
-  task cluster-verify PROVIDER="$PROVIDER" ROLE="$ROLE"
-fi
+# One verifier, and it is the release scope: Talos, Cilium, no Flux. The
+# full-platform check that waited for 35 Flux Kustomizations was deleted with the
+# staging lane it served — 0.1.0 disables Flux, so a cluster that has it is
+# outside what this release validates and infra-verify says so rather than
+# quietly verifying something else.
+ok "verifying against the infrastructure floor"
+
+# Through the TASK, not the script. infra-verify reads `tofu output` for the
+# topology, the app LB and the bucket names, and that needs AWS_* — which this
+# repository deliberately never sets ambiently: the Taskfile's provider-env
+# anchor derives them per provider. Called directly from here, the verifier
+# cannot read the state and reports two checks it could not perform.
+#
+# Measured on a live Scaleway cluster 2026-08-17: 7 passed / 2 failed from here,
+# 9 passed / 0 failed through `task verify`, same cluster, same second. Both
+# failures were the guards added that morning refusing to conclude from an
+# unanswered question — the old code would have read the empty output as "no
+# application load balancer" and gone green.
+task cluster-verify PROVIDER="$PROVIDER" ROLE="$ROLE"
 
 report_probe
 echo "✓ ${PROVIDER}/${ROLE}: upgraded ${TALOS_FROM}→${TALOS_TO} / ${K8S_FROM}→${K8S_TO}, in place"

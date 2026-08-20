@@ -1155,6 +1155,24 @@ tasks:
       # what an upgrade must prove could only be run by typing its path.
       - ./scripts/dev/cluster-upgrade.sh {{.PROVIDER}} {{.ROLE}} {{.KEY}}
 
+  cluster-idempotency:
+    desc: >-
+      Re-run the bring-up on a live cluster and assert nothing moved: empty plan, the SAME nodes
+      (names and creationTimestamps), a kubeconfig that still reaches the apiserver.
+      Usage: task cluster-idempotency PROVIDER=… [ROLE=management] [KEY=~/.ssh/yourkey]
+    # A second `task cluster-up` already says "No changes." on its own, and that
+    # is the idempotence evidence — the property belongs to the command, not to
+    # this target. What OpenTofu cannot see is the other two assertions: a node
+    # replaced behind an identical plan, and the kubeconfig a re-run invalidated
+    # on 2026-07-30. This existed only as a CI step until that lane was deleted.
+    requires:
+      vars: [PROVIDER]
+    vars:
+      ROLE: '{{.ROLE | default "management"}}'
+      KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
+    cmds:
+      - ./scripts/dev/cluster-idempotency.sh {{.PROVIDER}} {{.ROLE}} {{.KEY}}
+
   cluster-verify:
     aliases: [verify]
     desc: >-

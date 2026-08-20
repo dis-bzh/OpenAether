@@ -9,11 +9,10 @@
 > interrogée sur ce qu'il exécute. Les runs antérieurs sur Outscale et sur OVH
 > revenaient en arrière au redémarrage suivant, et `backlog.md` dit pourquoi.
 >
-> La version non assistée de cette même procédure est
-> [`scripts/dev/cluster-upgrade.sh`](../scripts/dev/cluster-upgrade.sh), que
-> `.github/workflows/staging.yml` cronne chaque semaine — une voie qui n'a jamais
-> atteint un déploiement (`backlog.md`). En attendant, cette page est ce qui a
-> réellement tourné.
+> La version scriptée de cette même procédure est `task cluster-upgrade`
+> ([`scripts/dev/cluster-upgrade.sh`](../scripts/dev/cluster-upgrade.sh)). Elle
+> se lance à la main, sous surveillance : aucune voie de CI ne déploie quoi que
+> ce soit. Cette page est ce qui a réellement tourné.
 
 ## Les deux faits dont découle tout le reste
 

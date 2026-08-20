@@ -45,7 +45,7 @@ docker run --rm -v /tmp/repo.tar:/tmp/repo.tar:ro ubuntu:24.04 bash -c '
 - [ ] it warns if `nc` is absent, and does not claim to install it
 - [ ] every command the README quick start names exists (`task --list`)
 - [ ] `task preflight` green — lint, render, validate, `tofu test` and the script
-      harnesses. That is 344 offline assertions across 11 harnesses, every one
+      harnesses. That is 350 offline assertions across 14 harnesses, every one
       mutation-tested; a count that has silently shrunk is a red line, not a pass.
 
 ## 2. Local Docker — the credential-free rung

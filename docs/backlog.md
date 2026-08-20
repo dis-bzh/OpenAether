@@ -63,7 +63,7 @@ every apply plans to a file and applies THAT file, and a saved plan never prompt
 Destroy always takes two commands and no flag collapses them. S3 credentials are
 namespaced by the cloud that HOLDS the bucket, and a cross-provider backup is
 proven — an encrypted tfstate at Outscale while the cluster runs on Scaleway.
-344 offline assertions across 11 harnesses, every one mutation-tested; the
+350 offline assertions across 14 harnesses, every one mutation-tested; the
 emulated lane runs feint 0.9.0 against Scaleway provider 2.81.0, the version the
 clusters run.
 
@@ -172,11 +172,7 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
       above them has no `-out` either, so only the string `N to destroy` survives
       it and the guard that refuses to "apply blind" asserts against a plan that
       no longer exists. The second apply is neither planned nor counted. This is
-      also the only reason `.github/workflows/staging.yml:116,121` still set
-      `TF_CLI_ARGS_apply` / `_destroy` to `-auto-approve` — inert next to a saved
-      plan, but they would auto-approve a REGRESSION back to a prompting apply.
-      **Closes:** planning to a file, counting from that file, applying it, and
-      both `TF_CLI_ARGS_*` deleted from the workflow.
+      **Closes:** planning to a file, counting from that file, and applying it.
       `rolling-replace.sh:1108` prints the command in `--dry-run` and must change
       in the same commit. Rung: `task test`, then one real roll.
 
@@ -261,21 +257,16 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
       **Closes:** a mutation for each shape, each seen to go red before it is
       believed; counts asserted against expected values. Rung: `task test`.
 
-- [ ] **The staging lane has never run, and the re-scope stranded part of it.**
-      `.github/workflows/staging.yml` still carries the weekly cron (Mondays
-      03:17) and still has no `STAGING_*` secret: its one recorded run,
-      2026-08-17, failed at "Materialise the tfvars" and it has never reached a
-      deploy. A weekly red that measures nothing teaches you to ignore red.
-      1428 lines serve this lane, and `flux-verify.sh` waits for 35 Flux
-      Kustomizations — a platform this release disables — so part of it tests
-      something the product no longer ships. `cluster-upgrade.sh` is different:
-      it is reachable from `task` and encodes the upgrade proven on three clouds.
-      **Decide:** whether 0.1.0 ships a staging lane at all. Then either configure
-      the secrets (`check-staging-secrets.sh` prints the 17 `gh secret set` lines;
-      the three `STAGING_TFVARS_B64_*` must pin both versions one patch below
-      `cluster/variables.tf` — that gap is the only thing the upgrade stage has to
-      move) and watch one green run per provider, or delete what the re-scope
-      stranded and drop the cron. Rung: real cloud, which is the point.
+- [ ] **Deleting the staging lane left two things unchecked.** 0.1.0 ships no
+      CI lane that deploys (decided 2026-08-20; the code is on the
+      `archive/staging-lane` branch). Gone with it: the only automated proof that
+      a bring-up works end to end without a human, and the full-platform verifier
+      — so nothing now checks that `rolling-replace.sh` leaves no Kustomization
+      suspended and no PodDisruptionBudget missing, which is the exact failure
+      mode two of its comments warn about. Neither matters while Flux is
+      disabled; both matter the day it returns.
+      **Closes:** a lane that reaches a green deploy unattended, or a verifier
+      that owns the post-roll Flux state. Rung: real cloud.
 
 - [ ] **Why the tunnels died is still not diagnosed.** Outscale, 2026-08-18:
       `talos-tunnels.sh open` reported 6/6 up and nothing was listening on the

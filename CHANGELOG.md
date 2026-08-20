@@ -57,7 +57,7 @@ Talos API, never from the tool that performed the upgrade.
   failed probes out of 575), 7 s on OVH (9-10 out of ~540) and 8 s on Outscale.
   All three are *worse* than the best figures this project ever recorded (3 s,
   1 s and 1 s), and why has not been established. Plan for a gap.
-- **344 offline assertions across 11 harnesses**, every one mutation-tested
+- **350 offline assertions across 14 harnesses**, every one mutation-tested
   (`task test-scripts`). The emulated lane runs feint 0.9.0 against Scaleway provider
   2.81.0 — the same version the clusters run.
 

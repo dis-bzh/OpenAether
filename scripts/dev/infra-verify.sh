@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # What a PURE-INFRA cluster must prove once `task cluster-up` returns.
 #
-# flux-verify.sh is the full-platform check: it waits for 35 Flux
-# Kustomizations, the Gateway, the OpenAether-apps ref. On a 1.0.0 cluster none
-# of that exists, so running it there would go red for reasons that have nothing
-# to do with the infrastructure. This is its floor-sized sibling, and the claim
-# it defends is exactly the release scope: a cluster that is healthy, up and
-# ready, with its state backed up.
+# This is the ONLY verifier. A full-platform sibling used to wait for 35 Flux
+# Kustomizations, the Gateway and the OpenAether-apps ref; it went with the
+# staging lane, because 0.1.0 ships none of that. The claim defended here is
+# exactly the release scope: a cluster that is healthy, up and ready, with its
+# state backed up.
 #
 # It also asserts what must be ABSENT. "No Flux" and "no application load
 # balancer" are the product decision for 1.0.0, and a decision nothing checks is
