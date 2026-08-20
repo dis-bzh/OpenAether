@@ -118,5 +118,67 @@ for kind in primary replica; do
 done
 
 
+echo "--- the state lock is claimed only where the store honours it ---"
+# use_lockfile locks by PUTting a .tflock with `If-None-Match: *`. MEASURED with
+# one client against all three stores on 2026-08-20: Scaleway and OVH refuse the
+# second write, Outscale ACCEPTS it. Claiming a lock there would print
+# "Acquiring state lock" and hold nothing, which is worse than none — so this
+# asserts the asymmetry rather than trusting it to stay true by accident.
+# Keyed on the endpoint, because a Proxmox cluster's state lives elsewhere.
+for pair in "scaleway:yes" "ovh:yes" "outscale:no"; do
+  prov="${pair%%:*}"; want="${pair##*:}"
+  tf="infrastructure/opentofu/cluster/envs/management-${prov}.tfvars"
+  [ -f "$tf" ] || { echo "  (no $tf — skipped)"; continue; }
+  if scripts/internal/tf-backend.sh "$tf" 2>/dev/null | grep -q 'use_lockfile=true'; then got=yes; else got=no; fi
+  eq "${prov}: state lock claimed = ${want}" "$got" "$want"
+done
+
+# And the reason it is keyed on the endpoint, not the provider name.
+if scripts/internal/tf-backend.sh infrastructure/opentofu/cluster/envs/management-proxmox.tfvars 2>/dev/null \
+   | grep -q 'use_lockfile=true'; then got=yes; else got=no; fi
+case "$(grep -E '^s3_primary_endpoint' infrastructure/opentofu/cluster/envs/management-proxmox.tfvars 2>/dev/null)" in
+  *scw.cloud*|*io.cloud.ovh.net*) eq "proxmox on a locking store claims the lock" "$got" "yes" ;;
+  *outscale.com*)                 eq "proxmox on Outscale claims no lock"        "$got" "no"  ;;
+  *) echo "  (proxmox endpoint is not one of the three — not asserted)" ;;
+esac
+
+
+echo "--- one data directory per cluster, so two providers cannot collide ---"
+# .terraform/ holds the CURRENT backend, so with one shared source directory the
+# target that inited last owned it, and a second run applied one cloud's plan
+# against another's pointer. Survived twice by luck. Every task that talks to a
+# backend must therefore carry its own TF_DATA_DIR, keyed on the pair that
+# selects the tfvars — and must declare ROLE, or the key collapses to
+# `.terraform--<provider>` and two roles share a directory again.
+OUT_TDD="$(python3 - <<'PY2'
+import yaml, re
+raw = open('Taskfile.yml').read()
+t = yaml.safe_load(raw)['tasks']
+blocks = re.split(r'\n  (?=[a-z_][a-z0-9_-]*:\n)', raw)
+bad = []
+for b in blocks:
+    name = b.split(':', 1)[0].strip()
+    if '*provider-env' not in b and '&provider-env' not in b:
+        continue
+    spec = t.get(name) or {}
+    env = spec.get('env') or {}
+    tdd = env.get('TF_DATA_DIR')
+    if not tdd:
+        bad.append(f'{name}: no TF_DATA_DIR')
+        continue
+    if '{{.ROLE}}' not in tdd or '{{.PROVIDER}}' not in tdd:
+        bad.append(f'{name}: TF_DATA_DIR={tdd} is not keyed on ROLE and PROVIDER')
+    if 'ROLE' not in (spec.get('vars') or {}) and 'ROLE' not in [v for v in (spec.get('requires') or {}).get('vars', [])]:
+        bad.append(f'{name}: inherits the data dir but declares no ROLE')
+print('\n'.join(bad))
+PY2
+)"
+if [ -z "$OUT_TDD" ]; then
+  ok "every backend-touching task has its own TF_DATA_DIR, keyed on ROLE and PROVIDER"
+else
+  while IFS= read -r l; do bad "$l"; done <<<"$OUT_TDD"
+fi
+
+
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

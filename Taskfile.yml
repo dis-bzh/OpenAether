@@ -537,6 +537,14 @@ tasks:
       # there is one: every apply still plans, then applies that saved plan.
       APPROVE: '{{.APPROVE | default "ask"}}'
     env: &provider-env
+      # One source directory, several clusters — and .terraform/ holds the CURRENT
+      # backend, so whichever target inited last owned it. Two runs on different
+      # providers then stole it from each other; survived twice by luck on
+      # 2026-08-19 and 2026-08-20. TF_DATA_DIR relocates that per-directory data,
+      # VERIFIED offline: two inits on different backends in one source directory
+      # each keep their own pointer. Keyed on ROLE-PROVIDER because that is
+      # exactly how the tfvars — and therefore the backend — are selected.
+      TF_DATA_DIR: '.terraform-{{.ROLE}}-{{.PROVIDER}}'
       AWS_ACCESS_KEY_ID:
         sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak
       AWS_SECRET_ACCESS_KEY:
@@ -797,6 +805,7 @@ tasks:
     requires:
       vars: [PROVIDER]
     vars:
+      ROLE: '{{.ROLE | default "management"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
       # One word for "do not ask me", the same one infra-apply uses. It used to be
       # a `--yes` buried in CLI_ARGS, which meant three different spellings of the
@@ -935,6 +944,8 @@ tasks:
     # the documentation: it names the variable instead of guessing.
     requires:
       vars: [PROVIDER]
+    vars:
+      ROLE: '{{.ROLE | default "management"}}'
     env: *provider-env
     cmds:
       - ../../../scripts/ops/backup-state.sh .
@@ -1015,6 +1026,7 @@ tasks:
     requires:
       vars: [PROVIDER]
     vars:
+      ROLE: '{{.ROLE | default "management"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
       KEEP: '{{.KEEP | default "30"}}'
     env: *provider-env
@@ -1027,6 +1039,7 @@ tasks:
     internal: true
     dir: infrastructure/opentofu/cluster
     vars:
+      ROLE: '{{.ROLE | default "management"}}'
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
     env: *provider-env
     cmds:
