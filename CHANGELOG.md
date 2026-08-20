@@ -14,14 +14,15 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ## [0.1.0] — 2026-08-20
 
-> **The 0.1.0 tag was moved once before publication**, from `421c1ee` to
-> `fc24092`. Reading the published tag as a stranger — §9 of the release
-> checklist, which exists for this — found a real admin IP that had been serving
-> as a test fixture in `check-gitleaks-rules.sh` since 2026-08-13. History was
-> rewritten and the tag re-cut on the clean commit. No release had been published
-> under the first tag, and nothing depended on it. GitHub still serves the old
-> blob by direct SHA and the diff of the pull request that introduced it; only
-> GitHub Support can remove those.
+> **This tag does not point at the commit first cut as 0.1.0.** That one,
+> `421c1ee`, carried a real admin IP that had been serving as a test fixture in
+> `check-gitleaks-rules.sh` since 2026-08-13 — found by reading the published tag
+> as a stranger, which is what §9 of the release checklist is for. History was
+> rewritten and the tag re-cut, twice: once on the purged history, once more to
+> take in this record of it. No release was ever published under the first tag
+> and nothing depended on it. GitHub still serves the old blob by direct SHA and
+> the diff of the pull request that introduced it; only GitHub Support can remove
+> those, and anyone who cloned before the rewrite keeps it.
 
 **One Talos cluster, on one supported cloud, with one fixed foundation: Cilium.**
 Infrastructure only — nothing above that layer. Start at
