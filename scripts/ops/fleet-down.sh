@@ -206,7 +206,9 @@ info "Step 2/3 — management cluster ($ROLE / $PROVIDER)"
 # commands, and it is the one an operator reads.
 if [ "$PLAN_ONLY" = 1 ]; then
   PLAN_OUT="destroy-${ROLE}-${PROVIDER}.tfplan"
-  ( cd "$ROOT" && task infra-down-plan ROLE="$ROLE" PROVIDER="$PROVIDER" OUT="$PLAN_OUT" ) || {
+  # Say who is driving, so the inner target does not advertise a next step that
+  # would bypass this script's own first phase.
+  ( cd "$ROOT" && OA_DRIVEN_BY=fleet-down task infra-down-plan ROLE="$ROLE" PROVIDER="$PROVIDER" OUT="$PLAN_OUT" ) || {
     warn "could not compute the destruction plan"; exit 1; }
   # Echo back the flags we were GIVEN, not a fixed string: step 1 refuses without
   # --force-no-edges when the CAPI CRDs are absent, so a hard-coded line printed a

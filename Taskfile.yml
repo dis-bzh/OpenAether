@@ -871,10 +871,20 @@ tasks:
         echo "  already gone, and it will not notice one that drifted." >&2
         tofu plan -destroy -refresh=false -out="{{.OUT}}" -var-file="$VARS" -var talos_bootstrap=false
       - |
-        echo
-        echo "✓ destruction plan written to {{.OUT}}. Nothing has been destroyed."
-        echo "  Read it, then apply exactly it:"
-        echo "    task infra-down PROVIDER={{.PROVIDER}} ROLE={{.ROLE}} PLAN={{.OUT}}"
+        # Silent when something else is driving. Called from fleet-down, this
+        # printed its own next step right above fleet-down's — two commands for
+        # one action, at two different levels, and following the inner one SKIPS
+        # the CAPI-children step that cluster-down exists to enforce. An operator
+        # asked which of the two to run, which is the answer.
+        if [ "${OA_DRIVEN_BY:-}" = "" ]; then
+          echo
+          echo "✓ destruction plan written to {{.OUT}}. Nothing has been destroyed."
+          echo "  Read it, then apply exactly it:"
+          echo "    task infra-down PROVIDER={{.PROVIDER}} ROLE={{.ROLE}} PLAN={{.OUT}}"
+        else
+          echo
+          echo "✓ destruction plan written to {{.OUT}}. Nothing has been destroyed."
+        fi
 
   infra-down:
     aliases: [destroy]

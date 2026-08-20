@@ -563,5 +563,32 @@ case "$(argv PLAN=d.tfplan APPROVE=auto)" in
 esac
 
 
+echo "=== one action, one next step ==="
+# infra-down-plan printed its own "then run task infra-down …" even when
+# fleet-down had called it — so a --plan run ended with TWO commands at two
+# levels, and following the inner one skips the CAPI-children phase that
+# cluster-down exists to enforce. An operator asked which of the two to run.
+# ${OA_DRIVEN_BY:-} is SHELL syntax, evaluated when the block runs, not when
+# go-task renders it — so the branch cannot be read off a dry-run. Cut the echo
+# block out of the rendering and RUN it, which is the only way to see which side
+# was taken.
+echo_block() { # <env assignment...>
+  "$REAL_TASK" --dry infra-down-plan PROVIDER=scaleway ROLE=management OUT=d.tfplan 2>&1 \
+    | sed -n '/if \[ "${OA_DRIVEN_BY/,/^ *fi$/p' | env "$@" bash 2>/dev/null
+}
+case "$(echo_block OA_DRIVEN_BY=)" in
+  *"task infra-down PROVIDER=scaleway"*) ok "unpiloted, it names its own next step" ;;
+  *) bad "unpiloted, the next step is missing: $(echo_block OA_DRIVEN_BY= | tr '\n' '|')" ;;
+esac
+case "$(echo_block OA_DRIVEN_BY=fleet-down)" in
+  *"task infra-down PROVIDER="*) bad "driven, it still advertises the step that skips the CAPI phase" ;;
+  *"Nothing has been destroyed"*) ok "driven, it reports the plan and leaves the next step to its caller" ;;
+  *) bad "driven, it printed nothing recognisable: $(echo_block OA_DRIVEN_BY=fleet-down | tr '\n' '|')" ;;
+esac
+grep -q 'OA_DRIVEN_BY=fleet-down task infra-down-plan' "$ROOT/scripts/ops/fleet-down.sh" \
+  && ok "fleet-down declares itself as the driver" \
+  || bad "fleet-down no longer declares itself — the inner next step comes back"
+
+
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

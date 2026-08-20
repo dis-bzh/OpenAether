@@ -147,7 +147,7 @@ variable "talos_version" {
   description = "Talos Linux version"
   type        = string
   # renovate: datasource=github-releases depName=siderolabs/talos
-  default = "v1.13.8"
+  default = "v1.13.9"
 }
 
 variable "kubernetes_version" {

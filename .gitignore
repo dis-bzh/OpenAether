@@ -56,6 +56,9 @@ worker.yaml
 .terraform-validate/
 # Same isolation for the emulated-cloud lane (docs/emulated-cloud.md).
 .terraform-feint/
+# One data dir per cluster (TF_DATA_DIR), so two providers cannot steal the
+# backend pointer from each other.
+.terraform-*/
 .terraform.lock.hcl
 *.tfstate
 *.tfstate.*
