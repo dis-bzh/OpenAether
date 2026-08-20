@@ -910,6 +910,70 @@ etcd_remove_member() { # <node_name> <node_ip> <exclude_index>
 # Queries each CP in turn until one answers — robust to the CP currently rebooting
 # (talosctl -e <tunnel> connects, -n <real-ip> is the node identity apid validates).
 # Each member row carries exactly one peer URL on :2380, so that count == members.
+# --- etcd leadership, and the order that spares it ----------------------------
+#
+# Taking a control plane away while it carries the etcd leader forces an
+# election, and during an election EVERY apiserver fails — which is what a run
+# of consecutive probe failures looks like, as opposed to the intermittent ones
+# a single missing backend would cause. Measured 2026-08-20 on a cluster that
+# had been bootstrapped once and rolled once: RAFT TERM 13.
+#
+# So: roll the followers first (the leader is never disturbed, quorum holds at
+# 2/3), then hand leadership over deliberately to a peer that is ALREADY
+# upgraded, then roll the former leader. One chosen transition instead of three
+# suffered.
+#
+# `talosctl etcd status` has no --output json, and its columns contain spaces
+# ("DB SIZE", "IN USE"), so positional parsing is fragile. The two etcd ids are
+# the only 16-hex-character fields in the row: the first is this node's own
+# MEMBER, the second the cluster's LEADER. VERIFIED against a live cluster.
+etcd_member_and_leader() { # <endpoint> <ip> → "<member> <leader>", or empty
+  talosctl -e "$1" -n "$2" etcd status 2>/dev/null |
+    awk 'NR>1 { o=""; for (i = 1; i <= NF; i++) if ($i ~ /^[0-9a-f]{16}$/) o = o $i " ";
+                if (o != "") { print o; exit } }'
+}
+
+etcd_leader_index() { # → index of the CP carrying the leader, or empty
+  local k ep ip m l
+  for k in "${!CP_IPS[@]}"; do
+    ep="$(talos_ep cp "$k")"; ip="${CP_IPS[$k]}"
+    read -r m l <<<"$(etcd_member_and_leader "$ep" "$ip")"
+    [ -n "${m:-}" ] && [ "$m" = "${l:-}" ] && { printf '%s' "$k"; return 0; }
+  done
+  return 1
+}
+
+cp_roll_order() { # → CP indices, the etcd leader LAST
+  local lead k
+  lead="$(etcd_leader_index)" || {
+    # No leader answered. Say so and keep the declared order rather than
+    # inventing one: an unreadable cluster is not a reordering problem.
+    warn "could not identify the etcd leader — rolling control planes in index order"
+    printf '%s
+' "${!CP_IPS[@]}"; return 0; }
+  for k in "${!CP_IPS[@]}"; do [ "$k" = "$lead" ] || printf '%s
+' "$k"; done
+  printf '%s
+' "$lead"
+}
+
+forfeit_leadership() { # <index> — hand etcd leadership to a peer, and check it moved
+  local k="$1" ep ip deadline m l
+  ep="$(talos_ep cp "$k")"; ip="${CP_IPS[$k]}"
+  info "Handing etcd leadership off ${NODE_PREFIX}-cp-${k} before taking it down…"
+  talosctl -e "$ep" -n "$ip" etcd forfeit-leadership >/dev/null 2>&1 || {
+    warn "forfeit-leadership was refused — continuing, the election will happen on its own"; return 0; }
+  deadline=$(( SECONDS + 30 ))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    read -r m l <<<"$(etcd_member_and_leader "$ep" "$ip")"
+    [ -n "${m:-}" ] && [ "$m" != "${l:-}" ] && { ok "etcd leadership moved off cp-${k}"; return 0; }
+    sleep 2
+  done
+  # Not fatal: the roll is still correct, it just costs the election we were
+  # trying to avoid. Saying so beats pretending the hand-off worked.
+  warn "etcd leadership did not move off cp-${k} within 30s — proceeding, expect an election"
+}
+
 wait_etcd_healthy() { # <expected_members>
   local want="$1" deadline=$(( SECONDS + ETCD_TIMEOUT ))
   info "Waiting for etcd ${want}/${want} members healthy…"
@@ -1400,7 +1464,14 @@ if [[ "$SCOPE" == "all" || "$SCOPE" == "workers" ]]; then
   for j in "${!WK_IPS[@]}"; do stop_here worker && break; replace_node worker "$j"; done
 fi
 if [[ "$SCOPE" == "all" || "$SCOPE" == "cp" ]]; then
-  for j in "${!CP_IPS[@]}"; do stop_here cp && break; replace_node cp "$j"; done
+  for j in $(cp_roll_order); do
+    stop_here cp && break
+    # Re-read each time: leadership can move for reasons that are not ours.
+    if [[ $DRY_RUN -eq 0 && "$j" == "$(etcd_leader_index || true)" ]]; then
+      forfeit_leadership "$j"
+    fi
+    replace_node cp "$j"
+  done
 fi
 
 hr

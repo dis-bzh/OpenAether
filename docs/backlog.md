@@ -80,22 +80,43 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
 
 ## Open — infrastructure
 
-- [ ] **The API interruption doubled on two clouds in the same week.** Same probe
-      (`/readyz`, ~1 Hz, through the load-balanced endpoint), asserting on the
-      LONGEST CONSECUTIVE run of failures:
+- [ ] **The API is unreachable for seconds during a control-plane roll.** Same
+      probe (`/readyz`, ~1 Hz, through the load-balanced endpoint), asserting on
+      the LONGEST CONSECUTIVE run of failures:
 
-      | | before | 2026-08-19 |
+      | | before | 2026-08-19/20 |
       |---|---|---|
       | Scaleway | 3 s, 7 fails in 1817 | **5 s**, 16 in 575 |
       | OVH | 1 s, 1 fail in 912 | **7 s**, 9-10 in ~540 |
+      | Outscale | 1 s | **8 s**, 59 in 1179 |
 
-      Two clouds moved the same way, so it is a signal, not one bad run; the rate
-      moved further than the peak (~0.4% of samples → 2-3%). No cause established.
-      Untested candidates: the saved-plan apply path introduced the same day, the
-      30m LB timeouts, a provider-side change, or a shorter roll concentrating the
-      same disruption into fewer samples.
-      **Closes:** one bisected run naming which of them moved it — or a
-      measurement showing the comparison itself is invalid. Rung: real cloud.
+      Three clouds moved the same way, so it is systemic. What the numbers rule
+      OUT: the load balancer noticing a dead backend. It needs 5 checks × 15 s
+      (Scaleway, OVH) or 3 × 10 s (Outscale) — 30 to 75 s, far LONGER than the
+      gap. And only one CP is down at a time (`rolling-replace.sh:1309` gates on
+      etcd 3/3), so two of three still serve: a missing backend gives
+      INTERMITTENT failures, never a consecutive block.
+
+      A consecutive block means no backend served at all, and the mechanism that
+      does that is an etcd leader election — every apiserver fails during one.
+      Supporting, not proof: a cluster bootstrapped once and rolled once reported
+      `RAFT TERM 13`.
+
+      Addressed 2026-08-20 by rolling the followers first and handing leadership
+      over with `talosctl etcd forfeit-leadership` before the last CP — one
+      chosen transition instead of three forced elections. **Whether that is
+      actually what was costing the seconds is not yet measured**; the probe now
+      timestamps every sample and keeps them, so the next real roll says where
+      the gap falls rather than only how long it was.
+
+      Still open behind it: the health checks are TCP on 6443, which cannot tell
+      a listening port from a serving apiserver, so the LB keeps a not-ready CP
+      in rotation for up to 75 s. HTTP on `/readyz` with a short interval would
+      fix that — first verify `/readyz` answers unauthenticated on these
+      clusters. And `--shutdown-delay-duration` on kube-apiserver would let it
+      go not-ready BEFORE it stops, if Talos machine config can set it.
+      **Closes:** a roll whose kept samples show zero consecutive failures, and
+      the before/after to go with it. Rung: real cloud.
 
 - [ ] **One apply still throws away the plan it decided on.** Everything else
       plans to a file and applies that file. `scripts/ops/rolling-replace.sh:1272`

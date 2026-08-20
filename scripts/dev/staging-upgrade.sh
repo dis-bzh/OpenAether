@@ -195,12 +195,17 @@ fi
 # single node, which measures the node we are deliberately taking away.
 
 PROBE_LOG="$(mktemp)"
+# Each sample carries the wall-clock time it was taken. Without it a run can say
+# the API was gone for 8 seconds but never WHICH eight — and the two candidate
+# causes are told apart precisely by where the gap falls: at the moment a node
+# disappears (an etcd election) or while it reboots (the load balancer still
+# routing to it). A number with no timestamp cannot arbitrate between them.
 probe() {
   while :; do
     if kubectl get --raw=/readyz --request-timeout=2s >/dev/null 2>&1; then
-      echo ok
+      printf '%s ok\n' "$(date +%H:%M:%S)"
     else
-      echo FAIL
+      printf '%s FAIL\n' "$(date +%H:%M:%S)"
     fi
     sleep 1
   done >>"$PROBE_LOG"
@@ -242,10 +247,14 @@ report_probe() {
   fi
   longest="$(awk '/FAIL/{r++; if (r>m) m=r; next} {r=0} END{print m+0}' "$PROBE_LOG")"
   echo "  probe: ${fails} FAIL in ${total} samples (~1s apart), longest outage ${longest}s"
-  [ "$longest" -le "$MAX_PROBE_FAILS" ] && return 0
-  keep="${PROBE_LOG}.kept"
+  # Kept on EVERY run, not only on the failing one. A green run is the baseline
+  # the next is compared against, and it was being deleted — so an investigation
+  # started from a single number and no samples.
+  keep="${ROOT}/.upgrade-probe-${PROVIDER}-${ROLE}.log"
   cp "$PROBE_LOG" "$keep" 2>/dev/null || true
-  fail "the API was unreachable for ${longest}s in a row, over the ${MAX_PROBE_FAILS}s this lane allows (samples kept in ${keep})"
+  echo "  samples kept in ${keep}"
+  [ "$longest" -le "$MAX_PROBE_FAILS" ] && return 0
+  fail "the API was unreachable for ${longest}s in a row, over the ${MAX_PROBE_FAILS}s this lane allows (samples in ${keep})"
 }
 
 # --- Kubernetes first: no reboot, so it isolates the control-plane roll --------

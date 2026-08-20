@@ -122,3 +122,6 @@ restic-escrow-*.txt
 # Python bytecode caches (committed by accident on 2026-07-28).
 __pycache__/
 *.pyc
+
+# Probe samples from a roll — kept so the next investigation has a baseline.
+.upgrade-probe-*.log

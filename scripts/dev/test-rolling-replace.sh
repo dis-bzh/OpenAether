@@ -359,5 +359,67 @@ grep -q 'want_sch != .*have_sch\|want_sch" != "\$have_sch' "$ROOT/scripts/ops/ro
   && ok "the skip compares the schematic as well as the tag" \
   || bad "the skip is back to comparing the version tag alone"
 
+echo "=== the etcd leader is rolled LAST, and hands over deliberately ==="
+# Taking the leader down forces an election, and during one EVERY apiserver
+# fails — which is what a consecutive run of probe failures looks like. Rolling
+# the followers first leaves the leader untouched (quorum holds at 2/3), so the
+# cluster pays ONE chosen hand-off instead of three forced elections.
+eval "$(extract 'etcd_member_and_leader,etcd_leader_index,cp_roll_order')"
+CP_IPS=(10.0.0.1 10.0.0.2 10.0.0.3)
+talos_ep() { printf 'ep%s' "$2"; }
+
+# A stub that answers `etcd status` per node: the node whose own MEMBER equals
+# STUB_LEADER is the leader, exactly as a real cluster reports it.
+etcd_stub() { # <leader-ip>
+  cat >"$STUB_DIR/talosctl" <<STUB
+#!/usr/bin/env bash
+node=""; prev=""
+for a in "\$@"; do [ "\$prev" = "-n" ] && node="\$a"; prev="\$a"; done
+case "\$*" in
+  *"etcd status"*)
+    declare -A ids=( [10.0.0.1]=aaaaaaaaaaaaaaa1 [10.0.0.2]=aaaaaaaaaaaaaaa2 [10.0.0.3]=aaaaaaaaaaaaaaa3 )
+    lead="\${ids[$1]}"
+    echo "NODE MEMBER DB SIZE IN USE LEADER RAFT INDEX"
+    echo "\$node \${ids[\$node]} 12 MB 4.0 MB (34.06%) \$lead 30689"
+    ;;
+esac
+exit 0
+STUB
+  chmod +x "$STUB_DIR/talosctl"
+}
+
+for lead_ip in 10.0.0.1 10.0.0.2 10.0.0.3; do
+  etcd_stub "$lead_ip"
+  case "$lead_ip" in 10.0.0.1) li=0; want="1 2 0" ;; 10.0.0.2) li=1; want="0 2 1" ;; *) li=2; want="0 1 2" ;; esac
+  got="$(PATH="$STUB_DIR:$PATH" cp_roll_order | tr '\n' ' ' | sed 's/ $//')"
+  [ "$got" = "$want" ] \
+    && ok "leader on cp-${li}: rolled last (order ${got})" \
+    || bad "leader on cp-${li}: expected '${want}', got '${got}'"
+  [ "$(PATH="$STUB_DIR:$PATH" etcd_leader_index)" = "$li" ] \
+    && ok "and the leader is identified as cp-${li}" \
+    || bad "the leader was not identified as cp-${li}"
+done
+
+# A cluster that will not say who leads is not a reordering problem: keep the
+# declared order and say so, rather than inventing one.
+cat >"$STUB_DIR/talosctl" <<'STUB'
+#!/usr/bin/env bash
+exit 1
+STUB
+chmod +x "$STUB_DIR/talosctl"
+# cp_roll_order runs in a subshell, so a variable it sets cannot be read back
+# here — the warning has to be observed on stderr, where it actually goes.
+warn() { printf 'WARN:%s\n' "$*" >&2; }
+WARN_OUT="$STUB_DIR/warn.txt"
+got="$(PATH="$STUB_DIR:$PATH" cp_roll_order 2>"$WARN_OUT" | tr '\n' ' ' | sed 's/ $//')"
+[ "$got" = "0 1 2" ] && grep -q 'could not identify the etcd leader' "$WARN_OUT" \
+  && ok "an unreadable etcd keeps the index order, and says so" \
+  || bad "unreadable etcd: order='${got}' warn='$(tr -d '\n' <"$WARN_OUT")'"
+
+grep -q 'etcd forfeit-leadership' "$ROOT/scripts/ops/rolling-replace.sh" \
+  && ok "the roll hands leadership over instead of letting it be taken" \
+  || bad "no forfeit-leadership — the last control plane still forces an election"
+
+
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
