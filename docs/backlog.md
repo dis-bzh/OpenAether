@@ -361,12 +361,30 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
       **Closes:** a documented minimum per provider, and the shipped examples
       meeting it. Rung: real cloud for the numbers, which we now have.
 
-- [ ] **The `talos-image` root still hardcodes the project in one place.**
-      `talos-image/variables.tf:34` defaults `staging_bucket` to a literal
-      staging bucket name. Everything else now derives it (`oa_project`), so a
-      fork gets correct names everywhere except here.
-      **Closes:** the same derivation, plus a release-checklist line — an existing
-      deployment's buckets do not rename themselves. Rung: `task test`.
+- [ ] **One Talos image bucket is orphaned, and only a human can empty it.**
+      `staging_bucket` became `import_bucket` and the bucket `…-talos-staging`
+      became `…-talos-import` (2026-08-20), because this repository already
+      spends "staging" on environments and reading it as one here is what it
+      cost. The next build creates the new bucket and re-uploads; the OLD one
+      keeps every QCOW2 it ever held, on every cloud that was built from, and
+      nothing deletes it — `purge-orphans` enumerates by project prefix, so it
+      WILL list it, but emptying a bucket is not something this repository does
+      to a bucket it no longer names.
+      **Closes:** `task purge-orphans PROVIDER=…` run per cloud after the first
+      rebuild, the old bucket emptied and deleted, and a release-checklist line
+      so the next rename does not repeat this. Rung: real cloud.
+
+- [ ] **Scaleway never purges the QCOW2 it stages; Outscale does.** Outscale
+      deletes the object once the OMI is registered
+      (`talos-image/outscale/main.tf:188`) and explains why it can. The Scaleway
+      module uploads, imports it as a block snapshot, and stops — so the bucket
+      keeps one image per Talos version for ever, and nothing in the repository
+      says whether that is a cache, a plan-stability requirement, or an oversight.
+      HYPOTHESIS, untested: `scaleway_block_snapshot.talos` holds an
+      `import { bucket, key }` block, so deleting the object may break every later
+      plan — which is exactly the failure the Outscale comment says it avoided.
+      **Closes:** the answer, written where the module is; then either a purge or
+      one sentence saying why there is none. Rung: real cloud, one plan.
 
 - [ ] **Three small tooling gaps, each one line of trust.**
       `test-talos-local.sh:244,263` — schedulable workers Ready and Flux

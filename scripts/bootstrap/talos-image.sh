@@ -142,13 +142,15 @@ ensure "$STATE_BUCKET"
 APPLY_VARS=(-var "target_provider=$TGT" -var "talos_version=$VERSION")
 case "$P" in
   scaleway | outscale)
-    # Scaleway/Outscale stage the raw image in Object Storage for the snapshot import.
-    STAGING="s3-${IMG_PROJECT}-${TGT}-talos-staging"
-    ensure "$STAGING"
-    APPLY_VARS+=(-var "staging_bucket=$STAGING" -var "region=$SREGION" -var "s3_endpoint=$SEP")
+    # Scaleway/Outscale upload the raw image to Object Storage, then import it
+    # as a snapshot. "import", not "staging": this repository spends that word
+    # on environments (dev/prod) and reading it as one here is what it cost.
+    IMPORT_BUCKET="s3-${IMG_PROJECT}-${TGT}-talos-import"
+    ensure "$IMPORT_BUCKET"
+    APPLY_VARS+=(-var "import_bucket=$IMPORT_BUCKET" -var "region=$SREGION" -var "s3_endpoint=$SEP")
     ;;
   proxmox)
-    # No staging bucket — the download lands straight on the host's datastore.
+    # No import bucket — the download lands straight on the host's datastore.
     # PROXMOX_NODE_NAMES is comma-separated (e.g. "pve1,pve2,pve3"); match
     # node_distribution.proxmox.node_names in the cluster envs/*.tfvars.
     IFS=',' read -ra PMX_NODES <<<"${PROXMOX_NODE_NAMES:-pve1}"

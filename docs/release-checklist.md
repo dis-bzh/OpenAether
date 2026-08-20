@@ -47,6 +47,10 @@ docker run --rm -v /tmp/repo.tar:/tmp/repo.tar:ro ubuntu:24.04 bash -c '
 - [ ] `task preflight` green — lint, render, validate, `tofu test` and the script
       harnesses. That is 350 offline assertions across 14 harnesses, every one
       mutation-tested; a count that has silently shrunk is a red line, not a pass.
+- [ ] no bucket is orphaned by a rename in this release. `…-talos-staging` became
+      `…-talos-import` (2026-08-20): the old one still holds every QCOW2 it was
+      ever given, on every cloud built from. `task purge-orphans PROVIDER=…` lists
+      it; emptying and deleting it is by hand.
 
 ## 2. Local Docker — the credential-free rung
 
