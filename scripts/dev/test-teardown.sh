@@ -103,6 +103,9 @@ STUB
 
 chmod +x "$STUB_DIR"/kubectl "$STUB_DIR"/task "$STUB_DIR"/tofu \
          "$STUB_DIR"/python3 "$STUB_DIR"/sleep
+# The real binaries, kept before the stubs shadow them — same reason as
+# REAL_SLEEP: some assertions need the tool itself, not its stand-in.
+REAL_TASK="$(command -v task || true)"
 export PATH="$STUB_DIR:$PATH"
 
 export STUB_PLAN="$STUB_DIR/plan"
@@ -168,6 +171,17 @@ refute_destroyed "the management destroy is NOT reached after an unanswerable qu
 refute_out "no child cluster" "an unanswered query is not reported as 'no child cluster'"
 refute_out "fleet-down complete" "it does not report success"
 expect_out "connection refused" "and it quotes what the provider actually said"
+
+# The fail-safe itself, pinned. When the state cannot be consulted — no
+# credentials, wrong backend, a read that failed — the probe must not become a
+# way to skip the check: an unreachable management with an unknown history still
+# refuses. OA_SKIP_BOOTSTRAP_PROBE forces that path deterministically here; the
+# probe's own true/false is verified against real state, which a stub cannot
+# honestly imitate.
+plan "cluster-info\t1\tUnable to connect to the server\n"
+OA_SKIP_BOOTSTRAP_PROBE=1 run "$FLEET_DOWN" stubcloud --plan-file "$STUB_DIR/d.tfplan" --yes
+expect_rc 1 "an unreachable management still refuses when the state cannot be read"
+refute_destroyed "and nothing is destroyed"
 
 # The OTHER failure, which means the opposite. A management with no CAPI has no
 # children BY DEFINITION, and every cluster this release builds is that shape.
@@ -479,6 +493,75 @@ grep -q '^infra-down-plan ' "$STUB_TASK_LOG" && ok "it computed a destruction pl
 grep -q '^infra-down ROLE' "$STUB_TASK_LOG" \
   && bad "--plan also applied it — that is the single command this forbids" \
   || ok "…and applied nothing"
+
+echo "=== cluster-down speaks the same vocabulary as cluster-up ==="
+# The teardown was the one command taking dash-flags behind a bare `--`. It now
+# accepts PLAN= and APPROVE= like everything else — and must NOT synthesise a
+# flag on top of one the operator spelled out, or an old invocation would get
+# `--plan --plan-file f` and refuse.
+# grep, not tail: the dry-run output ends on a blank line.
+# 2>&1: task writes its dry-run listing to stderr.
+dry() { "$REAL_TASK" --dry cluster-down PROVIDER=stubcloud "$@" 2>&1 | grep 'fleet-down.sh' | tail -1; }
+# $ARGS is still a variable on the rendered line, so the decision has to be read
+# where it is made: with no PLAN= the -n test is against an empty string, and the
+# else branch — the one that plans and destroys nothing — is what runs.
+BARE="$("$REAL_TASK" --dry cluster-down PROVIDER=stubcloud 2>&1)"
+case "$BARE" in
+  *'if [ -n "" ]; then ARGS="--plan-file "; else ARGS="--plan"; fi'*)
+    ok "bare form plans, and destroys nothing" ;;
+  *) bad "bare form does not fall through to --plan" ;;
+esac
+# Not a substring search for --yes: the word is in the block's own source either
+# way, so that would pass whatever the code did. What distinguishes the two is
+# the value the gate is rendered against.
+case "$BARE" in
+  *'if [ "ask" = auto ]'*) ok "and APPROVE stays ask, so nothing lands" ;;
+  *) bad "the bare form did not leave the approval at ask" ;;
+esac
+OUT_DRY="$("$REAL_TASK" --dry cluster-down PROVIDER=stubcloud PLAN=d.tfplan APPROVE=auto 2>&1)"
+case "$OUT_DRY" in
+  *'ARGS="--plan-file d.tfplan"'*) ok "PLAN= becomes --plan-file" ;;
+  *) bad "PLAN= did not become --plan-file" ;;
+esac
+case "$OUT_DRY" in
+  *'if [ "auto" = auto ]'*) ok "APPROVE=auto is what answers the question" ;;
+  *) bad "APPROVE=auto did not reach the gate" ;;
+esac
+# Reading the rendered line is not enough: $ARGS is still a variable there, so an
+# assertion on it cannot see what the block PUT in it — a mutation that let the
+# translation overwrite an explicit flag survived exactly that way. RUN the block
+# instead, with the script swapped for an echo, and read the argv it produces.
+argv() {
+  "$REAL_TASK" --dry cluster-down PROVIDER=stubcloud "$@" 2>&1 \
+    | sed -n '/^ *ARGS=""/,/fleet-down\.sh/p' \
+    | sed 's|\./scripts/ops/fleet-down\.sh|echo ARGV:|' | bash 2>/dev/null
+}
+OLD="$(argv -- --plan-file d.tfplan --force-no-edges --yes)"
+case "$OLD" in
+  *"ARGV: stubcloud --role management --plan-file d.tfplan --force-no-edges --yes") ok "the old flag form is passed through untouched" ;;
+  *) bad "the old flag form was altered: $OLD" ;;
+esac
+case "$(argv)" in
+  *"ARGV: stubcloud --role management --plan") ok "and the bare form produces exactly --plan" ;;
+  *) bad "the bare form produced: $(argv)" ;;
+esac
+# Both spellings at once — the only shape that exercises the anti-doubling
+# guard. Harmless for --yes, load-bearing for --plan (`--plan --plan-file f`
+# is a contradiction fleet-down would have to resolve), so it is pinned here.
+# COUNT, do not look for adjacency: a synthesised --yes lands at the front of
+# ARGS and the explicit one at the end, so the two are never side by side and a
+# substring test for "--yes --yes" passes while the flag is doubled.
+BOTH="$(argv APPROVE=auto -- --plan-file d.tfplan --yes)"
+if [ "$(grep -o -- '--yes' <<<"$BOTH" | wc -l)" -le 1 ]; then
+  ok "an explicit flag is not doubled by its VAR= twin"
+else
+  bad "an explicit --yes was doubled by the translation: $BOTH"
+fi
+case "$(argv PLAN=d.tfplan APPROVE=auto)" in
+  *"ARGV: stubcloud --role management --plan-file d.tfplan --yes") ok "PLAN= and APPROVE=auto produce the landing form" ;;
+  *) bad "PLAN=/APPROVE= produced: $(argv PLAN=d.tfplan APPROVE=auto)" ;;
+esac
+
 
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

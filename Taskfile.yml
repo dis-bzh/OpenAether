@@ -966,7 +966,9 @@ tasks:
       clean cascade) THEN the management (tofu destroy), then a report of what is
       left to purge by hand (buckets, images, keypairs). The order is not
       negotiable: a child outliving the management means orphaned, billed VMs.
-      Usage: task cluster-down PROVIDER=ovh [ROLE=management] [-- --yes]
+      Two commands, always: `task cluster-down PROVIDER=…` computes a plan and destroys
+      nothing, then `task cluster-down PROVIDER=… PLAN=f APPROVE=auto` lands exactly it.
+      Usage: task cluster-down PROVIDER=ovh [ROLE=management] [PLAN=f] [APPROVE=auto]
     # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
     # scaleway in silence — including destroy and down — so a command typed
     # while working on another cloud aimed at the wrong account. The refusal is
@@ -975,8 +977,30 @@ tasks:
       vars: [PROVIDER]
     vars:
       ROLE: '{{.ROLE | default "management"}}'
+      PLAN: '{{.PLAN | default ""}}'
+      APPROVE: '{{.APPROVE | default "ask"}}'
     cmds:
-      - ./scripts/ops/fleet-down.sh {{.PROVIDER}} --role {{.ROLE}} {{.CLI_ARGS}}
+      - |
+        # The teardown was the one command that spoke a different language: six
+        # dash-flags behind a bare `--` that Task otherwise keeps for itself,
+        # while everything else took PROVIDER=, ROLE=, PLAN=, APPROVE=. Two
+        # vocabularies in one tool is how an operator ends up reading the source
+        # to destroy a cluster.
+        #
+        # The flags still work and are not deprecated: --force-no-edges is a
+        # genuine escape hatch, CI passes them, and breaking those to tidy a
+        # name would cost more than the name is worth. Anything spelled
+        # explicitly after `--` wins, and nothing is synthesised on top of it.
+        ARGS=""
+        case "{{.CLI_ARGS}}" in
+          *--plan*) : ;;
+          *) if [ -n "{{.PLAN}}" ]; then ARGS="--plan-file {{.PLAN}}"; else ARGS="--plan"; fi ;;
+        esac
+        case "{{.CLI_ARGS}}" in
+          *--yes*|*" -y"*) : ;;
+          *) if [ "{{.APPROVE}}" = auto ]; then ARGS="$ARGS --yes"; fi ;;
+        esac
+        ./scripts/ops/fleet-down.sh {{.PROVIDER}} --role {{.ROLE}} $ARGS {{.CLI_ARGS}}
 
   etcd-snapshot:
     desc: >-

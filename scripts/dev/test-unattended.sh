@@ -216,7 +216,10 @@ def shell_calls(text):
         for seg in segments(line, mask):
             c = task_call(seg)
             if c:
-                yield (ln,) + c
+                # The raw segment travels with the call: everything after `--`
+                # is invisible to the parsed vars, and an invocation's flags are
+                # what say whether it can reach an approval at all.
+                yield (ln,) + c + (seg,)
 
 def unquote(v):
     v = v.strip()
@@ -280,7 +283,7 @@ def callers():
                         yield name, ALIAS.get(c, c), how, {}
                 elif c.get('task'):
                     yield name, ALIAS.get(c['task'], c['task']), how, {key(k): str(v) for k, v in (c.get('vars') or {}).items()}
-        for _, callee, kv in shell_calls(BODY[name]):
+        for _, callee, kv, _seg in shell_calls(BODY[name]):
             yield name, callee, 'shell', kv
 
 EDGES = list(callers())
@@ -483,7 +486,7 @@ def call_sites():
             for seg in segments(line, mask):
                 c = task_call(seg)
                 if c:
-                    yield 'script', f, ln, c[0], c[1], interactive
+                    yield 'script', f, ln, c[0], c[1], interactive, seg
     for f in WORKFLOWS:
         with open(f) as fh:
             raw = fh.read()
@@ -498,18 +501,18 @@ def call_sites():
                 if not isinstance(run, str):
                     continue
                 senv = dict(jenv, **{str(k): str(v) for k, v in (step.get('env') or {}).items()})
-                for ln, callee, kv in shell_calls(run):
+                for ln, callee, kv, seg in shell_calls(run):
                     # The run: block's own numbering restarts at 1; point at the
                     # real file line so the message is actionable.
                     body = run.splitlines()[ln - 1].strip() if ln <= len(run.splitlines()) else ''
                     at = next((i + 1 for i, s in enumerate(raw.splitlines()) if body and body in s), 0)
-                    yield 'workflow', f, at, callee, dict(senv, **kv), False
+                    yield 'workflow', f, at, callee, dict(senv, **kv), False, seg
 
 hdr('every task invocation in scripts/ and .github/workflows/ carries the approval')
 sites = list(call_sites())
 external = 0
 claimed = {}
-for kind, f, ln, callee, kv, interactive in sites:
+for kind, f, ln, callee, kv, interactive, seg in sites:
     if callee not in NEEDS:
         continue
     external += 1
@@ -520,6 +523,13 @@ for kind, f, ln, callee, kv, interactive in sites:
         ok(f'{where} runs `task {callee}` with APPROVE={unquote(given)}')
     elif alts & {k for k, v in kv.items() if unquote(v)}:
         ok(f'{where} runs `task {callee}` with {sorted(alts & set(kv))[0]}, which its gate accepts instead of APPROVE')
+    # An invocation that cannot REACH the approval does not need to answer it.
+    # cluster-down's gate lives in fleet-down.sh: with no plan file it computes
+    # one and destroys nothing, and that half must stay answerable by nobody.
+    # Demanding APPROVE=auto there would be a guard right for the wrong reason,
+    # and would push CI to assert an authority the step does not need.
+    elif callee == 'cluster-down' and not unquote(kv.get('PLAN', '')) and '--plan-file' not in seg:
+        ok(f'{where} runs `task {callee}` to plan only — it lands nothing, so there is no approval to answer')
     elif interactive:
         claimed[f] = True
         ok(f'{where} runs `task {callee}` with no APPROVE, but {f} refuses to run without a terminal — a human is there to answer')

@@ -199,8 +199,8 @@ Deux commandes, toujours, et aucun drapeau ne les réduit à une.
 
 ```bash
 source .env.sh
-task cluster-down PROVIDER=ovh -- --plan --force-no-edges    # calcule, ne détruit rien
-task cluster-down PROVIDER=ovh -- --plan-file destroy-management-ovh.tfplan --force-no-edges --yes
+task cluster-down PROVIDER=ovh                                    # calcule, ne détruit rien
+task cluster-down PROVIDER=ovh PLAN=destroy-management-ovh.tfplan APPROVE=auto
 python3 scripts/ops/purge-orphans/ovh.py    # dry-run : vérifier qu'il ne reste rien
 ```
 

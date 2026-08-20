@@ -129,8 +129,8 @@ credential pair or the passphrase is missing.
       if your key is not `~/.ssh/id_ed25519`.
 - [ ] **teardown**, two commands and then the provider's own answer:
       ```bash
-      task cluster-down PROVIDER=scaleway -- --plan --force-no-edges
-      task cluster-down PROVIDER=scaleway -- --plan-file destroy-management-scaleway.tfplan --force-no-edges --yes
+      task cluster-down PROVIDER=scaleway
+      task cluster-down PROVIDER=scaleway PLAN=destroy-management-scaleway.tfplan APPROVE=auto
       python3 scripts/ops/purge-orphans/scaleway.py
       ```
       Record the counts. The 2026-08-19 deploy started from an empty account, so

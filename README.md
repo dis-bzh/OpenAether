@@ -197,13 +197,15 @@ Two commands, always, and no flag collapses them into one.
 
 ```bash
 source .env.sh
-task cluster-down PROVIDER=ovh -- --plan --force-no-edges    # computes, destroys nothing
-task cluster-down PROVIDER=ovh -- --plan-file destroy-management-ovh.tfplan --force-no-edges --yes
+task cluster-down PROVIDER=ovh                                    # computes, destroys nothing
+task cluster-down PROVIDER=ovh PLAN=destroy-management-ovh.tfplan APPROVE=auto
 python3 scripts/ops/purge-orphans/ovh.py    # dry-run: confirm nothing is left
 ```
 
-`--force-no-edges` is how you assert there are no CAPI children; a 0.1.0 cluster
-has none, and without it `fleet-down` refuses and leaves the cloud running.
+Same vocabulary as `cluster-up`. `fleet-down` still rules out CAPI children
+first, but it now reads why the query failed: absent CRDs mean there are none by
+definition, and it says so. `--force-no-edges` remains as an escape hatch for a
+cluster it cannot reach at all.
 
 ⚠️ Floating IPs pre-allocated outside OpenTofu do not disappear on their own.
 

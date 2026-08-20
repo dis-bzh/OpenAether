@@ -261,8 +261,8 @@ planes, c'est un cluster HA qui fonctionne ; consécutifs, c'est l'API à terre.
 ## 8. Détruire
 
 ```bash
-task cluster-down PROVIDER=scaleway -- --plan --force-no-edges          # ne détruit rien
-task cluster-down PROVIDER=scaleway -- --plan-file destroy-management-scaleway.tfplan --force-no-edges --yes
+task cluster-down PROVIDER=scaleway                                          # ne détruit rien
+task cluster-down PROVIDER=scaleway PLAN=destroy-management-scaleway.tfplan APPROVE=auto
 python3 scripts/ops/purge-orphans/scaleway.py
 ```
 
@@ -271,10 +271,11 @@ pas une gêne. La première calcule la destruction et ne détruit rien ; la seco
 applique exactement ce que tu as lu. Ni `--yes`, ni `TF_CLI_ARGS_destroy`, ni
 `APPROVE=auto` ne passent la première.
 
-`--force-no-edges` est obligatoire et le `--` nu ne l'est pas moins. `fleet-down`
-refuse de détruire tant qu'il n'a pas écarté l'existence de clusters enfants
-CAPI ; un cluster d'infrastructure pure n'a pas les CRD CAPI, donc cette requête
-ne peut jamais aboutir, et le drapeau est la façon de dire qu'il n'y en a aucun.
+`fleet-down` refuse toujours de détruire tant qu'il n'a pas écarté l'existence
+de clusters enfants CAPI, mais il lit désormais POURQUOI la requête a échoué. Des
+CRD absentes signifient un management sans CAPI, qui n'a donc pas d'enfant par
+définition : il le dit et continue. Un cluster totalement injoignable l'arrête
+encore — sauf si l'état prouve que rien n'y a jamais été bootstrapé.
 
 Les buckets et l'image Talos survivent volontairement — supprimer le bucket
 d'état supprime aussi toute possibilité de restauration. `fleet-down` les liste

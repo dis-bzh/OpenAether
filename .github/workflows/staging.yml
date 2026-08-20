@@ -239,13 +239,15 @@ jobs:
       # what it tore down — which the one-shot destroy never did.
       - name: Plan the teardown
         if: always() && !(inputs.keep && github.event_name == 'workflow_dispatch')
-        run: task cluster-down PROVIDER="$PROVIDER" ROLE="$ROLE" -- --plan --force-no-edges
+        # --force-no-edges stays: after a FAILED deploy the cluster may never have
+        # answered at all, and that is the one case fleet-down still refuses.
+        run: task cluster-down PROVIDER="$PROVIDER" ROLE="$ROLE" -- --force-no-edges
 
       - name: Destroy
         if: always() && !(inputs.keep && github.event_name == 'workflow_dispatch')
         run: |
-          task cluster-down PROVIDER="$PROVIDER" ROLE="$ROLE" -- \
-            --plan-file "destroy-${ROLE}-${PROVIDER}.tfplan" --force-no-edges --yes
+          task cluster-down PROVIDER="$PROVIDER" ROLE="$ROLE" \
+            PLAN="destroy-${ROLE}-${PROVIDER}.tfplan" APPROVE=auto -- --force-no-edges
 
       # This asserts now. The purge scripts printed what they found and exited 0
       # regardless, so this step passed while ten Scaleway resources were billing

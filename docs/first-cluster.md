@@ -254,8 +254,8 @@ down.
 ## 8. Tear it down
 
 ```bash
-task cluster-down PROVIDER=scaleway -- --plan --force-no-edges          # destroys nothing
-task cluster-down PROVIDER=scaleway -- --plan-file destroy-management-scaleway.tfplan --force-no-edges --yes
+task cluster-down PROVIDER=scaleway                                         # destroys nothing
+task cluster-down PROVIDER=scaleway PLAN=destroy-management-scaleway.tfplan APPROVE=auto
 python3 scripts/ops/purge-orphans/scaleway.py
 ```
 
@@ -264,10 +264,11 @@ point, not an inconvenience. The first computes the destruction and destroys
 nothing; the second lands exactly what you read. Neither `--yes` nor
 `TF_CLI_ARGS_destroy` nor `APPROVE=auto` gets past the first.
 
-`--force-no-edges` is required and the bare `--` is not optional. `fleet-down`
-refuses to destroy a cluster until it has ruled out CAPI children; a
-pure-infrastructure cluster has no CAPI CRDs, so that query can never succeed and
-the flag is how you say there are none.
+`fleet-down` still refuses to destroy a cluster until it has ruled out CAPI
+children, but it now reads WHY the query failed. Absent CRDs mean a management
+with no CAPI, which has no children by definition: it says so and continues. A
+cluster it cannot reach at all still stops it — unless the state proves nothing
+was ever bootstrapped there.
 
 The buckets and the Talos image survive on purpose — deleting the state bucket
 also deletes any possibility of restoring. `fleet-down` lists them by name.

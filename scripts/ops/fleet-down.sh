@@ -74,9 +74,35 @@ die()  { printf '✗ %s\n' "$*" >&2; exit 1; }
 # --force-no-edges is passed (the operator then asserts there is no child, or
 # has already purged them on the provider side).
 info "Step 1/3 — CAPI child clusters"
+# …but "unreachable" and "never existed" are not the same thing, and the state
+# knows which. talos_machine_bootstrap is written when Kubernetes is first
+# bootstrapped; without it no apiserver ever answered here, so no CAPI
+# controller ever ran and there is nothing that could have created a child.
+# Measured 2026-08-19: a deploy that died at the load balancer, before phase 2,
+# then could not be torn down — the guard demanded an assertion the state was
+# already able to prove.
+never_bootstrapped() {
+  local ak sk
+  ak="$("$ROOT/scripts/internal/resolve-s3-cred.sh" "$PROVIDER" ak 2>/dev/null)" || return 1
+  sk="$("$ROOT/scripts/internal/resolve-s3-cred.sh" "$PROVIDER" sk 2>/dev/null)" || return 1
+  [ -n "$ak" ] || return 1
+  ( cd "$ROOT/infrastructure/opentofu/cluster" 2>/dev/null || exit 1
+    export AWS_ACCESS_KEY_ID="$ak" AWS_SECRET_ACCESS_KEY="$sk"
+    tofu init -reconfigure \
+      $("$ROOT/scripts/internal/tf-backend.sh" "envs/${ROLE}-${PROVIDER}.tfvars") >/dev/null 2>&1 || exit 1
+    # An EMPTY state list is not proof: it can also mean the wrong backend or a
+    # failed read. Only a state that holds resources AND no bootstrap is proof.
+    local out
+    out="$(tofu state list 2>/dev/null)" || exit 1
+    [ -n "$out" ] || exit 1
+    ! grep -q 'talos_machine_bootstrap' <<<"$out" )
+}
+
 if [ ! -r "$KUBECONFIG" ] || ! kubectl cluster-info >/dev/null 2>&1; then
   if [ "$FORCE_NO_EDGES" -eq 1 ]; then
     warn "management unreachable — step skipped (--force-no-edges assumed)."
+  elif [ "${OA_SKIP_BOOTSTRAP_PROBE:-}" != 1 ] && never_bootstrapped; then
+    ok "this cluster was never bootstrapped (no talos_machine_bootstrap in state) — no CAPI controller ever ran, so no child clusters"
   else
     cat >&2 <<'EOT'
 

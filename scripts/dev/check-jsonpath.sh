@@ -25,6 +25,14 @@ TARGETS=("${@:-$ROOT/scripts}")
 
 command -v kubectl >/dev/null 2>&1 || { echo "✗ kubectl is required" >&2; exit 1; }
 
+# OFFLINE means offline. --dry-run=client parses without a server, but kubectl
+# still LOADS a kubeconfig — the ambient one, or ~/.kube/config — and once the
+# cluster it names is gone it waits on a dead endpoint for every expression.
+# On 2026-08-19 that hung the whole `task test-scripts` suite at its first
+# harness, minutes after the clusters this file has nothing to do with were
+# destroyed. Point it at a path that cannot exist so no server is ever dialled.
+export KUBECONFIG=/dev/null
+
 OBJ="$(mktemp)"; trap 'rm -f "$OBJ"' EXIT
 cat >"$OBJ" <<'JSON'
 {"apiVersion":"v1","kind":"Pod","metadata":{"name":"jsonpath-probe"},

@@ -11,12 +11,15 @@ This is the OpenAether commands and the traps this project has actually met.
 ## The sequence
 
 ```
-task cluster-down PROVIDER=<p> -- --plan       # computes, destroys nothing
-task cluster-down PROVIDER=<p> -- --plan-file destroy-<role>-<p>.tfplan --yes
+task cluster-down PROVIDER=<p>                                        # computes, destroys nothing
+task cluster-down PROVIDER=<p> PLAN=destroy-<role>-<p>.tfplan APPROVE=auto   # lands exactly it
 python3 scripts/ops/purge-orphans/<p>.py
 ```
 
-The bare `--` is not optional: without it Task keeps the flags for itself.
+Same vocabulary as `cluster-up`: `PROVIDER=`, `ROLE=`, `PLAN=`, `APPROVE=`. The
+dash-flags still work behind a bare `--` — `--force-no-edges` is a real escape
+hatch and CI passes them — and anything spelled explicitly there wins, with
+nothing synthesised on top of it.
 
 **`--force-no-edges` is no longer needed on a pure-infra cluster.** `fleet-down.sh`
 still refuses to destroy the management until it has accounted for CAPI child
