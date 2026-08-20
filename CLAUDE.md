@@ -15,6 +15,23 @@ dans `OpenAether-apps` et ont nécessité une purge d'historique (`git
 filter-repo`, `--replace-text` ET `--replace-message` — les messages de commit
 ne sont PAS couverts par le premier seul).
 
+**Le gitignore ne suffit pas : les FIXTURES DE TEST fuient aussi.** Incident du
+2026-08-20, trouvé pendant le §9 de la 0.1.0 : une IP admin réelle servait de cas
+`CATCH` dans `check-gitleaks-rules.sh`, publique depuis le 2026-08-13. Elle avait
+été choisie *parce que* la règle exige une adresse routable — une plage RFC 5737
+serait allowlistée et le test ne prouverait rien. Le bon choix est la plage
+RFC 1112 « réservée usage futur », allouée à personne : routable aux yeux de la
+règle, à personne dans les faits. Ne pas écrire l'adresse ici — cette page est
+scannée, la fixture ne l'est pas (`.gitleaks-envdata.toml` l'exempte par chemin),
+et l'écrire a fait rougir la CI de la PR qui documentait l'incident.
+
+**Et une purge d'historique ne referme pas tout.** Mesuré le jour même, après un
+`filter-repo` vérifié sur 1885 blobs : les refs sont propres depuis un clone neuf,
+mais GitHub sert encore le diff de la PR d'origine et l'ancien blob par son SHA
+(`/contents/<path>?ref=<vieux-sha>`). Seul le support GitHub peut les faire
+disparaître. Une donnée publiée est publiée ; la purge limite la suite, elle
+n'annule pas le passé.
+
 ## Objectif produit — socle Talos modulaire, management CAPI optionnel
 
 OpenAether déploie **un cluster Talos** sur **n'importe quel provider** (Proxmox ou

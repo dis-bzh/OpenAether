@@ -257,6 +257,19 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
       **Closes:** a mutation for each shape, each seen to go red before it is
       believed; counts asserted against expected values. Rung: `task test`.
 
+- [ ] **The purged IP is still served by GitHub, and only GitHub can stop that.**
+      A real admin address reached this public repository on 2026-08-13 as a
+      `CATCH` fixture in `check-gitleaks-rules.sh`. History was rewritten on
+      2026-08-20 (`filter-repo`, `--replace-text` AND `--replace-message`) and a
+      fresh clone is clean — 1885 blobs scanned, 0 occurrences, the scan itself
+      checked against an unpurged clone so it was known to detect. What is STILL
+      served, measured the same day: the diff of PR #21, and the old blob by
+      direct SHA (`/contents/<path>?ref=<old-sha>` returns it). Anyone who cloned
+      before the rewrite has it regardless.
+      **Closes:** GitHub Support asked to garbage-collect the unreachable objects
+      and remove PR #21's stored diff, and both re-checked afterwards with the
+      same two queries. Rung: nothing local can prove this one.
+
 - [ ] **Encrypted worker volumes are applied and never verified.** The reference
       Scaleway cluster declares `worker_storage`, three `scaleway_block_volume`
       resources are in its state, and `modules/talos/main.tf:181` renders a LUKS2
