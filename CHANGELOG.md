@@ -12,7 +12,7 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ---
 
-## [0.1.0] — unreleased
+## [0.1.0] — 2026-08-20
 
 **One Talos cluster, on one supported cloud, with one fixed foundation: Cilium.**
 Infrastructure only — nothing above that layer. Start at
