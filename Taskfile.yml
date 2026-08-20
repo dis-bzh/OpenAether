@@ -492,12 +492,13 @@ tasks:
           # Not passing this was the whole defect: cluster-up answered its own
           # gate and then let phase 2 ask a question nobody could hear.
           APPROVE: "{{.APPROVE}}"
+      # Do NOT end on "every step above is idempotent": that line came out
+      # identical on the first run, which created 43 resources, and on the second,
+      # which touched none. Idempotence is a property of the command, not a badge
+      # it awards itself — the evidence is OpenTofu's own plan. A YAML comment,
+      # not a shell one: go-task echoes the block it runs, so a `#` inside would
+      # be printed to the operator as the last thing they read.
       - |
-        # Do NOT end on "every step above is idempotent": that line came out
-        # identical on the first run, which created 72 resources, and on the
-        # second, which touched none. Idempotence is a property of the command,
-        # not a badge it awards itself — and the evidence was already on screen.
-        # Point at it instead of claiming it.
         echo "✓ cluster-up complete."
         echo "  Run this exact command again to converge again. Its plan is the"
         echo "  verdict, not this line: on a cluster that already matches the"
