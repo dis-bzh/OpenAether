@@ -41,12 +41,23 @@ docker run --rm -v /tmp/repo.tar:/tmp/repo.tar:ro ubuntu:24.04 bash -c '
   mkdir /oa && tar -xf /tmp/repo.tar -C /oa && cd /oa && ./scripts/setup.sh'
 ```
 
-- [ ] `setup.sh` completes and installs **helm** (`command -v helm`)
-- [ ] it warns if `nc` is absent, and does not claim to install it
-- [ ] every command the README quick start names exists (`task --list`)
-- [ ] `task preflight` green — lint, render, validate, `tofu test` and the script
-      harnesses. That is 350 offline assertions across 14 harnesses, every one
-      mutation-tested; a count that has silently shrunk is a red line, not a pass.
+- [x] `setup.sh` completes and installs **helm** → 2026-08-20, `ubuntu:24.04`
+      container from `git archive HEAD`: exit 0, helm v4.2.3, task 3.52.0,
+      tofu v1.12.6.
+- [x] **`nc`**: absent from the image, `✖ nc is missing` then `Installing
+      netcat…`, and `/usr/bin/nc` present afterwards. This line used to read "it
+      warns, and does not claim to install it" — the script installs it now, on
+      purpose (`setup.sh:331`), and only warns where `apt-get` is absent. The
+      line was describing a behaviour that had changed, which is the failure this
+      checklist exists to catch.
+- [x] every command the README quick start names exists → 18/18 against
+      `task --list-all` plus aliases. Checked to fail too: an invented name and
+      two just-deleted scripts all came back absent.
+- [x] `task preflight` green — lint, render, validate, `tofu test` and the script
+      harnesses. 353 offline assertions across 14 harnesses, every one
+      mutation-tested. **It went DOWN from 364 and that is not silent**: the
+      staging lane was deleted this release and 14 of those assertions tested a
+      script that no longer exists.
 - [ ] no bucket is orphaned by a rename in this release. `…-talos-staging` became
       `…-talos-import` (2026-08-20): the old one still holds every QCOW2 it was
       ever given, on every cloud built from. `task purge-orphans PROVIDER=…` lists
@@ -130,8 +141,17 @@ credential pair or the passphrase is missing.
       cloud's keys. S3 credentials are namespaced by the cloud that holds the
       bucket, not by the cluster.
 - [ ] `task etcd-snapshot PROVIDER=scaleway` writes to both buckets. Pass `KEY=`
-      if your key is not `~/.ssh/id_ed25519`.
-- [ ] **teardown**, two commands and then the provider's own answer:
+      if your key is not `~/.ssh/id_ed25519`. **Not run** — the reference cluster
+      was destroyed before this line was reached.
+- [x] **a second deploy → idempotency → upgrade → idempotency cycle**, 2026-08-20:
+      `cluster-up`, `cluster-up`, `cluster-upgrade`, `cluster-up`, all four green.
+      Both re-runs printed `No changes.` on all three roots and applied nothing —
+      the evidence is the command itself, not a script. **Idempotency AFTER an
+      upgrade had never been checked before**; it holds because `cluster-upgrade`
+      writes the new pin back into the tfvars. Talos v1.13.8 → v1.13.9 on 6/6
+      nodes, `cluster-verify` 11/11, longest apiserver outage **2 s** (13 fails in
+      577) — see `upgrade.md` for why that does not establish the leader-last fix.
+- [x] **teardown**, two commands and then the provider's own answer:
       ```bash
       task cluster-down PROVIDER=scaleway
       task cluster-down PROVIDER=scaleway PLAN=destroy-management-scaleway.tfplan APPROVE=auto
@@ -140,6 +160,7 @@ credential pair or the passphrase is missing.
       Record the counts. The 2026-08-19 deploy started from an empty account, so
       what preceded it left nothing — that is a fact about a previous run, not a
       result for yours.
+      → 2026-08-20: `Nothing to purge — the project is clean.`
 
 ### Worth the extra spend, in priority order
 
@@ -167,8 +188,11 @@ task cluster-up ROLE=management PROVIDER=ovh
       this one.
 - [ ] teardown **twice**: an Octavia LB orphaned by one teardown was silently
       reused by the next deploy. `verify-provider-clean.py` covers it now — this
-      is the run that proves the check, not the fix.
-- [ ] `python3 scripts/ops/purge-orphans/ovh.py` clean on the first pass
+      is the run that proves the check, not the fix. **Not run twice**; the
+      cluster was destroyed once and the account is empty, which is a weaker
+      statement than this line asks for.
+- [x] `python3 scripts/ops/purge-orphans/ovh.py` clean on the first pass →
+      2026-08-20: `Nothing to purge — the project is clean.`
 - [ ] **`OVH-vip`** if budget allows — `k8s_lb_mode=vip` has never been applied
       on OVH, and Neutron's `allowed_address_pairs` is a different mechanism from
       Scaleway's anti-spoofing
@@ -198,7 +222,18 @@ count, its Talos upgrade reverted on the next reboot.
 - [x] **the interruption is a number** → longest outage **8 s**, the worst of the
       three clouds and worse than the 1 s this provider once recorded. Quote this
       one.
-- [ ] teardown, then `python3 scripts/ops/purge-orphans/outscale.py` clean
+- [ ] teardown, then `python3 scripts/ops/purge-orphans/outscale.py` clean —
+      **NOT clean, and this line does not get ticked.** 2026-08-20: the cluster
+      was destroyed, and the purge found 6 resources of the pre-fix Net and could
+      delete none of them. The account's own words, in order, are the whole
+      story: `A load balancer is present on Net` → the internet service cannot be
+      unlinked → `The Subnet is in use. It has NICs` → `The Net is in use. It has
+      Subnet(s)`. The chain hangs off an LBU stuck in `provisioning` that no
+      `Read` returns and no `Delete` accepts. **This run is also what exposed a
+      defect in the purge scripts themselves**: six failed deletions were printed
+      and not counted, and the run still ended "purge complete" with exit 0 — so
+      the exit code every caller reads said clean. Fixed the same day in all
+      three scripts, with the scenario added to `test-purge-orphans.sh`.
 
 **Two things stay true here and belong in the announcement.** One Net created
 before the fix still refuses deletion, on a dependency no read returns — only

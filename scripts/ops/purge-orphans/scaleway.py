@@ -56,7 +56,15 @@ def listing(url, key):
         return []
 
 
+# Counted, not merely printed. A failed delete used to be one ⚠ line in a run
+# that still ended "purge complete" with exit 0, so a caller reading the exit
+# code heard "the account is clean" while everything was still there. Shown live
+# on Outscale 2026-08-20: six resources found, six deletes refused, exit 0.
+FAILED = 0
+
+
 def act(label, fn):
+    global FAILED
     if not APPLY:
         print("  [dry-run]", label)
         return
@@ -64,6 +72,7 @@ def act(label, fn):
         fn()
         print("  ✓ deleted:", label)
     except Exception as e:
+        FAILED += 1
         print("  ⚠ failed:", label, str(e)[:80])
 
 
@@ -119,3 +128,8 @@ elif not APPLY:
     # called this "Confirm the provider is clean" — got a clean verdict while ten Scaleway
     # resources were billing. A check that cannot fail is not a check.
     sys.exit(1)
+elif FAILED:
+    print(f"\n✗ {FAILED} of {total} deletion(s) failed — the project is NOT clean.")
+    sys.exit(3)
+else:
+    print(f"\n{total} resource(s) deleted. The project is clean.")

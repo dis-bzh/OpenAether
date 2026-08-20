@@ -75,6 +75,60 @@ for case in "scaleway.py:${SCW_ENV[*]}" "outscale.py:${OSC_ENV[*]}"; do
   fi
 done
 
+
+# --- the OTHER half: the listings ANSWER, the deletions all fail --------------
+# Measured live on Outscale 2026-08-20, on a Net only the provider can clear:
+# six resources found, six deletions refused, and the run still ended "Outscale
+# purge complete" with exit 0. The refusals WERE printed; nothing counted them,
+# so every caller reading the exit code heard "the account is clean".
+echo
+echo "=== --apply: everything found, every deletion refused ==="
+
+run_apply_refused() { # <script>
+  env OUTSCALE_ACCESS_KEY_ID=stub OUTSCALE_SECRET_KEY=stub OUTSCALE_REGION=eu-west-2 \
+      python3 - "$ROOT/scripts/ops/purge-orphans/$1" <<'PYSTUB' 2>&1
+import runpy, sys, json, io, urllib.request, urllib.error
+
+# Read* answers with one resource; anything that MUTATES is refused 409 — the
+# shape Outscale really returned (ResourceConflict on a Net still in use).
+CANNED = {
+    'ReadNets':             {'Nets': [{'NetId': 'vpc-stub', 'IpRange': '10.0.0.0/16'}]},
+    'ReadSubnets':          {'Subnets': [{'SubnetId': 'subnet-stub'}]},
+    'ReadInternetServices': {'InternetServices': [{'InternetServiceId': 'igw-stub', 'NetId': 'vpc-stub'}]},
+}
+
+def fake(req, *a, **k):
+    action = req.full_url.rsplit('/', 1)[-1]
+    if action.startswith('Read'):
+        return io.BytesIO(json.dumps(CANNED.get(action, {})).encode())
+    raise urllib.error.HTTPError(req.full_url, 409, 'Conflict', {},
+                                 io.BytesIO(b'{"Errors":[{"Code":"9092"}]}'))
+
+urllib.request.urlopen = fake
+sys.argv = [sys.argv[1], '--apply']
+try:
+    runpy.run_path(sys.argv[0], run_name='__main__')
+except SystemExit as e:
+    sys.exit(e.code if isinstance(e.code, int) else 1)
+PYSTUB
+}
+
+out="$(run_apply_refused outscale.py)"; rc=$?
+if [ "$rc" -eq 0 ]; then
+  bad "outscale.py --apply: every deletion refused and it still exited 0 — a caller reads that as clean"
+else
+  ok "outscale.py --apply: deletions refused, exit ${rc} — not an all-clear"
+fi
+if grep -qiE 'NOT clean|deletion' <<<"$out"; then
+  ok "outscale.py --apply: it says in words that the deletions failed"
+else
+  bad "outscale.py --apply: the transcript never says the deletions failed"
+fi
+if grep -qiE 'resource\(s\) deleted\. The account is clean' <<<"$out"; then
+  bad "outscale.py --apply: it claimed resources were deleted when none were"
+else
+  ok "outscale.py --apply: it does not claim a deletion that did not happen"
+fi
 echo
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

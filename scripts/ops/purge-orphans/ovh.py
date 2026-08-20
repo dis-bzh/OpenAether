@@ -32,10 +32,15 @@ def get(u):
 # standing between a failed teardown and a bill, and it used to report that by
 # printing nothing at all — which reads like a finding, not like an all-clear.
 TOTAL = 0
+# Counted, not merely printed. A failed delete used to be one ⚠ line in a run
+# that still ended "purge complete" with exit 0, so a caller reading the exit
+# code heard "the account is clean" while everything was still there. Shown live
+# on Outscale 2026-08-20: six resources found, six deletes refused, exit 0.
+FAILED = 0
 
 
 def delete(u, label):
-    global TOTAL
+    global TOTAL, FAILED
     TOTAL += 1
     if not APPLY:
         print("  [dry-run]", label)
@@ -44,6 +49,7 @@ def delete(u, label):
         urllib.request.urlopen(urllib.request.Request(u, headers=H, method='DELETE'), timeout=90)
         print("  ✓ deleted:", label)
     except Exception as e:
+        FAILED += 1
         print("  ⚠ failed:", label, str(e)[:80])
 
 
@@ -98,5 +104,8 @@ elif not APPLY:
     # Non-zero: see the note in scaleway.py. Callers read this exit code as
     # "the provider is clean", and it used to say yes regardless.
     sys.exit(1)
+elif FAILED:
+    print(f"\n✗ {FAILED} of {TOTAL} deletion(s) failed — the project is NOT clean.")
+    sys.exit(3)
 else:
-    print("\npurge complete")
+    print(f"\n{TOTAL} resource(s) deleted. The project is clean.")

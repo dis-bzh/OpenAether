@@ -63,7 +63,7 @@ every apply plans to a file and applies THAT file, and a saved plan never prompt
 Destroy always takes two commands and no flag collapses them. S3 credentials are
 namespaced by the cloud that HOLDS the bucket, and a cross-provider backup is
 proven — an encrypted tfstate at Outscale while the cluster runs on Scaleway.
-350 offline assertions across 14 harnesses, every one mutation-tested; the
+353 offline assertions across 14 harnesses, every one mutation-tested; the
 emulated lane runs feint 0.9.0 against Scaleway provider 2.81.0, the version the
 clusters run.
 
@@ -256,6 +256,17 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
       the check never asks whether the var it names is declared anywhere.
       **Closes:** a mutation for each shape, each seen to go red before it is
       believed; counts asserted against expected values. Rung: `task test`.
+
+- [ ] **ovh.py cannot tell a refused question from an empty account.**
+      `scaleway.py` and `outscale.py` both count refused calls and exit 2 when
+      they found nothing but nothing was actually asked; `ovh.py` has no such
+      counter. Its `get()` raises rather than swallowing, so a total auth failure
+      crashes it non-zero rather than reporting clean — which is why this is a
+      gap and not the same defect. But a partial refusal, one endpoint answering
+      403 while the others answer, would still shrink the findings silently.
+      Found 2026-08-20 while fixing the uncounted-deletion defect in all three.
+      **Closes:** the same UNREACHABLE counter and exit 2, with the 403 scenario
+      in `test-purge-orphans.sh` extended to ovh.py. Rung: mocked.
 
 - [ ] **Deleting the staging lane left two things unchecked.** 0.1.0 ships no
       CI lane that deploys (decided 2026-08-20; the code is on the
