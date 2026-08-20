@@ -46,6 +46,16 @@ Three things about that table are the point of it:
   earlier records were 3 s on Scaleway, 1 s on OVH and 1 s on Outscale. All three
   clouds moved the same way in the same week. First entry below.
 
+**Scaleway re-run on 2026-08-20**, after the roll was changed to take the etcd
+leader last: `cluster-up` → `cluster-up` → `cluster-upgrade` → `cluster-up`, all
+four green. The two re-runs are the idempotency evidence and they are the command
+itself, not a script — `No changes.` on all three roots, `0 added, 0 changed, 0
+destroyed`. **The second re-run is new**: idempotency AFTER an upgrade had never
+been checked, and it holds because `cluster-upgrade` writes the new pin back into
+the tfvars, so a later `cluster-up` does not try to revert. Longest outage 2 s
+(13 fails in 577) — see [`upgrade.md`](upgrade.md) for why that does NOT establish
+the leader-last fix: that run moved Talos only, the 5 s one also moved Kubernetes.
+
 **What the release delivers besides a cluster.** Every task is `<noun>-<verb>`
 (`cluster-up`, `infra-plan/apply/down`, `tunnels-up`, `cluster-verify/upgrade/roll/down`).
 `APPROVE=auto|ask` names WHO answers the approval, never whether there is one:
@@ -108,10 +118,16 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
 
       Addressed 2026-08-20 by rolling the followers first and handing leadership
       over with `talosctl etcd forfeit-leadership` before the last CP — one
-      chosen transition instead of three forced elections. **Whether that is
-      actually what was costing the seconds is not yet measured**; the probe now
-      timestamps every sample and keeps them, so the next real roll says where
-      the gap falls rather than only how long it was.
+      chosen transition instead of three forced elections. The first roll under
+      that order ran on Scaleway the same day, in the designed order (cp-0, cp-2,
+      hand off, cp-1) and measured **2 s, 13 fails in 577**. That does **not**
+      close this: the run moved Talos only, while the 5 s run also moved
+      Kubernetes, which restarts an apiserver per CP by itself — two workloads,
+      two numbers that do not compare. The kept timestamps do say something new:
+      of the 13 failures only two adjacent pairs were consecutive, the rest
+      isolated 5-6 s apart, so there were two real 2 s windows and not one long
+      one. The experiment that settles it is the SAME Talos-only upgrade with the
+      leader-last order disabled — one run, one variable.
 
       Still open behind it: the health checks are TCP on 6443, which cannot tell
       a listening port from a serving apiserver, so the LB keeps a not-ready CP
@@ -122,18 +138,6 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
       **Closes:** a roll whose kept samples show zero consecutive failures, and
       the before/after to go with it. Rung: real cloud.
 
-- [ ] **Idempotency has never been checked AFTER an upgrade.** The three runs of
-      2026-08-19/20 all re-ran `cluster-up` on a cluster at its pinned version.
-      Nobody has re-run it on a cluster that was just upgraded. The mechanism
-      looks right — `cluster-upgrade.sh:67` writes the new pin back into the
-      tfvars with `sed -i`, and the Outscale file now reads v1.13.8 / v1.36.3
-      exactly as its nodes report — so a bring-up should converge. Looking right
-      is not the same as measured, and the failure mode if it is wrong is a roll
-      back to the previous version on a healthy cluster.
-      **Closes:** `task infra-plan … STRICT=1` empty on a freshly upgraded
-      cluster, then a full `cluster-up` that changes nothing. Rung: real cloud,
-      and it costs one plan.
-
 - [ ] **An infrastructure change must not break a running cluster.** Nothing has
       ever changed `vcpu`, `ram` or a disk size on a live cluster and watched
       what happens. Some of those force the provider to replace the instance,
@@ -143,6 +147,24 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
       rolling-replace, or applies it to all six nodes at once, is unverified.
       **Closes:** one bump of a node size on a live cluster, with the probe
       running, and the answer recorded either way. Rung: real cloud.
+
+- [ ] **Nothing lets you ask what is in the state.** Reading it takes the root
+      directory, its per-cluster `TF_DATA_DIR` and two credentials resolved
+      through `resolve-s3-cred.sh` — four things to get right, and getting one
+      wrong answers "No state file was found", which reads like an empty state
+      rather than a mistyped command. `task kubeconfig` already re-inits a
+      backend from a cold shell, so the machinery exists.
+      **Closes:** `task state PROVIDER=…` listing entries from a fresh shell.
+      Rung: real cloud, and it costs nothing.
+
+- [ ] **Two harnesses failed once and passed on the next run, unchanged.**
+      `test-gates-local.sh` and `test-cnpg-gates-local.sh`, 2026-08-20, run back
+      to back in the same loop: red then green with no edit between. A test whose
+      colour is not a function of the code under test is worse than no test,
+      because a real failure is indistinguishable from the flake. Suspected but
+      unverified: both spin something local and raced.
+      **Closes:** the cause named, and the two run 20× consecutively green.
+      Rung: mocked.
 
 - [ ] **One apply still throws away the plan it decided on.** Everything else
       plans to a file and applies that file. `scripts/ops/rolling-replace.sh:1272`

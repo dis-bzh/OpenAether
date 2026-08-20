@@ -47,8 +47,18 @@ not those.
 
 The cause of that regression is not established. The roll now takes the etcd
 leader last and hands leadership over with `talosctl etcd forfeit-leadership`
-rather than letting its disappearance force an election (2026-08-20); whether
-that is what was costing the seconds has not been measured.
+rather than letting its disappearance force an election (2026-08-20).
+
+The first run under that order, Scaleway 2026-08-20, measured **2 s** — 13 failed
+samples in 577. **It does not establish the fix**: that run moved Talos only
+(v1.13.8 → v1.13.9, Kubernetes unchanged at v1.36.3), while the 5 s run also
+moved Kubernetes, which restarts an apiserver per control plane on its own. Two
+different workloads, so the two numbers do not compare. What the timestamps do
+show is a changed *shape*: of the 13 failures only two adjacent pairs were
+consecutive, and the rest were isolated 5-6 s apart — a lone failure means other
+backends still served, so there were two real 2 s windows rather than one long
+one. The experiment that would settle it is the same Talos-only upgrade with the
+leader-last order disabled: one run, one variable.
 
 ## Kubernetes first
 

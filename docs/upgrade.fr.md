@@ -51,7 +51,19 @@ relevés par ce projet (3 s, 1 s et 1 s) — citer ceux-là, pas ceux-ci.
 La cause de cette régression n'est pas établie. Le roulement prend désormais le
 leader etcd en dernier et lui fait céder le leadership avec `talosctl etcd
 forfeit-leadership` au lieu de laisser sa disparition forcer une élection
-(2026-08-20) ; que ce soit là ce qui coûtait ces secondes n'a pas été mesuré.
+(2026-08-20).
+
+La première exécution sous cet ordre, Scaleway le 2026-08-20, a mesuré **2 s** —
+13 échantillons en échec sur 577. **Cela n'établit pas le correctif** : cette
+exécution ne déplaçait que Talos (v1.13.8 → v1.13.9, Kubernetes inchangé en
+v1.36.3), là où l'exécution à 5 s déplaçait aussi Kubernetes, ce qui redémarre à
+soi seul un apiserver par control plane. Deux charges différentes, donc deux
+chiffres non comparables. Ce que les horodatages montrent en revanche, c'est une
+*forme* différente : sur les 13 échecs, deux paires adjacentes seulement étaient
+consécutives, le reste étant isolé à 5-6 s d'intervalle — un échec isolé signifie
+que d'autres backends servaient encore, donc deux vraies fenêtres de 2 s plutôt
+qu'une longue. L'expérience qui trancherait est le même upgrade Talos-seul avec
+l'ordre leader-en-dernier désactivé : une exécution, une variable.
 
 ## Kubernetes d'abord
 
