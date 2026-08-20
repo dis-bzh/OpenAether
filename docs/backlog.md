@@ -24,14 +24,14 @@ deleted on both repositories; the versions they named never worked. Scope:
 by default (`deploy_flux`, false) — disabled, not amputated, and it returns as a
 user choice. CAPI and multi-cluster are an optional overlay, never the entry point.
 
-**Measured 2026-08-19 on real clouds, from an empty account.** This is the
-evidence the release rests on.
+**Measured on real clouds, from an empty account** — Scaleway and OVH on
+2026-08-19, Outscale on 2026-08-20. This is the evidence the release rests on.
 
 | | deploy | `task cluster-verify` | idempotency | k8s | Talos | longest outage |
 |---|---|---|---|---|---|---|
 | Scaleway | ✅ 8 min 50, 72 resources | ✅ 11/11 | ✅ 3/3 | ✅ 1.36.2→1.36.3 | ✅ 6/6 nodes 1.13.7→1.13.8 | 5 s (16 fails in 575) |
 | OVH | ✅ | ✅ 11/11 | ✅ 3/3 | ✅ 1.36.2→1.36.3 | ✅ 6/6 nodes 1.13.7→1.13.8 | 7 s (9-10 in ~540) |
-| Outscale | ⛔ blocked upstream — see below | | | | | |
+| Outscale | ✅ 51 resources, then 17 | ✅ 11/11 | ✅ 3/3 | ✅ 1.36.2→1.36.3 | ✅ 6/6 nodes 1.13.7→1.13.8 | 8 s (59 in 1179) |
 
 Three things about that table are the point of it:
 
@@ -43,8 +43,8 @@ Three things about that table are the point of it:
 - **Idempotency is three assertions, not one**: an empty plan, the SAME nodes
   (name and creationTimestamp), and a kubeconfig that still reaches the apiserver.
 - **The interruption got WORSE, and that is a regression, not a footnote.** The
-  earlier records were 3 s on Scaleway and 1 s on OVH. Both clouds moved the same
-  way in the same week. First entry below.
+  earlier records were 3 s on Scaleway, 1 s on OVH and 1 s on Outscale. All three
+  clouds moved the same way in the same week. First entry below.
 
 **What the release delivers besides a cluster.** Every task is `<noun>-<verb>`
 (`cluster-up`, `infra-plan/apply/down`, `tunnels-up`, `cluster-verify/upgrade/roll/down`).
@@ -53,7 +53,7 @@ every apply plans to a file and applies THAT file, and a saved plan never prompt
 Destroy always takes two commands and no flag collapses them. S3 credentials are
 namespaced by the cloud that HOLDS the bucket, and a cross-provider backup is
 proven — an encrypted tfstate at Outscale while the cluster runs on Scaleway.
-313 offline assertions across 11 harnesses, every one mutation-tested; the
+344 offline assertions across 11 harnesses, every one mutation-tested; the
 emulated lane runs feint 0.9.0 against Scaleway provider 2.81.0, the version the
 clusters run.
 
@@ -64,11 +64,15 @@ waits for never appears). The boot sequence never finished, Stage never became
 Running, the META `Upgrade` key was never dropped, and the next reboot reverted
 the upgrade — one extension behind the hung watch, the lost upgrade and the revert.
 
-**Blocked, and not by us: Outscale.** An LBU sat in `provisioning` for over an
-hour; afterwards the Net, its subnet and its internet service refused deletion
-while the account held 0 VMs, 0 volumes, 0 load balancers, 0 public IPs, 0 NAT
-services and 0 NICs. **Outscale support request 399530 is open.** Nothing here
-unblocks it.
+**Outscale needs a fresh Net, and leaves one behind.** The LBU that sat in
+`provisioning` for over an hour was diagnosed by Outscale as a timeout inside
+their own load balancer service: it stops waiting after 10 s for an internal VM
+that takes about 10.7, so the workflow fails, the resources it already created
+stay, and the LBU never leaves `provisioning`. Their instruction is to create no
+further LBU in that Net and use a new one — a redeploy on a fresh Net succeeded
+on 2026-08-20, the new LBU `active` with 3 backends, and **request 399530 is
+closed**. One Net from before the fix still refuses deletion on a dependency no
+read returns; only Outscale can clear that, and a second request is open for it.
 
 **Not proven**: no lane has ever run unattended to completion; nobody has
 deployed under a non-empty `bucket_suffix`; and the failover — provider A treated
@@ -121,7 +125,7 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
 - [ ] **Idempotency has never been checked AFTER an upgrade.** The three runs of
       2026-08-19/20 all re-ran `cluster-up` on a cluster at its pinned version.
       Nobody has re-run it on a cluster that was just upgraded. The mechanism
-      looks right — `staging-upgrade.sh:67` writes the new pin back into the
+      looks right — `cluster-upgrade.sh:67` writes the new pin back into the
       tfvars with `sed -i`, and the Outscale file now reads v1.13.8 / v1.36.3
       exactly as its nodes report — so a bring-up should converge. Looking right
       is not the same as measured, and the failure mode if it is wrong is a roll
@@ -154,20 +158,19 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
       `rolling-replace.sh:1108` prints the command in `--dry-run` and must change
       in the same commit. Rung: `task test`, then one real roll.
 
-- [ ] **Two runs against one state race, and nothing refuses.** Nearly
-      demonstrated 2026-08-19: `infrastructure/opentofu/cluster/` is shared by
-      every provider and each target runs `tofu init -reconfigure` there to point
-      the S3 backend at that provider's state, so two `task` invocations steal the
-      backend from each other and the loser applies one provider's plan against
-      another's state. It was survived by luck — the Outscale deploy was still in
-      the `talos-image/` root when an OVH `cluster-verify` re-pointed `cluster/`.
-      Underneath, neither `cluster/backend.tf` nor `talos-image/backend.tf`
-      declares `use_lockfile`, so the object store takes no lock either.
-      OpenTofu documents S3-native locking via conditional writes (If-None-Match);
-      whether Scaleway, OVH and Outscale S3 all honour it is a HYPOTHESIS.
-      **Closes:** `use_lockfile = true` on both backends plus a lock around the
-      cluster root, and on each provider a second run started during the first
-      that is REFUSED by name rather than proceeding. Rung: real cloud, but cheap
+- [ ] **No state lock has ever been watched refuse a second run.**
+      `use_lockfile` is now passed at init, and only where the store really
+      locks: measured 2026-08-20 with one client against all three
+      (`scripts/dev/probe-s3-conditional-write.sh`), Scaleway and OVH refuse the
+      second conditional write and Outscale ACCEPTS it, so
+      `scripts/internal/tf-backend.sh:44` claims the lock on the first two and
+      not on Outscale — where nothing stops two runs against one state. The
+      other half of the collision, two clusters fighting over one working
+      directory, is separate and handled (`TF_DATA_DIR` per ROLE-PROVIDER,
+      verified offline). What is missing is the only thing that proves a lock.
+      **Closes:** on Scaleway and on OVH, a second run started during the first
+      and REFUSED by name rather than proceeding — and, for Outscale, whatever
+      is decided in place of a lock it cannot have. Rung: real cloud, but cheap
       — a plan is enough to take the lock.
 
 - [ ] **The failover half of the two-store design has never been run.** The
@@ -201,7 +204,7 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
       everything attached to it — a fresh deploy only, never a live cluster.
       **Closes:** an Outscale deploy whose `kubectl get nodes -o wide` shows
       control planes in at least two subregions, `task cluster-verify` green.
-      Rung: real cloud, new cluster — and behind support request 399530.
+      Rung: real cloud, new cluster.
 
 - [ ] **`task cluster-up` cannot add a node to a cluster it already bootstrapped.**
       Its `infra` step applies with `talos_bootstrap=true` once bootstrapped
@@ -241,10 +244,10 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
       03:17) and still has no `STAGING_*` secret: its one recorded run,
       2026-08-17, failed at "Materialise the tfvars" and it has never reached a
       deploy. A weekly red that measures nothing teaches you to ignore red.
-      1428 lines serve this lane, and `staging-verify.sh` waits for 35 Flux
+      1428 lines serve this lane, and `flux-verify.sh` waits for 35 Flux
       Kustomizations — a platform this release disables — so part of it tests
-      something the product no longer ships. `staging-upgrade.sh` is different:
-      it is reachable from `task` and encodes the upgrade proven on two clouds.
+      something the product no longer ships. `cluster-upgrade.sh` is different:
+      it is reachable from `task` and encodes the upgrade proven on three clouds.
       **Decide:** whether 0.1.0 ships a staging lane at all. Then either configure
       the secrets (`check-staging-secrets.sh` prints the 17 `gh secret set` lines;
       the three `STAGING_TFVARS_B64_*` must pin both versions one patch below
@@ -315,7 +318,7 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
 
 - [ ] **Kubernetes upgrades bypass `talosctl upgrade-k8s`.** We move
       `kubernetes_version` in the machine config and let Talos reconcile. It works
-      (1.36.2 → 1.36.3 on both clouds), but it skips the orchestrator Talos
+      (1.36.2 → 1.36.3 on all three clouds), but it skips the orchestrator Talos
       provides for exactly this, which sequences control-plane components and
       kubelets behind health checks. That is the gap the entry above about the
       interruption is measuring, and the two should be read together.
@@ -434,12 +437,13 @@ measured and will bite the day `deploy_flux` is turned back on; each belongs to
 
 Not work. Conditions. Do not re-investigate them from a desk.
 
-- [ ] **Outscale: an LBU that never finishes, then a Net that will not delete.**
-      2026-08-19: the load balancer sat in `provisioning` for over an hour, and
-      afterwards the Net, its subnet and its internet service refused deletion
-      while the account held 0 VMs, 0 volumes, 0 load balancers, 0 public IPs,
-      0 NAT services and 0 NICs. **Support request 399530.** Outscale is out of
-      the 0.1.0 definition of done until they answer.
+- [ ] **Outscale: a Net that will not delete.** The LBU half is answered —
+      a timeout inside Outscale's own load balancer service, request 399530
+      closed, deploy into a fresh Net and it works (2026-08-20). What is left is
+      what that hang created on 2026-08-19: a Net, its subnet and its internet
+      service refusing deletion while the account held 0 VMs, 0 volumes, 0 load
+      balancers, 0 public IPs, 0 NAT services and 0 NICs. Only Outscale can clear
+      it; a second request is open and nothing here moves it.
 - [ ] **`talos_machine` in the Talos provider will replace our orchestration** —
       its `image` argument upgrades when the running version differs, with
       `drain_on_upgrade` doing the cordon/uncordon. It is not in 0.11.0, the

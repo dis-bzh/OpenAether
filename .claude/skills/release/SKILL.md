@@ -18,8 +18,9 @@ were meant to certify — and every one of them, releases included, was deleted.
 the number asserts, prove exactly that, then tag.
 
 **Say which rung each claim reached.** Mocked, emulated, real cloud once by hand,
-or unattended and repeated. "Proven at the real-cloud rung on Scaleway and OVH,
-blocked upstream on Outscale" is a release note. "Proven" is a hope.
+or unattended and repeated. "Proven at the real-cloud rung on Scaleway, OVH and
+Outscale, never applied on real Proxmox hardware" is a release note. "Proven" is
+a hope.
 
 ## The two repositories are independent
 

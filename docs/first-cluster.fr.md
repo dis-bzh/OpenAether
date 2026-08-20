@@ -3,10 +3,10 @@
 # Ton premier cluster
 
 D'une machine nue et d'un compte cloud vide jusqu'à un cluster Talos que tu peux
-joindre, mettre à jour et détruire. Scaleway sert d'exemple ; OVH n'en diffère
-que par ses identifiants et son fichier tfvars, sauf à l'étape 4 où son load
-balancer est plus lent. Outscale a lui aussi un module, mais y déployer est
-**bloqué en amont** — voir la fin de cette page.
+joindre, mettre à jour et détruire. Scaleway sert d'exemple ; OVH et Outscale
+n'en diffèrent que par leurs identifiants et leur fichier tfvars, sauf à
+l'étape 4 où leurs load balancers sont plus lents — et où Outscale a une réserve
+qui lui est propre.
 
 **Lis la note d'honnêteté en fin de page avant de dépenser quoi que ce soit.**
 Elle dit ce qui a été mesuré, sur quel cloud et quand — et ce qui ne l'a pas été.
@@ -177,14 +177,24 @@ bien qu'un LB bloqué ne peut plus être supprimé et retient le sous-réseau, l
 réseau, et tout ton teardown derrière lui. `task cluster-down` le reconnaît et te le dit,
 au lieu de te conseiller de réessayer. C'est un ticket support.
 
-**Sur Outscale, c'est ici que ça s'arrête, et cela vient du provider, pas de ce
-projet.** Enregistrer l'image se compte déjà en minutes voire en heure — le
-snapshot est importé depuis un objet de 11 Gio via une file côté provider : 8 min
-le 2026-08-18, plus de 60 min bloqué à `in-queue 0%` le 2026-07-25. Puis, le
-2026-08-19, un load balancer est resté en `provisioning` plus d'une heure, après
-quoi le Net, son sous-réseau et son internet service ont refusé la suppression
-sur un compte qui ne contenait plus rien. La demande de support 399530 est
-ouverte ; la 0.1.0 ne revendique pas ce provider.
+**Outscale demande plus de patience ici, et il a un piège qu'il vaut mieux
+connaître avant de le rencontrer.** Enregistrer l'image se compte déjà en minutes
+voire en heure — le snapshot est importé depuis un objet de 11 Gio via une file
+côté provider : 8 min le 2026-08-18, plus de 60 min bloqué à `in-queue 0%` le
+2026-07-25. Puis, le 2026-08-19, un load balancer est resté en `provisioning`
+plus d'une heure, après quoi le Net, son sous-réseau et son internet service ont
+refusé la suppression sur un compte qui ne contenait plus rien.
+
+Le support Outscale a diagnostiqué celui-là, et la cause est chez eux : leur
+service de load balancer cesse d'attendre au bout de 10 secondes une machine
+interne qui en met environ 10,7. Le workflow échoue, les ressources machine et
+réseau déjà créées restent, et le load balancer ne quitte jamais `provisioning`.
+Leur consigne : ne plus créer de load balancer dans ce Net, en utiliser un neuf —
+un redéploiement sur un Net neuf a réussi le 2026-08-20, avec le nouveau load
+balancer `active` et 3 backends. La demande de support qui le couvrait est close.
+Un Net d'avant le correctif refuse encore la suppression, sur une dépendance
+qu'aucune lecture ne renvoie ; seul le fournisseur peut la lever, et une seconde
+demande est ouverte pour cela.
 
 Six buckets existent ensuite : l'état et les artefacts, chacun avec son jumeau
 `-backup`, plus l'image et sa zone de préparation.
@@ -251,12 +261,13 @@ n'est pas « sans interruption », c'est **la plus longue série d'échecs
 consécutifs de `/readyz`, à une seconde d'intervalle, reste sous 15 secondes**.
 Mesure-la.
 
-Mesuré le 2026-08-19, sur les deux upgrades : **16 échantillons en échec sur
-575, plus longue coupure 5 s** sur Scaleway, et 9 à 10 sur ~540 pour **7 s** sur
-OVH. Les deux sont pires que les meilleurs chiffres jamais relevés par ce projet
-(3 s et 1 s), et les deux sont le chiffre honnête. Les deux nombres sont des
-affirmations différentes — des ratés dispersés pendant un roulement de control
-planes, c'est un cluster HA qui fonctionne ; consécutifs, c'est l'API à terre.
+Mesuré sur les deux upgrades : **16 échantillons en échec sur 575, plus longue
+coupure 5 s** sur Scaleway et 9 à 10 sur ~540 pour **7 s** sur OVH, les deux le
+2026-08-19, puis **8 s** sur Outscale le 2026-08-20. Les trois sont pires que les
+meilleurs chiffres jamais relevés par ce projet (3 s, 1 s et 1 s), et les trois
+sont le chiffre honnête. Les deux nombres sont des affirmations différentes —
+des ratés dispersés pendant un roulement de control planes, c'est un cluster HA
+qui fonctionne ; consécutifs, c'est l'API à terre.
 
 ## 8. Détruire
 
@@ -311,25 +322,26 @@ quelque chose de prouvé, et c'est la raison d'être de ce document.
 
 Ce qui **est** mesuré, avec les dates (`docs/backlog.md`, « Where we stand ») :
 
-- `task cluster-verify` donne **11/11 sur Scaleway et 11/11 sur OVH**, le
-  2026-08-19.
+- `task cluster-verify` donne **11/11 sur Scaleway, sur OVH et sur Outscale** —
+  les deux premiers le 2026-08-19, Outscale le 2026-08-20.
 - **L'idempotence, ce sont trois assertions**, et les trois ont tenu 3/3 sur les
-  deux clouds : un plan vide, les *mêmes* nœuds (nom et `creationTimestamp`), et
+  trois clouds : un plan vide, les *mêmes* nœuds (nom et `creationTimestamp`), et
   un kubeconfig qui joint encore l'apiserver. Deux des trois peuvent passer alors
   que le cluster a été reconstruit en silence.
 - **L'état stocké a été ouvert.** Une enveloppe `encrypted_data` sous SSE-AES256,
   récupérée depuis le bucket `-backup` à l'endpoint d'un AUTRE fournisseur, avec
   les identifiants de ce fournisseur, le 2026-08-19. Pas déclaré : téléchargé et
   inspecté.
-- **Les deux upgrades sont passés sur Scaleway et sur OVH** : Kubernetes v1.36.2
+- **Les deux upgrades sont passés sur les trois clouds** : Kubernetes v1.36.2
   → v1.36.3 et Talos v1.13.7 → v1.13.8 sur 6/6 nœuds, relus depuis les kubelets
   et depuis l'API Talos de chaque nœud, jamais depuis l'outil qui les a menés.
 
 Ce qui reste ouvert :
 
-- **Outscale est bloqué en amont** — voir l'étape 4. Le module est dans le dépôt ;
-  cette version ne le revendique pas, et Proxmox n'a jamais touché de matériel
-  réel.
+- **Proxmox n'a jamais touché de matériel réel.** Le module est dans le dépôt ;
+  cette version ne le revendique pas. Chez Outscale, un Net créé avant le
+  correctif du load balancer refuse encore la suppression et seul le fournisseur
+  peut la lever — voir l'étape 4.
 - **Le chemin Scaleway a été parcouru de bout en bout le 2026-08-17**, mais
   depuis une machine qui avait déjà la chaîne d'outils — l'étape 1 sur un hôte nu
   n'a jamais été suivie. OVH a été piloté par son opérateur, pas en suivant cette

@@ -8,11 +8,11 @@
 # Every check here FAILS the run. A staging job that warns and ends green is the
 # defect that let a CNI-less local cluster ship for weeks.
 #
-# Usage: staging-verify.sh <provider> <role>
+# Usage: flux-verify.sh <provider> <role>
 set -euo pipefail
 
-PROVIDER="${1:?usage: staging-verify.sh <provider> <role>}"
-ROLE="${2:?usage: staging-verify.sh <provider> <role>}"
+PROVIDER="${1:?usage: flux-verify.sh <provider> <role>}"
+ROLE="${2:?usage: flux-verify.sh <provider> <role>}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 task kubeconfig ROLE="$ROLE" PROVIDER="$PROVIDER"

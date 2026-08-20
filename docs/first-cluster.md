@@ -3,10 +3,9 @@
 # Your first cluster
 
 From a bare machine and an empty cloud account to a Talos cluster you can reach,
-upgrade and destroy. Scaleway is used throughout; OVH differs only in its
-credentials and its tfvars file, except in step 4 where its load balancer is
-slower. Outscale has a module too, but a deploy there is **blocked upstream** —
-see the end of this page.
+upgrade and destroy. Scaleway is used throughout; OVH and Outscale differ only
+in their credentials and their tfvars file, except in step 4 where their load
+balancers are slower — and where Outscale carries one caveat of its own.
 
 **Read the honesty note at the bottom before you spend anything.** It says what
 has been measured, on which cloud and when — and what has not.
@@ -172,13 +171,23 @@ wedged one cannot be deleted and it pins the subnet, the network, and your whole
 teardown behind it. `task cluster-down` recognises this and says so rather than telling
 you to retry. It is a support ticket.
 
-**On Outscale this is where it stops, and it is the provider, not this project.**
-Registering the image alone is minutes to an hour — the snapshot is imported from
-an 11 GiB object through a provider-side queue: 8 min on 2026-08-18, over 60 min
-stuck at `in-queue 0%` on 2026-07-25. Then, on 2026-08-19, a load balancer sat in
-`provisioning` for over an hour and the Net, its subnet and its internet service
-refused deletion afterwards on an account holding nothing. Support request 399530
-is open; 0.1.0 does not claim this provider.
+**Outscale asks for more patience here, and it has one trap worth knowing before
+you meet it.** Registering the image alone is minutes to an hour — the snapshot
+is imported from an 11 GiB object through a provider-side queue: 8 min on
+2026-08-18, over 60 min stuck at `in-queue 0%` on 2026-07-25. Then, on
+2026-08-19, a load balancer sat in `provisioning` for over an hour and the Net,
+its subnet and its internet service refused deletion afterwards on an account
+holding nothing.
+
+Outscale support diagnosed that one, and it is theirs: their load balancer
+service stops waiting after 10 seconds for an internal machine that takes about
+10.7. The workflow fails, the machine and network resources it had already
+created stay, and the load balancer never leaves `provisioning`. Their
+instruction is to build no further load balancer in that Net and to use a new
+one — a redeploy on a fresh Net succeeded on 2026-08-20, with the new load
+balancer `active` and 3 backends. The support request covering it is closed. One
+Net from before the fix still refuses deletion on a dependency no read returns;
+only the provider can clear that, and a second request is open for it.
 
 Six buckets exist afterwards: state and artifacts, each with a `-backup` twin,
 plus the image and its staging area.
@@ -244,12 +253,12 @@ not your tfvars. Start the probe before you begin: the claim this project makes
 is not "no interruption", it is **the longest run of consecutive failed
 `/readyz` samples, one second apart, stays under 15 seconds**. Measure it.
 
-Measured on 2026-08-19, across both upgrades: **16 failed samples out of 575,
-longest outage 5 s** on Scaleway, and 9-10 out of ~540 for **7 s** on OVH. Both
-are worse than the best this project ever recorded (3 s and 1 s), and both are
-the honest figure. The two numbers are different claims — scattered blips over a
-control-plane roll are an HA cluster working; consecutive ones are the API being
-down.
+Measured across both upgrades: **16 failed samples out of 575, longest outage
+5 s** on Scaleway and 9-10 out of ~540 for **7 s** on OVH, both on 2026-08-19,
+then **8 s** on Outscale on 2026-08-20. All three are worse than the best this
+project ever recorded (3 s, 1 s and 1 s), and all three are the honest figure.
+The two numbers are different claims — scattered blips over a control-plane roll
+are an HA cluster working; consecutive ones are the API being down.
 
 ## 8. Tear it down
 
@@ -304,23 +313,26 @@ proven, and the reason this document exists.
 
 What **is** measured, with dates (`docs/backlog.md`, "Where we stand"):
 
-- `task cluster-verify` scores **11/11 on Scaleway and 11/11 on OVH**, 2026-08-19.
-- **Idempotency is three assertions**, and all three held 3/3 on both clouds: an
-  empty plan, the *same* nodes (name and `creationTimestamp`), and a kubeconfig
-  that still reaches the apiserver. Two of the three can pass while the cluster
-  was silently rebuilt.
+- `task cluster-verify` scores **11/11 on Scaleway, on OVH and on Outscale** —
+  the first two on 2026-08-19, Outscale on 2026-08-20.
+- **Idempotency is three assertions**, and all three held 3/3 on all three
+  clouds: an empty plan, the *same* nodes (name and `creationTimestamp`), and a
+  kubeconfig that still reaches the apiserver. Two of the three can pass while
+  the cluster was silently rebuilt.
 - **The stored state has been opened.** An `encrypted_data` envelope under
   SSE-AES256, fetched back out of the `-backup` bucket at ANOTHER provider's
   endpoint using that provider's credentials, 2026-08-19. Not declared —
   downloaded and inspected.
-- **Both upgrades landed on Scaleway and on OVH**: Kubernetes v1.36.2 → v1.36.3
+- **Both upgrades landed on all three clouds**: Kubernetes v1.36.2 → v1.36.3
   and Talos v1.13.7 → v1.13.8 on 6/6 nodes, read back from the kubelets and from
   each node's own Talos API rather than from the tool that performed them.
 
 What is still open:
 
-- **Outscale is blocked upstream** — see step 4. The module is in the repository;
-  this release does not claim it, and Proxmox has never touched real hardware.
+- **Proxmox has never touched real hardware.** The module is in the repository;
+  this release does not claim it. On Outscale, one Net created before the load
+  balancer fix still refuses deletion and only the provider can clear it — see
+  step 4.
 - **The Scaleway path was walked end to end on 2026-08-17**, but from a machine
   that already had the toolchain — step 1 on a bare host is unwalked. OVH was
   driven by its operator, not by following this page.

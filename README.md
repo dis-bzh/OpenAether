@@ -18,15 +18,15 @@ Flux is present in the code and **off** (`deploy_flux = false`); it returns as a
 user choice in a later release. Every 1.x tag and release was deleted and none
 of them ever ran — **0.1.0 is the first release that ships something proven**.
 
-**Honest status**, measured on real accounts on 2026-08-19: Scaleway from an
-empty account — deploy 8 min 50 for 72 resources, `cluster-verify` 11/11,
-idempotency 3/3, Kubernetes v1.36.2 → v1.36.3 then Talos v1.13.7 → v1.13.8,
-confirmed on 6/6 nodes by each node's own Talos API — and OVH on the same five
-pillars. An upgrade is not seamless: longest apiserver outage 5 s on Scaleway,
-7 s on OVH, both worse than the best figures this project ever recorded.
-**Outscale is blocked upstream** (support request 399530) and Proxmox has
-**never been applied on real hardware**. Open items:
-[`docs/backlog.md`](docs/backlog.md).
+**Honest status**, measured on real accounts — three clouds, the same five
+pillars on each. Scaleway from an empty account on 2026-08-19: deploy 8 min 50
+for 72 resources, `cluster-verify` 11/11, idempotency 3/3, Kubernetes v1.36.2
+→ v1.36.3 then Talos v1.13.7 → v1.13.8, confirmed on 6/6 nodes by each node's
+own Talos API. OVH the same day, Outscale on 2026-08-20. An upgrade is not
+seamless: longest apiserver outage 5 s on Scaleway, 7 s on OVH, 8 s on Outscale
+— all three worse than the best figures this project ever recorded, for a
+reason that is not established. Proxmox has **never been applied on real
+hardware**. Open items: [`docs/backlog.md`](docs/backlog.md).
 
 ## Architecture
 
@@ -83,7 +83,7 @@ Talos/cluster stack is provider-agnostic. Details:
 |----------|--------|-----------------|-------|
 | **Scaleway** | ✅ five pillars measured 2026-08-19 | fr-par (3 AZs) | Reference implementation; deploy, verify, idempotency and both upgrades |
 | **OVH** | ✅ the same five, the same day | EU-WEST-PAR (OpenStack) | Octavia LB, floating IPs, SNAT router, private network |
-| **Outscale / Numspot** | ⛔ blocked upstream (request 399530) | eu-west-2 | A load balancer stuck in `provisioning`, then a Net, subnet and internet service refusing deletion on an account holding nothing. The module stays; the release does not claim it |
+| **Outscale / Numspot** | ✅ the same five, measured 2026-08-20 | eu-west-2 | Redeployed on a **fresh Net** after an internal LBU timeout upstream left one stuck in `provisioning` (request 399530, closed). Two scars: a Net created before that fix still refuses deletion and only the provider can clear it, and the object store ignores `If-None-Match`, so the `use_lockfile` state lock is deliberately off here |
 | **Proxmox (on-prem)** | 🧪 code-complete, unit-tested — **never applied for real** | PVE single/multi-host | Talos VIP (no managed LB), host nftables NAT/DNAT, manual prerequisites |
 | **Local (Docker)** | ✅ validated (`task local-up`) | WSL2 / Docker | 3 CP + 3 workers, etcd quorum, Cilium — credential-free proof of `modules/talos` |
 
@@ -264,10 +264,10 @@ task security            # hardening checks
 
 | Release | Deliverable | Status |
 |---------|-------------|--------|
-| **0.1.0** | One Talos cluster + Cilium on Scaleway or OVH, encrypted state and artifacts, in-place upgrades | ⏳ first release |
+| **0.1.0** | One Talos cluster + Cilium on Scaleway, OVH or Outscale, encrypted state and artifacts, in-place upgrades | ⏳ first release |
 | next | Flux back as a user choice, then the modular pick from `OpenAether-apps` | ⏳ planned |
 | later | CAPI overlay: a management cluster driving children | ⏳ planned |
-| open | Outscale (blocked upstream), Proxmox on real hardware, the full cross-provider failover | ⏳ |
+| open | Proxmox on real hardware, the full cross-provider failover, the Outscale Net only the provider can delete | ⏳ |
 
 ## License
 

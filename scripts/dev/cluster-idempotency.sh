@@ -11,11 +11,11 @@
 #   2. every node is the same node   — same names, same creationTimestamps
 #   3. the kubeconfig still works    — the output was not invalidated
 #
-# Usage: staging-idempotency.sh <provider> <role> [ssh-key]
+# Usage: cluster-idempotency.sh <provider> <role> [ssh-key]
 set -euo pipefail
 
-PROVIDER="${1:?usage: staging-idempotency.sh <provider> <role> [ssh-key]}"
-ROLE="${2:?usage: staging-idempotency.sh <provider> <role> [ssh-key]}"
+PROVIDER="${1:?usage: cluster-idempotency.sh <provider> <role> [ssh-key]}"
+ROLE="${2:?usage: cluster-idempotency.sh <provider> <role> [ssh-key]}"
 KEY="${3:-$HOME/.ssh/id_ed25519}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 

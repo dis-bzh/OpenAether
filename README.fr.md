@@ -20,15 +20,16 @@ redevient un choix utilisateur dans une version ultérieure. Tous les tags et
 toutes les releases 1.x ont été supprimés et aucun n'a jamais tourné — **la
 0.1.0 est la première version qui livre quelque chose de prouvé**.
 
-**Statut honnête**, mesuré sur des comptes réels le 2026-08-19 : Scaleway depuis
-un compte vide — déploiement en 8 min 50 pour 72 ressources, `cluster-verify`
-11/11, idempotence 3/3, Kubernetes v1.36.2 → v1.36.3 puis Talos v1.13.7 →
-v1.13.8, confirmés sur 6/6 nœuds par l'API Talos de chaque nœud — et OVH sur les
-mêmes cinq piliers. Un upgrade n'est pas transparent : coupure d'apiserver la
-plus longue 5 s sur Scaleway, 7 s sur OVH, toutes deux pires que les meilleurs
-chiffres jamais relevés par ce projet. **Outscale est bloqué en amont**
-(demande de support 399530) et Proxmox n'a **jamais été appliqué sur matériel
-réel**. Points ouverts : [`docs/backlog.md`](docs/backlog.md).
+**Statut honnête**, mesuré sur des comptes réels — trois clouds, les mêmes cinq
+piliers sur chacun. Scaleway depuis un compte vide le 2026-08-19 : déploiement
+en 8 min 50 pour 72 ressources, `cluster-verify` 11/11, idempotence 3/3,
+Kubernetes v1.36.2 → v1.36.3 puis Talos v1.13.7 → v1.13.8, confirmés sur 6/6
+nœuds par l'API Talos de chaque nœud. OVH le même jour, Outscale le 2026-08-20.
+Un upgrade n'est pas transparent : coupure d'apiserver la plus longue 5 s sur
+Scaleway, 7 s sur OVH, 8 s sur Outscale — toutes trois pires que les meilleurs
+chiffres jamais relevés par ce projet, pour une raison qui n'est pas établie.
+Proxmox n'a **jamais été appliqué sur matériel réel**. Points ouverts :
+[`docs/backlog.md`](docs/backlog.md).
 
 ## Architecture
 
@@ -84,7 +85,7 @@ Talos/cluster est provider-agnostique. Détail : `docs/deployment-test-matrix.fr
 |----------|--------|----------------|-------|
 | **Scaleway** | ✅ cinq piliers mesurés le 2026-08-19 | fr-par (3 AZ) | Implémentation de référence ; déploiement, vérification, idempotence et les deux upgrades |
 | **OVH** | ✅ les mêmes cinq, le même jour | EU-WEST-PAR (OpenStack) | LB Octavia, floating IPs, routeur SNAT, réseau privé |
-| **Outscale / Numspot** | ⛔ bloqué en amont (demande 399530) | eu-west-2 | Un load balancer coincé en `provisioning`, puis un Net, son sous-réseau et son internet service refusant la suppression sur un compte qui ne contenait plus rien. Le module reste ; la version ne le revendique pas |
+| **Outscale / Numspot** | ✅ les mêmes cinq, mesurés le 2026-08-20 | eu-west-2 | Redéployé sur un **Net neuf** après un timeout interne du service LBU en amont, qui en avait laissé un coincé en `provisioning` (demande 399530, close). Deux cicatrices : un Net créé avant ce correctif refuse toujours la suppression et seul le provider peut le lever, et son object store ignore `If-None-Match`, donc le verrou d'état `use_lockfile` est délibérément désactivé ici |
 | **Proxmox (on-prem)** | 🧪 code-complet, testé unitairement — **jamais appliqué en réel** | PVE mono/multi-hôte | VIP Talos (pas de LB managé), NAT/DNAT nftables, prérequis manuels |
 | **Local (Docker)** | ✅ validé (`task local-up`) | WSL2 / Docker | 3 CP + 3 workers, quorum etcd, Cilium — preuve sans credentials de `modules/talos` |
 
@@ -204,9 +205,10 @@ task cluster-down PROVIDER=ovh PLAN=destroy-management-ovh.tfplan APPROVE=auto
 python3 scripts/ops/purge-orphans/ovh.py    # dry-run : vérifier qu'il ne reste rien
 ```
 
-`--force-no-edges` est la façon d'affirmer qu'il n'y a aucun enfant CAPI ; un
-cluster 0.1.0 n'en a aucun, et sans lui `fleet-down` refuse et laisse le cloud
-tourner.
+Même vocabulaire que `cluster-up`. `fleet-down` écarte toujours les enfants CAPI
+d'abord, mais il lit désormais pourquoi la requête a échoué : des CRDs absents
+signifient qu'il n'y en a aucun par définition, et il le dit. `--force-no-edges`
+reste une porte de sortie pour un cluster qu'il n'arrive pas du tout à joindre.
 
 ⚠️ Les floating IPs pré-allouées hors OpenTofu ne partent pas seules.
 
@@ -266,10 +268,10 @@ task security            # contrôles de durcissement
 
 | Version | Livrable | Statut |
 |---------|----------|--------|
-| **0.1.0** | Un cluster Talos + Cilium sur Scaleway ou OVH, état et artefacts chiffrés, upgrades en place | ⏳ première version |
+| **0.1.0** | Un cluster Talos + Cilium sur Scaleway, OVH ou Outscale, état et artefacts chiffrés, upgrades en place | ⏳ première version |
 | suivante | Flux redevenu un choix utilisateur, puis la pioche modulaire dans `OpenAether-apps` | ⏳ prévu |
 | plus tard | Surcouche CAPI : un cluster de management pilotant des enfants | ⏳ prévu |
-| ouvert | Outscale (bloqué en amont), Proxmox sur matériel réel, le failover cross-provider complet | ⏳ |
+| ouvert | Proxmox sur matériel réel, le failover cross-provider complet, le Net Outscale que seul le provider peut supprimer | ⏳ |
 
 ## Licence
 

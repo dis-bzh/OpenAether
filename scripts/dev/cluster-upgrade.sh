@@ -22,11 +22,11 @@
 # makes the version arithmetic below testable rather than first exercised on a
 # paying account.
 #
-# Usage: staging-upgrade.sh <provider> <role> [ssh-key]
+# Usage: cluster-upgrade.sh <provider> <role> [ssh-key]
 set -euo pipefail
 
-PROVIDER="${1:?usage: staging-upgrade.sh <provider> <role> [ssh-key]}"
-ROLE="${2:?usage: staging-upgrade.sh <provider> <role> [ssh-key]}"
+PROVIDER="${1:?usage: cluster-upgrade.sh <provider> <role> [ssh-key]}"
+ROLE="${2:?usage: cluster-upgrade.sh <provider> <role> [ssh-key]}"
 KEY="${3:-$HOME/.ssh/id_ed25519}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TFVARS="$ROOT/infrastructure/opentofu/cluster/envs/${ROLE}-${PROVIDER}.tfvars"
@@ -326,13 +326,13 @@ task infra-plan ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY" STRICT=1 ||
 ok "plan empty after the upgrade"
 
 # Verify what this cluster ACTUALLY is, not what the upgrade lane assumes it is.
-# staging-verify.sh waits for 35 Flux Kustomizations; a 1.0.0 cluster is Talos
+# flux-verify.sh waits for 35 Flux Kustomizations; a 1.0.0 cluster is Talos
 # and Cilium and has none, so calling it unconditionally failed an upgrade that
 # had just succeeded on every count — nodes on the target version, three seconds
 # of API outage, empty plan. Asked of the cluster rather than of a variable,
 # because that is the only source that cannot drift from reality.
 if kubectl get namespace flux-system >/dev/null 2>&1; then
-  "$ROOT/scripts/dev/staging-verify.sh" "$PROVIDER" "$ROLE"
+  "$ROOT/scripts/dev/flux-verify.sh" "$PROVIDER" "$ROLE"
 else
   ok "no flux-system — verifying against the infrastructure floor"
   # Through the TASK, not the script. infra-verify reads `tofu output` for the

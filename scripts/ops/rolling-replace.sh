@@ -408,7 +408,7 @@ cnpg_maintenance() { # <true|false>
   done <<<"$list"
   # Resume AFTER restoring, so Flux finds the objects already back where git
   # wants them. Leaving a Kustomization suspended is the failure mode this
-  # function must not have — staging-verify.sh fails the run if one is.
+  # function must not have — flux-verify.sh fails the run if one is.
   [[ "$on" == "true" ]] || cnpg_flux_suspend false
 
   # ⚠️ The patch returning 0 is not the setting taking effect. On OVH
@@ -420,7 +420,7 @@ cnpg_maintenance() { # <true|false>
   # mechanism is right and only the confirmation was missing.
   #
   # Confirm on the way IN only: on the way out the budgets coming back is Flux's
-  # and the operator's business, and staging-verify.sh is what checks the end
+  # and the operator's business, and flux-verify.sh is what checks the end
   # state.
   [[ "$on" == "true" ]] || return 0
   local waited=0 left rc
@@ -1390,7 +1390,7 @@ info "Pre-flight health check…"
 if [[ $DRY_RUN -eq 0 ]]; then
   wait_etcd_healthy "${#CP_IPS[@]}" || die "etcd is not ${#CP_IPS[@]}/${#CP_IPS[@]} healthy — refusing to start a rolling replace on an unhealthy cluster"
   "${KCTL[@]}" get nodes >/dev/null 2>&1 || die "kubectl cannot reach the API via ${KUBECONFIG_FILE}"
-  # WAIT, do not sample once. staging-upgrade.sh calls this immediately after a
+  # WAIT, do not sample once. cluster-upgrade.sh calls this immediately after a
   # Kubernetes version bump, and a kubelet that has just restarted is NotReady
   # for a few seconds while reporting the new version — so a single sample
   # refused the whole Talos roll on a cluster that was fine moments later

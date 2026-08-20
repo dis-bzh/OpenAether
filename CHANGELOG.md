@@ -37,9 +37,9 @@ Infrastructure only — nothing above that layer. Start at
 
 ### Validated
 
-Measured on real accounts on 2026-08-19, on Scaleway and on OVH. Versions were
-read back from the kubelets and from each node's own Talos API, never from the
-tool that performed the upgrade.
+Measured on real accounts: Scaleway and OVH on 2026-08-19, Outscale on
+2026-08-20. Versions were read back from the kubelets and from each node's own
+Talos API, never from the tool that performed the upgrade.
 
 - **Scaleway, from an empty account**: deploy in 8 min 50 for 72 resources,
   `cluster-verify` 11/11, idempotency 3/3, Kubernetes v1.36.2 → v1.36.3, Talos
@@ -47,14 +47,18 @@ tool that performed the upgrade.
   fallback dropped).
 - **OVH**: the same five pillars — deploy, verify, idempotency, and both
   upgrades — the same versions, 11/11, idempotency 3/3.
+- **Outscale**: the same five pillars again, measured the same way — deploy (51
+  resources, then 17), `cluster-verify` 11/11, idempotency 3/3, the same two
+  upgrades on 6/6 nodes. It had to go onto a **fresh Net**: see the known limits.
 - **Idempotency is three assertions, not one**: an empty plan, the *same* nodes
   (name and `creationTimestamp`), and a kubeconfig that still reaches the
   apiserver. An empty plan alone would not catch a node replaced underneath it.
 - **An upgrade is not seamless.** Longest apiserver outage 5 s on Scaleway (16
-  failed probes out of 575) and 7 s on OVH (9-10 out of ~540). Both are *worse*
-  than the best figures this project ever recorded (3 s and 1 s). Plan for a gap.
-- **313 offline assertions across 11 harnesses**, every one mutation-tested
-  (`task test`). The emulated lane runs feint 0.9.0 against Scaleway provider
+  failed probes out of 575), 7 s on OVH (9-10 out of ~540) and 8 s on Outscale.
+  All three are *worse* than the best figures this project ever recorded (3 s,
+  1 s and 1 s), and why has not been established. Plan for a gap.
+- **344 offline assertions across 11 harnesses**, every one mutation-tested
+  (`task test-scripts`). The emulated lane runs feint 0.9.0 against Scaleway provider
   2.81.0 — the same version the clusters run.
 
 ### Fixed
@@ -78,12 +82,18 @@ Read these before deploying something that matters. Open items:
   `OpenAether-apps`.
 - **No CAPI and no multi-cluster.** A management cluster is an optional overlay
   on top of this, never the entry point.
-- **Outscale is blocked upstream, not by us.** A load balancer sat in
-  `provisioning` for over an hour, and afterwards the Net, its subnet and its
-  internet service refused deletion while the account held 0 VMs, 0 volumes, 0
-  load balancers, 0 public IPs, 0 NAT services and 0 NICs. Outscale support
-  request 399530 is open. The provider module stays in the repository; the
-  release does not claim it.
-- **Scaleway and OVH are the clouds that were measured.** Proxmox has never been
-  applied on real hardware; the local Docker rung proves `modules/talos` without
-  credentials and nothing about a cloud. Anything else is code, not a claim.
+- **Outscale needs a fresh Net, and leaves one behind.** A load balancer that
+  never left `provisioning` was diagnosed by Outscale as an internal timeout in
+  their LBU service — support request 399530, now closed, with the instruction
+  not to create another load balancer in that Net. One Net created before the
+  fix still refuses deletion on a dependency no read returns; only the provider
+  can clear it, and a second request is open for that.
+- **No state lock on Outscale.** Its object store accepts a conditional write
+  (`If-None-Match`) that Scaleway's and OVH's refuse, so `use_lockfile` is
+  enabled on those two and deliberately not there — a lock that announces itself
+  and holds nothing is worse than none. Two concurrent runs against an Outscale
+  cluster's state are not stopped by anything.
+- **Scaleway, OVH and Outscale are the clouds that were measured.** Proxmox has
+  never been applied on real hardware; the local Docker rung proves
+  `modules/talos` without credentials and nothing about a cloud. Anything else is
+  code, not a claim.

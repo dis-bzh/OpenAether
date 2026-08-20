@@ -3,14 +3,14 @@
 🇬🇧 [English version](upgrade.md)
 
 > Construire un cluster et en garder un sont deux affirmations différentes. Voici
-> la seconde. Mesurée à la main sur **Scaleway et OVH** le 2026-08-19, en
-> topologie HA, chaque nœud mis à niveau **sur place** plutôt que remplacé et
-> l'API Talos de chaque nœud interrogée sur ce qu'il exécute. Outscale est bloqué
-> en amont ; les runs antérieurs là-bas et sur OVH revenaient en arrière au
-> redémarrage suivant, et `backlog.md` dit pourquoi.
+> la seconde. Mesurée à la main sur **Scaleway, OVH et Outscale** — les deux
+> premiers le 2026-08-19, Outscale le 2026-08-20 — en topologie HA, chaque nœud
+> mis à niveau **sur place** plutôt que remplacé et l'API Talos de chaque nœud
+> interrogée sur ce qu'il exécute. Les runs antérieurs sur Outscale et sur OVH
+> revenaient en arrière au redémarrage suivant, et `backlog.md` dit pourquoi.
 >
 > La version non assistée de cette même procédure est
-> [`scripts/dev/staging-upgrade.sh`](../scripts/dev/staging-upgrade.sh), que
+> [`scripts/dev/cluster-upgrade.sh`](../scripts/dev/cluster-upgrade.sh), que
 > `.github/workflows/staging.yml` cronne chaque semaine — une voie qui n'a jamais
 > atteint un déploiement (`backlog.md`). En attendant, cette page est ce qui a
 > réellement tourné.
@@ -43,10 +43,15 @@ while :; do kubectl get --raw=/readyz --request-timeout=2s >/dev/null 2>&1 \
 ```
 
 Une exécution propre perd quelques secondes le temps qu'un apiserver redémarre.
-Le 2026-08-19, les deux upgrades de bout en bout : **5 s** sur Scaleway (16
-échantillons en échec sur 575) et **7 s** sur OVH (9-10 sur ~540). Les deux sont
-pires que les meilleurs chiffres jamais relevés par ce projet (3 s et 1 s) —
-citer ceux-là, pas ceux-ci.
+Les deux upgrades de bout en bout : **5 s** sur Scaleway (16 échantillons en
+échec sur 575) et **7 s** sur OVH (9-10 sur ~540) le 2026-08-19, puis **8 s** sur
+Outscale le 2026-08-20. Les trois sont pires que les meilleurs chiffres jamais
+relevés par ce projet (3 s, 1 s et 1 s) — citer ceux-là, pas ceux-ci.
+
+La cause de cette régression n'est pas établie. Le roulement prend désormais le
+leader etcd en dernier et lui fait céder le leadership avec `talosctl etcd
+forfeit-leadership` au lieu de laisser sa disparition forcer une élection
+(2026-08-20) ; que ce soit là ce qui coûtait ces secondes n'a pas été mesuré.
 
 ## Kubernetes d'abord
 

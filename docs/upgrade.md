@@ -3,13 +3,14 @@
 🇫🇷 [Version française](upgrade.fr.md)
 
 > Building a cluster and keeping one are different claims. This is the second.
-> Measured by hand on **Scaleway and OVH** on 2026-08-19, HA topologies, every
-> node upgraded **in place** rather than replaced and each node's own Talos API
-> asked what it runs. Outscale is blocked upstream; earlier runs there and on OVH
-> reverted on the next reboot, and `backlog.md` says why.
+> Measured by hand on **Scaleway, OVH and Outscale** — the first two on
+> 2026-08-19, Outscale on 2026-08-20 — HA topologies, every node upgraded **in
+> place** rather than replaced and each node's own Talos API asked what it runs.
+> Earlier runs on Outscale and on OVH reverted on the next reboot, and
+> `backlog.md` says why.
 >
 > The unattended version of this same procedure is
-> [`scripts/dev/staging-upgrade.sh`](../scripts/dev/staging-upgrade.sh), which
+> [`scripts/dev/cluster-upgrade.sh`](../scripts/dev/cluster-upgrade.sh), which
 > `.github/workflows/staging.yml` crons weekly — a lane that has never reached a
 > deploy (`backlog.md`). Until it does, this page is what was actually run.
 
@@ -38,10 +39,16 @@ while :; do kubectl get --raw=/readyz --request-timeout=2s >/dev/null 2>&1 \
   && echo ok || echo FAIL; sleep 1; done | tee probe.log
 ```
 
-A clean run loses a few seconds while an apiserver restarts. 2026-08-19, both
-upgrades end to end: **5 s** on Scaleway (16 failed samples in 575) and **7 s**
-on OVH (9-10 in ~540). Both are worse than the best this project ever recorded
-(3 s and 1 s) — quote these, not those.
+A clean run loses a few seconds while an apiserver restarts. Both upgrades end
+to end: **5 s** on Scaleway (16 failed samples in 575) and **7 s** on OVH (9-10
+in ~540) on 2026-08-19, then **8 s** on Outscale on 2026-08-20. All three are
+worse than the best this project ever recorded (3 s, 1 s and 1 s) — quote these,
+not those.
+
+The cause of that regression is not established. The roll now takes the etcd
+leader last and hands leadership over with `talosctl etcd forfeit-leadership`
+rather than letting its disappearance force an election (2026-08-20); whether
+that is what was costing the seconds has not been measured.
 
 ## Kubernetes first
 

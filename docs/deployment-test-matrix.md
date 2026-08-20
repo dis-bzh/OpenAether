@@ -9,12 +9,12 @@
 >
 > ✅ apply-tested · 🎭 emulated (Feint: real provider, real HTTP, no account) ·
 > ⛔ blocked upstream · 🧪 unit-tested only (mocked) · ⬜ untested.
-> Reviewed 2026-08-19.
+> Reviewed 2026-08-20.
 >
 > A ✅ is a record of a run on its date, not a claim 0.1.0 makes. What this
-> release rests on is the Scaleway and OVH management HA measured 2026-08-19 —
-> `backlog.md` § "Where we stand". Rows dated before that, `CAPI-*` included,
-> predate the re-scope.
+> release rests on is the Scaleway and OVH management HA measured 2026-08-19 and
+> the Outscale one measured 2026-08-20 — `backlog.md` § "Where we stand". Rows
+> dated before those, `CAPI-*` included, predate the re-scope.
 
 ## Mental model
 
@@ -103,7 +103,7 @@ Two orthogonal layers of knobs:
 
 | ID | Role | CP/W | k8s_lb_mode | Uniquely exercises | Status |
 |---|---|---|---|---|---|
-| `OSC-mgmt-ha` | mgmt | 3+1 | managed | LB returns a **DNS name**, not an IP; outscale SSH user. 3+3 does not fit the 40 GB RAM quota, so HA here means the control plane only — and **every node is in eu-west-2a**, because the module never reads past the first subregion. Three control planes, one failure domain. | ⛔ *(blocked upstream, request 399530 — the 2026-08-13 ✅ does not stand: its Talos upgrade reverted on the next reboot, see `backlog.md`)* |
+| `OSC-mgmt-ha` | mgmt | 3+1 | managed | LB returns a **DNS name**, not an IP; outscale SSH user. 3+3 does not fit the 40 GB RAM quota, so HA here means the control plane only — and **every node is in eu-west-2a**, because the module never reads past the first subregion. Three control planes, one failure domain. | ✅ *(2026-08-20, on a **fresh** Net — LB `active` with 3 backends. The hang that blocked it was a timeout inside Outscale's own LBU service, request 399530 closed; the Net that predates the fix still refuses deletion. The 2026-08-13 ✅ does not stand: its Talos upgrade reverted on the next reboot, see `backlog.md`)* |
 | `OSC-work-ha` | workload | 3+3 | managed | Workload role; BSU volumes if paired with storage. | ⬜ |
 | `OSC-vip-reject` | — | any | vip | Negative test: validation must reject `vip`. | 🧪 |
 
@@ -157,13 +157,13 @@ Not reachable in this lane, and why: Scaleway root volume type, Outscale
 | `OP-destroy` | `task cluster-down` / `task infra-down` | Ordered teardown (children then management). | ✅ |
 | `OP-tftest` | mocked | The unit-test suite (no credentials). | ✅ (CI) |
 | `OP-backup` | `backup_enabled=true`, cross-provider replica (`<STORE>_AWS_*`) | DR: tfstate + kube/talosconfig to primary + replica; client-encrypted restic. | ✅ *(local + real cloud SCW+OVH)* |
-| `OP-rolling-replace` | `task cluster-roll` | Zero-downtime node replacement (etcd evict, one node at a time). | ✅ *(Scaleway and OVH, 2026-08-19 — it carries the Talos upgrade)* |
+| `OP-rolling-replace` | `task cluster-roll` | One node at a time (etcd evict, cordon/drain). Not zero-downtime: the API is unreachable for 5-8 s, see `backlog.md`. | ✅ *(Scaleway and OVH 2026-08-19, Outscale 2026-08-20 — it carries the Talos upgrade)* |
 
 ## C) Priority (highest-value untested, real apply)
 
 1. **Proxmox real apply** (`PMX-*`) — never run on a real host.
 2. **Cloud HA multi-AZ** (`SCW-mgmt-ha`) — 3-CP etcd across zones never applied
-   at this exact shape. `OSC-mgmt-ha` cannot be one: one subregion, and blocked.
+   at this exact shape. `OSC-mgmt-ha` cannot be one: one subregion.
 3. **`OVH-vip`** — vip mode never applied on OVH (distinct Neutron
    `allowed_address_pairs` mechanism).
 4. **Workload role real apply** (`*-work-*`) — only management exercised.

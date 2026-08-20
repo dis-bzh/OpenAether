@@ -8,7 +8,7 @@
 # died. Three paid deployments found that, one at a time, because no test reads
 # the call graph. This one does.
 #
-# It reads the CALLERS too. staging-idempotency.sh called `task cluster-up` with
+# It reads the CALLERS too. cluster-idempotency.sh called `task cluster-up` with
 # no approval variable at all, and this harness — which existed for exactly that
 # defect — was reading Taskfile.yml and nothing else, so it stayed green while a
 # CI stage was guaranteed to stop after a full paid deploy.

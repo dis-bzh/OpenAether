@@ -14,8 +14,8 @@ run and to write down.
 0.1.0 is infrastructure only: one Talos cluster, Cilium as the whole platform,
 Flux off (`deploy_flux = false`), no applications and no CAPI. Anything about
 Flux, `OpenAether-apps` or a child cluster belongs to a later release and is not
-a gate on this one. Two clouds are proven, a third is blocked upstream — the
-checklist says which, and so must the announcement.
+a gate on this one. Three clouds are proven and no bare metal is — the
+checklist says on what, and so must the announcement.
 
 ---
 
@@ -45,7 +45,7 @@ docker run --rm -v /tmp/repo.tar:/tmp/repo.tar:ro ubuntu:24.04 bash -c '
 - [ ] it warns if `nc` is absent, and does not claim to install it
 - [ ] every command the README quick start names exists (`task --list`)
 - [ ] `task preflight` green — lint, render, validate, `tofu test` and the script
-      harnesses. That is 313 offline assertions across 11 harnesses, every one
+      harnesses. That is 344 offline assertions across 11 harnesses, every one
       mutation-tested; a count that has silently shrunk is a red line, not a pass.
 
 ## 2. Local Docker — the credential-free rung
@@ -169,18 +169,41 @@ task cluster-up ROLE=management PROVIDER=ovh
       on OVH, and Neutron's `allowed_address_pairs` is a different mechanism from
       Scaleway's anti-spoofing
 
-## 6. Cloud — Outscale: blocked upstream, and not a gate
+## 6. Cloud — Outscale
 
-Do not tick anything here from an earlier cycle: none of those runs shipped.
+```bash
+task preflight-quotas PROVIDER=outscale
+task cluster-up ROLE=management PROVIDER=outscale
+```
 
-An LBU sat in `provisioning` for over an hour, and afterwards the Net, its
-subnet and its internet service refused deletion while the account held 0 VMs,
-0 volumes, 0 load balancers, 0 public IPs, 0 NAT services and 0 NICs. Outscale
-support request **399530** is open. The module stays in the repository; 0.1.0
-does not claim the provider, and the announcement must say so in the same breath
-as Scaleway and OVH.
+Deploy into a **fresh Net**. What blocked this provider was a timeout inside
+Outscale's own LBU service: it stops waiting after 10 s while the VM the load
+balancer needs takes about 10.7, so the workflow fails, the internal resources
+are created anyway and the LBU stays in `provisioning` for ever. Support request
+**399530** carried that diagnosis and is **closed**; the instruction that came
+with it is do not create another LBU in that Net, use a new one.
 
-- [ ] the support request has an answer, and it changes something
+Do not tick anything here from an earlier cycle — the 2026-08-13 run does not
+count, its Talos upgrade reverted on the next reboot.
+
+- [x] **the same five pillars as Scaleway and OVH, measured the same way** →
+      2026-08-20: deploy — 51 resources, then 17 — `cluster-verify` 11/11,
+      idempotency 3/3, Kubernetes v1.36.2 → v1.36.3, Talos v1.13.7 → v1.13.8
+      confirmed on 6/6 nodes by each node's own Talos API (`stage=running`,
+      fallback dropped). The new load balancer reached `active` with 3 backends.
+- [x] **the interruption is a number** → longest outage **8 s**, the worst of the
+      three clouds and worse than the 1 s this provider once recorded. Quote this
+      one.
+- [ ] teardown, then `python3 scripts/ops/purge-orphans/outscale.py` clean
+
+**Two things stay true here and belong in the announcement.** One Net created
+before the fix still refuses deletion, on a dependency no read returns — only
+Outscale can clear it, and a second support request is open for it; it is not
+your leak, and it must not hide one. And this object store does not honour
+conditional writes: measured with the same client that got a refusal from
+Scaleway and OVH, it accepts the second one — so `use_lockfile` is on for those
+two and deliberately **off** here, where it would claim a state lock and hold
+nothing. Nothing stops two concurrent runs against an Outscale cluster's state.
 
 ## 7. Upgrades — Kubernetes and Talos, on a cluster that has to stay up
 
@@ -192,10 +215,14 @@ and does not belong here twice. What a *release* adds to it:
 
 - [x] the one-second probe up throughout, and the claim made as a number: the
       LONGEST consecutive run of failed `/readyz` samples, not the total.
-      5 s on Scaleway, 7 s on OVH — both worse than this project's own records
-      (3 s and 1 s), and both are what the announcement quotes.
-      "No interruption" is not measurable.
-- [x] run on **two clouds**, not only the reference one: the known first-apply
+      5 s on Scaleway, 7 s on OVH, 8 s on Outscale — every one of them worse than
+      this project's own records (3 s, 1 s and 1 s), and all three are what the
+      announcement quotes. "No interruption" is not measurable.
+      A fix shipped 2026-08-20 — the roll takes the etcd leader LAST and hands
+      leadership over with `talosctl etcd forfeit-leadership` instead of letting
+      its disappearance force an election — but whether that is what was costing
+      the seconds has not been measured. Do not present it as the explanation.
+- [x] run on **three clouds**, not only the reference one: the known first-apply
       failure (upstream #352) reproduces on OVH and not on Scaleway.
 - [ ] every node upgraded **in place**, none replaced, every one back under its
       own name — and the running SCHEMATIC compared, not just the version tag
@@ -203,7 +230,7 @@ and does not belong here twice. What a *release* adds to it:
 - [ ] whatever it shook out is in `backlog.md` before the tag, including what you
       chose not to fix
 
-`scripts/dev/staging-upgrade.sh` does all of the above unattended and does not
+`scripts/dev/cluster-upgrade.sh` does all of the above unattended and does not
 retry the failing apply, on purpose.
 
 ## 8. Release mechanics
@@ -225,12 +252,14 @@ Only once everything above is green.
 - [ ] clone the repo **as a stranger would** — no local state, no `.env.sh` —
       and do §1 and §2 one more time
 - [ ] read `README.md` top to bottom as someone who has never seen it: the
-      disclaimers (Outscale blocked upstream, Proxmox never applied, the emulator
-      proving nothing about a real deploy, no applications above Cilium) are the
-      reason a knowledgeable reader will trust the rest. Do not soften them.
+      disclaimers (Proxmox never applied on hardware, the undeletable Outscale
+      Net, the emulator proving nothing about a real deploy, no applications
+      above Cilium) are the reason a knowledgeable reader will trust the rest.
+      Do not soften them.
 - [ ] decide what the announcement claims, and check each claim against the
-      matrix. "Validated on three providers" is false: two clouds are proven,
-      Outscale is blocked upstream, and nothing above Cilium is deployed at all.
+      matrix. "Validated on three clouds" holds — Scaleway, OVH and Outscale.
+      "Validated on three providers" does not: Proxmox has never touched real
+      hardware, and nothing above Cilium is deployed at all.
 
 ---
 

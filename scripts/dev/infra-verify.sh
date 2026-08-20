@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # What a PURE-INFRA cluster must prove once `task cluster-up` returns.
 #
-# staging-verify.sh is the full-platform check: it waits for 35 Flux
+# flux-verify.sh is the full-platform check: it waits for 35 Flux
 # Kustomizations, the Gateway, the OpenAether-apps ref. On a 1.0.0 cluster none
 # of that exists, so running it there would go red for reasons that have nothing
 # to do with the infrastructure. This is its floor-sized sibling, and the claim

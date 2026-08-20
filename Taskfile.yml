@@ -274,11 +274,11 @@ tasks:
       # target, not CI. A harness nobody invokes is the failure mode this whole
       # target exists for, one level up: the check does work, it is simply never
       # asked. test-teardown owns the branches that decide whether a management
-      # is destroyed while its children keep billing; test-staging-checks owns
+      # is destroyed while its children keep billing; test-cluster-checks owns
       # the queries that turn "the apply returned" into "the cluster works".
       # Both use a stub kubectl, need no credentials, and cost ~10s together.
       - ./scripts/dev/test-teardown.sh
-      - ./scripts/dev/test-staging-checks.sh
+      - ./scripts/dev/test-cluster-checks.sh
       # The purge scripts are the last sentence between a failed teardown and a
       # bill, and both said "clean" when every API call was refused. Forced-403,
       # in-process, no network.
@@ -493,8 +493,15 @@ tasks:
           # gate and then let phase 2 ask a question nobody could hear.
           APPROVE: "{{.APPROVE}}"
       - |
-        echo "✓ cluster-up complete — every step above is idempotent."
-        echo "  Re-run 'task cluster-up' after fixing any failure to resume."
+        # Do NOT end on "every step above is idempotent": that line came out
+        # identical on the first run, which created 72 resources, and on the
+        # second, which touched none. Idempotence is a property of the command,
+        # not a badge it awards itself — and the evidence was already on screen.
+        # Point at it instead of claiming it.
+        echo "✓ cluster-up complete."
+        echo "  Run this exact command again to converge again. Its plan is the"
+        echo "  verdict, not this line: on a cluster that already matches the"
+        echo "  configuration OpenTofu prints 'No changes.' and applies nothing."
 
   # ===========================================================================
   # Cluster Lifecycle
@@ -1142,10 +1149,10 @@ tasks:
       ROLE: '{{.ROLE | default "management"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
     cmds:
-      # staging-upgrade.sh was reachable from no target and from no workflow —
+      # cluster-upgrade.sh was reachable from no target and from no workflow —
       # the same gap infra-verify.sh had until today. The script that defines
       # what an upgrade must prove could only be run by typing its path.
-      - ./scripts/dev/staging-upgrade.sh {{.PROVIDER}} {{.ROLE}} {{.KEY}}
+      - ./scripts/dev/cluster-upgrade.sh {{.PROVIDER}} {{.ROLE}} {{.KEY}}
 
   cluster-verify:
     aliases: [verify]

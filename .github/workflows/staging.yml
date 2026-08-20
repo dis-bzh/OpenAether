@@ -170,7 +170,7 @@ jobs:
       #
       # Each one is expected to pin talos_version / kubernetes_version one patch
       # BELOW cluster/variables.tf, which is what gives the upgrade stage
-      # something real to move. See scripts/dev/staging-upgrade.sh.
+      # something real to move. See scripts/dev/cluster-upgrade.sh.
       - name: Materialise the tfvars
         env:
           TFVARS_B64_SCALEWAY: ${{ secrets.STAGING_TFVARS_B64_SCALEWAY }}
@@ -218,17 +218,17 @@ jobs:
         run: ./scripts/ops/seed-openbao.sh "$PROVIDER" "$ROLE"
 
       - name: Verify
-        run: ./scripts/dev/staging-verify.sh "$PROVIDER" "$ROLE"
+        run: ./scripts/dev/flux-verify.sh "$PROVIDER" "$ROLE"
 
       # Building a cluster and keeping one are different claims. These two
       # stages are the second; 1.0.0 shipped having proven only the first.
       - name: Idempotency — a second bring-up must change nothing
         if: env.STAGES != 'deploy'
-        run: ./scripts/dev/staging-idempotency.sh "$PROVIDER" "$ROLE"
+        run: ./scripts/dev/cluster-idempotency.sh "$PROVIDER" "$ROLE"
 
       - name: Upgrade — Kubernetes then Talos, in place, with a probe running
         if: env.STAGES == 'full'
-        run: ./scripts/dev/staging-upgrade.sh "$PROVIDER" "$ROLE"
+        run: ./scripts/dev/cluster-upgrade.sh "$PROVIDER" "$ROLE"
 
       # `if: always()` is the load-bearing line in this file. A failed apply is
       # precisely the case that leaves billed resources standing, so the teardown

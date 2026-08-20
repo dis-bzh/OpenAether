@@ -5,7 +5,7 @@ description: Upgrading Kubernetes and Talos on a live OpenAether cluster without
 
 # Upgrading a live cluster
 
-`docs/upgrade.md` is the procedure, and `scripts/dev/staging-upgrade.sh` is that
+`docs/upgrade.md` is the procedure, and `scripts/dev/cluster-upgrade.sh` is that
 same procedure unattended — if the two disagree, the script wins, it is the one
 that runs. This is the reasoning behind both.
 
@@ -54,7 +54,7 @@ unknown at plan time, the provider keeps the old `machine_configuration_hash` in
 the plan and recomputes it at apply. The second run works because the first
 resolved whatever was unknown. Fixed upstream in the 0.12.0 pre-release line
 only — we pin 0.11.0, the newest stable. **Do not "fix" it locally without
-proving the fix on a real cloud**, and do not add a retry: `staging-upgrade.sh`
+proving the fix on a real cloud**, and do not add a retry: `cluster-upgrade.sh`
 deliberately has none, because a retry turns the defect green.
 
 ## What to watch, beyond "it came back"

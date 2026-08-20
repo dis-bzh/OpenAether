@@ -2,7 +2,7 @@
 # Unit tests for the assertions that decide a staging run is GREEN, against a
 # stub kubectl — same shape as test-rolling-replace.sh, one rung below the cloud.
 #
-# staging-verify.sh and staging-upgrade.sh are what turn "the apply returned"
+# flux-verify.sh and cluster-upgrade.sh are what turn "the apply returned"
 # into "the cluster works", and every conclusion they reach comes out of a
 # kubectl query. The class of defect that cost 25 to 90 minutes of paid cloud
 # time each on 2026-08-15 was never the cloud: it was a query that FAILED and a
@@ -21,7 +21,7 @@
 # Verdicts: ✓ pass, ✗ fail, ⏱ hang (the run never returned, so nothing was
 # proven), — skip (the check never ran), ! known defect. Only ✓ is green.
 #
-# Usage: test-staging-checks.sh          (STRICT_DEFECTS=1, STRICT_SKIPS=1, RUN_TIMEOUT=<s>)
+# Usage: test-cluster-checks.sh          (STRICT_DEFECTS=1, STRICT_SKIPS=1, RUN_TIMEOUT=<s>)
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -104,7 +104,7 @@ ln -s kubectl "$STUB_DIR/task"
 ln -s kubectl "$STUB_DIR/flux"
 
 # Time is the one thing a wait loop must not really spend here. Log the request,
-# then yield briefly — a pure no-op spins staging-upgrade's background probe hot.
+# then yield briefly — a pure no-op spins cluster-upgrade's background probe hot.
 cat >"$STUB_DIR/sleep" <<'STUB'
 #!/usr/bin/env bash
 printf 'sleep %s\n' "$1" >>"${STUB_LOG:-/dev/null}"
@@ -126,18 +126,18 @@ FAKE="$STUB_DIR/root"
 CLUSTER="$FAKE/infrastructure/opentofu/cluster"
 TFVARS="$CLUSTER/envs/${ROLE}-${PROVIDER}.tfvars"
 mkdir -p "$FAKE/scripts/dev" "$CLUSTER/envs"
-ln -s "$ROOT/scripts/dev/staging-verify.sh" "$FAKE/scripts/dev/staging-verify.sh"
-ln -s "$ROOT/scripts/dev/staging-upgrade.sh" "$FAKE/scripts/dev/staging-upgrade.sh"
-# staging-upgrade now picks its verifier from the cluster: staging-verify.sh when
+ln -s "$ROOT/scripts/dev/flux-verify.sh" "$FAKE/scripts/dev/flux-verify.sh"
+ln -s "$ROOT/scripts/dev/cluster-upgrade.sh" "$FAKE/scripts/dev/cluster-upgrade.sh"
+# cluster-upgrade now picks its verifier from the cluster: flux-verify.sh when
 # flux-system exists, infra-verify.sh when it does not. Both have to be reachable
 # from the fake root, or the all-green control dies on rc 127 — which is how this
 # harness caught the change five minutes after it was written.
 ln -s "$ROOT/scripts/dev/infra-verify.sh" "$FAKE/scripts/dev/infra-verify.sh"
-VERIFY="$FAKE/scripts/dev/staging-verify.sh"
-UPGRADE="$FAKE/scripts/dev/staging-upgrade.sh"
+VERIFY="$FAKE/scripts/dev/flux-verify.sh"
+UPGRADE="$FAKE/scripts/dev/cluster-upgrade.sh"
 KEYFILE="$STUB_DIR/ssh-key-fixture"; : >"$KEYFILE"
 
-# The versions staging-upgrade upgrades TOWARD. Fictional on purpose: nothing in
+# The versions cluster-upgrade upgrades TOWARD. Fictional on purpose: nothing in
 # a fixture should read like a pin someone could copy into a real environment.
 cat >"$CLUSTER/variables.tf" <<'TF'
 variable "talos_installer_schematic_id" {
@@ -169,7 +169,7 @@ RUN_TIMEOUT="${RUN_TIMEOUT:-30}"
   { echo "RUN_TIMEOUT must be a positive integer (0 disables the hang guard)" >&2; exit 2; }
 run() { # <cmd...> — RUN_OUT gets stdout+stderr, RUN_RC the status
   : >"$STUB_LOG"; RUN_HUNG=0; RUN_CMD="$*"
-  # To a file, not a pipe: staging-upgrade leaves a background probe holding the
+  # To a file, not a pipe: cluster-upgrade leaves a background probe holding the
   # inherited stdout, and a command substitution would wait on it forever.
   # 30s is ten times the slowest scenario. -k: a script that swallows TERM must
   # still die here rather than become the CI job's own timeout.
@@ -183,7 +183,7 @@ verify()  { run env FLUX_READY_TIMEOUT="${FLUX_READY_TIMEOUT:-2}" "$VERIFY" "$PR
 # A real run rewrites the pins, so every scenario starts from a fresh env file a
 # patch below the target — otherwise the second one aborts on "upgrades nothing"
 # and each assertion after it silently measures the wrong run.
-# FLUX_READY_TIMEOUT reaches the staging-verify.sh this script chains into at the
+# FLUX_READY_TIMEOUT reaches the flux-verify.sh this script chains into at the
 # end; without it that one waits out its 1500s default and the run dies on the
 # harness timeout instead of on an assertion.
 upgrade() { tfvars v0.0.1 v0.0.1; run env FLUX_READY_TIMEOUT=2 "$UPGRADE" "$PROVIDER" "$ROLE" "$KEYFILE"; }
@@ -191,7 +191,7 @@ said()    { case "$RUN_OUT" in *"$1"*) return 0 ;; esac; return 1; }
 called()  { grep -qF -- "$1" "$STUB_LOG"; }
 # awk, not `grep -c`: this file exists because of what `grep -c` returns on input
 # that never arrived.
-# Keyed on the DURATION: staging-upgrade's background probe sleeps 1 the whole
+# Keyed on the DURATION: cluster-upgrade's background probe sleeps 1 the whole
 # run, and counting those made "it kept waiting" true of a loop that never ran.
 slept() { awk -v d="${1:-}" '/^sleep /{ if (d == "" || $2 == d) n++ } END{print n+0}' "$STUB_LOG"; }
 # Call order. A call that never happened reads as "never" on the left and
@@ -199,9 +199,9 @@ slept() { awk -v d="${1:-}" '/^sleep /{ if (d == "" || $2 == d) n++ } END{print 
 first_at() { awk -v pat="$1" 'index($0,pat){n=NR; exit} END{print (n ? n : 999999)}' "$STUB_LOG"; }
 last_at()  { awk -v pat="$1" 'index($0,pat){n=NR} END{print n+0}' "$STUB_LOG"; }
 
-# Every query staging-verify makes, all answered green. Scenarios prepend the one
+# Every query flux-verify makes, all answered green. Scenarios prepend the one
 # line they want to change, because the first match wins.
-# staging-upgrade asks the CLUSTER which verifier applies. This scenario is the
+# cluster-upgrade asks the CLUSTER which verifier applies. This scenario is the
 # full platform, so flux-system must answer present or the upgrade would verify
 # against the infrastructure floor and the checks below would never run.
 VERIFY_OK='get --raw=/readyz\t0\tok\n'
@@ -215,8 +215,8 @@ VERIFY_OK+='get httproute longhorn\t1\tError from server (NotFound): httproutes 
 VERIFY_OK+="get gitrepository openaether\t0\t${GIT_REF}\n"
 VERIFY_OK+='task \t0\t\n'
 
-# Nodes and kubelets already on the target, for staging-upgrade.
-# The fleet BEFORE the upgrade. staging-upgrade now decides what to run by asking
+# Nodes and kubelets already on the target, for cluster-upgrade.
+# The fleet BEFORE the upgrade. cluster-upgrade now decides what to run by asking
 # the cluster rather than by reading the tfvars — the tfvars is rewritten before
 # the apply lands, so an interrupted run leaves it claiming a version nobody has,
 # and the next run would skip that step for ever. The survey uses custom-columns
@@ -229,7 +229,7 @@ UPGRADE_OK="$SURVEY_PRE"
 UPGRADE_OK+='nodeInfo.kubeletVersion\t0\tv0.0.2%%v0.0.2\n'
 UPGRADE_OK+='nodeInfo.osImage\t0\tTalos (v0.0.2)%%Talos (v0.0.2)\n'
 
-echo "=== staging-verify: an unanswered query must not read as a healthy cluster ==="
+echo "=== flux-verify: an unanswered query must not read as a healthy cluster ==="
 
 plan "$VERIFY_OK"
 verify
@@ -251,7 +251,7 @@ verify
 if [ "$(slept 10)" -ge 25 ] && said 'not Ready after'; then
   defect_gone "the node wait now survives a transient query error"
 else
-  defect "staging-verify.sh:37 ends the run at the FIRST failed node query — $(slept 10) of the 30 retries, and not one word about nodes on stdout or stderr"
+  defect "flux-verify.sh:37 ends the run at the FIRST failed node query — $(slept 10) of the 30 retries, and not one word about nodes on stdout or stderr"
 fi
 
 plan "conditions[?(@.type==\"Ready\")]\t1\terror: the server could not find the requested resource\n${VERIFY_OK}"
@@ -265,7 +265,7 @@ verify
 if [ "$(slept 15)" -ge 1 ] && said 'not Ready after'; then
   defect_gone "the Kustomization wait now survives a transient query error"
 else
-  defect "staging-verify.sh:85 aborts the whole run on the FIRST failed Kustomization query — $(slept 15) retries, no message, rc=$RUN_RC"
+  defect "flux-verify.sh:85 aborts the whole run on the FIRST failed Kustomization query — $(slept 15) retries, no message, rc=$RUN_RC"
 fi
 
 plan "conditions[?(@.type==\"Ready\")]\t0\t\n${VERIFY_OK}"
@@ -293,7 +293,7 @@ verify
   || bad "the unauthenticated storage UI passed the regression gate"
 
 echo
-echo "=== staging-verify: the apps ref is the one the tfvars asked for ==="
+echo "=== flux-verify: the apps ref is the one the tfvars asked for ==="
 
 plan "get gitrepository openaether\t1\tError from server: connection refused\n${VERIFY_OK}"
 verify
@@ -307,11 +307,11 @@ verify
 if [ "$RUN_RC" -ne 0 ] && said 'main'; then
   defect_gone "the ref check now compares against git_ref (${PINNED})"
 else
-  defect "staging-verify.sh:124 only asserts the ref is NON-EMPTY: the cluster tracks branch 'main' while the tfvars pins '${PINNED}', and the run ends green"
+  defect "flux-verify.sh:124 only asserts the ref is NON-EMPTY: the cluster tracks branch 'main' while the tfvars pins '${PINNED}', and the run ends green"
 fi
 
 echo
-echo "=== staging-upgrade: resolving the target, without a cluster ==="
+echo "=== cluster-upgrade: resolving the target, without a cluster ==="
 
 tfvars v0.0.1 v0.0.1
 plan "$VERIFY_OK"
@@ -368,7 +368,7 @@ said 'could not be read' \
 #
 # This is the only scenario in this file where the two sources differ, and
 # therefore the only one that can tell the fix from the bug: reverting
-# staging-upgrade to read the tfvars turns this red and nothing else.
+# cluster-upgrade to read the tfvars turns this red and nothing else.
 tfvars v0.0.2 v0.0.2
 plan "$SURVEY_PRE"
 run env DRY_RUN=1 "$UPGRADE" "$PROVIDER" "$ROLE" "$KEYFILE"
@@ -378,7 +378,7 @@ run env DRY_RUN=1 "$UPGRADE" "$PROVIDER" "$ROLE" "$KEYFILE"
 tfvars v0.0.1 v0.0.1
 
 echo
-echo "=== staging-upgrade: the two version counters ==="
+echo "=== cluster-upgrade: the two version counters ==="
 
 tfvars v0.0.1 v0.0.1
 plan "${UPGRADE_OK}${VERIFY_OK}"
@@ -406,7 +406,7 @@ plan 'get namespace flux-system\t1\tNotFound\n'"${UPGRADE_OK}${VERIFY_OK}"
 upgrade
 { said 'no flux-system' && said 'infrastructure floor'; } \
   && ok "no flux-system: the upgrade verifies against the infrastructure floor" \
-  || bad "an apps-free cluster still had staging-verify demanded of it"
+  || bad "an apps-free cluster still had flux-verify demanded of it"
 
 plan "nodeInfo.kubeletVersion\t0\tv0.0.2%%v0.0.1\n${UPGRADE_OK}${VERIFY_OK}"
 upgrade
@@ -442,12 +442,12 @@ said 'every node on Talos v0.0.2' \
   || bad "the upgrade ended green (rc=0) without one node version ever having been read"
 
 echo
-echo "=== staging-upgrade: report_probe, the interruption budget ==="
+echo "=== cluster-upgrade: report_probe, the interruption budget ==="
 
 RUN_HUNG=0  # nothing below concludes from a run(), so a prior hang must not void it
 # Extracted rather than run: how many samples a background probe gets in a stub
 # run is a timing accident, and the interesting input is a log that stayed empty.
-eval "$(awk '/^report_probe\(\) \{/,/^\}/' "$ROOT/scripts/dev/staging-upgrade.sh")"
+eval "$(awk '/^report_probe\(\) \{/,/^\}/' "$ROOT/scripts/dev/cluster-upgrade.sh")"
 # `fail` must ABORT, as it does in the script. Returning 1 instead lets the rest
 # of the function run and the LAST test decide — which quietly reported a probe
 # gate as broken while a fixed one was under test.
@@ -461,7 +461,7 @@ PROBE_LOG="$STUB_DIR/probe"; MAX_PROBE_FAILS=15
 # is "command not found", and `probe_ok && bad … || ok …` takes the GREEN branch
 # on rc 127. So the extraction is asserted before anything is concluded from it.
 if ! declare -F report_probe >/dev/null; then
-  bad "report_probe could NOT be extracted from staging-upgrade.sh — the checks below would have scored a pass from rc 127"
+  bad "report_probe could NOT be extracted from cluster-upgrade.sh — the checks below would have scored a pass from rc 127"
 else
   # PROBE_STARTED is what lets report_probe tell a quick step from a dead probe.
   # Unset here would leave `elapsed` at the test shell's own uptime, so every
@@ -540,9 +540,9 @@ YAML
       sed -E 's/^"?jsonpath="?//; s/"$//; s/\\(["$`\\])/\1/g'
   }
   # Read out of the scripts, so a template added tomorrow is covered too — and
-  # from all THREE, staging-idempotency.sh included.
-  TPL_FILES=("$ROOT/scripts/dev/staging-verify.sh" "$ROOT/scripts/dev/staging-upgrade.sh"
-    "$ROOT/scripts/dev/staging-idempotency.sh")
+  # from all THREE, cluster-idempotency.sh included.
+  TPL_FILES=("$ROOT/scripts/dev/flux-verify.sh" "$ROOT/scripts/dev/cluster-upgrade.sh"
+    "$ROOT/scripts/dev/cluster-idempotency.sh")
   n_tpl=0
   while read -r tpl; do
     [ -n "$tpl" ] || continue
