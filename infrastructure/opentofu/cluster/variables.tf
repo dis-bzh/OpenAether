@@ -10,6 +10,34 @@ variable "cluster_name" {
   default     = "openaether"
 }
 
+variable "bucket_suffix" {
+  description = <<-EOT
+    Discriminator appended to the bucket namespace, so this deployment does not
+    collide with anybody else's.
+
+    S3 bucket names are NOT scoped to your account. Scaleway documents them as
+    unique "in our whole platform"; OVH as "unique within OVHcloud"; Outscale as
+    unique per region. Whoever creates `s3-<project>-<provider>-tfstate-<env>`
+    first owns that name for every other customer, and the next person's very
+    first billable command fails on it.
+
+    Empty by default, which keeps the names already in use. Set it — six
+    lowercase alphanumerics is plenty, `task bucket-suffix` prints one — and
+    every bucket becomes s3-<project>-<suffix>-<provider>-…
+
+    It cannot be random or generated here: the state bucket has to exist before
+    OpenTofu runs, so its name cannot come from OpenTofu state. Pick it once,
+    keep it in the tfvars, and treat it as part of the cluster's identity —
+    changing it later orphans every bucket you already have.
+  EOT
+  type        = string
+  default     = ""
+  validation {
+    condition     = can(regex("^[a-z0-9]{0,16}$", var.bucket_suffix))
+    error_message = "bucket_suffix must be 0-16 lowercase letters or digits (it goes into an S3 bucket name)."
+  }
+}
+
 variable "environment" {
   description = "Deployment environment (e.g., dev, prod)"
   type        = string
@@ -99,11 +127,27 @@ variable "ssh_key_path" {
   default     = "~/.ssh/id_ed25519"
 }
 
+variable "talos_tunnel_port_offset" {
+  description = <<-EOT
+    Shifts the localhost ports Phase 2 reaches the nodes on (CPs 50000+offset+i,
+    workers 50100+offset+i), so more than one cluster can be bootstrapped from a
+    single workstation instead of colliding on a fixed block.
+    Must equal TALOS_TUNNEL_OFFSET, which is what actually opens the tunnels;
+    Taskfile.yml derives this from that one variable so the two cannot drift.
+  EOT
+  type        = number
+  default     = 0
+  validation {
+    condition     = var.talos_tunnel_port_offset >= 0 && var.talos_tunnel_port_offset % 200 == 0
+    error_message = "talos_tunnel_port_offset must be a non-negative multiple of 200 — the CP and worker blocks are 100 apart, so anything else overlaps them."
+  }
+}
+
 variable "talos_version" {
   description = "Talos Linux version"
   type        = string
   # renovate: datasource=github-releases depName=siderolabs/talos
-  default = "v1.13.8"
+  default = "v1.13.9"
 }
 
 variable "kubernetes_version" {
@@ -270,6 +314,43 @@ variable "git_ref" {
   }
 }
 
+variable "deploy_app_lb" {
+  description = <<-EOT
+    Create the public HTTP/HTTPS load balancer that fronts the application
+    Gateway. FALSE by default: its backends are pinned to the Istio Gateway's
+    fixed NodePorts (30080/30443), so on an infrastructure-only cluster it is a
+    load balancer that is created, billed, and points at ports where nothing
+    listens. Turn it on with the apps that need it.
+
+    The Kubernetes API load balancer is a different resource and is NOT governed
+    by this — a cluster needs its apiserver reachable whether or not it runs any
+    application.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "deploy_flux" {
+  description = <<-EOT
+    Install Flux on the cluster. FALSE by default: 0.1.0 is infrastructure only —
+    Talos plus Cilium, which is what makes a cluster healthy, up and ready. Flux
+    and everything it reconciles live in OpenAether-apps and come back as a
+    user choice in a later release.
+
+    The mechanism is not new and is not switched off code: modules/talos already
+    reads an empty flux_manifest as "no Flux", and infrastructure/opentofu-local
+    has driven that exact path through this same module on every `task local-up`
+    since the local cluster existed. This variable only chooses which way the
+    existing branch goes, in a local — no resource address moves, so flipping it
+    cannot replace a node.
+
+    When false, git_repo_url / git_ref / flux_namespace / apps_profile are inert:
+    they exist to fill a template that is never rendered.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "flux_namespace" {
   description = "Namespace for Flux installation"
   type        = string
@@ -366,4 +447,25 @@ variable "emulator_api_url" {
     condition     = var.emulator_api_url == "" || can(regex("^http://(127\\.0\\.0\\.1|localhost|\\[::1\\]):[0-9]+$", var.emulator_api_url))
     error_message = "emulator_api_url must be empty or a loopback URL (http://127.0.0.1:<port>): it exists to reach a local emulator, never a remote endpoint."
   }
+}
+
+variable "talos_installer_schematic_id" {
+  description = <<-EOT
+    Image Factory schematic ID for the installer the machine config names, so a
+    node keeps its system extensions (iscsi-tools, util-linux-tools) across
+    `talosctl upgrade`. qemu-guest-agent was REMOVED on 2026-08-19: it never
+    started on OVH or Outscale, and an extension that never starts blocks the boot
+    sequence, so Talos never confirms the upgrade and the next reboot reverts the
+    node — see talos-image/schematic.yaml. MUST match what
+    `talos-image/schematic.yaml` resolves to — `talos-image.sh` refuses to build
+    when the two disagree, which is the only place that can catch drift without
+    a network call on every plan.
+
+    Recompute after editing that file:
+      curl -sf -X POST -H 'Content-Type: application/yaml' \
+        --data-binary @infrastructure/opentofu/talos-image/schematic.yaml \
+        https://factory.talos.dev/schematics
+  EOT
+  type        = string
+  default     = "613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245"
 }

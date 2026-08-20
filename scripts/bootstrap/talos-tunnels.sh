@@ -7,6 +7,10 @@
 # clashes). Detached so they survive the `tofu apply` that follows; PIDs tracked
 # for a clean teardown.
 #
+# TALOS_TUNNEL_OFFSET shifts that whole block, so a second cluster can be
+# bootstrapped from the same workstation instead of colliding on the ports —
+# see oa_tunnel_offset() in scripts/lib/common.sh.
+#
 # Usage:
 #   SSH_KEY=~/.ssh/mykey ./scripts/talos-tunnels.sh open|close [tofu_dir]
 #
@@ -14,9 +18,18 @@
 #     EXPERIMENTAL, for the single-apply path (var.auto_tunnels): takes IPs as
 #     arguments because there is no state to read yet. Never exercised for real.
 
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
+
 ACTION="${1:-open}"
+# Absolute path to this script: `ensure` re-execs it after cd-ing elsewhere.
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
 KEY="${KEY/#\~/$HOME}"
+
+OFFSET="$(oa_tunnel_offset)" || exit 1
+CP_BASE=$((50000 + OFFSET))
+WK_BASE=$((50100 + OFFSET))
+API_PORT=$((6443 + OFFSET))
 
 if [[ "$ACTION" == "open-direct" ]]; then
   shift
@@ -62,13 +75,13 @@ if [[ "$ACTION" == "open-direct" ]]; then
   }
 
   echo "▶ [open-direct] opening tunnels via ${BUSER}@${BASTION} (key: $KEY)"
-  i=0; for ip in "${CPS[@]}"; do [[ -n "$ip" ]] && open_direct_one "$((50000 + i))" "$ip"; i=$((i + 1)); done
-  i=0; for ip in "${WKS[@]}"; do [[ -n "$ip" ]] && open_direct_one "$((50100 + i))" "$ip"; i=$((i + 1)); done
+  i=0; for ip in "${CPS[@]}"; do [[ -n "$ip" ]] && open_direct_one "$((CP_BASE + i))" "$ip"; i=$((i + 1)); done
+  i=0; for ip in "${WKS[@]}"; do [[ -n "$ip" ]] && open_direct_one "$((WK_BASE + i))" "$ip"; i=$((i + 1)); done
 
   sleep 4
   ports=()
-  for j in "${!CPS[@]}"; do ports+=("$((50000 + j))"); done
-  [[ -n "${WKS_CSV:-}" ]] && for j in "${!WKS[@]}"; do ports+=("$((50100 + j))"); done
+  for j in "${!CPS[@]}"; do ports+=("$((CP_BASE + j))"); done
+  [[ -n "${WKS_CSV:-}" ]] && for j in "${!WKS[@]}"; do ports+=("$((WK_BASE + j))"); done
   ok=0
   for p in "${ports[@]}"; do nc -z 127.0.0.1 "$p" 2>/dev/null && ok=$((ok + 1)); done
   echo "✓ [open-direct] ${ok}/${#ports[@]} tunnels up"
@@ -76,7 +89,12 @@ if [[ "$ACTION" == "open-direct" ]]; then
   exit 0
 fi
 
-TOFU_DIR="${2:-infrastructure/opentofu/cluster}"
+# Absolute, because `ensure` re-execs this script AFTER the `cd "$TOFU_DIR"`
+# below — and because PIDFILE is otherwise resolved a second time after that cd,
+# so the pidfile lands somewhere that does not exist while the run still reports
+# "✓ N/N tunnels up" with nothing tracked.
+TOFU_DIR="$(cd "${2:-infrastructure/opentofu/cluster}" 2>/dev/null && pwd)" ||
+  { echo "✗ no such directory: ${2:-infrastructure/opentofu/cluster}"; exit 1; }
 PIDFILE="${TOFU_DIR}/.talos-tunnels.pids"
 
 close_tunnels() {
@@ -85,11 +103,19 @@ close_tunnels() {
     while read -r pid; do [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true; done <"$PIDFILE"
     rm -f "$PIDFILE"
   fi
-  # Fallback: kill any SSH process forwarding port 50000+ to a remote :50000
-  # (catches orphaned tunnels from failed/interrupted runs)
-  pkill -f "ssh.*-L 5[01][0-9][0-9][0-9]:.*:50000" 2>/dev/null || true
-  # Same, for the private k8s API tunnel opened in k8s_lb_mode = "vip".
-  pkill -f "ssh.*-L 6443:.*:6443" 2>/dev/null || true
+  # Fallback: kill orphaned tunnels from failed/interrupted runs. Scoped to THIS
+  # offset's block — a blanket pkill on 5[01][0-9][0-9][0-9] would tear down the
+  # tunnels of another cluster being brought up beside this one, which is the
+  # whole thing TALOS_TUNNEL_OFFSET exists to allow.
+  local lo=$CP_BASE hi=$((WK_BASE + 99)) pid cmd port
+  while read -r pid cmd; do
+    [[ "$cmd" == ssh\ * ]] || continue
+    port="${cmd#*-L }"; port="${port%%:*}"
+    [[ "$port" =~ ^[0-9]+$ ]] || continue
+    if (( port >= lo && port <= hi )) || (( port == API_PORT )); then
+      kill "$pid" 2>/dev/null || true
+    fi
+  done < <(pgrep -a -f 'ssh .*-L [0-9]+:' 2>/dev/null || true)
 }
 
 # RFC1918 check (k8s_lb_mode = "vip": k8s_lb_ip is a private address instead of
@@ -119,13 +145,50 @@ OUTPUTS="$(tofu output -json 2>/dev/null || echo '{}')"
 BASTION="$(jq -r '.bastion_ip.value // empty' <<<"$OUTPUTS")"
 if [[ -z "$BASTION" || "$BASTION" == "<bastion-ip>" ]]; then
   echo "✗ No bastion_ip in the state — deploy the infrastructure first:"
-  echo "    task infra ROLE=management       (or: task infra ROLE=workload PROVIDER=...)"
+  echo "    task infra-apply ROLE=management PROVIDER=... APPROVE=auto   (or ROLE=workload)"
   exit 1
 fi
 BUSER="$(jq -r '.bastion_user.value // "root"' <<<"$OUTPUTS")"
 mapfile -t CPS < <(jq -r '.control_plane_private_ips.value[]? // empty' <<<"$OUTPUTS")
 mapfile -t WKS < <(jq -r '.worker_private_ips.value[]? // empty' <<<"$OUTPUTS")
 K8S_LB_IP="$(jq -r '.k8s_lb_ip.value // empty' <<<"$OUTPUTS")"
+
+# ── ensure: the idempotent front door ───────────────────────────────────────
+# `open` is DESTRUCTIVE — close_tunnels sweeps the whole port block before
+# rebuilding — which is right for bootstrap-phase2 and rolling-replace, where
+# node IPs may have changed, and wrong for anything that just needs the tunnels
+# to be there. Callers that only need them working call `ensure`: it touches
+# nothing when the set answers, and rebuilds only what is actually broken.
+#
+# It asks for a TLS answer, not a bound port. `ssh -L` keeps listening after the
+# connection through it dies, so `nc -z` would skip exactly the rebuild it
+# needed. scripts/dev/test-endpoint-probe.sh measures that difference.
+if [[ "$ACTION" == "ensure" ]]; then
+  BAD=()
+  probe_all() { # fills BAD with the ports that do not answer
+    local i p
+    BAD=()
+    for i in "${!CPS[@]}"; do p=$((CP_BASE + i)); oa_talos_endpoint_ok 127.0.0.1 "$p" || BAD+=("$p"); done
+    for i in "${!WKS[@]}"; do p=$((WK_BASE + i)); oa_talos_endpoint_ok 127.0.0.1 "$p" || BAD+=("$p"); done
+  }
+  TOTAL=$(( ${#CPS[@]} + ${#WKS[@]} ))
+  probe_all
+  if [[ ${#BAD[@]} -eq 0 ]]; then
+    echo "✓ ${TOTAL}/${TOTAL} Talos tunnels answering — leaving them alone"
+    exit 0
+  fi
+  echo "▶ ${#BAD[@]}/${TOTAL} Talos tunnel(s) not answering (${BAD[*]}) — rebuilding" >&2
+  "$SELF" open "$TOFU_DIR" || exit 1
+  for _ in 1 2 3 4 5 6; do
+    probe_all
+    [[ ${#BAD[@]} -eq 0 ]] && { echo "✓ Talos tunnels rebuilt and answering"; exit 0; }
+    sleep 5
+  done
+  echo "✗ still nothing answering on 127.0.0.1: ${BAD[*]}" >&2
+  echo "  A port can be BOUND while the node behind it is down — this probe wants a" >&2
+  echo "  TLS answer, not a listener. Check the nodes before blaming the tunnels." >&2
+  exit 1
+fi
 
 close_tunnels # drop any stale tunnels (old IPs) before reopening
 : >"$PIDFILE"
@@ -166,9 +229,33 @@ until ssh -o UserKnownHostsFile="$BASTION_KH" -o StrictHostKeyChecking=accept-ne
   sleep 10
 done
 
+# WAIT for the ports close_tunnels just freed. `kill` is asynchronous: the old
+# ssh has not released its listener when the new one tries to bind, so the new
+# one dies on ExitOnForwardFailure while the old one is still listening — and the
+# `nc -z` count below then reads that dying forward as "up". A Scaleway deploy
+# reported 4/6 that way on 2026-08-14 and failed with a healthy bastion.
+# It also catches someone else holding this offset's block — that one will not
+# clear, and says so.
+__ports=()
+for __i in "${!CPS[@]}"; do __ports+=("$((CP_BASE + __i))"); done
+for __i in "${!WKS[@]}"; do __ports+=("$((WK_BASE + __i))"); done
+for _ in $(seq 1 20); do
+  __busy=()
+  for __p in "${__ports[@]}"; do nc -z 127.0.0.1 "$__p" 2>/dev/null && __busy+=("$__p"); done
+  [[ ${#__busy[@]} -eq 0 ]] && break
+  sleep 1
+done
+if [[ ${#__busy[@]} -gt 0 ]]; then
+  echo "✗ ports still in use after 20s: ${__busy[*]}" >&2
+  echo "  Something outside this run holds them — another cluster's tunnels on" >&2
+  echo "  this machine, most likely. Close them:  $0 close" >&2
+  echo "  Or give this cluster its own block: TALOS_TUNNEL_OFFSET=200 (400, …)" >&2
+  exit 1
+fi
+
 echo "▶ Opening tunnels via ${BUSER}@${BASTION} (key: $KEY)"
-i=0; for ip in "${CPS[@]}"; do open_one "$((50000 + i))" "$ip"; i=$((i + 1)); done
-i=0; for ip in "${WKS[@]}"; do open_one "$((50100 + i))" "$ip"; i=$((i + 1)); done
+i=0; for ip in "${CPS[@]}"; do open_one "$((CP_BASE + i))" "$ip"; i=$((i + 1)); done
+i=0; for ip in "${WKS[@]}"; do open_one "$((WK_BASE + i))" "$ip"; i=$((i + 1)); done
 
 # k8s_lb_mode = "vip": k8s_lb_ip is a private Talos VIP, not a public managed
 # LB — open a dedicated tunnel to reach the API from the operator's machine.
@@ -176,7 +263,7 @@ K8S_API_TUNNELED=false
 if [[ -n "$K8S_LB_IP" ]] && is_private_ip "$K8S_LB_IP"; then
   nohup ssh -o UserKnownHostsFile="$BASTION_KH" -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes \
     -o ServerAliveInterval=15 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
-    -i "$KEY" -N -L "6443:${K8S_LB_IP}:6443" "${BUSER}@${BASTION}" \
+    -i "$KEY" -N -L "${API_PORT}:${K8S_LB_IP}:6443" "${BUSER}@${BASTION}" \
     >/dev/null 2>&1 &
   echo $! >>"$PIDFILE"
   K8S_API_TUNNELED=true
@@ -185,15 +272,15 @@ fi
 # Give SSH a moment to establish the forwards, then verify.
 sleep 4
 ports=()
-for j in "${!CPS[@]}"; do ports+=("$((50000 + j))"); done
-for j in "${!WKS[@]}"; do ports+=("$((50100 + j))"); done
-[[ "$K8S_API_TUNNELED" == true ]] && ports+=("6443")
+for j in "${!CPS[@]}"; do ports+=("$((CP_BASE + j))"); done
+for j in "${!WKS[@]}"; do ports+=("$((WK_BASE + j))"); done
+[[ "$K8S_API_TUNNELED" == true ]] && ports+=("$API_PORT")
 ok=0
 for p in "${ports[@]}"; do nc -z 127.0.0.1 "$p" 2>/dev/null && ok=$((ok + 1)); done
 
-echo "✓ ${ok}/${#ports[@]} tunnels up — CPs on 50000+i, workers on 50100+i"
+echo "✓ ${ok}/${#ports[@]} tunnels up — CPs on ${CP_BASE}+i, workers on ${WK_BASE}+i"
 if [[ "$K8S_API_TUNNELED" == true ]]; then
-  echo "  k8s_lb_mode=vip: API tunneled — kubectl --server https://127.0.0.1:6443 get nodes"
+  echo "  k8s_lb_mode=vip: API tunneled — kubectl --server https://127.0.0.1:${API_PORT} get nodes"
 fi
 if [[ "$ok" -ne "${#ports[@]}" ]]; then
   echo "⚠ some tunnels failed. Check: SSH_KEY is correct, the bastion is reachable"

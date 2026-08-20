@@ -18,8 +18,8 @@ output "k8s_lb_ip" {
 }
 
 output "app_lb_ip" {
-  description = "DNS name of the App LB (80/443)"
-  value       = outscale_load_balancer.app.dns_name
+  description = "DNS name of the App LB (80/443). Null means no application load balancer on this cluster (deploy_app_lb = false)."
+  value       = one(outscale_load_balancer.app[*].dns_name)
 }
 
 # Bastion

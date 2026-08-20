@@ -84,9 +84,9 @@ resource "openstack_networking_port_v2" "bastion" {
   # the subnet: OpenTofu may create the port before it, and Neutron then leaves
   # it without an IPv4 address. The apply fails further along, on two errors
   # that do not name the cause:
-  #   « Port <id> requires a FixedIP in order to be used »        (boot du bastion)
+  #   « Port <id> requires a FixedIP in order to be used »     (booting the bastion)
   #   « Cannot add floating IP to port <id> that has no fixed
-  #     IPv4 addresses »                                          (association FIP)
+  #     IPv4 addresses »                                       (associating the FIP)
   # The block forces the ordering AND guarantees allocation. It is a race, so
   # an INTERMITTENT failure: several OVH deployments went through without it
   # (observed 2026-07-27). The control-plane ports and the VIP already declare it.

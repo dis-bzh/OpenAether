@@ -40,7 +40,8 @@ REPLICA_EP="$(jq -r '.replica_endpoint' <<<"$T")";  REPLICA_REGION="$(jq -r '.re
 PROVIDER="$(jq -r '.provider' <<<"$T")"
 
 PRIMARY_AK="$(s3_cred "$PROVIDER" primary ak)"; PRIMARY_SK="$(s3_cred "$PROVIDER" primary sk)"
-BACKUP_AK="$(s3_cred "$PROVIDER" backup ak)";   BACKUP_SK="$(s3_cred "$PROVIDER" backup sk)"
+BACKUP_AK="$(s3_cred "$PROVIDER" backup ak "$REPLICA_EP")"
+BACKUP_SK="$(s3_cred "$PROVIDER" backup sk "$REPLICA_EP")"
 
 mapfile -t CP_IPS < <(tofu output -json 2>/dev/null | jq -r '.control_plane_private_ips.value[]? // empty')
 [ ${#CP_IPS[@]} -gt 0 ] || { echo "✗ no control_plane_private_ips output — is the infra deployed?" >&2; exit 1; }
@@ -52,8 +53,9 @@ trap 'rm -rf "$GNUPGHOME" "$WORK"' EXIT
 # --- 1) snapshot from the first healthy CP (tunnels: CP i → 50000+i) ---------
 SNAP="$WORK/etcd.snap"
 took=""
+TUNNEL_OFFSET="$(oa_tunnel_offset)"
 for k in "${!CP_IPS[@]}"; do
-  ep="127.0.0.1:$((50000 + k))"; ip="${CP_IPS[$k]}"
+  ep="127.0.0.1:$((50000 + TUNNEL_OFFSET + k))"; ip="${CP_IPS[$k]}"
   if talosctl -e "$ep" -n "$ip" etcd snapshot "$SNAP" >/dev/null 2>&1; then
     took="cp-${k} (${ip})"; break
   fi

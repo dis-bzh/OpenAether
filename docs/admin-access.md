@@ -1,8 +1,11 @@
-# Day 1 — admin initialisation after `task up` (management)
+# Day 1 — admin initialisation after `task cluster-up` (management)
 
 🇫🇷 [Version française](admin-access.fr.md)
 
-The manual post-deployment steps, in order. Validated on Scaleway, 2026-07-25.
+The manual post-deployment steps for a cluster carrying the **application
+platform**, in order. **0.1.0 deploys none of it** — on an infrastructure-only
+cluster `task cluster-verify` is the whole day-1 path and nothing below applies.
+Validated on Scaleway, 2026-07-25.
 Convention: `KC=infrastructure/opentofu/cluster/kubeconfig`.
 
 ## 1. Escrow (IMMEDIATE)
@@ -20,8 +23,11 @@ Three secrets into Bitwarden EU, then wiped from local output:
 The bootstrap Job prints the CSR. Sign it **offline** with the root CA, then:
 
 ```bash
+# https, and skip-verify: the listener holds the cluster's own self-signed pair.
+# This said `http://` until 2026-08-14 and answered "Client sent an HTTP request
+# to an HTTPS server" — the command as written could never have worked.
 kubectl --kubeconfig $KC exec -i openbao-0 -n foundation-vault -- \
-  env BAO_ADDR=http://127.0.0.1:8200 BAO_TOKEN=<root_token> \
+  env BAO_ADDR=https://127.0.0.1:8200 BAO_SKIP_VERIFY=true BAO_TOKEN=<root_token> \
   bao write pki/intermediate/set-signed certificate=@- < intermediate-signed.pem
 ```
 
@@ -29,6 +35,15 @@ kubectl --kubeconfig $KC exec -i openbao-0 -n foundation-vault -- \
 Runbook: `OpenAether-apps/apps/base/foundation/vault/pki-root-offline-runbook.md`.
 
 ## 3. Seed the backup destinations
+
+**`scripts/ops/seed-openbao.sh <provider>` does all of this**, write-if-absent so
+a re-run cannot rotate `backup/restic` and orphan every existing backup. Use it;
+the commands below are what it runs and why.
+
+This is not optional polish: without `backup/s3-primary` alone, six Kustomizations
+stay not-Ready and the DAG never converges — measured on Scaleway 2026-08-14,
+where all 35 went Ready within two minutes of seeding. A deploy is not finished
+until this has run.
 
 Buckets must **pre-exist** (restic does not create them), on different providers
 in production.
@@ -114,7 +129,7 @@ bao token create -policy=openaether-reader -ttl=8h -display-name=<name>
 `openaether-admin` covers daily operations but explicitly denies seal, rekey and
 key rotation — those stay with the offline root token, deliberate and rare.
 
-⚠️ If your public IP changes: update `admin_ip` then `task infra`, or the bastion
+⚠️ If your public IP changes: update `admin_ip` then `task infra-apply`, or the bastion
 becomes unreachable.
 
 ## 7. Grafana SSO through Zitadel (OIDC)

@@ -18,6 +18,12 @@
 #   3. Update DNS for management endpoints (if using ExternalDNS — automated in Phase 4)
 # ==============================================================================
 
+# ⚠️ NEVER EXECUTED. This describes the disaster-recovery drill (primary provider
+# gone, cluster rebuilt on another) that is still an OPEN item in docs/backlog.md.
+# Nothing here has been deployed, so read it as a design intent, not as a proven
+# procedure. Note also that `ROLE=failover` only picks THIS FILE: the Flux overlay
+# and the bucket segment come from cluster_role below, which is "management".
+
 cluster_name       = "openaether"
 environment        = "prod"
 cluster_role       = "management"
@@ -30,7 +36,11 @@ node_distribution = {
     control_planes     = 3
     workers            = 2
     region             = "EU-WEST-PAR"
-    flavor_name        = "b3-8"
+    # c3-8 (4 vCPU / 8 GB), not b3-8 (2 vCPU): measured 2026-08-15, three b3-8
+    # workers sit at ~99% of CPU requests with the platform on them, so no node
+    # can be drained and `rolling-replace --upgrade` cannot finish. A rolling
+    # upgrade needs one node's worth of spare capacity — see docs/upgrade.md.
+    flavor_name        = "c3-8"
     # image_id optional — defaults to looking up "talos-ovh-amd64-<talos_version>" by
     # name (published by talos-image). Override only if you use a different name/UUID:
     # image_id           = "TALOS_IMAGE_ID"
@@ -66,13 +76,13 @@ bastion_ssh_keys = {
 git_repo_url     = "https://github.com/dis-bzh/OpenAether-apps.git"
 # Pin the platform: a commit on a branch would otherwise reach a running
 # cluster within the reconcile interval. refs/heads/<branch> to test.
-git_ref          = "refs/tags/1.0.0"
+git_ref          = "refs/heads/main"
 
 # --- Backup / DR object stores ------------------------------------------------
 # This failover cluster runs when your primary provider is DOWN, so its PRIMARY
 # state lives on OVH (reachable), and it replicates BACK to the primary once it
-# recovers. Export BACKUP_AWS_* with the primary provider's creds for the
-# replica. Derived buckets (parts come from this file, each with a "-backup"
+# recovers. That replica is opened with the primary provider's own keys — the
+# cloud s3_replica_endpoint names, not this one. Derived buckets (parts come from this file, each with a "-backup"
 # twin):
 #   state            -> s3-<cluster_name>-ovh-tfstate-<environment>
 #   kube/talosconfig -> s3-<cluster_name>-ovh-management-<environment>

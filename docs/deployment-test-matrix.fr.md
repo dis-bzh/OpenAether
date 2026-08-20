@@ -8,7 +8,14 @@
 > du fichier.
 >
 > ✅ testé par apply réel · 🎭 émulé (Feint : vrai provider, vrai HTTP, sans
-> compte) · 🧪 testé unitairement (mocké) · ⬜ non testé. Revue 2026-07-28.
+> compte) · ⛔ bloqué en amont · 🧪 testé unitairement (mocké) · ⬜ non testé.
+> Revue 2026-08-20.
+>
+> Un ✅ est le compte rendu d'un run à sa date, pas une revendication de la
+> 0.1.0. Ce sur quoi cette version repose, c'est le management HA Scaleway et OVH
+> mesuré le 2026-08-19 et celui d'Outscale mesuré le 2026-08-20 — `backlog.md`
+> § « Where we stand ». Les lignes datées d'avant, `CAPI-*` comprises, précèdent
+> le recentrage.
 
 ## Modèle mental
 
@@ -39,12 +46,13 @@ Deux couches de réglages orthogonales :
 | Nombre de workers | `node_distribution.<p>.workers` ; local `worker_count` | ≥ 0 (local `0..3`) | 0 / local 3 | tous | 0 worker → workloads sur les CP (non tachés). |
 | Mode LB k8s | `node_distribution.<p>.k8s_lb_mode` | `managed`, `vip` | `managed` | **scw, ovh** seulement ; outscale = managed seul (rejette vip) ; proxmox = toujours VIP ; local = ni l'un ni l'autre | `vip` (EXPÉRIMENTAL) : pas de LB, adresse IPAM privée + VIP Talos Layer2 → **API privée uniquement, via tunnel bastion**. |
 | VIP apiserver | `local.apiserver_vip` → `module.talos.apiserver_vip` ; proxmox `apiserver_vip` (requis) + `apiserver_vip_interface` | IP / null | null (cloud) ; requis (proxmox) | proxmox toujours ; scw/ovh en mode vip | Injecté en `machine.network.interfaces[].vip` + certSANs. Ignoré en mode conteneur. |
-| LB applicatif | (pas de bascule) contrat `app_lb_ip` | inhérent au provider | actif | scw/ovh/outscale créent un LB applicatif (80/443) ; proxmox = DNAT hôte ; local = `127.0.0.1` | Pas un axe de test. |
-| Zones / AZ | scw `.zone`+`.zones` ; ovh/outscale `.availability_zones` ; proxmox `.node_names` (round-robin) | ex. scw `["fr-par-1","fr-par-2","fr-par-3"]` | selon exemple | cloud + proxmox | Mono vs multi-AZ. Proxmox : 1 hôte = non-HA, 3 hôtes = **vraie** HA ; 3 CP sur 1 hôte = fausse HA (à éviter). |
+| LB applicatif | `deploy_app_lb` | `true`/`false` | `false` | scw/ovh/outscale ; proxmox = DNAT hôte ; local = `127.0.0.1` | Ses backends sont les NodePorts fixes de la Gateway : un cluster infra seule paierait un LB qui ne pointe sur rien. Désactivé ⇒ `app_lb_ip` vaut null (`N/A` à la racine). |
+| Zones / AZ | scw `.zone`+`.zones` et ovh `.availability_zones` en round-robin via `element(...)` ; **outscale ne lit que `availability_zones[0]`** — un seul sous-réseau, une seule subregion, quoi que dise la liste ; proxmox `.node_names` (round-robin) | ex. scw `["fr-par-1","fr-par-2","fr-par-3"]` | selon exemple | cloud + proxmox | Mono vs multi-AZ. Proxmox : 1 hôte = non-HA, 3 hôtes = **vraie** HA ; 3 CP sur 1 hôte = fausse HA (à éviter). |
 | Bastion | proxmox `enable_bastion` | `true` (VM) / `false` (hôte-bastion) | `false` | bascule proxmox ; scw/ovh/outscale = toujours une VM dédiée ; local = aucun | Le contrat exige `bastion_ip`. |
 | Stockage workers | `worker_storage.disks[]` + `worker_storage.volumes[]` (LUKS2 `UserVolumeConfig`) | aucun, ou disques+volumes | `{disks=[],volumes=[]}` | scw/ovh/outscale/proxmox ; local forcé à off | `disks` → module provider ; `volumes` → `modules/talos`. |
-| Phase d'amorçage | `talos_bootstrap` | `false` (phase 1 infra), `true` (phase 2 config+etcd+Flux) | `true` | tous | `task infra` → `task bootstrap-phase2`. |
+| Phase d'amorçage | `talos_bootstrap` | `false` (phase 1 infra), `true` (phase 2 config+etcd+Flux) | `true` | tous | `task infra-apply` → `task bootstrap-phase2`. |
 | auto_tunnels | `auto_tunnels` (+ `ssh_key_path`) | `true`/`false` | `false` | cloud/proxmox | EXPÉRIMENTAL, apply unique ; jamais testé sur machine réelle. |
+| Bloc de ports des tunnels | `TALOS_TUNNEL_OFFSET` → `talos_tunnel_port_offset` | multiple de 200, positif ou nul | `0` | cloud/proxmox | Décale les CP en `50000+off+i` et les workers en `50100+off+i`, pour monter plusieurs clusters depuis un même poste. Ne poser que la variable d'environnement ; `Taskfile.yml` alimente la variable tofu. |
 | secrets_prevent_destroy | `secrets_prevent_destroy` | `true`/`false` | `true` | tous | `false` réservé au nettoyage de `tofu test`. |
 | skip_port_ready_wait | `skip_port_ready_wait` | `true`/`false` | `false` | tous | `true` réservé à la CI mockée. |
 | backup_enabled | `backup_enabled` | `true`/`false` | `true` | racine | `false` saute le local-exec de backup. |
@@ -70,7 +78,7 @@ Deux couches de réglages orthogonales :
 
 | ID | CP/W | Ce qu'il exerce en propre | Statut |
 |---|---|---|---|
-| `L-ha` | 3+3 | Vrai quorum etcd à 3 nœuds, workers dédiés ordonnançables, Cilium, livraison par `userdata` — preuve principale de `modules/talos` sans credentials. | ✅ (`task local-up`, 2026-07-28) |
+| `L-ha` | 3+3 | Vrai quorum etcd à 3 nœuds, workers dédiés ordonnançables, Cilium, livraison par `userdata` — preuve principale de `modules/talos` sans credentials. | ✅ (`task local-up`, rejoué le 2026-08-20 : manifeste rendu quand absent, Cilium 6/6, 3 membres etcd, `local-test` vert) |
 | `L-smoke` | 1+0 | Smoke test mono-nœud ; repli d'ordonnancement sur CP non taché. | ⬜ |
 
 ### Scaleway (provider de référence)
@@ -78,10 +86,11 @@ Deux couches de réglages orthogonales :
 | ID | Rôle | CP/W | k8s_lb_mode | Zones | Stockage | Ce qu'il exerce en propre | Statut |
 |---|---|---|---|---|---|---|---|
 | `SCW-mgmt-nonha` | mgmt | 1+1 | managed | mono | aucun | Chemin cloud le moins cher ; taint CP non-HA ; ACL du LB managé. | ✅ |
-| `SCW-mgmt-ha` | mgmt | 3+2 | managed | 3 AZ | aucun | etcd sur 3 zones ; distribution multi-AZ. | ⬜ |
+| `SCW-mgmt-ha` | mgmt | 3+2 | managed | 3 AZ | aucun | etcd sur 3 zones ; distribution multi-AZ. | ⬜ — voir la ligne suivante : ce qui tourne est sur **2 zones**, la troisième n'ayant aucun type d'instance utilisé par ce projet |
+| `SCW-mgmt-ha-2az` | mgmt | 3+3 | managed | 2 AZ | **disques+volumes** | Ce sur quoi repose réellement la 0.1.0. etcd sur 2 zones, en round-robin. | ✅ 2026-08-19, puis 2026-08-20 |
 | `SCW-vip` | mgmt | 3+1 | **vip** | multi-AZ | aucun | Supprime le LB ; VIP Talos Layer2 ; API privée via tunnel ; anti-spoofing. | ✅ *(2026-07-15)* |
 | `SCW-work-ha` | workload | 3+3 | managed | 3 AZ | aucun | Chemin d'amorçage Flux du rôle workload. | ⬜ |
-| `SCW-storage` | workload | 3+3 | managed | 3 AZ | **disques+volumes** | Volumes blocs SBS + `UserVolumeConfig` chiffré (LUKS2). | ⬜ |
+| `SCW-storage` | workload | 3+3 | managed | 3 AZ | **disques+volumes** | Volumes blocs SBS + `UserVolumeConfig` chiffré (LUKS2). | ⬜ sur le rôle *workload*. Les volumes blocs et les patchs UserVolumeConfig ONT bien été appliqués sur `SCW-mgmt-ha-2az` — 3 × `scaleway_block_volume.worker_data` dans l'état — mais **rien n'a relu qu'ils étaient formatés en LUKS2 et montés** : `cluster-verify` n'interroge aucun volume |
 
 ### OVH (OpenStack)
 
@@ -96,7 +105,7 @@ Deux couches de réglages orthogonales :
 
 | ID | Rôle | CP/W | k8s_lb_mode | Ce qu'il exerce en propre | Statut |
 |---|---|---|---|---|---|
-| `OSC-mgmt-ha` | mgmt | 3+2 | managed | Le LB renvoie un **nom DNS**, pas une IP ; utilisateur SSH outscale. | ✅ |
+| `OSC-mgmt-ha` | mgmt | 3+1 | managed | Le LB renvoie un **nom DNS**, pas une IP ; utilisateur SSH outscale. 3+3 ne tient pas dans le quota de 40 Go de RAM, donc HA ici ne concerne que le control plane — et **tous les nœuds sont en eu-west-2a**, le module ne lisant jamais au-delà de la première subregion. Trois control planes, un seul domaine de panne. | ✅ *(2026-08-20, sur un Net **neuf** — LB `active` avec 3 backends. Le blocage venait d'un timeout interne au service LBU d'Outscale, demande 399530 close ; le Net antérieur au correctif refuse toujours d'être supprimé. Le ✅ du 2026-08-13 ne tient pas : son upgrade Talos est revenu en arrière au redémarrage suivant, cf. `backlog.md`)* |
 | `OSC-work-ha` | workload | 3+3 | managed | Rôle workload ; volumes BSU si couplé au stockage. | ⬜ |
 | `OSC-vip-reject` | — | tout | vip | Test négatif : la validation doit rejeter `vip`. | 🧪 |
 
@@ -145,19 +154,20 @@ Cf. `backlog.md`.
 
 | ID | Variables clés | Ce qu'il exerce en propre | Statut |
 |---|---|---|---|
-| `OP-twophase` | `talos_bootstrap=false` puis `true` | Découpage documenté `task infra` → `task bootstrap-phase2`. | ✅ |
+| `OP-twophase` | `talos_bootstrap=false` puis `true` | Découpage documenté `task infra-apply` → `task bootstrap-phase2`. | ✅ |
 | `OP-autotunnels` | `auto_tunnels=true` | EXPÉRIMENTAL, apply unique. | ⬜ |
-| `OP-failover` | `failover-<p>.tfvars`, `task failover` | 2ᵉ management cross-provider ; ré-enregistrement des spokes. | ⬜ |
-| `OP-destroy` | `task fleet-down` / `task destroy` | Chemin de destruction ordonné (enfants puis management). | ✅ |
+| `OP-failover` | `failover-<p>.tfvars`, pas encore de commande | Reconstruire chez B depuis le réplica de B. Le réplica est vérifié ; la reconstruction reste à concevoir. | ⬜ |
+| `OP-destroy` | `task cluster-down` / `task infra-down` | Chemin de destruction ordonné (enfants puis management). | ✅ |
 | `OP-tftest` | mocké | Suite de tests unitaires (sans credentials). | ✅ (CI) |
-| `OP-backup` | `backup_enabled=true`, `BACKUP_AWS_*` cross-provider | DR : tfstate + kube/talosconfig vers primaire et réplica ; restic chiffré client. | ✅ *(local + cloud réel SCW+OVH)* |
-| `OP-rolling-replace` | `task rolling-replace` | Remplacement d'un nœud sans coupure (evict etcd, 1 nœud à la fois). | ✅ *(Scaleway)* |
+| `OP-backup` | `backup_enabled=true`, réplica cross-provider (`<MAGASIN>_AWS_*`) | DR : tfstate + kube/talosconfig vers primaire et réplica ; restic chiffré client. | ✅ *(local + cloud réel SCW+OVH)* |
+| `OP-rolling-replace` | `task cluster-roll` | Un nœud à la fois (evict etcd, cordon/drain). Pas « sans coupure » : l'API est injoignable 5 à 8 s, cf. `backlog.md`. | ✅ *(Scaleway et OVH le 2026-08-19, Outscale le 2026-08-20 — il porte l'upgrade Talos)* |
 
 ## C) Priorités (plus forte valeur, non testé, apply réel)
 
 1. **Apply réel Proxmox** (`PMX-*`) — jamais exécuté sur un hôte réel.
-2. **HA multi-AZ en cloud** (`SCW-mgmt-ha`, `OSC-mgmt-ha`) — etcd 3 CP réparti
-   sur plusieurs zones jamais appliqué.
+2. **HA multi-AZ en cloud** (`SCW-mgmt-ha`) — etcd 3 CP réparti sur plusieurs
+   zones jamais appliqué sous cette forme exacte. `OSC-mgmt-ha` ne peut pas en
+   être un : une seule subregion.
 3. **`OVH-vip`** — le mode vip n'a jamais été appliqué sur OVH (mécanisme
    Neutron `allowed_address_pairs`, distinct de Scaleway).
 4. **Apply réel du rôle workload** (`*-work-*`) — seul le management est exercé.

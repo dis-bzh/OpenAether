@@ -24,11 +24,23 @@ command -v jq  >/dev/null 2>&1 || { echo "✗ jq required"; exit 1; }
 oa_aws_compat
 
 cd "$TOFU_DIR"
-T="$(tofu output -json backup_targets 2>/dev/null || echo 'null')"
-[ "$T" != "null" ] && [ -n "$T" ] || {
-  echo "⚠ no backup_targets output — apply the infra first (or backup_enabled=false). Skipping state backup."
-  exit 0
-}
+# "There is nothing to replicate yet" and "I could not ask" are different
+# answers, and this used to give the first for both: any failure of `tofu output`
+# — no backend, no credentials, wrong directory — became 'null', a warning and
+# exit 0. The caller cannot see through that, so un-swallowing it in the Taskfile
+# achieved nothing on its own.
+ERR="$(mktemp)"; trap 'rm -f "$ERR"' EXIT
+T="$(tofu output -json backup_targets 2>"$ERR")" || T=""
+if [ -z "$T" ] || [ "$T" = null ]; then
+  if grep -qiE 'no outputs|not found|does not have an output' "$ERR" 2>/dev/null || [ ! -s "$ERR" ]; then
+    echo "⚠ no backup_targets output — apply the infra first (or backup_enabled=false). Skipping state backup."
+    exit 0
+  fi
+  echo "✗ could not read backup_targets, so nothing was replicated and nothing can" >&2
+  echo "  confirm the copy exists. This is not 'no backup configured':" >&2
+  sed 's/^/    /' "$ERR" >&2
+  exit 1
+fi
 
 PRIMARY_BUCKET="$(jq -r '.state_bucket_primary' <<<"$T")"
 REPLICA_BUCKET="$(jq -r '.state_bucket_replica' <<<"$T")"
@@ -42,8 +54,8 @@ PROVIDER="$(jq -r '.provider // empty' <<<"$T")"
 [ -n "$PROVIDER" ] || PROVIDER="$(sed -E 's/^s3-[^-]+-([a-z]+)-tfstate-.*/\1/' <<<"$PRIMARY_BUCKET")"
 
 # Replica creds = the cluster provider's BACKUP creds (cross-provider in prod).
-BACKUP_AK="$(s3_cred "$PROVIDER" backup ak)"
-BACKUP_SK="$(s3_cred "$PROVIDER" backup sk)"
+BACKUP_AK="$(s3_cred "$PROVIDER" backup ak "$REPLICA_EP")"
+BACKUP_SK="$(s3_cred "$PROVIDER" backup sk "$REPLICA_EP")"
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
@@ -54,4 +66,8 @@ AWS_ACCESS_KEY_ID="$BACKUP_AK" AWS_SECRET_ACCESS_KEY="$BACKUP_SK" \
   aws s3 cp "$WORK/state" "s3://$REPLICA_BUCKET/$KEY" \
     --endpoint-url "$REPLICA_EP" --region "$REPLICA_REGION" --sse AES256 >/dev/null
 
-echo "✓ tfstate replicated (still client-encrypted): s3://$PRIMARY_BUCKET/$KEY → s3://$REPLICA_BUCKET/$KEY"
+if [ "$REPLICA_EP" = "$PRIMARY_EP" ]; then
+  echo "✓ tfstate replicated (still client-encrypted) to s3://$REPLICA_BUCKET/$KEY — SAME provider"
+else
+  echo "✓ tfstate replicated (still client-encrypted) to s3://$REPLICA_BUCKET/$KEY — on ${REPLICA_EP}"
+fi

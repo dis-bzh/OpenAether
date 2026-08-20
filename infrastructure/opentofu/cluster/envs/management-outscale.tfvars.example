@@ -1,7 +1,6 @@
 # ==============================================================================
 # Management Cluster — Outscale / Numspot (hub)
-# Hosts Flux (hub), OpenBao, Keycloak, VictoriaMetrics. NOT in the client
-# data path. Use this when Outscale is your PRIMARY management provider.
+# NOT in the client data path. Use this when Outscale is your PRIMARY management provider.
 #
 # Prerequisites:
 #   export OSC_ACCESS_KEY=<outscale_access_key>
@@ -10,13 +9,26 @@
 # ==============================================================================
 
 cluster_name    = "openaether"
-environment     = "prod"
+
+# --- Bucket namespace ---------------------------------------------------------
+# S3 bucket names are NOT scoped to your account: Scaleway documents them unique
+# "in our whole platform", OVH "within OVHcloud", Outscale per region. Whoever
+# creates a name owns it for everyone else, so leaving this empty means you
+# inherit whichever names are still free. `task bucket-suffix` prints one.
+# Pick it ONCE — changing it later orphans every bucket you already have.
+# bucket_suffix = "a1b2c3"
+# dev, not prod: `prod` makes the replica store a HARD requirement — scripts/dev/
+# infra-verify.sh fails a prod cluster whose s3_replica_endpoint equals its primary,
+# and every example below ships them equal. Switch to "prod" in the same edit as
+# pointing s3_replica_endpoint at ANOTHER provider.
+environment     = "dev"
 cluster_role    = "management"
 talos_bootstrap = true
 # talos_version / kubernetes_version: leave unset to inherit the tracked
-# defaults from cluster/variables.tf. image_id below is a fixed Outscale OMI (unlike
-# Scaleway's name-derived lookup), and it is the medium a node INSTALLS
-# from — not the version it runs. Bumping talos_version alone changes the
+# defaults from cluster/variables.tf. The image is resolved by NAME from
+# talos_version (same as Scaleway) unless image_id below is set, and it is the
+# medium a node INSTALLS from — not the version it runs. Bumping talos_version
+# alone changes the
 # installer in the machine config, which `rolling-replace --upgrade` then
 # applies to running nodes; rebuild the image via
 # `task talos-image PROVIDER=outscale` when you want NEW nodes to start there
@@ -61,15 +73,16 @@ bastion_ssh_keys = {
 git_repo_url     = "https://github.com/dis-bzh/OpenAether-apps.git"
 # Pin the platform: a commit on a branch would otherwise reach a running
 # cluster within the reconcile interval. refs/heads/<branch> to test.
-git_ref          = "refs/tags/1.0.0"
+git_ref          = "refs/heads/main"
 
 # --- Backup / DR object stores (Outscale OOS, S3-compatible) ------------------
 # Derived buckets (you don't set them) — parts come from this file,
 # and each has a "-backup" twin:
 #   state            -> s3-<cluster_name>-outscale-tfstate-<environment>
 #   kube/talosconfig -> s3-<cluster_name>-outscale-management-<environment>
-# PRIMARY = Outscale (AWS_*). REPLICA = the "-backup" store; in prod point it at
-# a DIFFERENT provider (e.g. Scaleway) + export BACKUP_AWS_* for it.
+# PRIMARY = this cluster's own store. REPLICA = its "-backup" twin, opened with
+# the keys of the cloud s3_replica_endpoint names — a Scaleway replica needs
+# SCW_AWS_* in .env.sh, never this cluster's own keys.
 s3_primary_endpoint = "https://oos.eu-west-2.outscale.com"
 s3_primary_region   = "eu-west-2"
 s3_replica_endpoint = "https://oos.eu-west-2.outscale.com" # prod: e.g. SCW https://s3.fr-par.scw.cloud

@@ -2,27 +2,37 @@
 
 > **Store Anywhere, Run Anywhere.**
 > An idempotent Talos cluster on any environment — local (Docker), on-prem
-> (Proxmox) or cloud (Scaleway/OVH/Outscale) — with a single fixed foundation:
-> **CNI (Cilium) + Flux**. Everything else is picked from `OpenAether-apps`.
+> (Proxmox) or cloud (Scaleway/OVH/Outscale) — with one fixed foundation:
+> **Cilium**. Applications are a separate choice, in `OpenAether-apps`.
 
 🇫🇷 [Version française](README.fr.md)
 
 ## Version
 
-**1.0.1** — modular multi-provider Talos foundation (see `CHANGELOG.md`).
-Deploys the matching `OpenAether-apps` tag: one version identifies one system.
+**0.1.0, unreleased** — infrastructure only. Five things and nothing else:
+deploy, a healthy HA cluster (Talos + Cilium), idempotency, Kubernetes and Talos
+upgrades, and an OpenTofu state encrypted client-side in S3 with an optional
+replica on a second provider. kubeconfig and talosconfig get the same treatment.
 
-Management validated end-to-end on **Scaleway, OVH and Outscale**; local Docker
-validated (3 CP + 3 workers); Proxmox is code-complete but **never applied on
-real hardware**. Client-side-encrypted tfstate/artifact backups, dual store.
-Active-active multi-cloud has been dropped; the CAPI hub/spoke is an
-**optional layer**.
+Flux is present in the code and **off** (`deploy_flux = false`); it returns as a
+user choice in a later release. Every 1.x tag and release was deleted and none
+of them ever ran — **0.1.0 is the first release that ships something proven**.
+
+**Honest status**, measured on real accounts — three clouds, the same five
+pillars on each. Scaleway from an empty account on 2026-08-19: deploy 8 min 50
+for 72 resources, `cluster-verify` 11/11, idempotency 3/3, Kubernetes v1.36.2
+→ v1.36.3 then Talos v1.13.7 → v1.13.8, confirmed on 6/6 nodes by each node's
+own Talos API. OVH the same day, Outscale on 2026-08-20. An upgrade is not
+seamless: longest apiserver outage 5 s on Scaleway, 7 s on OVH, 8 s on Outscale
+— all three worse than the best figures this project ever recorded, for a
+reason that is not established. Proxmox has **never been applied on real
+hardware**. Open items: [`docs/backlog.md`](docs/backlog.md).
 
 ## Architecture
 
 ```
-A standalone Talos cluster (fixed foundation: Cilium + Flux)
-  └── modular pick from OpenAether-apps (scripts/pick.py):
+A standalone Talos cluster (fixed foundation: Cilium)
+  └── LATER, a modular pick from OpenAether-apps (scripts/pick.py):
       OpenBao, ESO, cert-manager/PKI, Istio ambient, gateway, CNPG,
       Longhorn, observability, Zitadel, Kyverno, restic backups…
 
@@ -44,7 +54,8 @@ own Flux.
 | **CAPI** (optional) | You want the management described like any other cluster, plus CAPI's day-2 tooling | A throwaway cluster creates the management, which then becomes self-managed (`clusterctl move`) |
 
 The CAPI path **does not replace** OpenTofu: on OVH, OpenTofu creates ~44
-resources of which only 3 are compute instances. Full procedure and pitfalls:
+resources of which only 3 are compute instances. It is an optional overlay and
+**0.1.0 deploys no CAPI** — the procedure is kept for the release that does:
 **[docs/capi-bootstrap.md](docs/capi-bootstrap.md)**.
 
 ## Layer status
@@ -53,17 +64,14 @@ resources of which only 3 are compute instances. Full procedure and pitfalls:
 |-------|------------|--------|
 | **IaC** | OpenTofu 1.12.x | ✅ |
 | **OS** | Talos Linux v1.13.x (immutable) | ✅ |
-| **CNI** | Cilium 1.19.2 (WireGuard) | ✅ |
-| **GitOps** | Flux v2.4.0 (hub/spoke) | ✅ |
-| **Secrets** | OpenBao 2.5.4 (Vault fork) | ✅ validated on real cloud |
-| **PKI** | cert-manager v1.15.3 | ✅ |
-| **Gateway / Mesh** | Istio 1.24.2 (ambient + Gateway API) | ✅ |
-| **Database** | CloudNativePG 1.23.1 | ✅ |
-| **Storage** | Longhorn 1.9.2 | ✅ |
-| **Identity** | Zitadel 10.0.2 | ✅ deployed — Grafana SSO pending a browser check |
-| **Observability** | VictoriaMetrics operator 0.65.1, Loki 6.25.0, Grafana 8.6.4, Alloy 0.11.0 | ✅ |
-| **Policy** | Kyverno v1.12.1 | ✅ |
-| **Cluster API** | CAPI v1.13.2, CABPT v0.6.12, CACPPT v0.5.13, CAPS v0.2.1, CAPO v0.14.4, CAPOSC v1.5.0 | ✅ optional layer |
+| **CNI** | Cilium 1.20.0 (WireGuard) | ✅ shipped, inline manifest — the whole of 0.1.0's platform |
+| **GitOps** | Flux v2.9.3 | ⬜ code present, `deploy_flux = false` — returns as a choice in a later release |
+
+Everything else — secrets, PKI, mesh, database, storage, identity, observability,
+policy, Cluster API — lives in
+[`OpenAether-apps`](https://github.com/dis-bzh/OpenAether-apps) and is **not
+deployed by this release**. The versions this table used to list were that
+repository's, and no string in this one could confirm any of them.
 
 ## Providers
 
@@ -73,9 +81,9 @@ Talos/cluster stack is provider-agnostic. Details:
 
 | Provider | Status | Region / target | Notes |
 |----------|--------|-----------------|-------|
-| **Scaleway** | ✅ management validated | fr-par (3 AZs) | Reference implementation; rolling-replace exercised live |
-| **OVH** | ✅ management validated | EU-WEST-PAR (OpenStack) | Octavia LB, floating IPs, SNAT router, private network |
-| **Outscale / Numspot** | ✅ management validated | eu-west-2 | LB, NAT service, public/private subnets, VPC |
+| **Scaleway** | ✅ five pillars measured 2026-08-19 | fr-par (3 AZs) | Reference implementation; deploy, verify, idempotency and both upgrades |
+| **OVH** | ✅ the same five, the same day | EU-WEST-PAR (OpenStack) | Octavia LB, floating IPs, SNAT router, private network |
+| **Outscale / Numspot** | ✅ the same five, measured 2026-08-20 | eu-west-2 | Redeployed on a **fresh Net** after an internal LBU timeout upstream left one stuck in `provisioning` (request 399530, closed). Two scars: a Net created before that fix still refuses deletion and only the provider can clear it, and the object store ignores `If-None-Match`, so the `use_lockfile` state lock is deliberately off here |
 | **Proxmox (on-prem)** | 🧪 code-complete, unit-tested — **never applied for real** | PVE single/multi-host | Talos VIP (no managed LB), host nftables NAT/DNAT, manual prerequisites |
 | **Local (Docker)** | ✅ validated (`task local-up`) | WSL2 / Docker | 3 CP + 3 workers, etcd quorum, Cilium — credential-free proof of `modules/talos` |
 
@@ -99,6 +107,11 @@ Kubernetes manifests live in
 [dis-bzh/OpenAether-apps](https://github.com/dis-bzh/OpenAether-apps).
 
 ## Quick start
+
+> **First time here?** Read **[docs/first-cluster.md](docs/first-cluster.md)**
+> instead — the same path, step by step, with every value you must supply, what
+> each command creates, what tells you it worked, and an honest list of what is
+> not proven yet. What follows is the short form for someone who has done it.
 
 ### Prerequisites
 
@@ -138,35 +151,63 @@ source .env.sh
 
 cp infrastructure/opentofu/cluster/envs/management-scaleway.tfvars.example \
    infrastructure/opentofu/cluster/envs/management-scaleway.tfvars
-# Edit: admin_ip, bastion_ssh_keys, image_name/image_id, s3_primary_*/s3_replica_*
-# And git_repo_url + git_ref if you run your own fork of OpenAether-apps —
-# the defaults point at ours, and its apps/clusters is not yours.
-
-task preflight-quotas PROVIDER=ovh          # check quotas first
-task talos-image PROVIDER=scaleway          # once per image version
-task infra ROLE=management PROVIDER=scaleway
-task bootstrap-phase2 ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
 ```
 
-**After deployment**: follow the day-1 path
-([docs/admin-access.md](docs/admin-access.md)) — Shamir/root/restic
-escrow, offline signing of the PKI intermediate, seeding the backup
-destinations, admin access to the UIs, CAPI child secrets.
+Six fields have no default and the deploy will not start without them. Everything
+else in the example already has a working value.
+
+| field | what to put in it |
+|---|---|
+| `environment` | `dev` or `prod` — nothing else is accepted. It names the buckets and the resources, and `prod` additionally requires `s3_replica_endpoint` to be a **different** provider |
+| `admin_ip` | your public IP as a CIDR. It is the SSH allow-list AND the apiserver LB ACL |
+| `s3_primary_endpoint` / `s3_primary_region` | S3 for the encrypted tfstate, on the **same** provider as the cluster (e.g. `https://s3.fr-par.scw.cloud` / `fr-par`) |
+| `s3_replica_endpoint` / `s3_replica_region` | S3 for the **backup copy**. In production put it on a **different provider** — a state you can only read from the cloud that just failed is not a backup. It is opened with THAT cloud's `<PU>_AWS_*` keys, so an Outscale replica reads `OUTSCALE_AWS_*` |
+
+Also `bastion_ssh_keys`: the **public** half of the key you will pass as `KEY=`.
+They are a pair, and `task cluster-up` refuses to start if they do not match — before it
+spends anything. And `git_repo_url` + `git_ref` if you run your own fork of
+OpenAether-apps; the defaults point at ours, and its `apps/clusters` is not yours.
+
+```bash
+# Quotas: OVH and Outscale only — the script does not cover Scaleway.
+# On Scaleway, check the console: 3 control planes + 2 workers needs 5 instances
+# of the type in your tfvars, and a new account may be capped at 1.
+task preflight-quotas PROVIDER=ovh
+
+task cluster-up ROLE=management PROVIDER=scaleway KEY=~/.ssh/yourkey
+task cluster-verify PROVIDER=scaleway               # ask the cluster, not the tool
+```
+
+`task cluster-up` is the one command, and it is idempotent: it builds the Talos image if
+the account lacks it, renders the bootstrap manifests, applies the
+infrastructure, opens the tunnels and bootstraps Talos. Re-run it after fixing
+any failure and it resumes. It is also the command CI runs, so it is the path
+that gets validated. The individual steps (`task image-build`, `task infra-apply`,
+`task bootstrap-phase2`) still exist for when you want to drive one of them
+alone.
+
+**After deployment**: `task cluster-verify` is the whole day-1 path for an
+infrastructure-only cluster. The application platform's own — escrow, offline
+PKI signing, UI access — is [docs/admin-access.md](docs/admin-access.md), and it
+belongs to the release that deploys applications.
 
 ### Teardown
 
-Order matters: the management owns its children's CRs.
+Two commands, always, and no flag collapses them into one.
 
 ```bash
 source .env.sh
-task edge-down CLUSTER=edge-1 -- --yes      # each CAPI child first
-task fleet-down PROVIDER=ovh -- --yes       # then the management
+task cluster-down PROVIDER=ovh                                    # computes, destroys nothing
+task cluster-down PROVIDER=ovh PLAN=destroy-management-ovh.tfplan APPROVE=auto
 python3 scripts/ops/purge-orphans/ovh.py    # dry-run: confirm nothing is left
 ```
 
-⚠️ Floating IPs pre-allocated outside OpenTofu do not disappear on their own,
-and a **self-managed** cluster cannot finish deleting itself
-(see `docs/capi-bootstrap.md`).
+Same vocabulary as `cluster-up`. `fleet-down` still rules out CAPI children
+first, but it now reads why the query failed: absent CRDs mean there are none by
+definition, and it says so. `--force-no-edges` remains as an escape hatch for a
+cluster it cannot reach at all.
+
+⚠️ Floating IPs pre-allocated outside OpenTofu do not disappear on their own.
 
 ### Emulated cloud (Feint — no cloud account, no credentials)
 
@@ -197,7 +238,8 @@ task security            # hardening checks
 
 | File | Contents |
 |---|---|
-| [docs/admin-access.md](docs/admin-access.md) | Day-1 path: escrow, offline PKI, UI access, browser tests |
+| [docs/first-cluster.md](docs/first-cluster.md) | **Start here.** Bare machine to a cluster you can reach, upgrade and destroy — and what is not proven |
+| [docs/admin-access.md](docs/admin-access.md) | Day-1 path for the application platform: escrow, offline PKI, UI access, browser tests. **Not needed for an infrastructure-only cluster** |
 | [docs/capi-bootstrap.md](docs/capi-bootstrap.md) | Bootstrap a management via CAPI and make it self-managed |
 | [docs/deployment-test-matrix.md](docs/deployment-test-matrix.md) | What is validated, where, and how |
 | [docs/emulated-cloud.md](docs/emulated-cloud.md) | Testing Scaleway/Outscale against a local emulator — and the limits of that |
@@ -217,22 +259,20 @@ task security            # hardening checks
 | Kubernetes API access | LB ACL restricted to `admin_ip` |
 | Talos API access | SSH tunnel only (port 50000, never on the LB) |
 | Inter-node encryption | Cilium WireGuard |
-| Secrets management | OpenBao (Vault fork, open source) |
 
 ## Roadmap
 
-| Phase | Deliverable | Status |
-|-------|-------------|--------|
-| **3** | OVH + Outscale active, Flux hub/spoke, cross-provider failover | ✅ done |
-| **3b** | CAPI-bootstrapped management + self-managed pivot | ✅ done |
-| **4** | `providerID` on CAPI nodes (CCM or kubelet) → MachineHealthCheck | ⏳ priority |
-| **4b** | DNS failover (ExternalDNS + k8GB), OpenBao auto-unseal | ⏳ planned |
-| **5** | Service catalogue (Kratix / Backstage) | ⏳ planned |
+| Release | Deliverable | Status |
+|---------|-------------|--------|
+| **0.1.0** | One Talos cluster + Cilium on Scaleway, OVH or Outscale, encrypted state and artifacts, in-place upgrades | ⏳ first release |
+| next | Flux back as a user choice, then the modular pick from `OpenAether-apps` | ⏳ planned |
+| later | CAPI overlay: a management cluster driving children | ⏳ planned |
+| open | Proxmox on real hardware, the full cross-provider failover, the Outscale Net only the provider can delete | ⏳ |
 
 ## License
 
 **OpenAether** is licensed under the
-[Apache License 2.0](LICENSE). It was AGPLv3 through the 0.x releases; the change is a
+[Apache License 2.0](LICENSE). It was AGPLv3 earlier in its history; the change is a
 relaxation, so anything you already had under AGPLv3 stays yours under it.
 
 Source: **https://github.com/dis-bzh/OpenAether-infra**

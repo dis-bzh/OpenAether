@@ -1,11 +1,22 @@
 # ==============================================================================
 # Management Cluster — Scaleway HA (3 zones)
-# This cluster hosts Flux (hub), OpenBao, Keycloak, VictoriaMetrics.
 # It is NOT in the data path of client workloads.
 # ==============================================================================
 
 cluster_name    = "openaether"
-environment     = "prod"
+
+# --- Bucket namespace ---------------------------------------------------------
+# S3 bucket names are NOT scoped to your account: Scaleway documents them unique
+# "in our whole platform", OVH "within OVHcloud", Outscale per region. Whoever
+# creates a name owns it for everyone else, so leaving this empty means you
+# inherit whichever names are still free. `task bucket-suffix` prints one.
+# Pick it ONCE — changing it later orphans every bucket you already have.
+# bucket_suffix = "a1b2c3"
+# dev, not prod: `prod` makes the replica store a HARD requirement — scripts/dev/
+# infra-verify.sh fails a prod cluster whose s3_replica_endpoint equals its primary,
+# and every example below ships them equal. Switch to "prod" in the same edit as
+# pointing s3_replica_endpoint at ANOTHER provider.
+environment     = "dev"
 cluster_role    = "management"
 talos_bootstrap = true
 # talos_version / kubernetes_version: leave unset to inherit the tracked
@@ -50,17 +61,20 @@ bastion_ssh_keys = {
 git_repo_url     = "https://github.com/dis-bzh/OpenAether-apps.git"
 # Pin the platform: a commit on a branch would otherwise reach a running
 # cluster within the reconcile interval. refs/heads/<branch> to test.
-git_ref          = "refs/tags/1.0.0"
+git_ref          = "refs/heads/main"
 
 # --- Backup / DR object stores ------------------------------------------------
 # Derived buckets (you don't set them) — parts come from this file,
 # and each has a "-backup" twin:
 #   state            -> s3-<cluster_name>-scaleway-tfstate-<environment>
 #   kube/talosconfig -> s3-<cluster_name>-scaleway-management-<environment>
-# PRIMARY = this cluster's provider (uses AWS_*). REPLICA = the "-backup" store.
-# In PROD, point the replica at a DIFFERENT provider and export
-# BACKUP_AWS_ACCESS_KEY_ID / BACKUP_AWS_SECRET_ACCESS_KEY for it. In dev, leave
-# the replica equal to the primary (replica creds then default to AWS_*).
+# PRIMARY = this cluster's own object store. REPLICA = its "-backup" twin.
+# Each is opened with the credentials of the cloud that HOLDS it: the replica
+# uses the keys of whatever s3_replica_endpoint points at. So a Scaleway cluster
+# backing up to Outscale needs OUTSCALE_AWS_* in .env.sh — and no SCW_BACKUP_*.
+# Leaving the replica equal to the primary is the single-provider shape: legal,
+# stated out loud at deploy, and it survives a deleted bucket but not a lost
+# provider. `prod` refuses that shape (scripts/dev/infra-verify.sh).
 s3_primary_endpoint = "https://s3.fr-par.scw.cloud"
 s3_primary_region   = "fr-par"
 s3_replica_endpoint = "https://s3.fr-par.scw.cloud" # prod: e.g. OVH https://s3.gra.io.cloud.ovh.net

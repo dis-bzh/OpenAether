@@ -28,10 +28,10 @@ Implement it; do not restate it here. The rest of the stack — `modules/talos`,
 
 ## The image lane
 
-`task talos-image PROVIDER=<p>` builds and publishes. Scaleway resolves by
+`task image-build PROVIDER=<p>` builds and publishes. Scaleway resolves by
 **name**, OVH and Outscale pin an **id** in `envs/*.tfvars`. The version comes
 from `scripts/internal/talos-version.sh` — one source, because two drifted once
-and `task up` built an image the cluster then refused to find.
+and `task cluster-up` built an image the cluster then refused to find.
 
 A boot image is the medium a node **installs from**, not the version it runs:
 node resources ignore that attribute on purpose. Re-imaging is deliberate, via

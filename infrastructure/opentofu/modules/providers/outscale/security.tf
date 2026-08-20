@@ -46,7 +46,10 @@ resource "outscale_security_group_rule" "talos_api" {
 
 # HTTP/HTTPS — from the LB subnet, on the Gateway's FIXED NodePorts.
 # Opening 80/443 on the nodes would be pointless: nothing listens there.
+# Tied to the app LB: with no LB on that subnet, these two only widen the
+# nodes' inbound surface for a caller that does not exist.
 resource "outscale_security_group_rule" "http" {
+  count             = var.deploy_app_lb ? 1 : 0
   flow              = "Inbound"
   security_group_id = outscale_security_group.this.security_group_id
   from_port_range   = var.app_lb_node_ports.http
@@ -56,6 +59,7 @@ resource "outscale_security_group_rule" "http" {
 }
 
 resource "outscale_security_group_rule" "https" {
+  count             = var.deploy_app_lb ? 1 : 0
   flow              = "Inbound"
   security_group_id = outscale_security_group.this.security_group_id
   from_port_range   = var.app_lb_node_ports.https

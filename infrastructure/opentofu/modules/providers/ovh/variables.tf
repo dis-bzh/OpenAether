@@ -126,6 +126,21 @@ variable "k8s_lb_mode" {
   }
 }
 
+variable "deploy_app_lb" {
+  description = <<-EOT
+    Create the public HTTP/HTTPS Octavia LB (+ its floating IP) that fronts the
+    application Gateway. FALSE by default: its members are pinned to the
+    Gateway's fixed NodePorts (see app_lb_node_ports), so on an
+    infrastructure-only cluster it is an Octavia LB and a floating IP that are
+    created, BILLED, and forward to ports where nothing listens.
+
+    Does NOT govern the Kubernetes API LB (k8s_lb_mode): the apiserver must stay
+    reachable whether or not the cluster runs any application.
+  EOT
+  type        = bool
+  default     = false
+}
+
 # ==============================================================================
 # Gateway NodePorts — CROSS-REPOSITORY CONTRACT
 #

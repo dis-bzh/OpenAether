@@ -19,7 +19,19 @@
 # ==============================================================================
 
 cluster_name       = "openaether-pmx"
-environment        = "prod"
+
+# --- Bucket namespace ---------------------------------------------------------
+# S3 bucket names are NOT scoped to your account: Scaleway documents them unique
+# "in our whole platform", OVH "within OVHcloud", Outscale per region. Whoever
+# creates a name owns it for everyone else, so leaving this empty means you
+# inherit whichever names are still free. `task bucket-suffix` prints one.
+# Pick it ONCE — changing it later orphans every bucket you already have.
+# bucket_suffix = "a1b2c3"
+# dev, not prod: `prod` makes the replica store a HARD requirement — scripts/dev/
+# infra-verify.sh fails a prod cluster whose s3_replica_endpoint equals its primary,
+# and every example below ships them equal. Switch to "prod" in the same edit as
+# pointing s3_replica_endpoint at ANOTHER provider.
+environment        = "dev"
 cluster_role       = "management"
 talos_version      = "v1.13.3"
 kubernetes_version = "v1.35.3"
@@ -73,12 +85,12 @@ admin_ip = ["YOUR_IP/32"]
 git_repo_url = "https://github.com/dis-bzh/OpenAether-apps.git"
 # Pin the platform: a commit on a branch would otherwise reach a running
 # cluster within the reconcile interval. refs/heads/<branch> to test.
-git_ref          = "refs/tags/1.0.0"
+git_ref          = "refs/heads/main"
 
 # --- Backup / DR object stores (any S3-compatible store) ----------------------
 # Proxmox has no native object storage — point these at an external S3 (e.g. a
-# Scaleway/OVH bucket). PRIMARY = AWS_*; REPLICA = the "-backup" store, ideally a
-# different provider + BACKUP_AWS_* in prod.
+# Scaleway/OVH bucket). Each store is opened with the keys of the cloud that
+# HOLDS it, named by its endpoint below — so an OVH replica reads OVH_AWS_*.
 s3_primary_endpoint = "https://s3.fr-par.scw.cloud"
 s3_primary_region   = "fr-par"
 s3_replica_endpoint = "https://s3.fr-par.scw.cloud"

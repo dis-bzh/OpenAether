@@ -36,21 +36,38 @@ NODE="${NODE:-$HOST}"
 MAX_WAIT_SECONDS="${MAX_WAIT_SECONDS:-900}"
 ELAPSED=0
 
-if command -v talosctl >/dev/null 2>&1; then
-  probe() {
-    local out
-    out="$(talosctl get machinestatus -e "$ENDPOINT" -n "$NODE" 2>&1)" || true
-    # Only a transport failure means "not there yet". A certificate complaint is
-    # the node answering from maintenance mode, which is exactly what we wait for.
-    ! grep -qE 'connection refused|no route to host|i/o timeout|context deadline exceeded|transport: Error while dialing|EOF' <<<"$out"
-  }
-  WHAT="Talos API"
-else
-  # No talosctl: fall back to the socket test and say what it cannot see, rather
-  # than passing the weaker check off as the same thing.
-  probe() { timeout 5 bash -c ">/dev/tcp/${HOST}/${PORT}" 2>/dev/null; }
-  WHAT="TCP ${HOST}:${PORT} (talosctl absent — blind to a tunnel with a dead far end)"
-fi
+#  3. `talosctl` WITHOUT A TALOSCONFIG. The local-exec passes ENDPOINT and NODE
+#     and nothing else, so talosctl fails with "failed to resolve configuration
+#     context: talos config file is empty" — never opening a socket. That string
+#     is not a transport error, so the probe below read it as "the API answered"
+#     and returned true on its first attempt, every time, on every provider.
+#     Measured 2026-08-18 on Outscale: the guard passed in 0s, the six config
+#     applies then spent 15 minutes each dialling tunnels that were not there and
+#     died on "connect: connection refused". The guard existed precisely to
+#     prevent that and had never once run.
+#
+# So the probe asks two questions that need no configuration at all:
+#   a) is anything LISTENING locally — `connection refused` means the tunnel
+#      itself is gone, which no amount of node readiness will fix;
+#   b) does the far end complete a TLS handshake — apid answers with a
+#      certificate even in maintenance mode, so a handshake means a live Talos,
+#      while an `ssh -L` whose far end is dead accepts and then closes.
+# Together they separate the three states the earlier versions confused.
+
+probe() {
+  # (a) local listener — catches a dead or never-opened tunnel.
+  timeout 5 bash -c ">/dev/tcp/${HOST}/${PORT}" 2>/dev/null || return 1
+  # (b) TLS handshake — catches a live tunnel with nothing behind it.
+  local out
+  out="$(timeout 10 openssl s_client -connect "${HOST}:${PORT}" -brief </dev/null 2>&1)" || true
+  grep -qiE 'CONNECTION ESTABLISHED|Peer certificate|Protocol version' <<<"$out"
+}
+WHAT="Talos API (TCP + TLS handshake)"
+
+command -v openssl >/dev/null 2>&1 || {
+  echo "✗ openssl is required to tell a live Talos from an empty tunnel — install it." >&2
+  exit 1
+}
 
 echo "Waiting for ${WHAT} on ${ENDPOINT} (node ${NODE}, up to ${MAX_WAIT_SECONDS}s)..."
 until probe; do

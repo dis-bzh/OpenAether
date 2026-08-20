@@ -3,7 +3,7 @@
 # it pins one, otherwise cluster/variables.tf's default.
 #
 # It used to be a literal in Taskfile.yml, duplicated twice. It drifted: the
-# Taskfile said v1.13.7 while variables.tf said v1.13.8, so `task up` built an
+# Taskfile said v1.13.7 while variables.tf said v1.13.8, so `task cluster-up` built an
 # image the cluster then refused to find — "no image found with the name
 # talos-scaleway-amd64-v1.13.8". Two defaults for one fact is one too many.
 #

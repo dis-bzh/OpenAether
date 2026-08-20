@@ -11,9 +11,9 @@
 #      mode, never configured;
 #   2. reading public-ipv4  -> the public IP (1:1 NAT on the Outscale side, so
 #      invisible from the NIC) becomes a NodeAddress and enters the apid
-#      certificate SANs; without it CACPPT would fail TLS on <IP>:50000 and
-#      ("certificate is valid for 10.x, not <IP publique>") et ne pourrait ni
-#      could neither bootstrap etcd nor fetch the child's kubeconfig.
+#      certificate SANs; without it CACPPT would fail TLS on <IP>:50000
+#      ("certificate is valid for 10.x, not <public IP>") and could neither
+#      bootstrap etcd nor fetch the child's kubeconfig.
 # The OpenTofu flow (two-phase apply) is unchanged: without user-data the aws
 # image also boots into maintenance mode and gets its config over the Talos API.
 # ==============================================================================
@@ -98,10 +98,13 @@ resource "outscale_snapshot" "talos" {
   snapshot_size = tonumber(data.external.oos_object.result.size)
   description   = "Talos ${var.talos_version} (${var.arch}) — imported for OMI registration"
 
-  # ⚠️ The Outscale snapshot import is SLOW and goes through a provider-side
-  # queue: measured > 60 min at `in-queue 0%` (2026-07-25), beyond the
-  # provider's default timeout (40 min) → the apply fails while the import
-  # then succeeds, leaving a snapshot OUTSIDE STATE. If this happens again:
+  # ⚠️ The Outscale snapshot import goes through a provider-side queue whose
+  # wait is WIDE and outside our control: 8 min end to end (2026-08-18) against
+  # > 60 min stuck at `in-queue 0%` (2026-07-25). Size the timeout for the bad
+  # day, not the good one — the provider default (40 min) let the apply fail
+  # while the import then succeeded, leaving a snapshot OUTSIDE STATE.
+  # `ReadSnapshots` reports State/Progress and is the only honest answer about
+  # where an import actually is. If the apply dies while the import lives on:
   # DO NOT re-run the apply as-is (it creates a second import) — import the
   # existing snapshot into state first, then continue:
   #   tofu import module.outscale[0].outscale_snapshot.talos <snap-id>
@@ -116,6 +119,13 @@ resource "outscale_snapshot" "talos" {
     # import.
     ignore_changes       = [file_location, snapshot_size]
     replace_triggered_by = [terraform_data.build_and_upload]
+
+    # Import the new snapshot BEFORE dropping the old one. Destroy-first would
+    # leave the account with no bootable Talos image for the whole import — an
+    # hour, in the middle of an upgrade — and an import that then fails leaves
+    # neither the old artifact nor a new one. Two versions coexisting costs
+    # snapshot storage; being unable to rebuild a node costs the cluster.
+    create_before_destroy = true
   }
 
   depends_on = [terraform_data.build_and_upload]
@@ -142,6 +152,24 @@ resource "outscale_image" "talos" {
     }
   }
 
+  lifecycle {
+    # An OMI's backing snapshot is IMMUTABLE, so a new snapshot means a new
+    # image — but the provider reports block_device_mappings as updatable, so a
+    # version bump planned "image: update in place, snapshot: replace". OpenTofu
+    # then destroyed the snapshot while this image still pointed at it and
+    # Outscale refused:
+    #     Unable to delete Snapshot — 409 ResourceConflict, Code 9094
+    # (measured 2026-08-18 upgrading v1.13.7 → v1.13.8: the run died before
+    # touching a single node, and the API confirmed ami-… still referenced
+    # snap-…). Forcing the replacement puts the image back where it belongs in
+    # the graph: destroyed BEFORE the snapshot it is built on.
+    replace_triggered_by = [outscale_snapshot.talos]
+
+    # Required for the snapshot's create_before_destroy above: OpenTofu refuses
+    # the mode unless every dependent shares it. Names carry the version, so two
+    # OMIs coexist without colliding.
+    create_before_destroy = true
+  }
 }
 
 # Purge of the staging `.raw`, once the OMI is registered.
@@ -169,7 +197,7 @@ resource "terraform_data" "purge_staging" {
     command     = <<-EOT
       set -euo pipefail
       export AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
-      echo "▶ Purge du staging : s3://${var.bucket_name}/${local.object_key}"
+      echo "▶ Purging the staging object: s3://${var.bucket_name}/${local.object_key}"
       aws s3 rm "s3://${var.bucket_name}/${local.object_key}" \
         --endpoint-url "${var.s3_endpoint}" --region "${var.region}" || true
       echo "✓ staging purged (the OMI and the snapshot remain the durable artifacts)"

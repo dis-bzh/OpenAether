@@ -31,7 +31,17 @@ locals {
   # image the VM boots. Named once, and exposed as an output, so a test can
   # assert it and an operator can read it back after an upgrade instead of
   # inferring it from `kubectl`, whose node osImage lags a Talos rejoin.
-  installer_image = "ghcr.io/siderolabs/installer:${var.talos_version}"
+  #
+  # ⚠️ It decides the EXTENSIONS too, and that is how this went wrong. The plain
+  # `ghcr.io/siderolabs/installer` carries none, so the schematic's extensions
+  # lived only in the boot image and any reinstall dropped them. Measured on
+  # Scaleway 2026-08-15: after the documented in-place upgrade every node
+  # reported zero system extensions, `longhorn-manager` crash-looped on
+  # "please make sure you have iscsiadm/open-iscsi installed on the host", its
+  # admission webhook lost every endpoint, and `storage-backup-target` could not
+  # apply — 34 of 35 Kustomizations, on a cluster whose API had never blinked and
+  # whose `tofu plan` was empty.
+  installer_image = var.installer_schematic_id == "" ? "ghcr.io/siderolabs/installer:${var.talos_version}" : "factory.talos.dev/installer/${var.installer_schematic_id}:${var.talos_version}"
 }
 
 # 32-byte random key for Kubernetes Secrets encryption at rest (AES-256-GCM via
@@ -466,6 +476,13 @@ resource "terraform_data" "talos_port_ready_worker" {
   }
 }
 
+# Carries nothing but the version pair, and exists only to be referenced by the
+# two `replace_triggered_by` below. See the comment on them.
+resource "terraform_data" "machine_config_version" {
+  count = local.do_apply ? 1 : 0
+  input = "${var.talos_version}/${var.kubernetes_version}"
+}
+
 resource "talos_machine_configuration_apply" "control_plane" {
   count = local.do_apply ? var.control_plane_count : 0
 
@@ -476,6 +493,22 @@ resource "talos_machine_configuration_apply" "control_plane" {
 
   timeouts = {
     create = "15m"
+  }
+
+  lifecycle {
+    # REPLACE on a version change instead of updating in place. Updating is what
+    # trips siderolabs/terraform-provider-talos#352: when the rendered config is
+    # only known during apply, the provider keeps the OLD
+    # `machine_configuration_hash` in the plan and recomputes it at apply, and
+    # OpenTofu rejects the difference — "Provider produced inconsistent final
+    # plan", once per machine config, on every provider. A create has no prior
+    # value to be inconsistent with.
+    # Replacing costs nothing here: this resource's destroy is a no-op (a config
+    # cannot be un-applied) and its create re-sends the same config the update
+    # would have. Nodes reboot in `rolling-replace --upgrade`, never here.
+    # Fixed upstream in the 0.12.0 pre-release line only; we pin 0.11.0, the
+    # newest stable. Remove this when 0.12 stabilises.
+    replace_triggered_by = [terraform_data.machine_config_version[0]]
   }
 
   depends_on = [terraform_data.talos_port_ready_cp]
@@ -491,6 +524,11 @@ resource "talos_machine_configuration_apply" "worker" {
 
   timeouts = {
     create = "15m"
+  }
+
+  lifecycle {
+    # Same reason as the control plane above: upstream #352.
+    replace_triggered_by = [terraform_data.machine_config_version[0]]
   }
 
   depends_on = [terraform_data.talos_port_ready_worker]

@@ -11,9 +11,9 @@
 #
 # Usage:
 #   ./scripts/bootstrap/talos-image.sh <provider> [talos_version] [--ensure]
-#   task talos-image PROVIDER=ovh [VERSION=v1.13.4]
+#   task image-build PROVIDER=ovh [VERSION=v1.13.4]
 #
-# --ensure: idempotence gate for `task up` — plans first and only applies on a
+# --ensure: idempotence gate for `task cluster-up` — plans first and only applies on a
 #   real change, so a rerun with the image already published costs nothing.
 set -euo pipefail
 
@@ -75,12 +75,65 @@ if [ "$P" = proxmox ]; then
   }
 fi
 
-STATE_BUCKET="s3-openaether-${TGT}-talos-image"
+# ──────────────────────────────────────────────────────────────────────────────
+# The schematic decides the image's system extensions AND, since 2026-08-15, the
+# installer the machine config names — so a node keeps iscsi-tools across a
+# `talosctl upgrade` instead of coming back without it and taking Longhorn with
+# it. Two files have to agree on the id, and this is the only place that already
+# computes it, so this is where the drift is caught. A build is also the only
+# moment the answer can change.
+# ──────────────────────────────────────────────────────────────────────────────
+SCHEMATIC_YAML="$(dirname "${BASH_SOURCE[0]}")/../../infrastructure/opentofu/talos-image/schematic.yaml"
+CLUSTER_VARS="$(dirname "${BASH_SOURCE[0]}")/../../infrastructure/opentofu/cluster/variables.tf"
+if [ -f "$SCHEMATIC_YAML" ] && [ -f "$CLUSTER_VARS" ]; then
+  LIVE_ID="$(curl -sf -X POST -H 'Content-Type: application/yaml' \
+    --data-binary @"$SCHEMATIC_YAML" https://factory.talos.dev/schematics \
+    | sed -nE 's/.*"id":"([0-9a-f]+)".*/\1/p')"
+  PINNED_ID="$(awk '/variable "talos_installer_schematic_id"/,/^}/' "$CLUSTER_VARS" \
+    | sed -nE 's/^[[:space:]]*default[[:space:]]*=[[:space:]]*"([0-9a-f]+)".*/\1/p' | head -1)"
+  if [ -n "$LIVE_ID" ] && [ -n "$PINNED_ID" ] && [ "$LIVE_ID" != "$PINNED_ID" ]; then
+    echo "✗ schematic.yaml now resolves to ${LIVE_ID}" >&2
+    echo "  but cluster/variables.tf pins talos_installer_schematic_id = ${PINNED_ID}." >&2
+    echo "  Nodes would install from the OLD schematic and lose the new extensions." >&2
+    echo "  Update the default in cluster/variables.tf, then re-run." >&2
+    exit 1
+  fi
+  [ -n "$LIVE_ID" ] && echo "  ✓ schematic ${LIVE_ID:0:12}… matches the cluster pin"
+fi
+
+# The image buckets follow the same namespace as every other bucket, read from
+# the cluster tfvars for this provider. They used to be the literal string
+# "openaether", overridable by nothing — and since S3 names are unique across a
+# whole provider (not per account), that made `task cluster-up`'s FIRST billable step
+# unrepeatable by anyone else. See oa_project in scripts/lib/common.sh.
+IMG_TFVARS="${OA_TFVARS:-$(dirname "${BASH_SOURCE[0]}")/../../infrastructure/opentofu/cluster/envs/${OA_ROLE:-management}-${TGT}.tfvars}"
+if [ -f "$IMG_TFVARS" ]; then
+  IMG_PROJECT="$(oa_project "$(tfv "$IMG_TFVARS" cluster_name)" "$(tfv "$IMG_TFVARS" bucket_suffix)")"
+else
+  IMG_PROJECT=openaether
+  echo "  ~ no ${IMG_TFVARS##*/}: falling back to the 'openaether' bucket namespace."
+  echo "    Create the tfvars first if these names are not yours — S3 names are"
+  echo "    unique across the whole provider, not per account."
+fi
+STATE_BUCKET="s3-${IMG_PROJECT}-${TGT}-talos-image"
 
 ensure() { # bucket
-  aws s3api head-bucket --bucket "$1" --endpoint-url "$SEP" --region "$SREGION" >/dev/null 2>&1 \
-    || aws s3 mb "s3://$1" --endpoint-url "$SEP" --region "$SREGION" >/dev/null
-  echo "  ✓ bucket $1"
+  aws s3api head-bucket --bucket "$1" --endpoint-url "$SEP" --region "$SREGION" >/dev/null 2>&1 && {
+    echo "  ✓ bucket $1"; return 0; }
+  if aws s3 mb "s3://$1" --endpoint-url "$SEP" --region "$SREGION" >/dev/null 2>&1; then
+    echo "  ✓ bucket $1 (created)"; return 0
+  fi
+  # The message that turns an hour of confusion into a one-line fix. A
+  # head-bucket on someone else's bucket answers 403, so the probe above fails
+  # and the failure lands here rather than where the cause is.
+  echo "✗ could not create s3://$1 on ${TGT}." >&2
+  echo "  The most likely cause is that the NAME IS ALREADY TAKEN — by another" >&2
+  echo "  customer, not by you. S3 bucket names are unique across the whole" >&2
+  echo "  provider (Scaleway and OVH platform-wide, Outscale per region)." >&2
+  echo "  Fix: set a discriminator in ${IMG_TFVARS##*/} —" >&2
+  echo "      bucket_suffix = \"$(openssl rand -hex 3 2>/dev/null || echo 'a1b2c3')\"   # or 'task bucket-suffix'" >&2
+  echo "  then re-run. Other causes: wrong region, or no S3 quota left." >&2
+  exit 1
 }
 
 echo "▶ Ensuring talos-image state bucket on ${TGT} (${STATE_BUCKET})"
@@ -89,13 +142,15 @@ ensure "$STATE_BUCKET"
 APPLY_VARS=(-var "target_provider=$TGT" -var "talos_version=$VERSION")
 case "$P" in
   scaleway | outscale)
-    # Scaleway/Outscale stage the raw image in Object Storage for the snapshot import.
-    STAGING="s3-openaether-${TGT}-talos-staging"
-    ensure "$STAGING"
-    APPLY_VARS+=(-var "staging_bucket=$STAGING" -var "region=$SREGION" -var "s3_endpoint=$SEP")
+    # Scaleway/Outscale upload the raw image to Object Storage, then import it
+    # as a snapshot. "import", not "staging": this repository spends that word
+    # on environments (dev/prod) and reading it as one here is what it cost.
+    IMPORT_BUCKET="s3-${IMG_PROJECT}-${TGT}-talos-import"
+    ensure "$IMPORT_BUCKET"
+    APPLY_VARS+=(-var "import_bucket=$IMPORT_BUCKET" -var "region=$SREGION" -var "s3_endpoint=$SEP")
     ;;
   proxmox)
-    # No staging bucket — the download lands straight on the host's datastore.
+    # No import bucket — the download lands straight on the host's datastore.
     # PROXMOX_NODE_NAMES is comma-separated (e.g. "pve1,pve2,pve3"); match
     # node_distribution.proxmox.node_names in the cluster envs/*.tfvars.
     IFS=',' read -ra PMX_NODES <<<"${PROXMOX_NODE_NAMES:-pve1}"
@@ -116,20 +171,25 @@ tofu init -reconfigure \
 
 if [ "$ENSURE" = true ]; then
   echo "▶ --ensure: checking whether the image needs (re)building..."
+  # Plan ONCE, to a file, and apply THAT file. -auto-approve discarded the plan
+  # that decided "rebuild" and applied a second, unseen one — on buckets, a
+  # snapshot import and an image publish. A saved plan never prompts either, so
+  # the gate stays unattended, and tofu refuses it if the state moved since.
+  PLAN="talos-image-${TGT}.tfplan"
+  trap 'rm -f "$ROOT/$PLAN"' EXIT
   PLAN_EXIT=0
-  tofu plan -detailed-exitcode "${APPLY_VARS[@]}" || PLAN_EXIT=$?
+  tofu plan -detailed-exitcode -out="$PLAN" "${APPLY_VARS[@]}" || PLAN_EXIT=$?
   case "$PLAN_EXIT" in
     0) echo "✓ image already up to date — skipping apply" ;;
-    # --ensure is the non-interactive idempotence gate for `task up`, so the
-    # apply must not stop to prompt for approval (it would EOF and abort the
-    # pipeline). The plain `task talos-image` path below stays interactive.
-    2) tofu apply -auto-approve "${APPLY_VARS[@]}" ;;
+    2) tofu apply "$PLAN" ;;
     *)
       echo "✗ tofu plan failed (exit ${PLAN_EXIT})"
       exit 1
       ;;
   esac
 else
+  # Interactive on purpose: tofu shows and applies the SAME in-memory plan, so
+  # the yes a human types answers the plan they just read. Nothing to freeze.
   tofu apply "${APPLY_VARS[@]}"
 fi
 
@@ -137,16 +197,21 @@ echo
 echo "→ image_name: $(tofu output -raw image_name 2>/dev/null || echo '?')"
 tofu output image_id 2>/dev/null || true
 [ "$P" = proxmox ] && tofu output image_file_id 2>/dev/null
-echo "  (Scaleway: cluster looks up by image_name; OVH/Outscale: put image_id in the cluster envs/*.tfvars;"
-echo "   Proxmox: talos_image_file_id defaults to the same convention — usually no override needed)"
+echo "  (All three clouds look the image up by name — leave image_id unset in the"
+echo "   cluster envs/*.tfvars and a version bump needs no edit. Proxmox:"
+echo "   talos_image_file_id follows the same convention.)"
 
 # ──────────────────────────────────────────────────────────────────────────────
-# On OVH and Outscale the cluster does NOT look the image up: it takes the id
-# from envs/*.tfvars, copied here by hand. Nothing compared the two, so a
-# rebuilt image left a stale id behind and `task up` — which runs this script
-# first, learns the right id, prints it, then deploys with the wrong one —
-# failed at server creation with "Can not find requested image", after the
-# network and the bastion had been created. Refuse instead, before the spend.
+# A pinned image_id is OPTIONAL on OVH and Outscale (null looks the name up, the
+# same way Scaleway does) and it is a trap: nothing compared the pin to the image
+# this lane publishes, so a rebuild left a stale id behind and `task cluster-up` — which
+# runs this script first, learns the right id, prints it, then deploys with the
+# wrong one — failed at server creation with "Can not find requested image",
+# after the network and the bastion had been created. Refuse before the spend.
+#
+# The remedy printed first is DELETING the pin, not updating it: updating keeps
+# the hand-copy step, which is what makes an unattended upgrade impossible on
+# these two providers (measured 2026-08-15 — the guard fired mid-run on OVH).
 # ──────────────────────────────────────────────────────────────────────────────
 if [ "$P" = ovh ] || [ "$P" = outscale ]; then
   WANT="$(tofu output -raw image_id 2>/dev/null || true)"
@@ -154,12 +219,23 @@ if [ "$P" = ovh ] || [ "$P" = outscale ]; then
   stale=0
   for f in "$ENVS"/*-"$P".tfvars; do
     [ -e "$f" ] || continue
-    HAVE="$(grep -oE 'image_id[[:space:]]*=[[:space:]]*"[^"]+"' "$f" \
-            | grep -v bastion_image_id | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
+    # Anchored, because `grep -o 'image_id...'` strips the `bastion_` prefix
+    # before the filter downstream can see it: with no Talos pin left in the
+    # file, the bastion's own image was read as the pin and this guard refused
+    # the very configuration it recommends (measured on OVH, 2026-08-15).
+    # `|| true` is load-bearing: under `set -e` + `pipefail`, a grep that
+    # matches nothing fails the whole substitution and kills the script HERE,
+    # before the emptiness test below can decide there is no pin to compare.
+    # It exits 1 having printed nothing at all.
+    HAVE="$(grep -E '^[[:space:]]*image_id[[:space:]]*=' "$f" \
+            | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)"
     [ -n "$WANT" ] && [ -n "$HAVE" ] && [ "$WANT" != "$HAVE" ] || continue
     echo "✗ $(basename "$f") pins image_id = $HAVE" >&2
     echo "  but the image this lane just resolved is $WANT." >&2
-    echo "  Deploying would fail at server creation, after the bill. Update it:" >&2
+    echo "  Deploying would fail at server creation, after the bill." >&2
+    echo "  Preferred: drop the pin so the name resolves it, here and on every bump:" >&2
+    echo "    sed -i '/^[[:space:]]*image_id[[:space:]]*=/d' $f" >&2
+    echo "  Or, to keep pinning this exact image:" >&2
     echo "    sed -i 's|$HAVE|$WANT|' $f" >&2
     stale=1
   done

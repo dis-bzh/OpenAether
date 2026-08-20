@@ -48,17 +48,17 @@ and junction point work without modification.
 
 Between phases, establish SSH tunnels via the bastion for Talos API access (port 50000).
 
-### One-shot bring-up: `task up`
+### One-shot bring-up: `task cluster-up`
 
 ```bash
-task up ROLE=management                    # or: ROLE=workload PROVIDER=ovh KEY=~/.ssh/yourkey
+task cluster-up ROLE=management                    # or: ROLE=workload PROVIDER=ovh KEY=~/.ssh/yourkey
 ```
 
 Chains image → render manifests → Phase 1 (`infra`) → tunnels → Phase 2
 (`bootstrap-phase2`) in one command. Every step is idempotent (image build
 skips if already published/downloaded, manifests skip re-rendering unless
 `FORCE=1`, `infra`/`bootstrap-phase2` are plain `tofu apply`s) — if any step
-fails, fix the issue and re-run `task up`; completed steps are no-ops. This
+fails, fix the issue and re-run `task cluster-up`; completed steps are no-ops. This
 doesn't replace the two-phase flow above, it just automates running both
 phases back to back — same tasks, same `tofu apply`s underneath.
 
@@ -69,7 +69,7 @@ the SSH tunnels itself (`talos-tunnels.sh open-direct`) between the provider
 module and `modules/talos`, using node/bastion IPs unknown until the VMs
 exist. Default `false`: not exercised against a real host yet, validate on a
 disposable environment before relying on it. `talos_bootstrap` remains the
-break-glass/two-phase path either way (e.g. for `task destroy`).
+break-glass/two-phase path either way (e.g. for `task infra-down`).
 
 ### apiserver VIP / `k8s_lb_mode` (Scaleway, OVH)
 
@@ -92,7 +92,7 @@ experimental — validate it before relying on it in prod.
 | `talosctl` | Cluster access + validation |
 | `kubectl` | App deployment |
 | `helm` | Rendering bootstrap manifests |
-| `jq` | failover, register-spoke, backup-state scripts |
+| `jq` | backup-state, tunnels, teardown scripts |
 | `gpg` (GnuPG >= 2.4) | Client-side encryption of the backed-up artifacts |
 | `aws` (CLI) | Streaming the encrypted backups to S3-compatible stores |
 
@@ -106,7 +106,7 @@ variable; the summary:
 | OVH (compute, OpenStack) | `OS_AUTH_URL`, `OS_USERNAME`, `OS_PASSWORD`, `OS_PROJECT_ID`, `OS_REGION_NAME` |
 | Outscale (compute) | `OSC_ACCESS_KEY`, `OSC_SECRET_KEY`, `OSC_REGION` |
 | S3 (state + backups) | `<PU>_AWS_ACCESS_KEY_ID` / `<PU>_AWS_SECRET_ACCESS_KEY`, where `PU` = `SCW`/`OVH`/`OUTSCALE`. Scaleway & Outscale **default to their API keys**; OVH needs dedicated S3 keys. **No ambient `AWS_*` fallback** (it could silently use another provider's keys); `task` resolves these and exports `AWS_*` internally. |
-| Backup replica (prod) | `<PU>_BACKUP_AWS_*` (or a global `BACKUP_AWS_*`) — the `-backup` store on a *different* provider; unset → reuses the primary creds (dev). |
+| Backup replica | Nothing new: the `-backup` store is opened with the `<PU>_AWS_*` of the cloud `s3_replica_endpoint` names, so an Outscale replica reads `OUTSCALE_AWS_*`. `<PU>_BACKUP_AWS_*` only if you want that one store to have its own pair. |
 | All | `TF_VAR_encryption_passphrase` (≥ 32 chars; encrypts state **and** backups) |
 
 ## Environment Files
@@ -148,14 +148,14 @@ credentials never get committed.
 
 ```bash
 # Phase 0 — build the Talos image once per version (separate state, reused by all clusters)
-task talos-image PROVIDER=scaleway               # -> image "talos-scaleway-amd64-v1.13.3" (or PROVIDER=ovh)
+task image-build PROVIDER=scaleway               # -> image "talos-scaleway-amd64-v1.13.3" (or PROVIDER=ovh)
 
 # Generate bootstrap manifests (Cilium, Flux)
 ./scripts/bootstrap/render-bootstrap-manifests.sh
 
 # Phase 1 — infra (IPs land in the state). The task ensures the buckets + inits the
 # per-cluster backend for you. PROVIDER defaults to scaleway (also ovh, outscale, proxmox).
-task infra ROLE=management                 # or: task infra ROLE=management PROVIDER=ovh
+task infra-apply ROLE=management                 # or: task infra-apply ROLE=management PROVIDER=ovh
 #   manual equivalent:
 #     ./scripts/internal/ensure-buckets.sh envs/management-scaleway.tfvars
 #     tofu init -reconfigure $(./scripts/internal/tf-backend.sh envs/management-scaleway.tfvars)
@@ -168,23 +168,24 @@ task bootstrap-phase2 ROLE=management KEY=~/.ssh/yourkey   # or: ROLE=management
 #  tofu apply -var-file=envs/management-scaleway.tfvars -var talos_bootstrap=true)
 
 # Close the tunnels when done
-task close-tunnels
+task tunnels-down
 ```
 
 ### Deploy workload cluster
 
 ```bash
-task infra ROLE=workload PROVIDER=ovh
+task infra-apply ROLE=workload PROVIDER=ovh
 task bootstrap-phase2 ROLE=workload PROVIDER=ovh KEY=~/.ssh/yourkey
 ```
 
 ### Cross-provider failover — second management on another cloud
 
-```bash
-# If your primary management provider is unavailable, stand one up elsewhere:
-./scripts/bootstrap/failover-management.sh ovh   # or: task failover PROVIDER=ovh
-# RTO: ~30 minutes. Workload clusters are unaffected.
-```
+There is no failover command. `failover-management.sh` was deleted in 0.5.0: it
+re-implemented `task cluster-up` with a hardcoded SSH key and its own tunnel loop, had
+never been run, and a broken skeleton is a worse starting point than none. The
+prerequisite — a state and artifacts replica on a SECOND provider — is real and
+measured (`docs/backlog.md`); rebuilding a cluster from it is designed work that
+has not been done. `envs/failover-*.tfvars.example` still describes the role.
 
 ### Upgrade Cilium or Flux
 
@@ -198,7 +199,7 @@ tofu apply -var-file=envs/management-scaleway.tfvars -var talos_bootstrap=true
 ### Teardown (destroy)
 
 ```bash
-task destroy ROLE=management                # or: ROLE=workload PROVIDER=ovh
+task infra-down ROLE=management                # or: ROLE=workload PROVIDER=ovh
 ```
 
 Manual equivalent (two steps are required):
@@ -222,9 +223,9 @@ swap the env file (`envs/workload-<provider>.tfvars`).
 ## Backup & Restore (DR)
 
 Every DR artifact lives in **two** object stores: a **primary** (the cluster's own
-provider, `<PU>_AWS_*` creds) and a **replica** — the `-backup` store, in prod a
-*different* provider reached with `<PU>_BACKUP_AWS_*` creds (these default to the
-primary when unset, e.g. for dev). Bucket names are derived from the cluster:
+provider) and a **replica** — the `-backup` store, in prod a *different* provider.
+Each is opened with the `<PU>_AWS_*` credentials of the cloud that HOLDS it, named
+by its endpoint. Bucket names are derived from the cluster:
 
 | Artifact | Primary | Replica | Client encryption |
 |----------|---------|---------|-------------------|
@@ -239,17 +240,23 @@ the Phase-2 apply (`backup-artifacts.sh`); the state is replicated **after** the
 apply (`backup-state.sh` / `task backup-state`), because the backend only flushes
 the new state on apply exit.
 
-The four buckets are **auto-provisioned** (idempotent) by `task infra ROLE=management` /
-`task infra ROLE=workload` before `tofu init` — `scripts/ensure-buckets.sh` derives their
-names from the cluster's tfvars and `aws s3 mb`s any that are missing (primary with
-`<PU>_AWS_*`, replicas with `<PU>_BACKUP_AWS_*`). Manual equivalent:
-`./scripts/ensure-buckets.sh envs/<cluster>.tfvars`.
+The four buckets are **auto-provisioned** (idempotent) by `task infra-apply ROLE=management` /
+`task cluster-up` before it builds anything, and `task infra-apply` again before
+`tofu init` — `scripts/internal/ensure-buckets.sh` derives their names from the
+cluster's tfvars and `aws s3 mb`s any that are missing, each with its own cloud's
+keys. It refuses when the replica names another provider it cannot write to, and
+says which variable supplied the rejected key. Manual equivalent:
+`./scripts/internal/ensure-buckets.sh envs/<cluster>.tfvars`.
 
 ```bash
-# In prod, point the replica at a different provider and give it its own creds:
-export BACKUP_AWS_ACCESS_KEY_ID=...      # the -backup store (e.g. OVH)
-export BACKUP_AWS_SECRET_ACCESS_KEY=...
-# then set s3_replica_endpoint / s3_replica_region in the env file.
+# A cluster on Scaleway keeping its backups on Outscale. No SCW_BACKUP_* needed:
+export SCW_AWS_ACCESS_KEY_ID=...          # the primary store
+export SCW_AWS_SECRET_ACCESS_KEY=...
+export OUTSCALE_AWS_ACCESS_KEY_ID=...     # the -backup store
+export OUTSCALE_AWS_SECRET_ACCESS_KEY=...
+# then, in the env file:
+#   s3_replica_endpoint = "https://oos.eu-west-2.outscale.com"
+#   s3_replica_region   = "eu-west-2"
 ```
 
 ### Restore a backup
@@ -271,9 +278,9 @@ tofu init -reconfigure \
   -backend-config="endpoint=<replica-endpoint>"
 ```
 
-> Rebuilding from scratch on another provider instead? That's the failover path
-> (`./scripts/failover-management.sh <provider>` / `task failover`) — a fresh
-> management cluster (new PKI), independent of these backups.
+> Rebuilding from scratch on another provider instead? That path has no command
+> yet — see the note under "Failover" above. The replica it would read from does
+> exist and is verified across providers.
 
 ## Module Structure
 
@@ -310,8 +317,8 @@ tofu test -filter=tests/provider-contract.tftest.hcl  # Junction point (7 tests)
 tofu test -filter=tests/proxmox.tftest.hcl        # Proxmox module + VIP + image convention (7 tests)
 tofu test -filter=tests/k8s-lb-mode.tftest.hcl     # k8s_lb_mode=vip on scw/ovh, rejected on outscale (3 tests)
 
-# Full local validation (tests + kustomize + talosctl + yamllint)
-./scripts/dev/test-local-stack.sh
+# Full local validation
+task lint && task validate && task test && task test-scripts
 ```
 
 ## Security

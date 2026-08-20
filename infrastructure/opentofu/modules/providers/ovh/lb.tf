@@ -14,6 +14,22 @@ resource "openstack_lb_loadbalancer_v2" "k8s" {
   count         = var.k8s_lb_mode == "managed" ? 1 : 0
   name          = "${var.cluster_name}-k8s-lb"
   vip_subnet_id = openstack_networking_subnet_v2.private.id
+
+  # Octavia is SLOW and its slowness is not bounded by the provider's patience:
+  # the default create timeout is 10 min, and on 2026-08-18 this load balancer
+  # was still PENDING_CREATE (operating_status ONLINE) fifteen minutes in, having
+  # already killed the apply at 9m51s — "context deadline exceeded". The resource
+  # is then TAINTED, so simply re-running destroys the one that was nearly ready
+  # and starts the wait again. That loop is the whole cost.
+  #
+  # Outscale hit the identical shape on 2026-08-16 and was given create = "30m";
+  # the lesson was never carried to its sibling modules. This is that carry.
+  timeouts {
+    create = "30m"
+    update = "30m"
+    delete = "30m"
+  }
+
 }
 
 resource "openstack_lb_listener_v2" "k8s_api" {
@@ -93,29 +109,51 @@ resource "openstack_networking_port_v2" "k8s_vip" {
 }
 
 # --- App LB (HTTP/HTTPS) ---
+# Only created when deploy_app_lb = true. Off by default: the members point at
+# the Gateway's NodePorts, so without applications this LB and its floating IP
+# are billed to forward traffic to ports where nothing listens.
 
 resource "openstack_lb_loadbalancer_v2" "app" {
+  count         = var.deploy_app_lb ? 1 : 0
   name          = "${var.cluster_name}-app-lb"
   vip_subnet_id = openstack_networking_subnet_v2.private.id
+
+  # Octavia is SLOW and its slowness is not bounded by the provider's patience:
+  # the default create timeout is 10 min, and on 2026-08-18 this load balancer
+  # was still PENDING_CREATE (operating_status ONLINE) fifteen minutes in, having
+  # already killed the apply at 9m51s — "context deadline exceeded". The resource
+  # is then TAINTED, so simply re-running destroys the one that was nearly ready
+  # and starts the wait again. That loop is the whole cost.
+  #
+  # Outscale hit the identical shape on 2026-08-16 and was given create = "30m";
+  # the lesson was never carried to its sibling modules. This is that carry.
+  timeouts {
+    create = "30m"
+    update = "30m"
+    delete = "30m"
+  }
+
 }
 
 resource "openstack_lb_listener_v2" "http" {
+  count           = var.deploy_app_lb ? 1 : 0
   name            = "http"
   protocol        = "TCP"
   protocol_port   = 80
-  loadbalancer_id = openstack_lb_loadbalancer_v2.app.id
+  loadbalancer_id = openstack_lb_loadbalancer_v2.app[0].id
 }
 
 resource "openstack_lb_pool_v2" "http" {
+  count       = var.deploy_app_lb ? 1 : 0
   name        = "http"
   protocol    = "TCP"
   lb_method   = "ROUND_ROBIN"
-  listener_id = openstack_lb_listener_v2.http.id
+  listener_id = openstack_lb_listener_v2.http[0].id
 }
 
 resource "openstack_lb_member_v2" "http" {
-  count   = var.worker_count
-  pool_id = openstack_lb_pool_v2.http.id
+  count   = var.deploy_app_lb ? var.worker_count : 0
+  pool_id = openstack_lb_pool_v2.http[0].id
   address = openstack_compute_instance_v2.worker[count.index].access_ip_v4
   # The Gateway's fixed NodePort; the public listener stays on 80.
   protocol_port = var.app_lb_node_ports.http
@@ -123,34 +161,38 @@ resource "openstack_lb_member_v2" "http" {
 }
 
 resource "openstack_lb_listener_v2" "https" {
+  count           = var.deploy_app_lb ? 1 : 0
   name            = "https"
   protocol        = "TCP"
   protocol_port   = 443
-  loadbalancer_id = openstack_lb_loadbalancer_v2.app.id
+  loadbalancer_id = openstack_lb_loadbalancer_v2.app[0].id
 }
 
 resource "openstack_lb_pool_v2" "https" {
+  count       = var.deploy_app_lb ? 1 : 0
   name        = "https"
   protocol    = "TCP"
   lb_method   = "ROUND_ROBIN"
-  listener_id = openstack_lb_listener_v2.https.id
+  listener_id = openstack_lb_listener_v2.https[0].id
 }
 
 resource "openstack_lb_member_v2" "https" {
-  count         = var.worker_count
-  pool_id       = openstack_lb_pool_v2.https.id
+  count         = var.deploy_app_lb ? var.worker_count : 0
+  pool_id       = openstack_lb_pool_v2.https[0].id
   address       = openstack_compute_instance_v2.worker[count.index].access_ip_v4
   protocol_port = var.app_lb_node_ports.https
   subnet_id     = openstack_networking_subnet_v2.private.id
 }
 
 resource "openstack_networking_floatingip_v2" "app" {
-  pool = var.network_name
+  count = var.deploy_app_lb ? 1 : 0
+  pool  = var.network_name
 }
 
 resource "openstack_networking_floatingip_associate_v2" "app" {
-  floating_ip = openstack_networking_floatingip_v2.app.address
-  port_id     = openstack_lb_loadbalancer_v2.app.vip_port_id
+  count       = var.deploy_app_lb ? 1 : 0
+  floating_ip = openstack_networking_floatingip_v2.app[0].address
+  port_id     = openstack_lb_loadbalancer_v2.app[0].vip_port_id
 
   # ⚠️ depends_on on the router interface is MANDATORY. Neutron REFUSES to
   # associate a floating IP until the port's subnet has a route to the external

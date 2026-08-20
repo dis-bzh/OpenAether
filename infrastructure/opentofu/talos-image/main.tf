@@ -62,7 +62,7 @@ module "scaleway" {
   arch          = var.arch
   schematic_id  = local.schematic_id
   image_name    = local.image_name
-  bucket_name   = var.staging_bucket
+  bucket_name   = var.import_bucket
   region        = var.region
   zones         = var.zones
   s3_endpoint   = var.s3_endpoint
@@ -91,7 +91,7 @@ module "outscale" {
   arch          = var.arch
   schematic_id  = local.schematic_id
   image_name    = local.image_name
-  bucket_name   = var.staging_bucket
+  bucket_name   = var.import_bucket
   region        = var.region
   s3_endpoint   = var.s3_endpoint
   cache_dir     = local.cache_dir

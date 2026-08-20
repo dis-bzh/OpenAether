@@ -18,8 +18,9 @@ output "k8s_lb_ip" {
 }
 
 output "app_lb_ip" {
-  description = "Public IP of the App LB (80/443)"
-  value       = openstack_networking_floatingip_v2.app.address
+  description = "Public IP of the App LB (80/443). Null means no application load balancer on this cluster (deploy_app_lb = false)."
+  # one(): returns null on the empty list instead of failing on [0].
+  value = one(openstack_networking_floatingip_v2.app[*].address)
 }
 
 # Bastion

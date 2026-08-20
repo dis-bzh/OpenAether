@@ -12,6 +12,15 @@ resource "outscale_load_balancer" "k8s" {
   load_balancer_name = "${var.cluster_name}-k8s-lb"
   load_balancer_type = "internet-facing"
 
+  # The provider default is 10 minutes, and on 2026-08-16 a pure-infra deploy
+  # died on exactly that: "timeout while waiting for state to become 'active'
+  # (last state: 'provisioning')". The load balancer then held the Net and every
+  # subsequent destroy failed on it too — one slow creation cost the whole run
+  # and its teardown. Waiting longer is free; failing here is not.
+  timeouts {
+    create = "30m"
+  }
+
   listeners {
     backend_port           = 6443
     backend_protocol       = "TCP"
@@ -52,11 +61,17 @@ resource "outscale_load_balancer_vms" "k8s" {
   backend_vm_ids     = outscale_vm.control_plane[*].vm_id
 }
 
-# --- App LB (HTTP/HTTPS) ---
+# --- App LB (HTTP/HTTPS), only when var.deploy_app_lb ---
 
 resource "outscale_load_balancer" "app" {
+  count              = var.deploy_app_lb ? 1 : 0
   load_balancer_name = "${var.cluster_name}-app-lb"
   load_balancer_type = "internet-facing"
+
+  # Same 10-minute provider default, same consequence — see the k8s LB above.
+  timeouts {
+    create = "30m"
+  }
 
   listeners {
     # backend_port = the Gateway's fixed NodePort; load_balancer_port stays public.
@@ -83,6 +98,7 @@ resource "outscale_load_balancer" "app" {
 }
 
 resource "outscale_load_balancer_vms" "app" {
-  load_balancer_name = outscale_load_balancer.app.load_balancer_name
+  count              = var.deploy_app_lb ? 1 : 0
+  load_balancer_name = outscale_load_balancer.app[0].load_balancer_name
   backend_vm_ids     = outscale_vm.worker[*].vm_id
 }

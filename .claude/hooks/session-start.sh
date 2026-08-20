@@ -1,6 +1,6 @@
 #!/bin/bash
 # SessionStart hook — installs the OpenAether toolchain so `task lint`,
-# `tofu fmt/validate/test` and `./scripts/dev/test-local-stack.sh` work inside
+# `tofu fmt/validate/test` and `task test-scripts` work inside
 # Claude Code on the web sessions.
 #
 # Requires the environment's network policy to allow outbound access to the

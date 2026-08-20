@@ -4,7 +4,7 @@
 #   - 6443/TCP: Kubernetes API via K8s LB (permanent)
 #   - 50000/TCP: Talos API via bastion ONLY. Accessible via SSH tunnels established
 #                through the bastion host. Never exposed via Load Balancers.
-#   - NodePorts 30080/30443: application traffic from the App LB
+#   - NodePorts 30080/30443: application traffic from the App LB (deploy_app_lb only)
 #   - Inter-node: full mesh on private subnets
 # ==============================================================================
 
@@ -29,12 +29,16 @@ resource "scaleway_instance_security_group" "this" {
     }
   }
 
-  # Kubernetes API — From App LB (for internal service communication)
-  inbound_rule {
-    action   = "accept"
-    port     = 6443
-    ip_range = "${scaleway_lb_ip.app.ip_address}/32"
-    protocol = "TCP"
+  # Kubernetes API — From App LB (for internal service communication).
+  # Only when that LB exists (deploy_app_lb): no LB, no source IP to allow.
+  dynamic "inbound_rule" {
+    for_each = var.deploy_app_lb ? [1] : []
+    content {
+      action   = "accept"
+      port     = 6443
+      ip_range = "${scaleway_lb_ip.app[0].ip_address}/32"
+      protocol = "TCP"
+    }
   }
 
   # Talos API — From Bastion ONLY (50000/TCP, never from LB)
@@ -70,18 +74,14 @@ resource "scaleway_instance_security_group" "this" {
   # HTTP/HTTPS — from the App LB, on the Gateway's FIXED NodePorts.
   # (The LB listens on public 80/443 and forwards to those worker-side ports;
   # opening 80/443 here would achieve nothing — nothing listens on the nodes.)
-  inbound_rule {
-    action   = "accept"
-    port     = var.app_lb_node_ports.http
-    ip_range = "${scaleway_lb_ip.app.ip_address}/32"
-    protocol = "TCP"
-  }
-
-  inbound_rule {
-    action   = "accept"
-    port     = var.app_lb_node_ports.https
-    ip_range = "${scaleway_lb_ip.app.ip_address}/32"
-    protocol = "TCP"
+  dynamic "inbound_rule" {
+    for_each = var.deploy_app_lb ? [var.app_lb_node_ports.http, var.app_lb_node_ports.https] : []
+    content {
+      action   = "accept"
+      port     = inbound_rule.value
+      ip_range = "${scaleway_lb_ip.app[0].ip_address}/32"
+      protocol = "TCP"
+    }
   }
 
   # Outbound — allow all for cluster nodes (nftables on bastion handles egress restriction)

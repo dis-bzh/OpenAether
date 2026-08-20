@@ -173,7 +173,11 @@ run "valid_cilium_manifest_passes" {
   }
 
   assert {
-    condition     = module.talos.control_plane_count > 0 || true
+    # `> 0 || true` is a constant, and it guarded the one thing that matters:
+    # the Cilium-placeholder precondition self-disables at control_plane_count
+    # == 0 (modules/talos/main.tf), so a run that asserted nothing about the
+    # count was documented as validating it.
+    condition     = module.talos.control_plane_count == 3
     error_message = "Talos module should be instantiated with valid cilium manifest."
   }
 }
@@ -259,9 +263,19 @@ run "installer_image_uses_talos_version" {
   # it checked the installer. It could not fail, and the installer reference it
   # claims to cover is the one that decides which Talos a node actually runs:
   # booting a newer image changes nothing if this string stays behind.
+  # The FACTORY installer, not the plain one: the plain image carries no system
+  # extensions, so every reinstall dropped iscsi-tools and Longhorn's manager
+  # crash-looped on a missing iscsiadm (Scaleway, 2026-08-15). Asserting the
+  # exact string is the point — a version pin alone was what let this through.
+  #
+  # HARDCODED ON PURPOSE, and updating it by hand IS the feature: reading it
+  # from var.talos_installer_schematic_id would let any schematic change pass
+  # in silence, and a schematic change means every node reinstalls from a
+  # different image. Last moved 2026-08-19, dropping qemu-guest-agent — see
+  # talos-image/schematic.yaml for why that extension had to go.
   assert {
-    condition     = module.talos.installer_image == "ghcr.io/siderolabs/installer:v1.13.3"
-    error_message = "the machine config must pin the installer to var.talos_version"
+    condition     = module.talos.installer_image == "factory.talos.dev/installer/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245:v1.13.3"
+    error_message = "the machine config must install from the Image Factory schematic, pinned to var.talos_version"
   }
 }
 
@@ -339,5 +353,54 @@ run "auto_tunnels_disabled_by_default" {
   assert {
     condition     = length(terraform_data.talos_tunnels) == 0
     error_message = "terraform_data.talos_tunnels must have count=0 when auto_tunnels is left at its default (false)."
+  }
+}
+
+# ==============================================================================
+# Test 14: deploy_flux governs BOTH manifests, in both directions
+#
+# 1.0.0 ships infrastructure only, so the default must leave Flux out. An
+# off-switch whose only tested position is "off" is not a switch — it is a
+# deletion nobody wrote down, and Flux comes back as a user choice in 1.1.0.
+# Asserted on the rendered control-plane config, which is where inlineManifests
+# actually land, rather than on the local that builds them.
+# ==============================================================================
+
+run "flux_absent_by_default" {
+  command = plan
+
+  variables {
+    talos_bootstrap = true
+  }
+
+  assert {
+    condition     = !contains(module.talos.inline_manifest_names, "flux-install") && !contains(module.talos.inline_manifest_names, "flux-bootstrap")
+    error_message = "deploy_flux defaults to false, so the control-plane config must carry no Flux manifest."
+  }
+
+  assert {
+    condition     = contains(module.talos.inline_manifest_names, "cilium")
+    error_message = "Cilium is the floor and is unconditional — a cluster without a CNI is not a cluster."
+  }
+}
+
+run "flux_present_when_asked" {
+  command = plan
+
+  variables {
+    talos_bootstrap         = true
+    deploy_flux             = true
+    flux_manifest           = "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: flux-system"
+    flux_bootstrap_manifest = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: flux-bootstrap-probe"
+  }
+
+  assert {
+    condition     = contains(module.talos.inline_manifest_names, "flux-install")
+    error_message = "deploy_flux=true must put the Flux install manifest back into the control-plane config."
+  }
+
+  assert {
+    condition     = contains(module.talos.inline_manifest_names, "flux-bootstrap")
+    error_message = "The bootstrap manifest is governed by the same switch — a half-empty pair injects an empty manifest."
   }
 }

@@ -216,6 +216,7 @@ module "scw" {
   instance_type    = local.scw_dist.instance_type
   additional_zones = local.scw_dist.zones != null ? local.scw_dist.zones : ["fr-par-1", "fr-par-2", "fr-par-3"]
   k8s_lb_mode      = local.scw_dist.k8s_lb_mode
+  deploy_app_lb    = var.deploy_app_lb
 
   worker_storage = var.worker_storage
 
@@ -244,6 +245,7 @@ module "ovh" {
   availability_zones = local.ovh_dist.availability_zones
   bastion_image_id   = local.ovh_dist.bastion_image_id
   k8s_lb_mode        = local.ovh_dist.k8s_lb_mode
+  deploy_app_lb      = var.deploy_app_lb
 
   worker_storage = var.worker_storage
 
@@ -270,6 +272,7 @@ module "outscale" {
   availability_zones = local.osc_dist.availability_zones
   bastion_image_id   = local.osc_dist.bastion_image_id
   k8s_lb_mode        = local.osc_dist.k8s_lb_mode
+  deploy_app_lb      = var.deploy_app_lb
 
   worker_storage = var.worker_storage
 
@@ -406,7 +409,11 @@ locals {
 
 locals {
   cilium_manifest = var.cilium_manifest != null ? var.cilium_manifest : file("${path.module}/bootstrap-manifests/cilium.yaml")
-  flux_manifest   = var.flux_manifest != null ? var.flux_manifest : file("${path.module}/bootstrap-manifests/flux-install.yaml")
+  # deploy_flux=false yields "", which modules/talos already reads as "no Flux"
+  # (main.tf:116) — the same path infrastructure/opentofu-local drives through
+  # this very module on every `task local-up`. Locals only: no resource address
+  # moves, so turning it off cannot replace a node.
+  flux_manifest = var.deploy_flux ? (var.flux_manifest != null ? var.flux_manifest : file("${path.module}/bootstrap-manifests/flux-install.yaml")) : ""
   # Cluster identity, published as the `cluster-identity` ConfigMap (flux-system)
   # and consumed by the bricks that must distinguish themselves from ANOTHER
   # cluster — today the restic repositories, which share cross-provider buckets.
@@ -414,7 +421,11 @@ locals {
   # read "openaether-dev" on all three clouds, so they distinguish nothing.
   cluster_id = "${var.cluster_name}-${var.environment}-${local.active_provider}"
 
-  flux_bootstrap_manifest = var.flux_bootstrap_manifest != null ? var.flux_bootstrap_manifest : templatefile("${path.module}/bootstrap-manifests/flux-bootstrap.yaml.tftpl", {
+  # Emptied by the SAME switch. modules/talos:116 only tests flux_manifest, so a
+  # half-empty pair would inject a manifest with no content — asymmetric and
+  # untested. One variable governs both, and the template is not even rendered
+  # when Flux is off.
+  flux_bootstrap_manifest = !var.deploy_flux ? "" : var.flux_bootstrap_manifest != null ? var.flux_bootstrap_manifest : templatefile("${path.module}/bootstrap-manifests/flux-bootstrap.yaml.tftpl", {
     namespace    = var.flux_namespace
     git_repo_url = var.git_repo_url
     git_ref      = var.git_ref
@@ -480,6 +491,9 @@ module "talos" {
   cluster_endpoint   = "https://${local.k8s_lb_ip}:6443"
   kubernetes_version = var.kubernetes_version
   talos_version      = var.talos_version
+  # Container mode has no installer and no extensions; everywhere else the
+  # installer must carry the schematic or a reinstall silently drops them.
+  installer_schematic_id = local.active_provider == "local" ? "" : var.talos_installer_schematic_id
 
   # Phase 2 apply sets talos_bootstrap = true. Use the planned counts (known at
   # plan) rather than length(local.*_ips) (unknown until the VMs exist), so the
@@ -513,9 +527,11 @@ module "talos" {
 
   # Phase 2 reaches the private nodes through per-node SSH tunnels on localhost
   # (see the `instructions` output). `endpoint` is where the provider connects;
-  # node identity stays the private IP. CPs: 127.0.0.1:50000+i, workers: :50100+i.
-  control_plane_endpoints = var.talos_bootstrap ? [for i in range(local.total_control_planes) : "127.0.0.1:${50000 + i}"] : []
-  worker_endpoints        = var.talos_bootstrap ? [for i in range(local.total_workers) : "127.0.0.1:${50100 + i}"] : []
+  # node identity stays the private IP. CPs: 127.0.0.1:50000+i, workers: :50100+i,
+  # both shifted by talos_tunnel_port_offset when a second cluster is being
+  # brought up from the same workstation.
+  control_plane_endpoints = var.talos_bootstrap ? [for i in range(local.total_control_planes) : "127.0.0.1:${50000 + var.talos_tunnel_port_offset + i}"] : []
+  worker_endpoints        = var.talos_bootstrap ? [for i in range(local.total_workers) : "127.0.0.1:${50100 + var.talos_tunnel_port_offset + i}"] : []
 
   # Bootstrap manifests — Cilium is always injected (CNI required),
   # Flux only on initial bootstrap (not on upgrades/DRP)

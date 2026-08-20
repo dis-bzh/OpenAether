@@ -176,25 +176,33 @@ else
   fail "2.1 mTLS STRICT mesh-wide" "PeerAuthentication mode='$PA_STRICT' (expected STRICT)"
 fi
 
-# 2.2 Default-deny authz par ns ambient (spec: {} = allow-nothing)
-AUTHZ_DIR="$BASE_DIR/istio/authz"
-if [ -d "$AUTHZ_DIR" ]; then
-  DENY_NS=$(grep -c "name: default-deny-all" "$AUTHZ_DIR/authorizationpolicy-default-deny.yaml" 2>/dev/null || true)
-  DENY_NS=${DENY_NS:-0}
-  AMBIENT_NS=("istio-system" "foundation-service-mesh" "services-observability" "foundation-storage" "foundation-networking")
-  FOUND=0
-  for ns in "${AMBIENT_NS[@]}"; do
-    if grep -q "namespace: $ns" "$AUTHZ_DIR/authorizationpolicy-default-deny.yaml" 2>/dev/null; then
-      FOUND=$((FOUND + 1))
-    fi
-  done
-  if [ "$FOUND" -ge 4 ]; then
-    pass "2.2 Default-deny authz: $FOUND/${#AMBIENT_NS[@]} ns ambient couverts"
-  else
-    fail "2.2 Default-deny authz per ambient ns" "Only $FOUND/${#AMBIENT_NS[@]} ambient ns with default-deny"
-  fi
+# 2.2 Default-deny authz on every ambient namespace (spec: {} = allow-nothing)
+#
+# Asked of the CLUSTER, not of the manifests. The file-based version hardcoded
+# five namespaces and grepped one file, and by 2026-08-15 it was wrong twice
+# over: services-observability had been taken OUT of the mesh on purpose, and
+# foundation-storage's policy had moved to istio/authz-storage/ back in July.
+# It reported "3/5" on a cluster where every ambient namespace was in fact
+# covered — and from a git worktree, where ../OpenAether-apps does not exist, it
+# skipped entirely and the run still said 25/31 passed.
+# The cluster cannot go stale when a file moves, and it cannot be absent.
+AMBIENT_NS=$(kubectl get ns -l istio.io/dataplane-mode=ambient -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null)
+if [ -z "$AMBIENT_NS" ]; then
+  skip "2.2 Default-deny authz per ambient ns" "no namespace is labelled istio.io/dataplane-mode=ambient"
 else
-  skip "2.2 Default-deny authz par ns ambient" "AuthZ dir not found"
+  MISSING=""
+  AMBIENT_COUNT=0
+  # istio-system hosts the control plane and carries its own default-deny; it is
+  # not labelled ambient, so name it explicitly rather than let it slip through.
+  for ns in $AMBIENT_NS istio-system; do
+    AMBIENT_COUNT=$((AMBIENT_COUNT + 1))
+    kubectl -n "$ns" get authorizationpolicy default-deny-all >/dev/null 2>&1 || MISSING="$MISSING $ns"
+  done
+  if [ -z "$MISSING" ]; then
+    pass "2.2 Default-deny authz: $AMBIENT_COUNT/$AMBIENT_COUNT ambient ns covered"
+  else
+    fail "2.2 Default-deny authz per ambient ns" "no default-deny-all in:$MISSING"
+  fi
 fi
 
 # 2.3 TrustDomain = cluster.local
@@ -296,12 +304,16 @@ else
 fi
 
 # 3.4 PSA restricted on the PKI foundation
-PKI_ENFORCE=$(kubectl get ns foundation-pki-root -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}' 2>/dev/null || echo "")
+# foundation-pki-root is GONE: the two-OpenBao design was replaced by a single
+# one (apps/base/cert-manager-issuers). This asked for a namespace nobody
+# creates any more and reported "pki-root=" as a failure — a check red for a
+# reason that had been designed away. It reads the namespace that replaced it.
+PKI_ENFORCE=$(kubectl get ns foundation-pki-management -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}' 2>/dev/null || echo "")
 VAULT_ENFORCE=$(kubectl get ns foundation-vault -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}' 2>/dev/null || echo "")
 if [ "$PKI_ENFORCE" = "restricted" ] && [ "$VAULT_ENFORCE" = "restricted" ]; then
-  pass "3.4 PSA restricted on the PKI foundation (pki-root + vault)"
+  pass "3.4 PSA restricted on the PKI foundation (pki-management + vault)"
 else
-  fail "3.4 PSA restricted on the PKI foundation" "pki-root=$PKI_ENFORCE, vault=$VAULT_ENFORCE (expected restricted)"
+  fail "3.4 PSA restricted on the PKI foundation" "pki-management=$PKI_ENFORCE, vault=$VAULT_ENFORCE (expected restricted)"
 fi
 
 # 3.5 Pod Security Admission: at least `baseline`, on every managed namespace
@@ -325,9 +337,17 @@ WILDCARD_ROLES=$(kubectl get clusterrole -o json 2>/dev/null | python3 -c "
 import json,sys
 roles=json.load(sys.stdin)['items']
 # Exclude the upstream charts and system roles
-EXCLUDE_PREFIXES=('system:' 'clusternet:' 'cnpg-' 'cloudnative-pg' 'external-secrets-' 'longhorn-' 'istio-' 'cert-manager-' 'kyverno-' 'capi-' 'cluster-api-' 'gateway-api-' 'fluent-' 'kube-state-metrics-' 'loki-' 'alloy-' 'prometheus-' 'node-exporter-' 'victoria-metrics-')
+# ⚠️ These lists were never tuned: until 2026-08-15 the tuples were written
+# without commas, so the comparison excluded everything and no entry ever
+# mattered. With the commas in, all 22 hits were upstream or built-in — the
+# additions below are named for that reason, and anything NOT on this list is a
+# role this project created and has to justify.
+EXCLUDE_PREFIXES=('system:', 'clusternet:', 'cnpg-', 'cloudnative-pg', 'external-secrets-', 'longhorn-', 'istio-', 'istiod-', 'cert-manager-', 'kyverno-', 'kyverno:', 'capi-', 'cluster-api-', 'cacppt-', 'caps-', 'gateway-api-', 'fluent-', 'kube-state-metrics-', 'loki-', 'alloy-', 'prometheus-', 'node-exporter-', 'victoria-metrics-', 'flux-', 'crd-controller')
+# Kubernetes' own aggregated roles, on every cluster ever built.
+EXCLUDE_EXACT=('admin', 'edit', 'view', 'cluster-admin')
 wildcards=[r for r in roles
-  if not any(r['metadata']['name'].startswith(p) for p in EXCLUDE_PREFIXES)
+  if r['metadata']['name'] not in EXCLUDE_EXACT
+  and not any(r['metadata']['name'].startswith(p) for p in EXCLUDE_PREFIXES)
   and any(rule.get('verbs')==['*'] or rule.get('resources')==['*'] for rule in r.get('rules',[]))]
 print(len(wildcards))
 " 2>/dev/null || echo "0")
@@ -341,9 +361,14 @@ fi
 ADMIN_BINDINGS=$(kubectl get clusterrolebinding -o json 2>/dev/null | python3 -c "
 import json,sys
 bindings=json.load(sys.stdin)['items']
-EXCLUDE_PREFIXES=('system:' 'cnpg-' 'external-secrets-' 'longhorn-' 'istio-' 'cert-manager-' 'kyverno-' 'capi-' 'cluster-api-')
+EXCLUDE_PREFIXES=('system:', 'cnpg-', 'external-secrets-', 'longhorn-', 'istio-', 'cert-manager-', 'kyverno-', 'capi-', 'cluster-api-')
+# 'cluster-admin' is Kubernetes' own binding to system:masters.
+# 'cluster-reconciler' is how Flux works: kustomize-controller and
+# helm-controller apply arbitrary manifests and cannot do it with less.
+EXCLUDE_EXACT=('cluster-admin', 'cluster-reconciler')
 custom=[b for b in bindings
   if b['roleRef'].get('name')=='cluster-admin'
+  and b['metadata']['name'] not in EXCLUDE_EXACT
   and not any(b['metadata']['name'].startswith(p) for p in EXCLUDE_PREFIXES)]
 print(len(custom))
 " 2>/dev/null || echo "0")
@@ -488,9 +513,11 @@ ADDED_CAPS=$(kubectl get pods -A -o json 2>/dev/null | python3 -c "
 import json,sys
 pods=json.load(sys.stdin).get('items',[])
 # System namespaces + legitimately privileged workloads
-SKIP_NS=('kube-system' 'longhorn-system' 'local-path-storage' 'capi-system' 'capi-operator-system' 'foundation-storage')
+SKIP_NS=('kube-system', 'longhorn-system', 'local-path-storage', 'capi-system', 'capi-operator-system', 'foundation-storage')
 # Legitimately privileged pods (CNI, CSI, node-exporter)
-SKIP_PATTERNS=('cilium' 'istio-cni' 'longhorn' 'csi-' 'instance-manager' 'engine-image' 'node-exporter' 'alloy')
+# ztunnel is Istio ambient's node proxy: NET_ADMIN/SYS_ADMIN/NET_RAW is what
+# it is for. It was the only real hit once the commas went in.
+SKIP_PATTERNS=('cilium', 'istio-cni', 'ztunnel', 'longhorn', 'csi-', 'instance-manager', 'engine-image', 'node-exporter', 'alloy')
 caps=0
 for p in pods:
   ns=p.get('metadata',{}).get('namespace','')

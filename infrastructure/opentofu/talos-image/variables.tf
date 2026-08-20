@@ -26,12 +26,21 @@ variable "arch" {
   }
 }
 
-# --- Scaleway-specific (unused by the OVH glance / Outscale builds) -----------
+# --- Scaleway / Outscale upload path (unused by the OVH glance build) --------
 
-variable "staging_bucket" {
-  description = "Object Storage bucket used to stage the image for the snapshot import (Scaleway/Outscale upload path)."
+# NOT "staging": this repository already uses that word for an environment
+# (`environment = "dev"` in the cluster tfvars), and reading it here as one is
+# what it cost. This is the transit area an image is uploaded to so the provider
+# can import it as a snapshot, and `import` is what it does.
+#
+# No default. It used to carry a literal name with the project AND the provider
+# baked in, so a fork got a correct name everywhere except here, and a caller
+# that stopped passing -var would have aimed at somebody else's bucket without
+# saying so. Empty is refused where it is used, by the two modules that need it.
+variable "import_bucket" {
+  description = "Object Storage bucket the image is uploaded to for the snapshot import (Scaleway/Outscale path). Derived by talos-image.sh; required on those two providers."
   type        = string
-  default     = "s3-openaether-scaleway-talos-staging"
+  default     = ""
 }
 
 variable "region" {

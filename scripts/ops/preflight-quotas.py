@@ -120,7 +120,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("provider", choices=["ovh", "outscale"])
-    ap.add_argument("--add-vms", type=int, default=0, help="VMs que la topologie ajoutera")
+    ap.add_argument("--add-vms", type=int, default=0, help="VMs added")
     ap.add_argument("--add-cores", type=int, default=0, help="vCPUs added")
     ap.add_argument("--add-ram-gb", type=int, default=0, help="RAM added, in GB")
     args = ap.parse_args()

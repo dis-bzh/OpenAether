@@ -56,6 +56,9 @@ worker.yaml
 .terraform-validate/
 # Same isolation for the emulated-cloud lane (docs/emulated-cloud.md).
 .terraform-feint/
+# One data dir per cluster (TF_DATA_DIR), so two providers cannot steal the
+# backend pointer from each other.
+.terraform-*/
 .terraform.lock.hcl
 *.tfstate
 *.tfstate.*
@@ -93,6 +96,10 @@ infrastructure/opentofu/cluster/zz-feint-backend_override.tf
 *.swo
 .DS_Store
 
+# Transcript of the last plan/apply, read by explain-failure.sh to quote the
+# provider on a failure. It holds real addresses and ids — never commit it.
+.tofu-run.log
+
 # Phase 2 SSH tunnel PIDs (Talos API via bastion)
 infrastructure/opentofu/.talos-tunnels.pids
 infrastructure/opentofu/cluster/.talos-tunnels.pids
@@ -118,3 +125,6 @@ restic-escrow-*.txt
 # Python bytecode caches (committed by accident on 2026-07-28).
 __pycache__/
 *.pyc
+
+# Probe samples from a roll — kept so the next investigation has a baseline.
+.upgrade-probe-*.log

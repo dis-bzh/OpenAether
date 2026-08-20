@@ -1,5 +1,13 @@
 version: "3"
 
+# One knob for "which local ports the Talos tunnels use". The scripts read
+# TALOS_TUNNEL_OFFSET; the cluster root needs the same number to know where to
+# connect, and gets it from here rather than from a second variable a caller
+# could forget to keep in step. Default 0 = the historical fixed block.
+env:
+  TF_VAR_talos_tunnel_port_offset:
+    sh: echo "${TALOS_TUNNEL_OFFSET:-0}"
+
 # The repo's real OpenTofu roots. ⚠️ DO NOT go back to a
 # `-recursive infrastructure/opentofu`: it would sweep in untracked local
 # scratch directories (e.g. `_v2/`), which used to fail `task lint`.
@@ -14,14 +22,86 @@ vars:
 
 tasks:
   default:
-    desc: Show available tasks
+    # `task --list` prints 52 targets in alphabetical order, which is a map of the
+    # repository rather than a path through it. Most of them are steps of `up`, dev
+    # rungs, or belong to a later version. This is the path.
+    silent: true
     cmds:
-      - task --list
+      - |
+        cat <<'EOT'
+        OpenAether — one Talos cluster, on any provider.
+
+        Deploy and operate, in order:
+          task setup                              install the toolchain
+          task bucket-suffix                      a discriminator for your bucket names
+          task infra-plan      PROVIDER=…         what would be created, before spending
+          task cluster-up      PROVIDER=… KEY=…   the journey: image → infra → bootstrap
+          task cluster-verify  PROVIDER=…         ask the cluster whether it is what we promise
+          task cluster-upgrade PROVIDER=… KEY=…   Kubernetes then Talos, measuring the outage
+
+        Destroying takes TWO commands, on purpose — no single line can do it:
+          task cluster-down PROVIDER=… -- --plan                  computes, destroys nothing
+          task cluster-down PROVIDER=… -- --plan-file F --yes     lands exactly that plan
+
+        Nothing asks you a question except `cluster-up`, once, before it spends. Add APPROVE=auto
+        to answer it in advance — for CI, and for a shell that cannot be asked.
+        APPROVE=auto is deliberately powerless on anything that destroys.
+
+        When you need them:
+          task kubeconfig        PROVIDER=…   get access back
+          task restore-artifacts PROVIDER=…   recover access from the encrypted backups
+          task tunnels-up        PROVIDER=…   open the Talos API tunnels
+
+        Before you push:
+          task preflight                  everything provable without a cloud account
+
+        Everything else — the steps `up` runs for you, the local and emulated rungs,
+        the CAPI and application targets — is still there:  task --list-all
+
+        Start here: docs/first-cluster.md
+        EOT
 
   setup:
     desc: Install dependencies (OpenTofu, Talosctl, Kubectl, Task, pre-commit)
     cmds:
       - ./scripts/setup.sh
+
+  bucket-suffix:
+    desc: >-
+      Print a fresh bucket_suffix to paste into your tfvars. S3 bucket names are unique across a
+      whole provider, not per account — without one you inherit whatever names someone else took.
+    silent: true
+    cmds:
+      - |
+        printf 'bucket_suffix = "%s"\n' "$(openssl rand -hex 3)"
+        echo "# Paste into infrastructure/opentofu/cluster/envs/<role>-<provider>.tfvars."
+        echo "# Pick it ONCE: changing it later orphans every bucket you already have."
+
+  preflight:
+    desc: >-
+      Everything provable WITHOUT a cloud account, in one command. Run it before spending: a defect
+      found here costs minutes, the same defect found on a paid cluster costs the run and its teardown.
+    # DELIBERATELY SHORT — about four minutes. The first draft of this gate was
+    # fifteen and could not finish on the author's own machine, and a gate that
+    # is skipped protects nothing. `security` (needs checkov), `feint-test` and
+    # `local-up` (need Docker) are heavier and belong to CI or to a deliberate
+    # full run, not to the thing typed before every attempt.
+    cmds:
+      - task: lint
+      - task: render-check
+      - task: validate
+        vars: {ROOT: cluster}
+      - task: validate
+        vars: {ROOT: talos-image}
+      - task: test
+      - task: test-scripts
+      - cmd: |
+          echo
+          echo "✓ preflight green — every free rung passed."
+          echo "  NOT covered here — only a cloud run can show that the provider accepts these"
+          echo "  arguments, that the stored state is ciphertext, that an upgrade keeps the API"
+          echo "  up, and that the teardown leaves the account empty. All four HAVE been shown on"
+          echo "  real clouds: see the table in docs/backlog.md for which, when, and how long."
 
   lint:
     desc: Lint and format code (OpenTofu, YAML)
@@ -38,6 +118,18 @@ tasks:
       # English is canonical; French belongs in *.fr.md, and .languageignore
       # lists what is French on purpose, one reason per entry.
       - ./scripts/dev/check-language.sh
+      # shellcheck was installed by setup.sh and invoked by nothing — 48 tracked
+      # scripts, none of them gated. -S error only: the 23 warnings below that
+      # level are style, and a lint that fails on style gets bypassed.
+      - shellcheck -S error $(git ls-files '*.sh')
+      # One tool, one version, everywhere it is claimed. Four instances of that
+      # defect landed in one week and every one was mechanically checkable.
+      - ./scripts/dev/check-version-drift.sh
+      # Required inputs must be named where the operator will look. A variable
+      # with no default that no document mentions is a deploy that works for us
+      # and fails for a stranger — the release criterion is that the docs are
+      # followable, not that we know the answers.
+      - ./scripts/dev/check-doc-inputs.sh
 
   fmt:
     desc: Format OpenTofu code
@@ -141,6 +233,78 @@ tasks:
       # match; two of them once matched nothing and passed.
       - ./scripts/dev/check-gitleaks-rules.sh
 
+  check-jsonpath:
+    desc: >-
+      Parse every jsonpath the scripts use, with kubectl itself, offline. A
+      malformed expression always fails at runtime, so whatever reads it always
+      sees nothing — and nothing reads as fine. Cost three cloud rolls to find once.
+    cmds:
+      - ./scripts/dev/check-jsonpath.sh
+
+  test-gates-local:
+    desc: >-
+      Rung ONE: the roll's gates against a real Kubernetes in Docker (needs
+      `task local-up`). A stub proves the branching; only a real apiserver proves
+      the queries run. Does NOT cover `talosctl upgrade` — no disk in a container.
+    cmds:
+      - ./scripts/dev/test-gates-local.sh
+
+  test-cnpg-gates-local:
+    desc: >-
+      Rung ONE for the DATABASE gates: rolling-replace.sh's cnpg_* logic against a
+      real CloudNativePG in Docker (needs `task local-up`). test-gates-local.sh only
+      ever proved CNPG ABSENT; this drives the branch a stub gave eleven green
+      assertions to while kubectl could not parse its jsonpath. Installs
+      local-path-provisioner and the CNPG operator (pinned) if absent, ~80s.
+    cmds:
+      - ./scripts/dev/test-cnpg-gates-local.sh
+
+  test-scripts:
+    desc: >-
+      Unit-test the shell gates against a stub kubectl. Rung ZERO: the defects
+      that cost real cloud runs on 2026-08-15 were logic, not cloud — a resource
+      name resolving to the wrong CRD, an error read as an empty list, an rc
+      capture `set -e` never reached. Seconds here instead of 25-90 minutes there.
+    cmds:
+      # jsonpath first: a query kubectl cannot parse makes every assertion below
+      # it meaningless, and this costs milliseconds.
+      - ./scripts/dev/check-jsonpath.sh
+      - ./scripts/dev/test-rolling-replace.sh
+      # These two were written, they pass, and nothing ever ran them — not this
+      # target, not CI. A harness nobody invokes is the failure mode this whole
+      # target exists for, one level up: the check does work, it is simply never
+      # asked. test-teardown owns the branches that decide whether a management
+      # is destroyed while its children keep billing; test-cluster-checks owns
+      # the queries that turn "the apply returned" into "the cluster works".
+      # Both use a stub kubectl, need no credentials, and cost ~10s together.
+      - ./scripts/dev/test-teardown.sh
+      - ./scripts/dev/test-cluster-checks.sh
+      # The purge scripts are the last sentence between a failed teardown and a
+      # bill, and both said "clean" when every API call was refused. Forced-403,
+      # in-process, no network.
+      - ./scripts/dev/test-purge-orphans.sh
+      # Six places build a bucket name, in two languages that cannot import each
+      # other. Nothing but this compares them.
+      - ./scripts/dev/test-bucket-names.sh
+      # The backup path had no inverse until 0.5.0. This is the round trip —
+      # the real enc() against the real dec(), offline.
+      - ./scripts/dev/test-restore.sh
+      # `nc -z` calls a dead ssh -L tunnel healthy. Two local listeners measure
+      # the difference the whole tunnel guard rests on.
+      - ./scripts/dev/test-endpoint-probe.sh
+      # Forgetting the second provider's keys does not fail — it signs the copy
+      # with the first provider's. Only the ENDPOINTS can say a backup was meant
+      # to be elsewhere, which is what these assert.
+      - ./scripts/dev/test-backup-creds.sh
+      # Nothing said "tainted", so re-running destroyed a load balancer the
+      # provider was still building. This keeps that sentence on screen.
+      - ./scripts/dev/test-explain-failure.sh
+      # `cluster-up … APPROVE=auto` did not pass APPROVE to phase 2, so an "unattended"
+      # journey stopped for an approval after spending. Nothing read the call
+      # graph; this does.
+      - ./scripts/dev/test-unattended.sh
+      - ./scripts/dev/test-talos-image.sh
+
   test:
     desc: Run OpenTofu tests (cluster root)
     dir: infrastructure/opentofu/cluster
@@ -173,28 +337,52 @@ tasks:
   # Talos image (decoupled — build once per Talos version, reused by clusters)
   # ===========================================================================
 
-  talos-image:
+  image-build:
+    aliases: [talos-image]
     desc: >-
       Build + publish the Talos image for a provider. Usage: task talos-image
       PROVIDER=scaleway|ovh|outscale|proxmox [VERSION=v1.13.4] [ENSURE=1]
+    # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
+    # scaleway in silence — including destroy and down — so a command typed
+    # while working on another cloud aimed at the wrong account. The refusal is
+    # the documentation: it names the variable instead of guessing.
+    requires:
+      vars: [PROVIDER]
     vars:
-      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+      # ROLE was never defaulted here, so the lookup below asked for
+      # `-scaleway.tfvars`, a file that cannot exist, and silently fell back to
+      # cluster/variables.tf — this task never read a cluster's own pin.
+      ROLE: '{{.ROLE | default "management"}}'
+      # A task-level `vars:` entry SHADOWS the value passed on the command line,
+      # so `task talos-image VERSION=v1.13.7` built v1.13.8 and said nothing.
+      # Resolve the fallback under its own name and let VERSION win explicitly.
       # renovate: datasource=github-releases depName=siderolabs/talos
-      VERSION:
+      PINNED_VERSION:
         sh: ./scripts/internal/talos-version.sh {{.ROLE}}-{{.PROVIDER}}.tfvars
+      IMAGE_VERSION: '{{.VERSION | default .PINNED_VERSION}}'
       ENSURE: '{{.ENSURE | default ""}}'
     cmds:
-      - './scripts/bootstrap/talos-image.sh {{.PROVIDER}} {{.VERSION}}{{if .ENSURE}} --ensure{{end}}'
+      - './scripts/bootstrap/talos-image.sh {{.PROVIDER}} {{.IMAGE_VERSION}}{{if .ENSURE}} --ensure{{end}}'
 
-  up:
+  cluster-up:
+    aliases: [up]
     desc: >-
-      Idempotent one-shot bring-up: image -> render manifests -> infra -> tunnels -> bootstrap. Usage: task up
-      ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox] [KEY=~/.ssh/yourkey] [VERSION=v1.13.4]
-      [FORCE=1]
+      Idempotent one-shot bring-up: image -> render manifests -> infra -> tunnels -> bootstrap. Usage: task cluster-up
+      ROLE=management|workload PROVIDER=… [KEY=~/.ssh/yourkey] [VERSION=v1.13.4] [FORCE=1] [APPROVE=auto].
+      It shows the plan and asks once before it spends; APPROVE=auto answers for you, for CI and for a
+      shell that cannot be asked.
+    # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
+    # scaleway in silence — including destroy and down — so a command typed
+    # while working on another cloud aimed at the wrong account. The refusal is
+    # the documentation: it names the variable instead of guessing.
+    requires:
+      vars: [PROVIDER]
     vars:
       ROLE: '{{.ROLE | default "management"}}'
-      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
+      # ask | auto — the value names WHO answers the approval, never whether
+      # there is one: every apply still plans, then applies that saved plan.
+      APPROVE: '{{.APPROVE | default "ask"}}'
       # renovate: datasource=github-releases depName=siderolabs/talos
       VERSION:
         sh: ./scripts/internal/talos-version.sh {{.ROLE}}-{{.PROVIDER}}.tfvars
@@ -232,7 +420,35 @@ tasks:
           echo "  to bastion_ssh_keys in $TFVARS, or pass the matching KEY=." >&2
           exit 1
         fi
-      - task: talos-image
+        # The S3 credentials, HERE, not twenty lines into talos-image. Demonstrated
+        # twice in three minutes on 2026-08-17: a shell that had not sourced .env.sh
+        # passed both guards above and died in the image build.
+        #
+        # This used to ask s3_cred whether a key was non-empty — which it ALWAYS is,
+        # because the backup keys fall back to the primary's. A check that cannot
+        # fail: on 2026-08-19 it passed a cluster whose replica pointed at another
+        # cloud with a stale key, and the deploy died four minutes later, after a
+        # full plan, on the same subject. ensure-buckets actually TALKS to both
+        # stores, so "the credentials work" is measured rather than assumed. It is
+        # idempotent and runs again inside infra-apply; here it costs a few HEAD
+        # requests and moves the refusal before anything is built.
+        if [ -z "$(./scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak primary 2>/dev/null)" ]; then
+          echo "✗ no S3 credentials for '{{.PROVIDER}}'." >&2
+          echo "  Did you 'source .env.sh'? Every cloud task needs it, and nothing" >&2
+          echo "  else in this shell will tell you it is missing until it costs time." >&2
+          exit 1
+        fi
+        ./scripts/internal/ensure-buckets.sh "$TFVARS" || exit 1
+        # The passphrase encrypts the state and both access artifacts, and NOTHING
+        # else checks it: without it `tofu` stops to prompt, and with the shipped
+        # placeholder — long enough to pass the only validation there is — it
+        # deploys happily under a secret published in this repository.
+        case "${TF_VAR_encryption_passphrase:-}" in
+          "") echo "✗ TF_VAR_encryption_passphrase is not set — tofu would stop and prompt for it." >&2; exit 1 ;;
+          *change-me*) echo "✗ TF_VAR_encryption_passphrase is still the example from .env.example." >&2
+                       echo "  It is public. Replace it: openssl rand -base64 48" >&2; exit 1 ;;
+        esac
+      - task: image-build
         vars:
           PROVIDER: "{{.PROVIDER}}"
           VERSION: "{{.VERSION}}"
@@ -244,35 +460,99 @@ tasks:
         else
           echo "✓ bootstrap manifests already rendered — skipping (FORCE=1 to re-render)"
         fi
-      - task: infra
-        vars:
-          ROLE: "{{.ROLE}}"
-          PROVIDER: "{{.PROVIDER}}"
+      # ONE human checkpoint on the whole journey, and it is here — the step that
+      # spends. `up` plans, shows it, asks once, then applies EXACTLY that plan:
+      # never two different plans, and never a silent apply. APPROVE=auto skips the
+      # question, which is what CI and a shell with no terminal need; without a
+      # terminal and without APPROVE it stops with the plan saved and names the one
+      # command that lands it.
+      - |
+        PLANFILE="up-{{.ROLE}}-{{.PROVIDER}}.tfplan"
+        task infra-plan ROLE={{.ROLE}} PROVIDER={{.PROVIDER}} KEY={{.KEY}} OUT="$PLANFILE" || exit 1
+        if [ "{{.APPROVE}}" != auto ]; then
+          if [ -t 0 ]; then
+            printf '\nApply this plan? Only "yes" is accepted: '
+            read -r reply
+            [ "$reply" = yes ] || {
+              echo "✗ not applied. The plan is kept at cluster/$PLANFILE"; exit 1; }
+          else
+            echo "✗ no terminal, and no APPROVE=auto — nothing was applied." >&2
+            echo "  The plan above is saved. Read it, then land exactly it:" >&2
+            echo "    task infra-apply ROLE={{.ROLE}} PROVIDER={{.PROVIDER}} KEY={{.KEY}} PLAN=$PLANFILE" >&2
+            echo "  Or re-run the whole journey unattended: task cluster-up … APPROVE=auto" >&2
+            exit 1
+          fi
+        fi
+        task infra-apply ROLE={{.ROLE}} PROVIDER={{.PROVIDER}} KEY={{.KEY}} PLAN="$PLANFILE"
       - task: bootstrap-phase2
         vars:
           ROLE: "{{.ROLE}}"
           PROVIDER: "{{.PROVIDER}}"
           KEY: "{{.KEY}}"
-      - echo "✓ task up complete — every step above is idempotent, re-run 'task up' after fixing any failure to resume."
+          # Not passing this was the whole defect: cluster-up answered its own
+          # gate and then let phase 2 ask a question nobody could hear.
+          APPROVE: "{{.APPROVE}}"
+      # Do NOT end on "every step above is idempotent": that line came out
+      # identical on the first run, which applied 43 changes in phase 1 and 17 in
+      # phase 2, and on the second, which applied none. Idempotence is a property
+      # of the command, not a badge it awards itself — the evidence is OpenTofu's
+      # own plan. A YAML comment, not a shell one: go-task echoes the block it
+      # runs, so a `#` inside would be printed as the last thing the operator reads.
+      - |
+        echo "✓ cluster-up complete."
+        echo "  Run this exact command again to converge again. Its plan is the"
+        echo "  verdict, not this line: on a cluster that already matches the"
+        echo "  configuration OpenTofu prints 'No changes.' and applies nothing."
 
   # ===========================================================================
   # Cluster Lifecycle
   #
   # infra / bootstrap-phase2 / destroy each take ROLE=management|workload (the
-  # tfvars file is envs/<ROLE>-<PROVIDER>.tfvars) — these used to be six
+  # tfvars file is envs/<ROLE>-<PROVIDER>.tfvars).
+  #
+  # ROLE picks the FILE, and nothing else. The Flux overlay and the artifact
+  # bucket segment come from `cluster_role` INSIDE that file — they coincide for
+  # management/workload and diverge on purpose for the failover examples, which
+  # are DR scenarios declaring cluster_role = "management". Any prefix with a
+  # matching env file works; these two are simply the ones that ship.
+  #
+  # These used to be six
   # separate tasks (infra-management/infra-workload, management/workload,
   # destroy-management/destroy-workload) differing only in that filename.
   # ===========================================================================
 
-  infra:
+  infra-apply:
+    aliases: [infra, apply-plan]
     desc: >-
-      Phase 1: deploy infra (VMs/network, no Talos yet). Usage: task infra ROLE=management|workload
-      [PROVIDER=scaleway|ovh|outscale|proxmox]
+      Apply the infrastructure. Give it a PLAN you have read — `task infra-plan PROVIDER=… OUT=f`
+      then `task infra-apply PROVIDER=… PLAN=f` — or APPROVE=auto to compute and apply in one step
+      without a question. With neither it refuses: it will not guess, and it will not prompt.
+      Usage: task infra-apply PROVIDER=… [ROLE=…] [PLAN=f | APPROVE=auto] [KEY=…]
     dir: infrastructure/opentofu/cluster
+    # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
+    # scaleway in silence — including destroy and down — so a command typed
+    # while working on another cloud aimed at the wrong account. The refusal is
+    # the documentation: it names the variable instead of guessing.
+    requires:
+      vars: [PROVIDER]
     vars:
       ROLE: '{{.ROLE | default "management"}}'
-      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+      # Only used to REBUILD a tunnel the guard below finds broken; an apply on a
+      # cluster whose tunnels are healthy never reads it.
+      KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
+      PLAN: '{{.PLAN | default ""}}'
+      # ask | auto — the value names WHO answers the approval, never whether
+      # there is one: every apply still plans, then applies that saved plan.
+      APPROVE: '{{.APPROVE | default "ask"}}'
     env: &provider-env
+      # One source directory, several clusters — and .terraform/ holds the CURRENT
+      # backend, so whichever target inited last owned it. Two runs on different
+      # providers then stole it from each other; survived twice by luck on
+      # 2026-08-19 and 2026-08-20. TF_DATA_DIR relocates that per-directory data,
+      # VERIFIED offline: two inits on different backends in one source directory
+      # each keep their own pointer. Keyed on ROLE-PROVIDER because that is
+      # exactly how the tfvars — and therefore the backend — are selected.
+      TF_DATA_DIR: '.terraform-{{.ROLE}}-{{.PROVIDER}}'
       AWS_ACCESS_KEY_ID:
         sh: ../../../scripts/internal/resolve-s3-cred.sh {{.PROVIDER}} ak
       AWS_SECRET_ACCESS_KEY:
@@ -283,18 +563,38 @@ tasks:
         sh: '[ "{{.PROVIDER}}" = outscale ] && ../../../scripts/internal/resolve-s3-cred.sh outscale sk || true'
     cmds:
       - |
-        # A `tofu apply` with no terminal asks for approval, reads EOF, and dies as
-        # "error asking for approval: EOF" — exit 201, naming nothing you can act
-        # on. Say what to set instead. NOT auto-approved for you: an apply that
-        # replaces nodes should not confirm itself because nobody was watching.
-        if [ ! -t 0 ] && [[ "${TF_CLI_ARGS_apply:-}" != *-auto-approve* ]]; then
-          echo "✗ no terminal, and tofu apply needs approval — it would fail on EOF." >&2
-          echo "  Re-run with: TF_CLI_ARGS_apply=-auto-approve task {{.TASK}} ..." >&2
+        # Two ways in, and NEITHER of them is a prompt.
+        #
+        # PLAN= applies a file you have already read, and OpenTofu refuses it if
+        # the state moved since — so what you reviewed is what runs. APPROVE=auto says
+        # "compute it and apply it, do not ask", which is what CI and a shell
+        # with no terminal need. With neither, this refuses: an apply that can
+        # replace nodes should never happen because a default was convenient.
+        if [ -z "{{.PLAN}}" ] && [ "{{.APPROVE}}" != auto ]; then
+          echo "✗ nothing told me to apply anything." >&2
+          echo "  Read a plan first, then apply exactly it:" >&2
+          echo "    task infra-plan  PROVIDER={{.PROVIDER}} ROLE={{.ROLE}} OUT=tfplan" >&2
+          echo "    task infra-apply PROVIDER={{.PROVIDER}} ROLE={{.ROLE}} PLAN=tfplan" >&2
+          echo "  Or, for CI and unattended runs, compute and apply in one step:" >&2
+          echo "    task infra-apply PROVIDER={{.PROVIDER}} ROLE={{.ROLE}} APPROVE=auto" >&2
           exit 1
         fi
+      # FIRST, before anything that can fail: the explainer below reads this
+      # file, and a transcript left by the previous run would diagnose that one.
+      - rm -f .tofu-run.log
+      # Only on failure — EXIT_CODE is empty when the task succeeded (verified on
+      # Task 3.52). An apply that times out mid-creation leaves the resource
+      # TAINTED, so the obvious "just re-run" destroys what the provider was
+      # still building. Nothing said the word "tainted" on 2026-08-18 and that
+      # cost an hour of rebuilding an OVH load balancer at ten minutes a go.
+      - defer: '{{if .EXIT_CODE}}../../../scripts/internal/explain-failure.sh .{{else}}true{{end}}'
       - ../../../scripts/internal/ensure-buckets.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars
       - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
       - |
+        # tee, so the defer above can quote the provider on a failure state alone
+        # cannot explain (a 404 on an object it still holds). pipefail is what
+        # stops tee reporting success for a failed plan — measured on Task 3.52.
+        set -o pipefail
         # Idempotency guard: control_plane_count/worker_count (cluster/main.tf) are
         # gated by talos_bootstrap, so forcing =false here on an ALREADY-bootstrapped
         # cluster zeroes them and drops talos_machine_bootstrap et al. from state —
@@ -307,21 +607,72 @@ tasks:
         else
           TB=false
         fi
-        tofu apply -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=$TB
+        # TB=true means module.talos is in play, and every one of its resources
+        # speaks to the Talos API through the localhost tunnels. With them shut the
+        # apply does not fail — it WAITS: data.talos_cluster_health reads for 15m,
+        # and each replaced talos_machine_configuration_apply burns its own 15m
+        # dialling a closed port. Measured 2026-08-18 on Outscale: six of them,
+        # printing nothing but "Still creating...", on an upgrade that needed a
+        # human to read the provider's API by hand before it could continue.
+        # `ensure` answers in about a second, touches nothing when the tunnels are
+        # healthy, and rebuilds only what is broken. It runs AFTER the init above,
+        # so `tofu output` has its backend, and it never inits anything itself.
+        if [ "$TB" = true ] && [ "${OA_SKIP_TUNNEL_GUARD:-}" != 1 ]; then
+          SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh ensure . || exit 1
+        fi
+        if [ -n "{{.PLAN}}" ]; then
+          # A saved plan carries its own variables; passing -var-file with one is
+          # an error, and the backend must be the one it was planned against.
+          [ -f "{{.PLAN}}" ] || {
+            echo "✗ no plan file {{.PLAN}} — create one with:" >&2
+            echo "    task infra-plan PROVIDER={{.PROVIDER}} ROLE={{.ROLE}} OUT={{.PLAN}}" >&2
+            exit 1
+          }
+          tofu apply "{{.PLAN}}" 2>&1 | tee -a .tofu-run.log
+          rm -f "{{.PLAN}}"
+        else
+          # APPROVE=auto without a PLAN. It still PLANS, and it still applies THAT
+          # plan — APPROVE answers the question, it does not delete the question.
+          # -auto-approve would: there would be no plan artifact, nothing frozen
+          # between the reading and the doing, and no way for OpenTofu to refuse
+          # a plan whose state has moved. The saved-plan path gives all three,
+          # and `tofu apply <file>` never prompts, so the only yes is ours.
+          P="auto-{{.ROLE}}-{{.PROVIDER}}.tfplan"
+          tofu plan -out="$P" -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" \
+            -var talos_bootstrap=$TB 2>&1 | tee -a .tofu-run.log
+          tofu apply "$P" 2>&1 | tee -a .tofu-run.log
+          rm -f "$P"
+        fi
       - task: _backup-state
         vars: {PROVIDER: "{{.PROVIDER}}"}
 
-  plan:
+  infra-plan:
+    aliases: [plan]
     desc: >-
       Plan a cluster root without applying. STRICT=1 makes a non-empty plan an ERROR (exit 2) — that is the
       "converged" assertion an idempotency or post-upgrade check needs. Usage: task plan
       ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox] [STRICT=1]
     dir: infrastructure/opentofu/cluster
+    # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
+    # scaleway in silence — including destroy and down — so a command typed
+    # while working on another cloud aimed at the wrong account. The refusal is
+    # the documentation: it names the variable instead of guessing.
+    requires:
+      vars: [PROVIDER]
     vars:
       ROLE: '{{.ROLE | default "management"}}'
-      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+      KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
     env: *provider-env
     cmds:
+      # Dropped first, for the same reason as in `infra-apply`: a stale
+      # transcript would make the explainer diagnose the run before this one.
+      - rm -f .tofu-run.log
+      # A PLAN fails too, and until 2026-08-19 only `infra-apply` explained it.
+      # That day a plan died on a load balancer OpenTofu still had in state and
+      # Scaleway had already deleted — "waiting for lb failed: 404" — naming
+      # neither the ghost nor `tofu state rm`. Nothing tried to explain it,
+      # because the explainer was wired to the other target.
+      - defer: '{{if .EXIT_CODE}}../../../scripts/internal/explain-failure.sh .{{else}}true{{end}}'
       - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
       - |
         # Same talos_bootstrap resolution as `infra`: passing the phase-1 value to
@@ -332,74 +683,265 @@ tasks:
         else
           TB=false
         fi
+        # On a bootstrapped cluster this plan reads data.talos_cluster_health,
+        # whose endpoints are localhost tunnels — so from a shell that did not open
+        # them it waits out health_check_timeout and dies on "cluster health check
+        # failed", naming neither the tunnels nor the cause. MEASURED on a live
+        # Scaleway cluster, 2026-08-17: 15m10s to reach that message.
+        #
+        # This used to refuse, after testing ONE of the six ports with `nc -z` —
+        # which cannot tell a live endpoint from a dead one, because ssh -L keeps
+        # listening after the connection through it dies (measured, offline:
+        # scripts/dev/test-endpoint-probe.sh). `ensure` tests all six, demands a
+        # TLS answer, and repairs instead of refusing.
+        if [ "$TB" = true ] && [ "${OA_SKIP_TUNNEL_GUARD:-}" != 1 ]; then
+          SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh ensure . || exit 1
+        fi
         # -detailed-exitcode: 0 = no changes, 2 = changes, 1 = error. Task fails on
         # any non-zero, which is what turns "the plan is empty" into an assertion.
-        tofu plan {{if eq .STRICT "1"}}-detailed-exitcode{{end}} \
-          -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=$TB
+        # OUT= saves the plan so it can be APPLIED, not merely read. Without it
+        # "review the plan, then apply" is two different plans: OpenTofu says so
+        # itself — "you didn't use the -out option, so OpenTofu can't guarantee to
+        # take exactly these actions". Reviewing one and applying another is not a
+        # review, and `-auto-approve` after a separate plan is exactly that.
+        # Interactive `tofu apply` is sound because it shows and applies the SAME
+        # in-memory plan; this is for every case where nobody is watching.
+        # tee + pipefail: the transcript is the only record of the provider's
+        # own words, and pipefail keeps -detailed-exitcode's 0/1/2 intact
+        # through the pipe (measured on Task 3.52, including the 2).
+        set -o pipefail
+        tofu plan {{if eq .STRICT "1"}}-detailed-exitcode{{end}} {{if .OUT}}-out="{{.OUT}}"{{end}} \
+          -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=$TB 2>&1 | tee -a .tofu-run.log
+
+  tunnels-up:
+    aliases: [tunnels]
+    desc: >-
+      Open the per-node Talos API tunnels through the bastion (control planes on 50000+i, workers on
+      50100+i). Needed by `task plan` and by talosctl on a bootstrapped cluster. Usage:
+      task tunnels PROVIDER=scaleway [ROLE=management] [KEY=~/.ssh/yourkey] — then `task close-tunnels`.
+    dir: infrastructure/opentofu/cluster
+    # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
+    # scaleway in silence — including destroy and down — so a command typed
+    # while working on another cloud aimed at the wrong account. The refusal is
+    # the documentation: it names the variable instead of guessing.
+    requires:
+      vars: [PROVIDER]
+    vars:
+      ROLE: '{{.ROLE | default "management"}}'
+      KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
+    env: *provider-env
+    cmds:
+      # The init is what makes this runnable from a cold shell. Called by hand,
+      # talos-tunnels.sh reads `tofu output -json` with no backend and no
+      # credentials, falls back to `{}` and reports "No bastion_ip in the state —
+      # deploy the infrastructure first" against a cluster that is running. That
+      # message sent a reader looking for a deployment bug for the length of the
+      # search. Verified 2026-08-17 on a live cluster.
+      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
+      - SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh open .
 
   bootstrap-phase2:
     desc: >-
-      Phase 2: open SSH tunnels (from state) + bootstrap Talos. Usage: task bootstrap-phase2
-      ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox] [KEY=~/.ssh/yourkey]
+      Phase 2: open SSH tunnels (from state) + bootstrap Talos. It computes its OWN plan and
+      needs an approval — APPROVE=auto answers it, for CI and for a shell that cannot be asked.
+      Usage: task bootstrap-phase2 ROLE=management|workload
+      [PROVIDER=scaleway|ovh|outscale|proxmox] [KEY=~/.ssh/yourkey] [APPROVE=auto]
     dir: infrastructure/opentofu/cluster
     vars:
       ROLE: '{{.ROLE | default "management"}}'
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
+      # ask | auto — the value names WHO answers the approval, never whether
+      # there is one: every apply still plans, then applies that saved plan.
+      APPROVE: '{{.APPROVE | default "ask"}}'
     env: *provider-env
     cmds:
       - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
       - SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh open .
-      - tofu apply -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=true
+      - |
+        # Phase 2 cannot reuse the phase-1 plan: that one was computed with
+        # talos_bootstrap=false, which gates the node counts to zero. So it
+        # plans again, and the approval lives HERE.
+        #
+        # Without APPROVE and without a terminal this used to die on OpenTofu's
+        # "error asking for approval: EOF", which names neither the cause nor
+        # the knob. MEASURED 2026-08-19: three runs of `cluster-up … APPROVE=auto`
+        # stopped exactly here, each AFTER phase 1 had already spent — because
+        # cluster-up did not pass APPROVE down. A journey advertised as unattended
+        # could not complete unattended.
+        # PLAN, then apply THAT plan, and the yes in between is answered by a
+        # human or by APPROVE=auto. Never -auto-approve: that removes the approval
+        # rather than answering it. `tofu apply <saved-plan>` does not prompt,
+        # so this gate is the only one — and OpenTofu refuses a saved plan whose
+        # state has moved, which is what makes "what I read is what ran" true.
+        PLANFILE="phase2-{{.ROLE}}-{{.PROVIDER}}.tfplan"
+        tofu plan -out="$PLANFILE" -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=true
+        if [ "{{.APPROVE}}" != auto ]; then
+          if [ -t 0 ]; then
+            printf '\nApply this plan? Only "yes" is accepted: '
+            read -r reply
+            [ "$reply" = yes ] || {
+              echo "✗ not applied. The plan is kept at cluster/$PLANFILE"; exit 1; }
+          else
+            echo "✗ no terminal, and no APPROVE=auto — nothing was applied." >&2
+            echo "  Phase 1 is already applied; this only bootstraps Talos on it." >&2
+            echo "  The plan above is saved. Read it, then land exactly it:" >&2
+            echo "    cd infrastructure/opentofu/cluster && tofu apply $PLANFILE" >&2
+            echo "  Or re-run the journey unattended: task cluster-up PROVIDER={{.PROVIDER}} … APPROVE=auto" >&2
+            exit 1
+          fi
+        fi
+        tofu apply "$PLANFILE"
+        rm -f "$PLANFILE"
       - task: _backup-state
         vars: {PROVIDER: "{{.PROVIDER}}"}
 
-  rolling-replace:
+  cluster-roll:
+    aliases: [rolling-replace]
     desc: >-
       Replace nodes one at a time (drain→targeted apply→wait) with NO downtime. Use after a ForceNew change
       (instance_type / Talos image) instead of infra, which replaces all nodes in parallel and breaks etcd
       quorum. Management clusters only (see scripts/ops/rolling-replace.sh). Targets are derived from `tofu
       state list` — provider-agnostic; --upgrade exercised live on Scaleway, OVH and Outscale.
-      Usage: task rolling-replace PROVIDER=scaleway|ovh|outscale|proxmox [KEY=~/.ssh/key]
-      [-- --workers-only|--cp-only|--dry-run]
+      Usage: task cluster-roll PROVIDER=… [KEY=~/.ssh/key] [APPROVE=auto]
+      [-- --workers-only|--cp-only|--dry-run|--upgrade]
     dir: infrastructure/opentofu/cluster
+    # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
+    # scaleway in silence — including destroy and down — so a command typed
+    # while working on another cloud aimed at the wrong account. The refusal is
+    # the documentation: it names the variable instead of guessing.
+    requires:
+      vars: [PROVIDER]
     vars:
-      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+      ROLE: '{{.ROLE | default "management"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
+      # One word for "do not ask me", the same one infra-apply uses. It used to be
+      # a `--yes` buried in CLI_ARGS, which meant three different spellings of the
+      # same intent across the repository.
+      # ask | auto — the value names WHO answers the approval, never whether
+      # there is one: every apply still plans, then applies that saved plan.
+      APPROVE: '{{.APPROVE | default "ask"}}'
     env: *provider-env
     cmds:
       - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
       - SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh open .
-      - ../../../scripts/ops/rolling-replace.sh {{.PROVIDER}} {{.CLI_ARGS}}
+      - ../../../scripts/ops/rolling-replace.sh {{.PROVIDER}} {{if eq .APPROVE "auto"}}--yes {{end}}{{.CLI_ARGS}}
       - task: _backup-state
         vars: {PROVIDER: "{{.PROVIDER}}"}
 
-  destroy:
-    desc: "Destroy a cluster. Usage: task destroy ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox]"
+  infra-down-plan:
+    desc: >-
+      Compute the DESTRUCTION plan and write it to a file. Read it, then apply exactly it with
+      `task infra-down PROVIDER=… PLAN=f`. There is no one-command destroy, on purpose.
+      Usage: task infra-down-plan PROVIDER=… [ROLE=management] [OUT=destroy.tfplan]
     dir: infrastructure/opentofu/cluster
+    requires:
+      vars: [PROVIDER]
     vars:
       ROLE: '{{.ROLE | default "management"}}'
-      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+      OUT: '{{.OUT | default "destroy.tfplan"}}'
+    env: *provider-env
+    cmds:
+      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
+      # ⚠️ NOT purely read-only, and the one wart in this two-step design.
+      # machine_secrets carries prevent_destroy — the PKI is the cluster's root of
+      # trust — and OpenTofu enforces that at PLAN time, not at apply. So the plan
+      # cannot be computed while the resource is tracked. This detaches it from
+      # state, exactly as the old one-shot destroy did, only now it happens at the
+      # planning step. If you read the plan and change your mind, the cluster still
+      # runs and its PKI is untouched on the nodes — but the state no longer tracks
+      # that resource.
+      - |
+        echo "⚠ untracking module.talos.talos_machine_secrets so the destroy plan can be computed."
+        echo "  The PKI on the nodes is untouched; the state stops tracking it."
+      - tofu state rm module.talos.talos_machine_secrets.this 2>/dev/null || true
+      # talos_bootstrap=false resolves module.talos to count=0, so the plan skips
+      # data.talos_cluster_health — which would otherwise read through the SSH
+      # tunnels and hang if they are already closed.
+      - |
+        # A teardown must never be blocked by a provider that will not answer.
+        # The Outscale provider's READ of a load balancer WAITS for it to become
+        # active, so an LBU stuck in `provisioning` makes every refresh — and
+        # therefore every destroy plan — time out. Measured 2026-08-19: 5m0s per
+        # attempt, and the LBU was still `provisioning` two hours later. Without
+        # a fallback the account keeps billing because it cannot be planned.
+        #
+        # The refresh is still tried FIRST: a plan built on stale state can name
+        # resources the provider already removed, and reading beats guessing.
+        # The fallback is the exit, not the default.
+        VARS="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars"
+        if tofu plan -destroy -out="{{.OUT}}" -var-file="$VARS" -var talos_bootstrap=false; then
+          exit 0
+        fi
+        echo "⚠ the refresh failed — replanning from state alone (-refresh=false)." >&2
+        echo "  Something here no longer answers its provider. The plan below is built" >&2
+        echo "  from what the STATE records, so read it: it may name resources that are" >&2
+        echo "  already gone, and it will not notice one that drifted." >&2
+        tofu plan -destroy -refresh=false -out="{{.OUT}}" -var-file="$VARS" -var talos_bootstrap=false
+      - |
+        # Silent when something else is driving. Called from fleet-down, this
+        # printed its own next step right above fleet-down's — two commands for
+        # one action, at two different levels, and following the inner one SKIPS
+        # the CAPI-children step that cluster-down exists to enforce. An operator
+        # asked which of the two to run, which is the answer.
+        if [ "${OA_DRIVEN_BY:-}" = "" ]; then
+          echo
+          echo "✓ destruction plan written to {{.OUT}}. Nothing has been destroyed."
+          echo "  Read it, then apply exactly it:"
+          echo "    task infra-down PROVIDER={{.PROVIDER}} ROLE={{.ROLE}} PLAN={{.OUT}}"
+        else
+          echo
+          echo "✓ destruction plan written to {{.OUT}}. Nothing has been destroyed."
+        fi
+
+  infra-down:
+    aliases: [destroy]
+    desc: >-
+      Destroy a cluster by applying a plan you have already read. REQUIRES PLAN= — there is no
+      one-command destroy, and APPROVE=auto, --yes, force and TF_CLI_ARGS_destroy cannot create one.
+      Usage: task infra-down-plan PROVIDER=…, read it, then task infra-down PROVIDER=… PLAN=f
+    dir: infrastructure/opentofu/cluster
+    requires:
+      vars: [PROVIDER]
+    vars:
+      ROLE: '{{.ROLE | default "management"}}'
+      PLAN: '{{.PLAN | default ""}}'
     env: *provider-env
     cmds:
       - |
-        # Same as `infra`: a destroy with no terminal dies on EOF, not on a message.
-        if [ ! -t 0 ] && [[ "${TF_CLI_ARGS_destroy:-}" != *-auto-approve* ]]; then
-          echo "✗ no terminal, and tofu destroy needs approval — it would fail on EOF." >&2
-          echo "  Re-run with: TF_CLI_ARGS_destroy=-auto-approve task destroy ..." >&2
+        # THE POINT OF THIS TARGET. Destroying a cluster must take two deliberate
+        # commands, so that no single mistyped line — and no environment variable
+        # inherited from somewhere else — can do it. APPROVE=auto works on infra-apply
+        # and is DELIBERATELY inert here.
+        if [ -z "{{.PLAN}}" ]; then
+          echo "✗ refusing to destroy without a plan you have read." >&2
+          echo "  This takes two commands, always:" >&2
+          echo "    task infra-down-plan PROVIDER={{.PROVIDER}} ROLE={{.ROLE}}" >&2
+          echo "    task infra-down      PROVIDER={{.PROVIDER}} ROLE={{.ROLE}} PLAN=destroy.tfplan" >&2
+          echo "  APPROVE=auto does not apply here, and neither does TF_CLI_ARGS_destroy." >&2
+          exit 1
+        fi
+        [ -f "{{.PLAN}}" ] || { echo "✗ no plan file {{.PLAN}} — run task infra-down-plan first." >&2; exit 1; }
+        # A plan file that CREATES things is not a destroy plan, and applying one
+        # here would be the opposite of what the operator asked for.
+        if ! tofu show -json "{{.PLAN}}" 2>/dev/null | grep -q '"actions":\["delete"\]'; then
+          echo "✗ {{.PLAN}} contains no deletions — this is not a destruction plan." >&2
+          echo "  Regenerate it: task infra-down-plan PROVIDER={{.PROVIDER}} ROLE={{.ROLE}}" >&2
           exit 1
         fi
       - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
-      # machine_secrets carries prevent_destroy (the PKI is the cluster's root
-      # of trust) — untrack it first so `tofu destroy` doesn't refuse.
-      - tofu state rm module.talos.talos_machine_secrets.this 2>/dev/null || true
-      # talos_bootstrap=false resolves module.talos to count=0, so the destroy
-      # plan skips data.talos_cluster_health — which would otherwise re-read
-      # through the SSH tunnels and hang if they're already closed (see
-      # cluster/README.md's Teardown section).
-      - tofu destroy -var-file="envs/{{.ROLE}}-{{.PROVIDER}}.tfvars" -var talos_bootstrap=false
+      # Exactly the plan that was read. OpenTofu refuses a saved plan whose state
+      # has moved since, so nothing can have changed under it in the meantime.
+      - tofu apply "{{.PLAN}}"
+      - rm -f "{{.PLAN}}"
+      # The cluster is gone; its tunnels are not. Twelve were still listening
+      # after three teardowns on 2026-08-15, forwarding to bastions that no
+      # longer existed — and a stale listener reads as "up" to the next deploy's
+      # check. Scoped to this cluster's own port block by TALOS_TUNNEL_OFFSET.
+      - ../../../scripts/bootstrap/talos-tunnels.sh close .
 
-  close-tunnels:
+  tunnels-down:
+    aliases: [close-tunnels]
     desc: "Close the Talos API SSH tunnels opened for Phase 2"
     cmds:
       - ./scripts/bootstrap/talos-tunnels.sh close infrastructure/opentofu/cluster
@@ -408,11 +950,23 @@ tasks:
     desc: >-
       Replicate the (encrypted) tfstate to the -backup store (post-apply). Set BACKUP_AWS_* for a cross-provider
       replica. Usage: task backup-state [PROVIDER=scaleway|ovh|outscale|proxmox]
+    # `dir:` is NOT cosmetic here: the *provider-env anchor resolves the S3
+    # credentials with `../../../scripts/...`, a path that is only correct from
+    # infrastructure/opentofu/cluster. Without it every use of this target exits
+    # 127 before running anything — so the documented way to re-replicate the
+    # state, which is one of this release's five promises, could not execute.
+    dir: infrastructure/opentofu/cluster
+    # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
+    # scaleway in silence — including destroy and down — so a command typed
+    # while working on another cloud aimed at the wrong account. The refusal is
+    # the documentation: it names the variable instead of guessing.
+    requires:
+      vars: [PROVIDER]
     vars:
-      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+      ROLE: '{{.ROLE | default "management"}}'
     env: *provider-env
     cmds:
-      - ./scripts/ops/backup-state.sh infrastructure/opentofu/cluster
+      - ../../../scripts/ops/backup-state.sh .
 
   edge-down:
     desc: >-
@@ -434,18 +988,48 @@ tasks:
         export KUBECONFIG="${KUBECONFIG:-$PWD/infrastructure/opentofu/cluster/kubeconfig}"
         ./scripts/ops/edge-down.sh {{.CLUSTER}} --namespace {{.NS}} --timeout {{.TIMEOUT}} {{.CLI_ARGS}}
 
-  fleet-down:
+  cluster-down:
+    aliases: [down, fleet-down]
     desc: >-
       COMPLETE, idempotent fleet teardown: every CAPI child cluster (edge-down,
       clean cascade) THEN the management (tofu destroy), then a report of what is
       left to purge by hand (buckets, images, keypairs). The order is not
       negotiable: a child outliving the management means orphaned, billed VMs.
-      Usage: task fleet-down PROVIDER=ovh [ROLE=management] [-- --yes]
+      Two commands, always: `task cluster-down PROVIDER=…` computes a plan and destroys
+      nothing, then `task cluster-down PROVIDER=… PLAN=f APPROVE=auto` lands exactly it.
+      Usage: task cluster-down PROVIDER=ovh [ROLE=management] [PLAN=f] [APPROVE=auto]
+    # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
+    # scaleway in silence — including destroy and down — so a command typed
+    # while working on another cloud aimed at the wrong account. The refusal is
+    # the documentation: it names the variable instead of guessing.
+    requires:
+      vars: [PROVIDER]
     vars:
-      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
       ROLE: '{{.ROLE | default "management"}}'
+      PLAN: '{{.PLAN | default ""}}'
+      APPROVE: '{{.APPROVE | default "ask"}}'
     cmds:
-      - ./scripts/ops/fleet-down.sh {{.PROVIDER}} --role {{.ROLE}} {{.CLI_ARGS}}
+      - |
+        # The teardown was the one command that spoke a different language: six
+        # dash-flags behind a bare `--` that Task otherwise keeps for itself,
+        # while everything else took PROVIDER=, ROLE=, PLAN=, APPROVE=. Two
+        # vocabularies in one tool is how an operator ends up reading the source
+        # to destroy a cluster.
+        #
+        # The flags still work and are not deprecated: --force-no-edges is a
+        # genuine escape hatch, CI passes them, and breaking those to tidy a
+        # name would cost more than the name is worth. Anything spelled
+        # explicitly after `--` wins, and nothing is synthesised on top of it.
+        ARGS=""
+        case "{{.CLI_ARGS}}" in
+          *--plan*) : ;;
+          *) if [ -n "{{.PLAN}}" ]; then ARGS="--plan-file {{.PLAN}}"; else ARGS="--plan"; fi ;;
+        esac
+        case "{{.CLI_ARGS}}" in
+          *--yes*|*" -y"*) : ;;
+          *) if [ "{{.APPROVE}}" = auto ]; then ARGS="$ARGS --yes"; fi ;;
+        esac
+        ./scripts/ops/fleet-down.sh {{.PROVIDER}} --role {{.ROLE}} $ARGS {{.CLI_ARGS}}
 
   etcd-snapshot:
     desc: >-
@@ -453,8 +1037,14 @@ tasks:
       tfstate; retention KEEP=30). GitOps makes etcd reconstructible — this is an RTO shortcut. Usage: task
       etcd-snapshot PROVIDER=scaleway|ovh|outscale|proxmox [KEY=~/.ssh/key] [KEEP=30]
     dir: infrastructure/opentofu/cluster
+    # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
+    # scaleway in silence — including destroy and down — so a command typed
+    # while working on another cloud aimed at the wrong account. The refusal is
+    # the documentation: it names the variable instead of guessing.
+    requires:
+      vars: [PROVIDER]
     vars:
-      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+      ROLE: '{{.ROLE | default "management"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
       KEEP: '{{.KEEP | default "30"}}'
     env: *provider-env
@@ -467,31 +1057,16 @@ tasks:
     internal: true
     dir: infrastructure/opentofu/cluster
     vars:
+      ROLE: '{{.ROLE | default "management"}}'
       PROVIDER: '{{.PROVIDER | default "scaleway"}}'
     env: *provider-env
     cmds:
-      - ../../../scripts/ops/backup-state.sh . || echo "⚠ state backup skipped/failed (does the -backup bucket exist?)"
-
-  # ===========================================================================
-  # Multi-Cluster Management
-  # ===========================================================================
-
-  failover:
-    desc: >-
-      Cross-provider failover: stand up a 2nd management cluster on another cloud/on-prem target. Usage: task
-      failover PROVIDER=ovh
-    vars:
-      PROVIDER: '{{.PROVIDER | default "ovh"}}'
-    cmds:
-      - ./scripts/bootstrap/failover-management.sh "{{.PROVIDER}}"
-
-  register-spoke:
-    desc: "Register a spoke cluster in Flux hub. Usage: task register-spoke CLUSTER=openaether-ovh-prod PROVIDER=ovh"
-    vars:
-      CLUSTER: '{{.CLUSTER | default ""}}'
-      PROVIDER: '{{.PROVIDER | default ""}}'
-    cmds:
-      - ./scripts/bootstrap/register-spoke.sh "{{.CLUSTER}}" "{{.PROVIDER}}"
+      # NOT swallowed. This used to end in `|| echo "⚠ …"`, so a replica that could
+      # not be written cost one warning line in a wall of tofu output and the run
+      # reported success — you believed you had a copy and had nothing. The script
+      # already exits 0 by itself when there is legitimately nothing to replicate
+      # yet (no backup_targets output), so a non-zero here means a real failure.
+      - ../../../scripts/ops/backup-state.sh .
 
   render-manifests:
     desc: Render/update bootstrap manifests (Cilium + Flux)
@@ -521,15 +1096,110 @@ tasks:
       Retrieve kubeconfig/talosconfig from OpenTofu outputs (re-inits the backend, so this works from a cold
       shell). Usage: task kubeconfig ROLE=management|workload [PROVIDER=scaleway|ovh|outscale|proxmox]
     dir: infrastructure/opentofu/cluster
+    # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
+    # scaleway in silence — including destroy and down — so a command typed
+    # while working on another cloud aimed at the wrong account. The refusal is
+    # the documentation: it names the variable instead of guessing.
+    requires:
+      vars: [PROVIDER]
     vars:
       ROLE: '{{.ROLE | default "management"}}'
-      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
     env: *provider-env
     cmds:
       - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
       - tofu output -raw kubeconfig > kubeconfig
       - tofu output -raw talosconfig > talosconfig
       - echo "KUBECONFIG and TALOSCONFIG written to infrastructure/opentofu/cluster/"
+
+  restore-artifacts:
+    desc: >-
+      Recover kubeconfig + talosconfig from the encrypted backups. Usage:
+      task restore-artifacts PROVIDER=scaleway [ROLE=management] [FROM=primary|replica] [FORCE=1]
+      FROM=replica reads the cross-provider copy — the one that answers when the cluster's own cloud does not.
+    dir: infrastructure/opentofu/cluster
+    # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
+    # scaleway in silence — including destroy and down — so a command typed
+    # while working on another cloud aimed at the wrong account. The refusal is
+    # the documentation: it names the variable instead of guessing.
+    requires:
+      vars: [PROVIDER]
+    vars:
+      ROLE: '{{.ROLE | default "management"}}'
+      FROM: '{{.FROM | default "primary"}}'
+      FORCE: '{{.FORCE | default ""}}'
+    env: *provider-env
+    cmds:
+      - >-
+        ../../../scripts/ops/restore-artifacts.sh {{.PROVIDER}}
+        --role {{.ROLE}} --from {{.FROM}}{{if .FORCE}} --force{{end}}
+
+  cluster-upgrade:
+    aliases: [upgrade]
+    desc: >-
+      Upgrade Kubernetes then Talos on a running cluster, MEASURING the interruption instead of
+      asserting there was none. Targets come from cluster/variables.tf; the tfvars is expected to pin
+      one patch below. DRY_RUN=1 resolves the versions and stops, needing no cluster. Needs a terminal:
+      the applies ask for approval. Usage: task upgrade PROVIDER=scaleway [ROLE=management] [KEY=~/.ssh/key]
+    # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
+    # scaleway in silence — including destroy and down — so a command typed
+    # while working on another cloud aimed at the wrong account. The refusal is
+    # the documentation: it names the variable instead of guessing.
+    requires:
+      vars: [PROVIDER]
+    vars:
+      ROLE: '{{.ROLE | default "management"}}'
+      KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
+    cmds:
+      # cluster-upgrade.sh was reachable from no target and from no workflow —
+      # the same gap infra-verify.sh had until today. The script that defines
+      # what an upgrade must prove could only be run by typing its path.
+      - ./scripts/dev/cluster-upgrade.sh {{.PROVIDER}} {{.ROLE}} {{.KEY}}
+
+  cluster-idempotency:
+    desc: >-
+      Re-run the bring-up on a live cluster and assert nothing moved: empty plan, the SAME nodes
+      (names and creationTimestamps), a kubeconfig that still reaches the apiserver.
+      Usage: task cluster-idempotency PROVIDER=… [ROLE=management] [KEY=~/.ssh/yourkey]
+    # A second `task cluster-up` already says "No changes." on its own, and that
+    # is the idempotence evidence — the property belongs to the command, not to
+    # this target. What OpenTofu cannot see is the other two assertions: a node
+    # replaced behind an identical plan, and the kubeconfig a re-run invalidated
+    # on 2026-07-30. This existed only as a CI step until that lane was deleted.
+    requires:
+      vars: [PROVIDER]
+    vars:
+      ROLE: '{{.ROLE | default "management"}}'
+      KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
+    cmds:
+      - ./scripts/dev/cluster-idempotency.sh {{.PROVIDER}} {{.ROLE}} {{.KEY}}
+
+  cluster-verify:
+    aliases: [verify]
+    desc: >-
+      Ask the CLUSTER whether it is what this release promises: apiserver up, every node Ready, the
+      requested number of control planes, Cilium on each, CoreDNS serving, no Flux, no app load
+      balancer, a tfstate replica in the backup store. Usage: task verify PROVIDER=scaleway [ROLE=management]
+    # See backup-state above: the *provider-env anchor needs this dir, and the
+    # first version of this target shipped without it and exited 127 everywhere.
+    dir: infrastructure/opentofu/cluster
+    # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
+    # scaleway in silence — including destroy and down — so a command typed
+    # while working on another cloud aimed at the wrong account. The refusal is
+    # the documentation: it names the variable instead of guessing.
+    requires:
+      vars: [PROVIDER]
+    vars:
+      ROLE: '{{.ROLE | default "management"}}'
+    env: *provider-env
+    cmds:
+      # The script reads the state for the topology and the bucket names, so it
+      # needs the backend and the S3 credentials — which is why it goes through a
+      # task rather than being run by hand. It had no target at all until 0.5.0,
+      # and its only caller was the upgrade lane: the one script that says what a
+      # healthy cluster looks like was unreachable to the person deploying one.
+      - task: kubeconfig
+        vars: {ROLE: '{{.ROLE}}', PROVIDER: '{{.PROVIDER}}'}
+      - ../../../scripts/dev/infra-verify.sh {{.PROVIDER}} {{.ROLE}}
 
   # ===========================================================================
   # Emulated cloud (Feint) — no account, no credentials. docs/emulated-cloud.md

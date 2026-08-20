@@ -32,8 +32,17 @@ variable "image_name" {
 }
 
 variable "bucket_name" {
-  description = "Object Storage bucket used to stage the QCOW2 for the snapshot import."
+  description = "Object Storage bucket the QCOW2 is uploaded to for the snapshot import."
   type        = string
+
+  # The root defaults this to "" so that a literal project name is not baked into
+  # a default nobody passes. Empty reaches here only when a caller forgot, and an
+  # empty bucket name would fail deep inside `aws s3 cp` with a message naming
+  # neither this variable nor the caller. Refuse it where it is named.
+  validation {
+    condition     = length(var.bucket_name) > 0
+    error_message = "bucket_name is empty: pass -var import_bucket=… (scripts/bootstrap/talos-image.sh derives it)."
+  }
 }
 
 variable "region" {
