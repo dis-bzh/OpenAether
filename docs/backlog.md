@@ -63,7 +63,7 @@ every apply plans to a file and applies THAT file, and a saved plan never prompt
 Destroy always takes two commands and no flag collapses them. S3 credentials are
 namespaced by the cloud that HOLDS the bucket, and a cross-provider backup is
 proven — an encrypted tfstate at Outscale while the cluster runs on Scaleway.
-353 offline assertions across 14 harnesses, every one mutation-tested; the
+333 offline assertions across 11 harnesses, every one mutation-tested; the
 emulated lane runs feint 0.10.0 against Scaleway provider 2.81.0, the version the
 clusters run.
 
@@ -205,18 +205,6 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
       binary and running the policy CI runs, wired into `task security`. Rung:
       mocked.
 
-- [ ] **branchMustBeProtected may be unreadable to the CI token, and that is
-      inherited rather than measured.** `main` has been protected since
-      2026-08-20, and plumber's control answers `passed` when it can read the
-      settings — measured locally 2026-08-21 with a token that can. A run on
-      v0.4.36 reported the default CI token cannot, and that plumber then exits 3
-      and withholds every other verdict. The job ships WITHOUT the skip so that
-      run answers it. If it exits 3, the alternative is `administration: read` on
-      that job — widening the token to satisfy one control — and that is the
-      trade to decide, not to default.
-      **Closes:** the CI run's own answer, recorded here, and the skip or the
-      permission chosen with it. Rung: the pipeline itself.
-
 - [ ] **Nothing lets you ask what is in the state.** Reading it takes the root
       directory, its per-cluster `TF_DATA_DIR` and two credentials resolved
       through `resolve-s3-cred.sh` — four things to get right, and getting one
@@ -226,14 +214,19 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
       **Closes:** `task state PROVIDER=…` listing entries from a fresh shell.
       Rung: real cloud, and it costs nothing.
 
-- [ ] **Two harnesses failed once and passed on the next run, unchanged.**
-      `test-gates-local.sh` and `test-cnpg-gates-local.sh`, 2026-08-20, run back
-      to back in the same loop: red then green with no edit between. A test whose
-      colour is not a function of the code under test is worse than no test,
-      because a real failure is indistinguishable from the flake. Suspected but
-      unverified: both spin something local and raced.
-      **Closes:** the cause named, and the two run 20× consecutively green.
-      Rung: mocked.
+- [ ] **`test-talos-local.sh` hangs instead of saying there is no cluster.**
+      Its two siblings, `test-gates-local.sh` and `test-cnpg-gates-local.sh`, exit
+      1 in under a second with `✗ no local cluster — run: task local-up`. That one
+      blocks past 90 s. All three need a live Docker cluster and all three are
+      deliberately absent from `task test-scripts` (12 entries), so `task
+      preflight` is unaffected — but anyone running `scripts/dev/test-*.sh` over
+      the glob, as this session did, hangs there.
+      NOT the flake an earlier entry claimed: their colour tracks whether a local
+      cluster exists, which is not chance. It read as one because the first run
+      happened while a 150-minute-old cluster was still up and the second ran
+      after `local-down`.
+      **Closes:** the same one-second refusal as its siblings, seen with no
+      cluster running. Rung: mocked.
 
 - [ ] **One apply still throws away the plan it decided on.** Everything else
       plans to a file and applies that file. `scripts/ops/rolling-replace.sh:1272`
