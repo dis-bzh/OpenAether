@@ -348,6 +348,14 @@ tasks:
     # the documentation: it names the variable instead of guessing.
     requires:
       vars: [PROVIDER]
+    preconditions: &refuse-local
+      - sh: '[ "{{.PROVIDER}}" != local ]'
+        msg: |
+          PROVIDER=local is not for this family. The Docker cluster is not a
+          provider — it is a different set of operations, and they carry their
+          own names: local-up, local-status, local-verify, local-test,
+          local-down. There is no local-upgrade, and that is not an omission:
+          a container has no disk for `talosctl upgrade` to write to.
     vars:
       # ROLE was never defaulted here, so the lookup below asked for
       # `-scaleway.tfvars`, a file that cannot exist, and silently fell back to
@@ -377,6 +385,7 @@ tasks:
     # the documentation: it names the variable instead of guessing.
     requires:
       vars: [PROVIDER]
+    preconditions: *refuse-local
     vars:
       ROLE: '{{.ROLE | default "management"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
@@ -535,6 +544,7 @@ tasks:
     # the documentation: it names the variable instead of guessing.
     requires:
       vars: [PROVIDER]
+    preconditions: *refuse-local
     vars:
       ROLE: '{{.ROLE | default "management"}}'
       # Only used to REBUILD a tunnel the guard below finds broken; an apply on a
@@ -659,6 +669,7 @@ tasks:
     # the documentation: it names the variable instead of guessing.
     requires:
       vars: [PROVIDER]
+    preconditions: *refuse-local
     vars:
       ROLE: '{{.ROLE | default "management"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
@@ -726,6 +737,7 @@ tasks:
     # the documentation: it names the variable instead of guessing.
     requires:
       vars: [PROVIDER]
+    preconditions: *refuse-local
     vars:
       ROLE: '{{.ROLE | default "management"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
@@ -812,6 +824,7 @@ tasks:
     # the documentation: it names the variable instead of guessing.
     requires:
       vars: [PROVIDER]
+    preconditions: *refuse-local
     vars:
       ROLE: '{{.ROLE | default "management"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
@@ -837,6 +850,7 @@ tasks:
     dir: infrastructure/opentofu/cluster
     requires:
       vars: [PROVIDER]
+    preconditions: *refuse-local
     vars:
       ROLE: '{{.ROLE | default "management"}}'
       OUT: '{{.OUT | default "destroy.tfplan"}}'
@@ -903,6 +917,7 @@ tasks:
     dir: infrastructure/opentofu/cluster
     requires:
       vars: [PROVIDER]
+    preconditions: *refuse-local
     vars:
       ROLE: '{{.ROLE | default "management"}}'
       PLAN: '{{.PLAN | default ""}}'
@@ -962,6 +977,7 @@ tasks:
     # the documentation: it names the variable instead of guessing.
     requires:
       vars: [PROVIDER]
+    preconditions: *refuse-local
     vars:
       ROLE: '{{.ROLE | default "management"}}'
     env: *provider-env
@@ -1004,6 +1020,7 @@ tasks:
     # the documentation: it names the variable instead of guessing.
     requires:
       vars: [PROVIDER]
+    preconditions: *refuse-local
     vars:
       ROLE: '{{.ROLE | default "management"}}'
       PLAN: '{{.PLAN | default ""}}'
@@ -1043,6 +1060,7 @@ tasks:
     # the documentation: it names the variable instead of guessing.
     requires:
       vars: [PROVIDER]
+    preconditions: *refuse-local
     vars:
       ROLE: '{{.ROLE | default "management"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
@@ -1102,6 +1120,7 @@ tasks:
     # the documentation: it names the variable instead of guessing.
     requires:
       vars: [PROVIDER]
+    preconditions: *refuse-local
     vars:
       ROLE: '{{.ROLE | default "management"}}'
     env: *provider-env
@@ -1123,6 +1142,7 @@ tasks:
     # the documentation: it names the variable instead of guessing.
     requires:
       vars: [PROVIDER]
+    preconditions: *refuse-local
     vars:
       ROLE: '{{.ROLE | default "management"}}'
       FROM: '{{.FROM | default "primary"}}'
@@ -1146,6 +1166,7 @@ tasks:
     # the documentation: it names the variable instead of guessing.
     requires:
       vars: [PROVIDER]
+    preconditions: *refuse-local
     vars:
       ROLE: '{{.ROLE | default "management"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
@@ -1167,6 +1188,7 @@ tasks:
     # on 2026-07-30. This existed only as a CI step until that lane was deleted.
     requires:
       vars: [PROVIDER]
+    preconditions: *refuse-local
     vars:
       ROLE: '{{.ROLE | default "management"}}'
       KEY: '{{.KEY | default "~/.ssh/id_ed25519"}}'
@@ -1188,6 +1210,7 @@ tasks:
     # the documentation: it names the variable instead of guessing.
     requires:
       vars: [PROVIDER]
+    preconditions: *refuse-local
     vars:
       ROLE: '{{.ROLE | default "management"}}'
     env: *provider-env
@@ -1321,6 +1344,17 @@ tasks:
         tofu -chdir=infrastructure/opentofu-local apply -var talos_bootstrap=true \
           -var talos_api_port_base={{.TALOS_API_PORT_BASE}} \
             -var k8s_api_port={{.K8S_API_PORT}} -auto-approve
+
+  local-verify:
+    desc: >-
+      Ask the local Docker cluster whether it is what it claims: apiserver up, every node Ready,
+      Cilium on each, CoreDNS serving, no Flux, and the Talos and Kubernetes versions
+      opentofu-local/variables.tf pins. Usage: task local-verify
+    # The same verifier the clouds use, on its `local` path — which had no target
+    # at all, so the only way to reach it was `cluster-verify PROVIDER=local`,
+    # exactly the mixing the preconditions above now refuse.
+    cmds:
+      - ./scripts/dev/infra-verify.sh local
 
   local-test:
     desc: "Full end-to-end local test: 3 CP + 3 workers + etcd quorum + Cilium + Flux + GitOps"
