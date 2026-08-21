@@ -440,8 +440,15 @@ upgrade_talos_to() { # <version>
 # dispatch without a test fixture pinning versions that look real. The harness
 # feeds it a path with the two upgrade_* stubbed out and reads the call order.
 walk_path() { # <talos-from> <k8s-from> <total>   — reads "talos k8s" lines on stdin
-  local prev_t="$1" prev_k="$2" total="$3" step=0 st sk
-  while read -r st sk; do
+  local prev_t="$1" prev_k="$2" total="$3" step=0 st sk line
+  # Drain stdin BEFORE the first step, never between two. Inside the loop
+  # `task cluster-roll` reaches ssh and talosctl, and both READ STDIN — the same
+  # stdin that feeds this loop. On Scaleway the Talos roll of step 2 ate steps
+  # 3-7: the climb ended, exited 0, and announced a version the cluster never ran.
+  local -a steps=()
+  mapfile -t steps
+  for line in "${steps[@]}"; do
+    read -r st sk <<<"$line"
     [ -n "$st" ] || continue
     step=$((step + 1))
     if [ "$total" -gt 1 ]; then
@@ -456,7 +463,9 @@ walk_path() { # <talos-from> <k8s-from> <total>   — reads "talos k8s" lines on
 
 # A here-string, NOT a pipe. `printf | walk_path` puts the loop in a subshell,
 # where `fail` exits the subshell and the run carries on past a step that did not
-# land — measured: the harness went 35/8 the moment it was a pipe.
+# land — measured: the harness went 35/8 the moment it was a pipe. The here-string
+# fixes that and does NOT protect the stream: walk_path drains it before the first
+# step because the steps themselves read stdin. Both traps, one line apart.
 walk_path "$TALOS_FROM" "$K8S_FROM" "$PATH_STEPS" <<<"$UPGRADE_PATH"
 
 # --- What a clean upgrade leaves behind ----------------------------------------

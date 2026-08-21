@@ -700,6 +700,19 @@ _out="$( walk_path v1.12.7 v1.30.0 7 <<<"$CLIMB7" 2>/dev/null )" || true
 { grep -q 'k8s v1.32.0' <<<"$_out" && ! grep -q 'k8s v1.33.0' <<<"$_out"; } \
   && ok "a step that fails stops the climb instead of walking past it" \
   || bad "the climb continued after a failed step: $(tr '\n' '|' <<<"$_out")"
+# The defect a real cluster found, and every stub above hid. Inside the loop
+# `task cluster-roll` reaches ssh and talosctl, and BOTH READ STDIN — the same
+# stdin the here-string feeds the loop. Measured on Scaleway 2026-08-21: the
+# Talos roll of step 2 swallowed steps 3-7, the climb exited 0 announcing
+# v1.36.3, and the cluster sat on v1.31.0 with every check green. A stub that
+# drains stdin, as ssh does, reproduces it without a cloud.
+upgrade_k8s_to()   { echo "k8s $1"; }
+upgrade_talos_to() { echo "talos $1"; cat >/dev/null; }
+_eat="$(walk_path v1.12.7 v1.30.0 7 <<<"$CLIMB7" | grep -cE '^(k8s|talos) ' || true)"
+[ "$_eat" = 7 ] \
+  && ok "a step that reads stdin cannot swallow the rest of the climb" \
+  || bad "a stdin-reading step truncated the climb to ${_eat}/7 dispatches"
+
 unset -f upgrade_k8s_to upgrade_talos_to walk_path
 echo
 printf '%s passed, %s failed, %s hung, %s skipped, %s known defect(s) in the scripts under test\n' \
