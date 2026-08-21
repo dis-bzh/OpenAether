@@ -220,19 +220,24 @@ pinned_version() { # <key>
 # is neither "matches" nor "drifted" — it is a roll that stopped half way, and
 # saying "drifted" there would send the operator looking for the wrong thing.
 version_check() { # <label> <field> <key>
-  local have want
+  local have want fix
   have="$(fleet_versions "$2")"
   want="$(pinned_version "$3")"
+  # The remedy has to be one that exists HERE. `talosctl upgrade` needs a disk,
+  # which a container does not have, so cluster-upgrade is not a thing to send a
+  # local operator to — the local cluster is rebuilt, not upgraded.
+  if [ "$PROVIDER" = local ]; then fix="task local-down && task local-up"
+  else fix="task cluster-upgrade PROVIDER=${PROVIDER}"; fi
   if [ -z "$want" ]; then
     warn "no ${3} pinned in ${VER_TFVARS##*/} or variables.tf — nothing to compare the fleet against"
   elif [ -z "$have" ]; then
     unk "could not read the running ${1} from any node — the fleet's version is UNCHECKED"
   elif case "$have" in *,*) true ;; *) false ;; esac; then
-    bad "the fleet is MIXED on ${1}: ${have}. The config pins ${want} — a roll stopped part way. Finish it: task cluster-upgrade PROVIDER=${PROVIDER}"
+    bad "the fleet is MIXED on ${1}: ${have}. The config pins ${want} — a roll stopped part way. Finish it: ${fix}"
   elif [ "$have" = "$want" ]; then
     ok "every node runs the pinned ${1} (${want})"
   else
-    bad "the fleet runs ${1} ${have}, the config pins ${want} — the pin was changed and never landed. Roll them: task cluster-upgrade PROVIDER=${PROVIDER}"
+    bad "the fleet runs ${1} ${have}, the config pins ${want} — the pin was changed and never landed. Land it: ${fix}"
   fi
 }
 
