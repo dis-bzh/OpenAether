@@ -69,6 +69,24 @@ variable "talos_api_port_base" {
   }
 }
 
+# The HOST side of the Kubernetes API mapping. modules/providers/local publishes
+# `127.0.0.1:<this>:6443` — 6443 inside the container is what Kubernetes serves on
+# and never moves; only the host side is ours to choose.
+#
+# It was hardcoded to 6443 here while the module had accepted a variable all
+# along, so a Hyper-V block landing on 6404-6503 (measured 2026-08-21) left the
+# credential-free rung unrunnable with no way around it. The Talos ports were
+# already movable; this was the one that was not.
+variable "k8s_api_port" {
+  description = "Host port mapped to control plane 0's Kubernetes API. Preflighted against the Hyper-V exclusions by scripts/dev/check-host-ports.sh."
+  type        = number
+  default     = 6443
+  validation {
+    condition     = var.k8s_api_port >= 1024 && var.k8s_api_port <= 65535
+    error_message = "k8s_api_port must be between 1024 and 65535."
+  }
+}
+
 # Accept cilium manifest override (for local simplified variant)
 variable "cilium_manifest" {
   description = "Cilium manifest content. Set via TF_VAR_cilium_manifest from cilium-local.yaml."

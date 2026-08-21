@@ -94,7 +94,7 @@ module "local" {
   cp_ip_base          = 10
   worker_ip_base      = 20
   talos_api_port_base = var.talos_api_port_base
-  k8s_api_port        = 6443
+  k8s_api_port        = var.k8s_api_port
 
   # Generated configs from modules/talos (one per node — identical, node-agnostic)
   control_plane_configs = module.talos.control_plane_machine_configs
