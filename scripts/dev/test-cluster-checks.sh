@@ -714,6 +714,95 @@ _eat="$(walk_path v1.12.7 v1.30.0 7 <<<"$CLIMB7" | grep -cE '^(k8s|talos) ' || t
   || bad "a stdin-reading step truncated the climb to ${_eat}/7 dispatches"
 
 unset -f upgrade_k8s_to upgrade_talos_to walk_path
+echo "=== converge-versions: the half of cluster-up that OpenTofu cannot do ==="
+
+# Its own stub, because both reads ask the SAME question — `custom-columns` on the
+# same field — so the shared plan cannot tell "before the roll" from "after" it.
+# This one keys on whether a roll has happened, which is exactly the distinction
+# the post-roll re-read exists to make.
+mkdir -p "$FAKE/scripts/internal" "$FAKE/scripts/lib" "$STUB_DIR/conv"
+ln -s "$ROOT/scripts/internal/converge-versions.sh" "$FAKE/scripts/internal/converge-versions.sh"
+ln -s "$ROOT/scripts/lib/common.sh" "$FAKE/scripts/lib/common.sh"
+CONVERGE="$FAKE/scripts/internal/converge-versions.sh"
+cat >"$STUB_DIR/conv/kubectl" <<'STUB'
+#!/usr/bin/env bash
+printf 'kubectl %s\n' "$*" >>"${STUB_LOG:-/dev/null}"
+if grep -q 'cluster-roll' "${STUB_LOG:-/dev/null}" 2>/dev/null
+  then t="${CONV_T_AFTER:-}"; k="${CONV_K_AFTER:-}"
+  else t="${CONV_T_BEFORE:-}"; k="${CONV_K_BEFORE:-}"; fi
+case "$*" in
+  *osImage*)        [ -n "$t" ] || exit 0; printf 'Talos (%s)\nTalos (%s)\n' "$t" "$t" ;;
+  *kubeletVersion*) [ -n "$k" ] || exit 0; printf '%s\n%s\n' "$k" "$k" ;;
+  *) exit 1 ;;
+esac
+STUB
+chmod +x "$STUB_DIR/conv/kubectl"
+cat >"$STUB_DIR/conv/task" <<'STUB'
+#!/usr/bin/env bash
+printf 'task %s\n' "$*" >>"${STUB_LOG:-/dev/null}"
+STUB
+chmod +x "$STUB_DIR/conv/task"
+
+conv() { # <t-before> <k-before> <t-after> <k-after> [--check]
+  : >"$STUB_LOG"
+  CONV_OUT="$(PATH="$STUB_DIR/conv:$PATH" \
+    CONV_T_BEFORE="$1" CONV_K_BEFORE="$2" CONV_T_AFTER="${3:-$1}" CONV_K_AFTER="${4:-$2}" \
+    "$CONVERGE" "$PROVIDER" "$ROLE" "$KEYFILE" ${5:+--check} 2>&1)"; CONV_RC=$?
+}
+rolled() { grep -q "cluster-roll.*$1" "$STUB_LOG" 2>/dev/null; }
+
+tfvars v0.0.2 v0.0.2
+
+# The NORMAL case first. cluster-up leaves the fleet matching its pin, so this
+# runs on every ordinary bring-up: if it rolled here it would re-roll every node
+# of every healthy cluster, for ever.
+conv v0.0.2 v0.0.2
+{ [ "$CONV_RC" -eq 0 ] && ! rolled . ; } \
+  && ok "a fleet already on the pin is not rolled" \
+  || bad "an up-to-date fleet was rolled anyway (rc=$CONV_RC): $CONV_OUT"
+
+conv v0.0.1 v0.0.1 v0.0.2 v0.0.2
+{ [ "$CONV_RC" -eq 0 ] && rolled cp-only && rolled workers-only; } \
+  && ok "a drifted fleet is rolled, control planes before workers" \
+  || bad "the drift was not converged (rc=$CONV_RC): $CONV_OUT"
+
+# The defect stage 3 found, one level up: the roll reporting success is the
+# CLIENT talking. Ask the fleet again, and refuse to claim what it does not say.
+conv v0.0.1 v0.0.1 v0.0.1 v0.0.1
+{ [ "$CONV_RC" -ne 0 ] && printf '%s' "$CONV_OUT" | grep -q 'after the roll'; } \
+  && ok "a roll that did not move the fleet fails instead of announcing success" \
+  || bad "a roll that changed nothing was reported as converged (rc=$CONV_RC)"
+
+# One axis at a time. The scenario above lags on BOTH, so the Talos check alone
+# catches it and the Kubernetes one can be deleted with every assertion still
+# green — measured, it survived the mutation. These two isolate each branch.
+conv v0.0.1 v0.0.1 v0.0.2 v0.0.1
+{ [ "$CONV_RC" -ne 0 ] && printf '%s' "$CONV_OUT" | grep -q 'Kubernetes v0.0.1'; } \
+  && ok "…and a Kubernetes-only lag is caught on its own" \
+  || bad "a Kubernetes-only lag survived the post-roll re-read (rc=$CONV_RC): $CONV_OUT"
+
+conv v0.0.1 v0.0.1 v0.0.1 v0.0.2
+{ [ "$CONV_RC" -ne 0 ] && printf '%s' "$CONV_OUT" | grep -q 'Talos v0.0.1'; } \
+  && ok "…and a Talos-only lag is caught on its own" \
+  || bad "a Talos-only lag survived the post-roll re-read (rc=$CONV_RC): $CONV_OUT"
+
+conv v0.0.1 v0.0.1 v0.0.2 v0.0.2 --check
+{ [ "$CONV_RC" -eq 0 ] && ! rolled . && printf '%s' "$CONV_OUT" | grep -q 'does not match'; } \
+  && ok "--check reports the drift before the approval and rolls nothing" \
+  || bad "--check rolled something or said nothing (rc=$CONV_RC): $CONV_OUT"
+
+# A fleet nobody could read is not a converged fleet. Before the apply that is
+# normal and silent; after it, claiming anything would be the original defect.
+conv "" ""
+{ [ "$CONV_RC" -ne 0 ] && printf '%s' "$CONV_OUT" | grep -q 'UNKNOWN'; } \
+  && ok "an unreadable fleet is refused, not called converged" \
+  || bad "an unreadable fleet did not stop the run (rc=$CONV_RC): $CONV_OUT"
+
+conv "" "" "" "" --check
+[ "$CONV_RC" -eq 0 ] \
+  && ok "…but before the apply, no cluster to read is not an error" \
+  || bad "--check failed with no cluster yet (rc=$CONV_RC): $CONV_OUT"
+
 echo
 printf '%s passed, %s failed, %s hung, %s skipped, %s known defect(s) in the scripts under test\n' \
   "$PASS" "$FAIL" "$HUNG" "$SKIPPED" "$KNOWN"

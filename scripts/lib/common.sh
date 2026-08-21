@@ -209,3 +209,31 @@ oa_talos_endpoint_ok() { # <host> <port>
   timeout 10 openssl s_client -connect "${1}:${2}" -brief </dev/null 2>&1 |
     grep -qiE 'CONNECTION ESTABLISHED|Peer certificate|Protocol version'
 }
+
+# --- Versions: what the fleet RUNS, and what the config PINS -------------------
+# Two readers, here rather than in each caller, because a disagreement between
+# them is invisible: both answers look like a version string either way.
+
+# The distinct set across all nodes, or empty. `|| true` because with no cluster
+# the grep matches nothing and pipefail would turn an empty answer into a dead
+# script. A comma in the result means a MIXED fleet — a roll that stopped part way.
+# Usage: oa_fleet_versions <node-field>
+oa_fleet_versions() {
+  timeout 60 kubectl get nodes --no-headers -o "custom-columns=V:$1" 2>/dev/null |
+    sed -E 's/^Talos \((v[^)]+)\)$/\1/' | grep -E '^v' | sort -u | paste -sd, - || true
+}
+
+# The tfvars wins, `variables.tf` is the tracked fallback: envs/management-*.tfvars
+# deliberately omit the pins on some clusters to inherit the default, so an empty
+# tfvars answer is a legitimate "use the default", never an error.
+# Usage: oa_pinned_version <cluster-dir> <tfvars-file> <key>
+oa_pinned_version() {
+  local dir="$1" tfvars="$2" k="$3" v="" blk
+  [ -f "$tfvars" ] && v="$(tfv "$tfvars" "$k")"
+  # Built HERE, not escaped inline: a \" inside single quotes inside $( ) inside
+  # " " is where bash stops agreeing with you.
+  blk="variable \"$k\""
+  [ -n "$v" ] || v="$(awk -v key="$blk" 'index($0, key) == 1, /^}/' "$dir/variables.tf" 2>/dev/null |
+                      sed -nE 's/^[[:space:]]*default[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' | head -1)"
+  printf '%s' "$v"
+}

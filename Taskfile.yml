@@ -405,7 +405,8 @@ tasks:
   cluster-up:
     aliases: [up]
     desc: >-
-      Idempotent one-shot bring-up: image -> render manifests -> infra -> tunnels -> bootstrap. Usage: task cluster-up
+      Idempotent one-shot bring-up: image -> render manifests -> infra -> tunnels -> bootstrap -> converge the
+      fleet onto the versions the tfvars pins (editing that file IS the decision to upgrade). Usage: task cluster-up
       ROLE=management|workload PROVIDER=… [KEY=~/.ssh/yourkey] [VERSION=v1.13.4] [FORCE=1] [APPROVE=auto].
       It shows the plan and asks once before it spends; APPROVE=auto answers for you, for CI and for a
       shell that cannot be asked.
@@ -499,6 +500,14 @@ tasks:
         else
           echo "✓ bootstrap manifests already rendered — skipping (FORCE=1 to re-render)"
         fi
+      # What the plan below CANNOT show. `ignore_changes` on the node image keeps a
+      # version roll out of the OpenTofu plan entirely, so an operator reading that
+      # plan would approve a bring-up and get every node rolled without ever having
+      # seen it. Best effort: with no cluster yet there is nothing to read and this
+      # says nothing. It deliberately does NOT refresh kubeconfig first — `tofu
+      # output` failing truncates the file it writes to, and overwriting a good
+      # kubeconfig to print a notice is a bad trade.
+      - ./scripts/internal/converge-versions.sh {{.PROVIDER}} {{.ROLE}} {{.KEY}} --check
       # ONE human checkpoint on the whole journey, and it is here — the step that
       # spends. `up` plans, shows it, asks once, then applies EXACTLY that plan:
       # never two different plans, and never a silent apply. APPROVE=auto skips the
@@ -531,6 +540,16 @@ tasks:
           # Not passing this was the whole defect: cluster-up answered its own
           # gate and then let phase 2 ask a question nobody could hear.
           APPROVE: "{{.APPROVE}}"
+      # rolling-replace hard-requires ./kubeconfig and ./talosconfig in the cluster
+      # directory, and nothing above has written either of them.
+      - task: kubeconfig
+        vars:
+          ROLE: "{{.ROLE}}"
+          PROVIDER: "{{.PROVIDER}}"
+      # Editing the tfvars IS the decision to upgrade, so the command that reads it
+      # has to reach it. APPROVE=auto inside is not a bypass: the one checkpoint
+      # above already asked, and --check had told it what this would roll.
+      - ./scripts/internal/converge-versions.sh {{.PROVIDER}} {{.ROLE}} {{.KEY}}
       # Do NOT end on "every step above is idempotent": that line came out
       # identical on the first run, which applied 43 changes in phase 1 and 17 in
       # phase 2, and on the second, which applied none. Idempotence is a property
