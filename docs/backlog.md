@@ -353,11 +353,14 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
       Not a small fix: on Outscale placement comes from the SUBNET, so spreading
       means one subnet per subregion, volumes in the matching subregion, and a
       decision about the NAT service (one = a single egress failure domain).
-      Indexing `outscale_subnet.private` moves its address and replaces
-      everything attached to it — a fresh deploy only, never a live cluster.
+      Indexing `outscale_subnet.private` does NOT destroy it — OpenTofu proposes
+      the move to instance zero by itself, and a `moved` block makes it explicit.
+      What gets replaced is a node whose subnet changes, one at a time, which is
+      what `scripts/ops/rolling-replace.sh` already does. So a live migration is
+      untested here, not impossible.
       **Closes:** an Outscale deploy whose `kubectl get nodes -o wide` shows
       control planes in at least two subregions, `task cluster-verify` green.
-      Rung: real cloud, new cluster.
+      Rung: real cloud.
 
 - [ ] **`task cluster-up` cannot add a node to a cluster it already bootstrapped.**
       Its `infra` step applies with `talos_bootstrap=true` once bootstrapped
