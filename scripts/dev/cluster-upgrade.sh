@@ -268,14 +268,9 @@ if [ "$K8S_DONE" = 1 ] && [ "$TALOS_DONE" = 1 ]; then
 fi
 
 # --- the path, announced before anything moves --------------------------------
-# Built and validated up front. A run that discovers half way that the next step
-# is unsupported has already landed the ones before it, and a cluster stranded on
-# an intermediate pair is worse than one that never started.
-#
-# NOTE, and it is the honest limit of this release: the steps are COMPUTED and
-# REFUSED here, not yet walked. The apply below still goes straight to the target,
-# which is correct for one minor and wrong for two — the execution loop is the
-# next piece of work, and the backlog says so.
+# Built and validated up front, then walked below. A run that discovers half way
+# that the next step is unsupported has already landed the ones before it, and a
+# cluster stranded on an intermediate pair is worse than one that never started.
 if ! UPGRADE_PATH="$(version_path "$TALOS_FROM" "$K8S_FROM" "$TALOS_TO" "$K8S_TO")"; then
   fail "no supported upgrade path from Talos ${TALOS_FROM} / Kubernetes ${K8S_FROM}
   to Talos ${TALOS_TO} / Kubernetes ${K8S_TO}. The ranges are in
@@ -286,8 +281,7 @@ if [ "$PATH_STEPS" -gt 1 ]; then
   echo
   echo "▶ This is a ${PATH_STEPS}-step climb, one minor at a time (talos k8s):"
   printf '%s' "$UPGRADE_PATH" | nl -w4 -s'  ' | sed 's/^/    /'
-  echo "⚠ cluster-upgrade applies the TARGET in one go. For more than one minor that" >&2
-  echo "  is not what Kubernetes allows — walk the steps by hand until the loop exists." >&2
+  echo "  Every step is a full apply, so the plan-time pair guard runs on each one."
 fi
 
 if [ "${DRY_RUN:-}" = "1" ]; then
@@ -368,44 +362,49 @@ report_probe() {
   fail "the API was unreachable for ${longest}s in a row, over the ${MAX_PROBE_FAILS}s this lane allows (samples in ${keep})"
 }
 
-# --- Kubernetes first: no reboot, so it isolates the control-plane roll --------
+# --- One step of the climb ------------------------------------------------------
+#
+# Each of these was a `if [ "$X_DONE" = 0 ]` block moving straight to the target.
+# They are functions now because the path can have seven steps, and every one of
+# them is the same operation against a different version. Nothing inside changed.
 
-if [ "$K8S_DONE" = 0 ]; then
-  echo "--- Kubernetes ${K8S_FROM} → ${K8S_TO} ---"
-  tfvar_set kubernetes_version "$K8S_TO"
+upgrade_k8s_to() { # <version>
+  local target="$1"
+  echo "--- Kubernetes → ${target} ---"
+  tfvar_set kubernetes_version "$target"
   task infra-apply ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY" APPROVE=auto
 
   # Talos reconciles the static pods and the kubelets; the node's reported
   # version is the observable end of that, and it is not instant.
-  echo "waiting for every kubelet to report ${K8S_TO}"
+  echo "waiting for every kubelet to report ${target}"
+  local seen stale
   for _ in $(seq 1 60); do
     # COUNT THE NODES, not just the stale ones. `grep -cvx` over the output of a
     # kubectl that answered nothing returns 0, which reads exactly like "every
     # kubelet is on the target" — a dead apiserver used to pass this.
-    SEEN="$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.kubeletVersion}{"\n"}{end}' 2>/dev/null |
-      grep -c . || true)"
-    STALE="$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.kubeletVersion}{"\n"}{end}' 2>/dev/null |
-      grep -cvx "$K8S_TO" || true)"
-    [ "$SEEN" -gt 0 ] && [ "$STALE" -eq 0 ] && break
+    seen="$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.kubeletVersion}{"\n"}{end}' 2>/dev/null |
+             grep -c . || true)"
+    stale="$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.kubeletVersion}{"\n"}{end}' 2>/dev/null |
+             grep -cvx "$target" || true)"
+    [ "$seen" -gt 0 ] && [ "$stale" -eq 0 ] && break
     sleep 10
   done
-  [ "${SEEN:-0}" -gt 0 ] || fail "the apiserver reported no nodes at all — nothing was verified, and this is not an upgrade that succeeded"
-  [ "${STALE:-1}" -eq 0 ] || fail "${STALE} kubelet(s) still not on ${K8S_TO} after 10 minutes"
-  ok "every kubelet on ${K8S_TO} (${SEEN} node(s) seen)"
+  [ "${seen:-0}" -gt 0 ] || fail "the apiserver reported no nodes at all — nothing was verified, and this is not an upgrade that succeeded"
+  [ "${stale:-1}" -eq 0 ] || fail "${stale} kubelet(s) still not on ${target} after 10 minutes"
+  ok "every kubelet on ${target} (${seen} node(s) seen)"
   report_probe
-fi
+}
 
-# --- Then Talos, in place ------------------------------------------------------
-
-if [ "$TALOS_DONE" = 0 ]; then
-  echo "--- Talos ${TALOS_FROM} → ${TALOS_TO} ---"
+upgrade_talos_to() { # <version>
+  local target="$1"
+  echo "--- Talos → ${target} ---"
 
   # The nodes ignore their image attribute, but the image DATA SOURCE still has
   # to resolve, and it derives its name from talos_version. Without this the
   # plan fails on an image the account does not have.
-  task image-build PROVIDER="$PROVIDER" VERSION="$TALOS_TO" ENSURE=1
+  task image-build PROVIDER="$PROVIDER" VERSION="$target" ENSURE=1
 
-  tfvar_set talos_version "$TALOS_TO"
+  tfvar_set talos_version "$target"
   task infra-apply ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY" APPROVE=auto
 
   # One node at a time, health-gated between each; control planes first because
@@ -418,14 +417,47 @@ if [ "$TALOS_DONE" = 0 ]; then
 
   # Same trap as the kubelet count above: with no nodes returned, `grep -cv`
   # answers 0 and a dead cluster reports a clean Talos upgrade.
-  OSIMAGES="$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.osImage}{"\n"}{end}' 2>/dev/null | grep -c . || true)"
-  RUNNING="$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.osImage}{"\n"}{end}' 2>/dev/null |
-    grep -cv "$TALOS_TO" || true)"
-  [ "$OSIMAGES" -gt 0 ] || fail "the apiserver reported no nodes at all after the Talos roll — nothing was verified"
-  [ "$RUNNING" -eq 0 ] || fail "${RUNNING} node(s) are not running Talos ${TALOS_TO}"
-  ok "every node on Talos ${TALOS_TO} (${OSIMAGES} node(s) seen)"
+  local osimages running
+  osimages="$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.osImage}{"\n"}{end}' 2>/dev/null | grep -c . || true)"
+  running="$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.osImage}{"\n"}{end}' 2>/dev/null |
+              grep -cv "$target" || true)"
+  [ "$osimages" -gt 0 ] || fail "the apiserver reported no nodes at all after the Talos roll — nothing was verified"
+  [ "$running" -eq 0 ] || fail "${running} node(s) are not running Talos ${target}"
+  ok "every node on Talos ${target} (${osimages} node(s) seen)"
   report_probe
-fi
+}
+
+# --- Walk the path, one minor at a time -----------------------------------------
+#
+# Kubernetes first within a step, when both move — it reboots nothing, so it
+# isolates the control-plane roll from the node roll. The path builder never
+# produces a step that moves both, but the order is stated rather than assumed.
+#
+# Each step is a full apply, so the plan-time pair guard runs on every one of
+# them: an intermediate the matrix does not support cannot slip through here.
+
+# A function, and not for tidiness: it is the only way to exercise a seven-step
+# dispatch without a test fixture pinning versions that look real. The harness
+# feeds it a path with the two upgrade_* stubbed out and reads the call order.
+walk_path() { # <talos-from> <k8s-from> <total>   — reads "talos k8s" lines on stdin
+  local prev_t="$1" prev_k="$2" total="$3" step=0 st sk
+  while read -r st sk; do
+    [ -n "$st" ] || continue
+    step=$((step + 1))
+    if [ "$total" -gt 1 ]; then
+      echo
+      echo "════ step ${step}/${total} — Talos ${st}, Kubernetes ${sk}"
+    fi
+    [ "$sk" = "$prev_k" ] || upgrade_k8s_to "$sk"
+    [ "$st" = "$prev_t" ] || upgrade_talos_to "$st"
+    prev_t="$st"; prev_k="$sk"
+  done
+}
+
+# A here-string, NOT a pipe. `printf | walk_path` puts the loop in a subshell,
+# where `fail` exits the subshell and the run carries on past a step that did not
+# land — measured: the harness went 35/8 the moment it was a pipe.
+walk_path "$TALOS_FROM" "$K8S_FROM" "$PATH_STEPS" <<<"$UPGRADE_PATH"
 
 # --- What a clean upgrade leaves behind ----------------------------------------
 

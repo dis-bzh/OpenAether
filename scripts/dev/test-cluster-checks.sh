@@ -652,6 +652,55 @@ _err="$(version_path v1.12.7 v1.30.0 v1.99.0 v1.36.3 2>&1 >/dev/null)"
 pair_ok v1.13.9 v1.30.0 \
   && bad "1.13 + Kubernetes 1.30 accepted — below the floor of 1.31" \
   || ok "1.13 + Kubernetes 1.30 refused — the window is actually consulted"
+
+# The dispatch across a real seven-step path. The harness fixture pins v0.0.1 on
+# purpose — fictional, so nobody copies it into an environment — which means it
+# carries no minor semantics and exercises exactly one step. walk_path is a
+# function so this can feed it a path directly, with the two operations stubbed.
+_wa=$(grep -n '^walk_path() {' "$ROOT/scripts/dev/cluster-upgrade.sh" | cut -d: -f1)
+_wb=$(awk -v a="$_wa" 'NR>=a && /^}$/ {print NR; exit}' "$ROOT/scripts/dev/cluster-upgrade.sh")
+eval "$(sed -n "${_wa},${_wb}p" "$ROOT/scripts/dev/cluster-upgrade.sh")"
+declare -f walk_path >/dev/null \
+  && ok "walk_path was extracted and is callable" \
+  || bad "could not extract walk_path — the assertions below would be vacuous"
+
+CLIMB7="$(version_path v1.12.7 v1.30.0 v1.13.9 v1.36.3 2>/dev/null)"
+upgrade_k8s_to()   { echo "k8s $1"; }
+upgrade_talos_to() { echo "talos $1"; }
+_seq="$(walk_path v1.12.7 v1.30.0 7 <<<"$CLIMB7" | grep -E '^(k8s|talos) ' | tr '\n' '|')"
+_want='k8s v1.31.0|talos v1.13.9|k8s v1.32.0|k8s v1.33.0|k8s v1.34.0|k8s v1.35.0|k8s v1.36.3|'
+[ "$_seq" = "$_want" ] \
+  && ok "seven steps dispatch as one Kubernetes hop, then Talos, then five more" \
+  || bad "dispatch order wrong: $_seq"
+
+# An axis that does not move must not be touched. Talos appears once in that
+# sequence, not seven times — re-applying an unchanged version would re-roll six
+# nodes for nothing, six times over.
+[ "$(grep -c '^talos ' <<<"$(walk_path v1.12.7 v1.30.0 7 <<<"$CLIMB7")")" = 1 ] \
+  && ok "…and Talos is rolled once, not once per step" \
+  || bad "Talos was dispatched $(grep -c '^talos ' <<<"$(walk_path v1.12.7 v1.30.0 7 <<<"$CLIMB7")") times"
+
+# The within-step order is DEFENSIVE: version_path never emits a step that moves
+# both axes, so nothing in a real climb observes it, and swapping the two lines
+# changed no assertion. Feed it the step the builder cannot produce, and the
+# choice becomes checkable — Kubernetes first, because it reboots nothing and so
+# keeps the control-plane roll separate from the node roll.
+upgrade_k8s_to()   { echo "k8s $1"; }
+upgrade_talos_to() { echo "talos $1"; }
+_both="$(walk_path v1.12.7 v1.30.0 1 <<<"v1.13.9 v1.31.0" | grep -E '^(k8s|talos) ' | tr '\n' '|')"
+[ "$_both" = 'k8s v1.31.0|talos v1.13.9|' ] \
+  && ok "a step moving both axes does Kubernetes first — the reboot-free one" \
+  || bad "both-axis step dispatched as: $_both"
+
+# The one that matters most. `printf … | walk_path` put the loop in a subshell,
+# where a failing step exits the subshell and the run carries on to the next —
+# measured, the harness went 35/8. A step that fails must stop the climb.
+upgrade_k8s_to() { echo "k8s $1"; [ "$1" = v1.32.0 ] && { echo "BOOM" >&2; exit 1; }; return 0; }
+_out="$( walk_path v1.12.7 v1.30.0 7 <<<"$CLIMB7" 2>/dev/null )" || true
+{ grep -q 'k8s v1.32.0' <<<"$_out" && ! grep -q 'k8s v1.33.0' <<<"$_out"; } \
+  && ok "a step that fails stops the climb instead of walking past it" \
+  || bad "the climb continued after a failed step: $(tr '\n' '|' <<<"$_out")"
+unset -f upgrade_k8s_to upgrade_talos_to walk_path
 echo
 printf '%s passed, %s failed, %s hung, %s skipped, %s known defect(s) in the scripts under test\n' \
   "$PASS" "$FAIL" "$HUNG" "$SKIPPED" "$KNOWN"
