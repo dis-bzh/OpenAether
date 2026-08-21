@@ -196,6 +196,27 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
       **Closes:** one bump of a node size on a live cluster, with the probe
       running, and the answer recorded either way. Rung: real cloud.
 
+- [ ] **Nothing local runs the pipeline audit.** `plumber` gates the workflow
+      files in CI, and the only way to know what it says before pushing is to
+      fetch the binary by hand — which is how this branch measured the control
+      count and the stand-down set. Every other checker here has a task:
+      `task security`, `task lint`, `task test-scripts`.
+      **Closes:** `task pipeline-audit` installing the pinned, checksum-verified
+      binary and running the policy CI runs, wired into `task security`. Rung:
+      mocked.
+
+- [ ] **branchMustBeProtected may be unreadable to the CI token, and that is
+      inherited rather than measured.** `main` has been protected since
+      2026-08-20, and plumber's control answers `passed` when it can read the
+      settings — measured locally 2026-08-21 with a token that can. A run on
+      v0.4.36 reported the default CI token cannot, and that plumber then exits 3
+      and withholds every other verdict. The job ships WITHOUT the skip so that
+      run answers it. If it exits 3, the alternative is `administration: read` on
+      that job — widening the token to satisfy one control — and that is the
+      trade to decide, not to default.
+      **Closes:** the CI run's own answer, recorded here, and the skip or the
+      permission chosen with it. Rung: the pipeline itself.
+
 - [ ] **Nothing lets you ask what is in the state.** Reading it takes the root
       directory, its per-cluster `TF_DATA_DIR` and two credentials resolved
       through `resolve-s3-cred.sh` — four things to get right, and getting one
