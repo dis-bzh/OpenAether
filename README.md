@@ -7,9 +7,27 @@
 
 🇫🇷 [Version française](README.fr.md)
 
+## Where to go
+
+Two different people land here, and they want different pages.
+
+**You want a cluster.** Start with the one that needs no account and no
+credentials — `task local-up` brings a six-node Talos cluster up in Docker. Then
+[Quick start](#quick-start) for a cloud, or
+[`docs/first-cluster.md`](docs/first-cluster.md) for the walked-through version,
+bare machine to a cluster you can reach, upgrade and destroy.
+
+**You want to contribute.** [`CONTRIBUTING.md`](CONTRIBUTING.md) has the rules
+that are not obvious — what counts as proof, the three rungs a change has to
+climb, and how commits made with an AI assistant are signed. The open work is
+[`docs/backlog.md`](docs/backlog.md), and its entries name the rung each one
+needs: `task test` and `mocked` are the ones you can close without a cloud
+account.
+
 ## Version
 
-**0.1.0, unreleased** — infrastructure only. Five things and nothing else:
+**0.1.0** — published 2026-08-20 as a pre-release. Infrastructure only. Five
+things and nothing else:
 deploy, a healthy HA cluster (Talos + Cilium), idempotency, Kubernetes and Talos
 upgrades, and an OpenTofu state encrypted client-side in S3 with an optional
 replica on a second provider. kubeconfig and talosconfig get the same treatment.
@@ -246,6 +264,7 @@ task security            # hardening checks
 | [docs/upgrade.md](docs/upgrade.md) | Moving Kubernetes and Talos on a cluster that has to stay up |
 | [docs/release-checklist.md](docs/release-checklist.md) | What to run before tagging a release, in the order that fails cheapest |
 | [docs/backlog.md](docs/backlog.md) | **Source of truth**: current state, debt, improvements (English only — living working document) |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | **Read before a first pull request**: what counts as proof, the three rungs, commit trailers, AI-assisted contributions |
 
 ## Security
 
