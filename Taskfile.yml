@@ -1293,10 +1293,14 @@ tasks:
     desc: "Deploy the local Talos cluster — 3 CP + 3 workers (config + containers + bootstrap + kubeconfig)"
     vars:
       TALOS_API_PORT_BASE: '{{.TALOS_API_PORT_BASE | default "45000"}}'
+      # The host side of the Kubernetes API. 6443 is the obvious choice and the
+      # reason it was hardcoded — until a Hyper-V block landed on 6404-6503 and
+      # the one port nobody could move turned out to be the one that collided.
+      K8S_API_PORT: '{{.K8S_API_PORT | default "6443"}}'
     cmds:
       # Fail fast on a Hyper-V port reservation: Docker Desktop only reports it
       # as an opaque 500, five retries and a 90s timeout later.
-      - ./scripts/dev/check-host-ports.sh {{.TALOS_API_PORT_BASE}}
+      - ./scripts/dev/check-host-ports.sh {{.TALOS_API_PORT_BASE}} {{.K8S_API_PORT}}
       # cilium-local.yaml is gitignored, so a fresh clone has none — render it
       # rather than boot a cluster with no CNI. Mirrors what `up` does for the
       # cloud manifest.
@@ -1315,7 +1319,8 @@ tasks:
         export TF_VAR_cilium_manifest="$(cat infrastructure/opentofu/cluster/bootstrap-manifests/cilium-local.yaml \
           2>/dev/null || echo 'CILIUM-MANIFEST-PLACEHOLDER')"
         tofu -chdir=infrastructure/opentofu-local apply -var talos_bootstrap=true \
-          -var talos_api_port_base={{.TALOS_API_PORT_BASE}} -auto-approve
+          -var talos_api_port_base={{.TALOS_API_PORT_BASE}} \
+            -var k8s_api_port={{.K8S_API_PORT}} -auto-approve
 
   local-test:
     desc: "Full end-to-end local test: 3 CP + 3 workers + etcd quorum + Cilium + Flux + GitOps"

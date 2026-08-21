@@ -10,12 +10,17 @@
 # No-op off WSL2 (netsh.exe absent) and non-fatal if the exclusions are
 # unreadable: this guards a known trap, it must never block a working setup.
 #
-# Usage: check-host-ports.sh [base]   (default: the tfvars/variable default)
+# Usage: check-host-ports.sh [talos-base] [k8s-port]   (defaults: the variable defaults)
 set -uo pipefail
 
 BASE="${1:-45000}"
-# cp_i → base+i (3), worker_i → base+10+i (3), plus the Kubernetes API on 6443.
-PORTS=("$((BASE))" "$((BASE + 1))" "$((BASE + 2))" "$((BASE + 10))" "$((BASE + 11))" "$((BASE + 12))" 6443)
+# Both defaults mirror infrastructure/opentofu-local/variables.tf. The Kubernetes
+# port used to be a literal here, which was fine while it was a literal there too
+# — and wrong the moment it became movable, because this guard would have kept
+# checking 6443 while the apply published something else.
+K8S="${2:-6443}"
+# cp_i → base+i (3), worker_i → base+10+i (3), plus the Kubernetes API.
+PORTS=("$((BASE))" "$((BASE + 1))" "$((BASE + 2))" "$((BASE + 10))" "$((BASE + 11))" "$((BASE + 12))" "$K8S")
 
 command -v netsh.exe >/dev/null 2>&1 || exit 0
 
@@ -39,12 +44,13 @@ if [ "$conflict" -ne 0 ]; then
   Docker Desktop cannot publish these ports; the apply would fail on an opaque
   500 and then on "Talos API not ready after 90s".
 
-  Pick a free base (it needs base..base+12 clear) and pass it through:
-      task local-up TALOS_API_PORT_BASE=<base>
+  Both are movable, and the message above says which one collided:
+      task local-up TALOS_API_PORT_BASE=<base>   # Talos, needs base..base+12 clear
+      task local-up K8S_API_PORT=<port>          # the Kubernetes API, one port
   Current reservations:
 $(printf '%s\n' "$RANGES" | sed 's/^/      /')
 EOT
   exit 1
 fi
 
-echo "✓ host ports free (base $BASE)"
+echo "✓ host ports free (Talos base $BASE, Kubernetes $K8S)"
