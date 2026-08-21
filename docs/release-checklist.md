@@ -112,13 +112,14 @@ task feint-down
       empty re-plan and a destroy confirmed against the API → 2026-08-20, feint
       0.9.0: Scaleway 8 added / empty re-plan / 8 destroyed, Outscale 27 / empty
       / 27, both confirmed against the API, no credentials in the shell.
-- [x] the ranking shows no operation that was not there before — but there are
-      now **three**, not four: 2 on Scaleway (`lb ips`, `vpc-gw ips`) and 1 on
-      Outscale (`CreateLoadBalancer`), all answering 501 or 404. `ipam BookIP`
-      left the list because feint 0.9.0 **serves** it now — it appears under
-      "already served" with 3 calls in 200/201. Fewer is not the alarm; a new one
-      would be, and there is none. Update this line, not the count, when the
-      emulator gains another.
+- [x] the ranking is **empty on both providers** — `every operation the client
+      called is served by a pack`. It was three under 0.9.0 (`lb ips` and
+      `vpc-gw ips` on Scaleway, `CreateLoadBalancer` on Outscale) and four before
+      that; 0.10.0 closed the last of them, and the served-and-exercised count rose
+      from 19 to 50 on Scaleway and 23 to 27 on Outscale because the plan now
+      reaches the load balancers instead of stopping at them. An empty ranking is
+      not the alarm this line watches for — a NEW entry is, and there is none.
+      Update the line, not the count, when one appears.
 - [x] the guard refuses a non-loopback endpoint — check it both ways, as a Task
       variable and as an environment variable. A Task variable is not an
       environment variable, and this test once passed without testing anything.
