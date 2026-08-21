@@ -558,9 +558,10 @@ tasks:
       # runs, so a `#` inside would be printed as the last thing the operator reads.
       - |
         echo "✓ cluster-up complete."
-        echo "  Run this exact command again to converge again. Its plan is the"
-        echo "  verdict, not this line: on a cluster that already matches the"
-        echo "  configuration OpenTofu prints 'No changes.' and applies nothing."
+        echo "  Two verdicts, and neither of them is this line: OpenTofu's plan for"
+        echo "  the infrastructure, and the version check above for the fleet — asked"
+        echo "  separately because ignore_changes keeps a roll out of the plan."
+        echo "  Run this exact command again to converge again."
 
   # ===========================================================================
   # Cluster Lifecycle
