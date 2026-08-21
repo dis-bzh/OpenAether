@@ -48,6 +48,13 @@ info() { printf '\n▶ %s\n' "$*"; }
 
 K() { timeout 60 kubectl "$@"; }
 
+# Sourced HERE, not where the first caller happens to be: the version check below
+# needs `tfv` too, and it runs long before the backup section that used to own
+# this line. common.sh is function definitions only, so sourcing it early costs
+# nothing and runs nothing.
+# shellcheck source=../lib/common.sh
+source "$ROOT/scripts/lib/common.sh"
+
 info "The cluster answers"
 
 # WAIT, do not sample once. `task cluster-up` returns when the Talos bootstrap RPC
@@ -169,6 +176,70 @@ if [ "$PROVIDER" != local ]; then
   fi
 fi
 
+# --- The fleet runs the versions the config pins --------------------------------
+#
+# `cluster-up` writes the pinned installer image into the machine config and asks
+# NO node to upgrade — `talosctl upgrade` lives in rolling-replace.sh alone. So a
+# bumped pin leaves the fleet a version behind with an empty plan behind it, and
+# the schematic check below cannot see it: a version bump does not change the
+# schematic. Every signal read green. This is the one that does not.
+#
+# kubectl, not talosctl: the node publishes both versions to the apiserver, which
+# section 1 has already proven reachable. So unlike the schematic this needs no
+# tunnel, cannot degrade for want of one, and a mismatch is a hard failure rather
+# than a warning.
+info "The fleet runs the versions the config pins"
+
+# The distinct set across all nodes, or empty. custom-columns rather than
+# jsonpath, and `|| true` because with no cluster the grep matches nothing and
+# pipefail would otherwise turn an empty answer into a dead script. Same reader as
+# cluster-upgrade.sh:97 — deliberately, so the two cannot disagree about what the
+# fleet runs.
+fleet_versions() { # <field>
+  K get nodes --no-headers -o "custom-columns=V:$1" 2>/dev/null |
+    sed -E 's/^Talos \((v[^)]+)\)$/\1/' | grep -E '^v' | sort -u | paste -sd, - || true
+}
+
+# The pin, with the precedence scripts/internal/talos-version.sh already defines:
+# the env file if it pins one, otherwise the root's default. An env file that
+# omits the key is a DELIBERATE choice to track the default (see the header of
+# envs/management-*.tfvars), so an empty read falls through — it is never a fault.
+pinned_version() { # <key>
+  local v="" blk
+  [ -f "$VER_TFVARS" ] && v="$(tfv "$VER_TFVARS" "$1")"
+  # The awk pattern is built HERE, not escaped inline: a \" inside single quotes
+  # inside $( ) inside " " is where bash stops agreeing with you.
+  blk="variable \"$1\""
+  [ -n "$v" ] || v="$(awk -v k="$blk" 'index($0, k) == 1, /^}/' \
+                        "$CLUSTER_DIR/variables.tf" 2>/dev/null |
+                      sed -nE 's/^[[:space:]]*default[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' | head -1)"
+  printf '%s' "$v"
+}
+
+# Four answers, not three. A comma means the nodes disagree with EACH OTHER, which
+# is neither "matches" nor "drifted" — it is a roll that stopped half way, and
+# saying "drifted" there would send the operator looking for the wrong thing.
+version_check() { # <label> <field> <key>
+  local have want
+  have="$(fleet_versions "$2")"
+  want="$(pinned_version "$3")"
+  if [ -z "$want" ]; then
+    warn "no ${3} pinned in ${VER_TFVARS##*/} or variables.tf — nothing to compare the fleet against"
+  elif [ -z "$have" ]; then
+    unk "could not read the running ${1} from any node — the fleet's version is UNCHECKED"
+  elif case "$have" in *,*) true ;; *) false ;; esac; then
+    bad "the fleet is MIXED on ${1}: ${have}. The config pins ${want} — a roll stopped part way. Finish it: task cluster-upgrade PROVIDER=${PROVIDER}"
+  elif [ "$have" = "$want" ]; then
+    ok "every node runs the pinned ${1} (${want})"
+  else
+    bad "the fleet runs ${1} ${have}, the config pins ${want} — the pin was changed and never landed. Roll them: task cluster-upgrade PROVIDER=${PROVIDER}"
+  fi
+}
+
+VER_TFVARS="$CLUSTER_DIR/envs/${ROLE}-${PROVIDER}.tfvars"
+version_check "Talos"      '.status.nodeInfo.osImage'        talos_version
+version_check "Kubernetes" '.status.nodeInfo.kubeletVersion' kubernetes_version
+
 # --- The fleet runs the image the config names ----------------------------------
 #
 # The version tag is not the image. The schematic carries the system extensions,
@@ -214,9 +285,7 @@ else
   # The shared helpers, not a local copy: this file used to build the bucket name
   # inline, so any change to the convention — the bucket_suffix, for one — would
   # leave it probing the old name and reporting a missing backup that is there
-  # under another one. `tfv` comes from common.sh and takes <file> <key>.
-  # shellcheck source=../lib/common.sh
-  source "$ROOT/scripts/lib/common.sh"
+  # under another one. `tfv` takes <file> <key>; common.sh is sourced at the top.
   TFVARS="$CLUSTER_DIR/envs/${ROLE}-${PROVIDER}.tfvars"
   CN="$(tfv "$TFVARS" cluster_name)"; ENVN="$(tfv "$TFVARS" environment)"
   PRIM_EP="$(tfv "$TFVARS" s3_primary_endpoint)"; REPL_EP="$(tfv "$TFVARS" s3_replica_endpoint)"

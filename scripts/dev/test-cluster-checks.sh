@@ -482,6 +482,89 @@ YAML
     || bad "the Ready-condition filter selected '$got'"
 fi
 
+
+# =============================================================================
+# infra-verify: the fleet runs the versions the tfvars pin
+#
+# `cluster-up` writes the pinned installer image into the machine config and asks
+# no node to upgrade, so a bumped pin leaves the fleet behind with an empty plan
+# behind it — and the schematic check cannot see it, because a version bump does
+# not change the schematic. Until this section existed, infra-verify.sh was
+# symlinked into the fake root and never once executed: the only assertion about
+# the verifier was that cluster-upgrade CALLED it.
+#
+# PROVIDER=local on purpose: that path skips every `tofu output` and `aws s3`, so
+# the whole script is drivable by the stub kubectl alone.
+# =============================================================================
+echo
+echo "=== infra-verify: the fleet runs the versions the config pins ==="
+
+VERIFY_SH="$FAKE/scripts/dev/infra-verify.sh"
+LOCAL_DIR="$FAKE/infrastructure/opentofu-local"
+mkdir -p "$LOCAL_DIR"
+: >"$LOCAL_DIR/kubeconfig"; : >"$LOCAL_DIR/talosconfig"
+cat >"$LOCAL_DIR/variables.tf" <<'TFV'
+variable "talos_version" {
+  type    = string
+  default = "v0.0.2"
+}
+
+variable "kubernetes_version" {
+  type    = string
+  default = "v0.0.2"
+}
+TFV
+
+# Everything section 1 asks, answered green, so the run reaches the version
+# section instead of timing out in the bounded waits above it.
+BASE='get --raw=/readyz\t0\tok\n'
+BASE+='get nodes -l node-role.kubernetes.io/control-plane\t0\tcp-a Ready control-plane 9m\n'
+BASE+='k8s-app=cilium\t0\tcilium-a 1/1 Running%%cilium-b 1/1 Running\n'
+BASE+='readyReplicas\t0\t1\n'
+BASE+='get namespace flux-system\t1\tNotFound\n'
+BASE+='get nodes --no-headers\t0\tnode-a Ready control-plane 9m%%node-b Ready <none> 9m\n'
+
+verify_local() { run "$VERIFY_SH" local; }
+
+# The COUNT, not the message. Turning `unk` into `ok` leaves the sentence
+# identical — an assertion on the words alone survives that mutation, and did.
+unk_count() { sed -E 's/\x1b\[[0-9;]*m//g' <<<"$RUN_OUT" |
+                sed -nE 's/.*, ([0-9]+) could not be checked.*/\1/p' | tail -1; }
+
+# --- both pins matched --------------------------------------------------------
+plan 'osImage\t0\tTalos (v0.0.2)\n''kubeletVersion\t0\tv0.0.2\n'"$BASE"
+verify_local
+{ said 'every node runs the pinned Talos (v0.0.2)' && said 'every node runs the pinned Kubernetes (v0.0.2)'; } \
+  && ok "a fleet on the pinned versions passes" \
+  || bad "a fleet that matches its pins was not recognised as matching"
+
+# --- the case this section exists for -----------------------------------------
+# One patch behind, which is what a bumped tfvars and an un-rolled fleet look
+# like. The schematic is untouched by a version bump, so nothing else sees it.
+plan 'osImage\t0\tTalos (v0.0.1)\n''kubeletVersion\t0\tv0.0.2\n'"$BASE"
+verify_local
+{ said 'the fleet runs Talos v0.0.1, the config pins v0.0.2' && [ "$RUN_RC" -ne 0 ]; } \
+  && ok "a fleet a version behind its pin FAILS the run" \
+  || bad "a version behind the pin passed — the drift cluster-up leaves is invisible"
+
+# --- a roll that stopped half way ---------------------------------------------
+# Neither "matches" nor "drifted": saying "drifted" here would send the operator
+# to re-run an upgrade when the truth is that one is already half done.
+plan 'osImage\t0\tTalos (v0.0.1)%%Talos (v0.0.2)\n''kubeletVersion\t0\tv0.0.2\n'"$BASE"
+verify_local
+{ said 'the fleet is MIXED on Talos' && said 'v0.0.1,v0.0.2'; } \
+  && ok "a mixed fleet is named as mixed, not as drifted" \
+  || bad "a half-finished roll reads as a plain version drift"
+
+# --- the question could not be asked ------------------------------------------
+# `unk`, never `ok`: a node query that FAILED once read as "everything is on the
+# target" in this repository, which is the defect this whole file exists for.
+plan 'osImage\t1\tError from server: connection refused\n''kubeletVersion\t0\tv0.0.2\n'"$BASE"
+verify_local
+{ said 'could not read the running Talos' && [ "$(unk_count)" -ge 1 ] \
+  && ! said 'every node runs the pinned Talos'; } \
+  && ok "an unanswered version query is UNCHECKED ($(unk_count) unknown), not a pass" \
+  || bad "a failed node query read as a fleet on the target, or was not counted as unknown"
 echo
 printf '%s passed, %s failed, %s hung, %s skipped, %s known defect(s) in the scripts under test\n' \
   "$PASS" "$FAIL" "$HUNG" "$SKIPPED" "$KNOWN"
