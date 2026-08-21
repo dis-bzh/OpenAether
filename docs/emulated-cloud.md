@@ -112,7 +112,7 @@ the only proof of a deployment; this catches wiring regressions before spending.
 
 ## Known gaps
 
-Pinned to **Feint 0.9.0** (`scripts/dev/feint.sh`). What this lane still cannot
+Pinned to **Feint 0.10.0** (`scripts/dev/feint.sh`). What this lane still cannot
 carry, all recorded in [`backlog.md`](backlog.md):
 
 | Not exercised | Why |
