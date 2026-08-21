@@ -72,16 +72,15 @@ jobs:
       # checking one thing in twenty-three and reporting success. The policy stays
       # the shipped default, and the step below asserts what stood down.
       #
-      # branchMustBeProtected is NOT skipped here, deliberately, and this run is
-      # the experiment. `main` has been protected since 2026-08-20 — 13 required
-      # checks, no force-push, no deletions — and plumber's own control answers
-      # `passed` when it can read that, measured locally on 2026-08-21 with a
-      # token that can. What is not known is whether the DEFAULT CI token can:
-      # an earlier run on v0.4.36 reported it could not, and that plumber then
-      # exits 3 ("incomplete data") and withholds every other verdict. That claim
-      # is inherited, not measured here, and the cheapest way to settle it is to
-      # let this job answer. If it exits 3, the skip comes back with the evidence
-      # in the commit that adds it.
+      # branchMustBeProtected is NOT skipped, and that was an open question until
+      # this job answered it. A run on v0.4.36 reported the default CI token could
+      # not read repository settings, and that plumber then exits 3 ("incomplete
+      # data") withholding every other verdict — which is why the earlier attempt
+      # skipped the control. Measured under v0.4.39 on 2026-08-21: the default
+      # token CAN read them. The run reported `22 controls evaluated, 1 stood down
+      # as declared` and the control passed. `main` has been protected since
+      # 2026-08-20 — 13 required checks, no force-push, no deletions — so this is
+      # a control with something to check, not a formality.
       - name: Plumber
         uses: getplumber/plumber@031bc86d1e5f661626e2000f4f8779912d608d5f  # v0.4.39
         with:
