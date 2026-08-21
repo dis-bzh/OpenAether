@@ -565,6 +565,93 @@ verify_local
   && ! said 'every node runs the pinned Talos'; } \
   && ok "an unanswered version query is UNCHECKED ($(unk_count) unknown), not a pass" \
   || bad "a failed node query read as a fleet on the target, or was not counted as unknown"
+
+# =============================================================================
+# cluster-upgrade: the path across minors
+#
+# Kubernetes forbids skipping a minor on the way up, and Talos supports a WINDOW
+# of Kubernetes minors — so a valid start and a valid end can be joined by a step
+# that is neither. (1.12, 1.30) → (1.13, 1.36) taken Talos-first lands on
+# (1.13, 1.30), below 1.13's floor of 1.31, and is refused at apply time — after
+# the step before it has already landed on a paying cluster.
+#
+# The functions are sourced rather than driven through the script: the harness
+# fixture pins v0.0.1/v0.0.2, which carries no minor semantics at all.
+# =============================================================================
+echo
+echo "=== cluster-upgrade: the path across minors ==="
+
+PATH_FNS="$STUB_DIR/pathfns.sh"
+_a=$(grep -n '^SUPPORT_JSON=' "$ROOT/scripts/dev/cluster-upgrade.sh" | cut -d: -f1)
+_b=$(awk -v a="$_a" 'NR>a && /^}$/ {n=NR} NR>a && /^TALOS_TO=/ {print n; exit}' "$ROOT/scripts/dev/cluster-upgrade.sh")
+{ printf 'ROOT=%q\n' "$ROOT"; sed -n "${_a},${_b}p" "$ROOT/scripts/dev/cluster-upgrade.sh"; } > "$PATH_FNS"
+# rc 127 from a failed extraction would make every negative below score a pass.
+# shellcheck source=/dev/null
+if source "$PATH_FNS" 2>/dev/null && declare -f version_path >/dev/null; then
+  ok "the path functions were extracted and are callable"
+else
+  bad "could not extract version_path — every assertion below would be vacuous"
+fi
+
+CLIMB="$(version_path v1.12.7 v1.30.0 v1.13.9 v1.36.3 2>/dev/null)"
+[ "$(printf '%s' "$CLIMB" | grep -c .)" = 7 ] \
+  && ok "(1.12.7, 1.30.0) → (1.13.9, 1.36.3) is a 7-step climb" \
+  || bad "expected 7 steps, got $(printf '%s' "$CLIMB" | grep -c .)"
+
+# EVERY pair on the way, not just the ends. This is the whole point.
+_bad=0
+while read -r tv kv; do
+  [ -n "$tv" ] || continue
+  pair_ok "$tv" "$kv" || { _bad=$((_bad + 1)); }
+done <<<"$CLIMB"
+[ "$_bad" = 0 ] \
+  && ok "…and every pair along it is inside the supported window" \
+  || bad "${_bad} step(s) of the climb are pairs the guard would refuse"
+
+# The first draft passed through v1.12.0 while the cluster ran v1.12.7 — a patch
+# DOWNGRADE, commanded by a function whose job is to go up.
+[ "$(printf '%s' "$CLIMB" | head -1 | awk '{print $1}')" = v1.12.7 ] \
+  && ok "the minor it is already on keeps its patch — no downgrade on the way through" \
+  || bad "step 1 moves Talos to $(printf '%s' "$CLIMB" | head -1 | awk '{print $1}'), off the running v1.12.7"
+
+[ "$(version_path v1.13.8 v1.36.3 v1.13.9 v1.36.3 2>/dev/null)" = "v1.13.9 v1.36.3" ] \
+  && ok "a patch bump is one step, not an empty list" \
+  || bad "a patch-only move produced $(version_path v1.13.8 v1.36.3 v1.13.9 v1.36.3 2>/dev/null | tr '\n' '/')"
+
+# Kubernetes alone, Talos held still — a real thing to want, and the ONLY route
+# that consults a Talos minor's CEILING. Every climb that also moves Talos takes
+# it first, so 1.12's k8s_max is never read on those: narrowing it to 31 changed
+# nothing and looked like a weak test until this case existed.
+_k8sonly="$(version_path v1.12.7 v1.30.0 v1.12.9 v1.35.0 2>/dev/null)"
+{ [ "$(printf '%s' "$_k8sonly" | grep -c .)" = 5 ] \
+  && [ "$(printf '%s' "$_k8sonly" | tail -1)" = "v1.12.9 v1.35.0" ]; } \
+  && ok "Kubernetes 1.30 → 1.35 on a held Talos is five steps, up to the ceiling" \
+  || bad "a Kubernetes-only climb to 1.12's ceiling produced $(printf '%s' "$_k8sonly" | tr '\n' '/')"
+
+# On the MESSAGE, not just the verdict: without the guard the loop refuses a
+# downgrade anyway, having tried and failed to climb — same exit code, and an
+# operator told "no supported step out of 1.13" when they asked to go DOWN reads
+# it as a broken map. The guard's whole value is the sentence.
+_dn="$(version_path v1.13.9 v1.36.3 v1.12.7 v1.30.0 2>&1)"; _dnrc=$?
+{ [ "$_dnrc" -ne 0 ] && grep -q 'goes DOWN' <<<"$_dn"; } \
+  && ok "a downgrade is refused AS a downgrade, not as a dead end" \
+  || bad "downgrade refused without saying so (rc=$_dnrc): ${_dn%%$'\n'*}"
+
+# Refused BEFORE printing: a caller shown steps and then a refusal has been told
+# to start something that cannot finish.
+# Also on the message. The loop would refuse this on its own after climbing and
+# failing, so the verdict alone does not distinguish "your target is not in the
+# matrix" from "I got stuck somewhere on the way" — and only the first is true.
+_out="$(version_path v1.12.7 v1.30.0 v1.99.0 v1.36.3 2>/dev/null)"; _rc=$?
+_err="$(version_path v1.12.7 v1.30.0 v1.99.0 v1.36.3 2>&1 >/dev/null)"
+{ [ "$_rc" -ne 0 ] && [ -z "$_out" ] && grep -q 'the TARGET' <<<"$_err"; } \
+  && ok "an unreachable TARGET is named as such, with no steps printed" \
+  || bad "refused without naming the target (rc=$_rc, steps=${_out:+yes}): ${_err%%$'\n'*}"
+
+# And the control: the guard must refuse something, or it guards nothing.
+pair_ok v1.13.9 v1.30.0 \
+  && bad "1.13 + Kubernetes 1.30 accepted — below the floor of 1.31" \
+  || ok "1.13 + Kubernetes 1.30 refused — the window is actually consulted"
 echo
 printf '%s passed, %s failed, %s hung, %s skipped, %s known defect(s) in the scripts under test\n' \
   "$PASS" "$FAIL" "$HUNG" "$SKIPPED" "$KNOWN"
