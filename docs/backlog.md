@@ -11,6 +11,12 @@ rung it needs (mocked / emulated / real cloud, see
 has to be settled first; a task-shaped entry invites someone to build what nobody
 decided.
 
+**Taking one.** Every entry names the rung it needs, at the end: `task test` and
+`mocked` close on a laptop, `emulated` needs Feint and still no cloud account,
+`real cloud` spends money on somebody's project. Grep for `Rung:` — today 6 of the
+open entries are closable with no cloud account, and 23 name no rung at all, which
+is a defect in this file rather than in them.
+
 ⚠️ This file twice drifted into a lab notebook — 215 lines on 2026-07-29, then
 1449 on 2026-08-19, entries of 30 lines re-telling incidents that were already
 fixed. Read the top of it at the END of a session too, not only at the start:
@@ -93,6 +99,22 @@ attempted.
 applies, then decide whether 0.1.0 ships a staging lane at all.
 
 ## Open — infrastructure
+
+- [ ] **Nobody has measured whether a service keeps answering during an upgrade.**
+      The probe that produced the 5/7/8-second figures asks
+      `kubectl get --raw=/readyz` — the APISERVER, through the load-balanced
+      endpoint. That is the control plane: for those seconds `kubectl` does not
+      answer and nothing is scheduled. It is not a service interruption, and the
+      reason is architectural — Cilium's eBPF datapath does not consult the
+      apiserver to forward a packet — but architecture is DOCUMENTED, not
+      measured, and this repository has never run the second probe.
+      The roll does cordon and drain each node in turn, honouring
+      PodDisruptionBudgets, so workloads genuinely MOVE. Whether anything stopped
+      answering while they moved is unknown, and the number people will quote
+      makes it sound answered.
+      **Closes:** a second probe, on a real workload behind a Service, running for
+      the whole roll alongside the apiserver one, with both numbers reported.
+      Rung: real cloud.
 
 - [ ] **The API is unreachable for seconds during a control-plane roll.** Same
       probe (`/readyz`, ~1 Hz, through the load-balanced endpoint), asserting on

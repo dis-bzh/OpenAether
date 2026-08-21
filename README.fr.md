@@ -7,9 +7,27 @@
 
 🇬🇧 [English version](README.md)
 
+## Par où commencer
+
+Deux profils différents arrivent ici, et ils ne cherchent pas la même page.
+
+**Vous voulez un cluster.** Commencez par celui qui ne demande ni compte ni
+credentials — `task local-up` monte un cluster Talos de six nœuds dans Docker.
+Puis [Démarrage rapide](#démarrage-rapide) pour un cloud, ou
+[`docs/first-cluster.fr.md`](docs/first-cluster.fr.md) pour la version pas à pas,
+de la machine nue à un cluster qu'on rejoint, met à jour et détruit.
+
+**Vous voulez contribuer.** [`CONTRIBUTING.md`](CONTRIBUTING.md) porte les règles
+qui ne se devinent pas — ce qui compte comme preuve, les trois barreaux qu'un
+changement doit gravir, et comment se signe un commit écrit avec une IA. Le
+travail ouvert est dans [`docs/backlog.md`](docs/backlog.md), et chaque entrée
+nomme le barreau qu'elle exige : `task test` et `mocked` sont celles qu'on peut
+fermer sans compte cloud.
+
 ## Version
 
-**0.1.0, non publiée** — infrastructure seule. Cinq choses et rien d'autre :
+**0.1.0** — publiée le 2026-08-20 en pré-version. Infrastructure seule. Cinq
+choses et rien d'autre :
 déployer, un cluster HA sain (Talos + Cilium), l'idempotence, les upgrades
 Kubernetes et Talos, et un état OpenTofu chiffré côté client dans S3 avec un
 réplica optionnel chez un second provider. kubeconfig et talosconfig sont
@@ -250,6 +268,7 @@ task security            # contrôles de durcissement
 | [docs/upgrade.fr.md](docs/upgrade.fr.md) | Faire bouger Kubernetes et Talos sur un cluster qui doit rester debout |
 | [docs/release-checklist.md](docs/release-checklist.md) | Ce qu'il faut lancer avant de taguer, dans l'ordre qui échoue le moins cher |
 | [docs/backlog.md](docs/backlog.md) | **Source de vérité** : état courant, dette, améliorations (anglais seulement) |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | **À lire avant une première pull request** : ce qui compte comme preuve, les trois barreaux, les trailers de commit, les contributions assistées par IA |
 
 ## Sécurité
 
