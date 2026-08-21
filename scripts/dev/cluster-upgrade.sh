@@ -300,8 +300,8 @@ if [ "$TALOS_DONE" = 0 ]; then
   # --yes: there is no terminal here, and without it rolling-replace stops at its
   # confirmation prompt and exits 1 — which is how an unattended lane discovers
   # that a script it depends on was only ever run by hand.
-  task cluster-roll PROVIDER="$PROVIDER" KEY="$KEY" APPROVE=auto -- --cp-only --upgrade
-  task cluster-roll PROVIDER="$PROVIDER" KEY="$KEY" APPROVE=auto -- --workers-only --upgrade
+  task cluster-roll PROVIDER="$PROVIDER" ROLE="$ROLE" KEY="$KEY" APPROVE=auto -- --cp-only --upgrade
+  task cluster-roll PROVIDER="$PROVIDER" ROLE="$ROLE" KEY="$KEY" APPROVE=auto -- --workers-only --upgrade
 
   # Same trap as the kubelet count above: with no nodes returned, `grep -cv`
   # answers 0 and a dead cluster reports a clean Talos upgrade.

@@ -843,9 +843,9 @@ tasks:
     desc: >-
       Replace nodes one at a time (drain→targeted apply→wait) with NO downtime. Use after a ForceNew change
       (instance_type / Talos image) instead of infra, which replaces all nodes in parallel and breaks etcd
-      quorum. Management clusters only (see scripts/ops/rolling-replace.sh). Targets are derived from `tofu
-      state list` — provider-agnostic; --upgrade exercised live on Scaleway, OVH and Outscale.
-      Usage: task cluster-roll PROVIDER=… [KEY=~/.ssh/key] [APPROVE=auto]
+      quorum. Targets are derived from `tofu state list` — provider-agnostic; --upgrade exercised live on
+      Scaleway, OVH and Outscale. ROLE picks the env file and the state, and defaults to management.
+      Usage: task cluster-roll PROVIDER=… [ROLE=management|workload] [KEY=~/.ssh/key] [APPROVE=auto]
       [-- --workers-only|--cp-only|--dry-run|--upgrade]
     dir: infrastructure/opentofu/cluster
     # PROVIDER is REQUIRED, not defaulted. Twenty targets used to fall back to
@@ -866,9 +866,13 @@ tasks:
       APPROVE: '{{.APPROVE | default "ask"}}'
     env: *provider-env
     cmds:
-      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/management-{{.PROVIDER}}.tfvars)
+      - tofu init -reconfigure $(../../../scripts/internal/tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars)
       - SSH_KEY="{{.KEY}}" ../../../scripts/bootstrap/talos-tunnels.sh open .
-      - ../../../scripts/ops/rolling-replace.sh {{.PROVIDER}} {{if eq .APPROVE "auto"}}--yes {{end}}{{.CLI_ARGS}}
+      # --role BEFORE CLI_ARGS: a role passed by the caller in `-- …` then wins,
+      # which is the ordering every other flag here already has.
+      - >-
+        ../../../scripts/ops/rolling-replace.sh {{.PROVIDER}} --role={{.ROLE}}
+        {{if eq .APPROVE "auto"}}--yes {{end}}{{.CLI_ARGS}}
       - task: _backup-state
         vars: {PROVIDER: "{{.PROVIDER}}"}
 

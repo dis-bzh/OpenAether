@@ -54,7 +54,7 @@ docker run --rm -v /tmp/repo.tar:/tmp/repo.tar:ro ubuntu:24.04 bash -c '
       `task --list-all` plus aliases. Checked to fail too: an invented name and
       two just-deleted scripts all came back absent.
 - [x] `task preflight` green — lint, render, validate, `tofu test` and the script
-      harnesses. 337 offline assertions across 11 harnesses, every one
+      harnesses. 344 offline assertions across 11 harnesses, every one
       mutation-tested. **It went DOWN from 364 and that is not silent**: the
       staging lane was deleted this release and 14 of those assertions tested a
       script that no longer exists.

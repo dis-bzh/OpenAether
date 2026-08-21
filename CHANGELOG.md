@@ -267,7 +267,7 @@ Talos API, never from the tool that performed the upgrade.
   that run moved Talos alone, while the 5 s run also moved Kubernetes, which
   restarts an apiserver per control plane by itself. Two workloads, two numbers
   that do not compare — quote the 5/7/8 figures.
-- **333 offline assertions across 11 harnesses**, every one mutation-tested
+- **344 offline assertions across 11 harnesses**, every one mutation-tested
   (`task test-scripts`). The emulated lane runs feint 0.10.0 against Scaleway provider
   2.81.0 — the same version the clusters run.
 
