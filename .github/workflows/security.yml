@@ -43,3 +43,81 @@ jobs:
 
       - name: Run gitleaks
         run: gitleaks git -v --redact
+
+  # ---------------------------------------------------------------------------
+  # gitleaks above reads what the pipeline CARRIES. Nothing read the pipeline
+  # itself — unpinned actions, dangerous triggers, a checkout of a fork's HEAD
+  # under pull_request_target, over-broad permissions, a security job quietly
+  # weakened. Those live in the workflow files, and until now only review stood
+  # between a pull request and any of them.
+  #
+  # 0.1.0 deleted the credentialed lane, so no workflow here touches a cloud
+  # account. That removes the worst blast radius and removes nothing else: these
+  # two workflows still run on every pull request, with a token, against a
+  # public repository.
+  # ---------------------------------------------------------------------------
+  pipeline-audit:
+    name: Pipeline audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write  # SARIF upload to Code Scanning
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      # Deliberately no .plumber.yaml. A config file REPLACES the built-in policy
+      # instead of extending it: a minimal one, measured on 2026-08-11, left 22 of
+      # the 23 controls "skipped" while the run still read as normal — a gate
+      # checking one thing in twenty-three and reporting success. The policy stays
+      # the shipped default, and the step below asserts what stood down.
+      #
+      # branchMustBeProtected is NOT skipped here, deliberately, and this run is
+      # the experiment. `main` has been protected since 2026-08-20 — 13 required
+      # checks, no force-push, no deletions — and plumber's own control answers
+      # `passed` when it can read that, measured locally on 2026-08-21 with a
+      # token that can. What is not known is whether the DEFAULT CI token can:
+      # an earlier run on v0.4.36 reported it could not, and that plumber then
+      # exits 3 ("incomplete data") and withholds every other verdict. That claim
+      # is inherited, not measured here, and the cheapest way to settle it is to
+      # let this job answer. If it exits 3, the skip comes back with the evidence
+      # in the commit that adds it.
+      - name: Plumber
+        uses: getplumber/plumber@031bc86d1e5f661626e2000f4f8779912d608d5f  # v0.4.39
+        with:
+          # Publishing the score sends this repository's name to a hosted badge
+          # service. That is a decision to take on purpose, not a CI default.
+          score-push: false
+          upload-sarif: ${{ github.event_name == 'push' }}
+          upload-artifacts: false
+
+      # A scanner that quietly stops scanning is the failure mode this repository
+      # keeps meeting. Two controls stand down by design; a third means the policy
+      # moved under us, and a green run would say nothing about it.
+      - name: The audit still audits
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, sys
+
+          try:
+              report = json.load(open("plumber-report.json"))
+          except OSError:
+              sys.exit("::error::no plumber-report.json — the analysis never ran")
+
+          controls = {k: v for k, v in report.items()
+                      if k.endswith("Result") and isinstance(v, dict)}
+          skipped = sorted(k for k, v in controls.items() if v.get("status") == "skipped")
+          ran = [k for k, v in controls.items() if v.get("status") not in (None, "skipped")]
+          # Only requiredActionsResult stands down on its own — measured against
+          # v0.4.39 on this tree, 22 of 23 evaluated. branchProtectionResult joins
+          # it only if the token cannot read the settings, which is what this run
+          # is here to find out.
+          expected = ["requiredActionsResult"]
+
+          if report.get("dataCollectionDegraded") or skipped != expected:
+              sys.exit(f"::error::{len(ran)} controls evaluated, skipped={skipped} "
+                       f"(expected {expected}), "
+                       f"degraded={report.get('dataCollectionDegraded')}")
+          print(f"{len(ran)} controls evaluated, {len(skipped)} stood down as declared")
+          PY
