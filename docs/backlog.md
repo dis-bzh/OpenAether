@@ -64,7 +64,7 @@ Destroy always takes two commands and no flag collapses them. S3 credentials are
 namespaced by the cloud that HOLDS the bucket, and a cross-provider backup is
 proven — an encrypted tfstate at Outscale while the cluster runs on Scaleway.
 353 offline assertions across 14 harnesses, every one mutation-tested; the
-emulated lane runs feint 0.9.0 against Scaleway provider 2.81.0, the version the
+emulated lane runs feint 0.10.0 against Scaleway provider 2.81.0, the version the
 clusters run.
 
 **The root cause behind a week of upgrade failures is fixed**, and it was ours:
@@ -495,7 +495,7 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
       Separately, `feint shapes` compares our providers' answers against a real
       cloud, which a proxy cannot do alone — recording needs a real account and
       rides on the next real-cloud session, then `--check` runs offline.
-      The measurements behind this predate feint 0.9.0 and must be re-run.
+      The measurements behind this predate feint 0.10.0 and must be re-run.
       **Closes:** `task feint-apply` reaching an apply on the real cluster root,
       both providers; `feint shapes --check` green against a recording.
 

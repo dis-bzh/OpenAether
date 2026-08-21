@@ -10,7 +10,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # renovate: datasource=github-releases depName=stephrobert/feint extractVersion=^v(?<version>.*)$
-FEINT_VERSION="0.9.0"
+FEINT_VERSION="0.10.0"
 FEINT_ENDPOINT="${FEINT_ENDPOINT:-http://127.0.0.1:4599}"
 BIN_DIR="${FEINT_BIN_DIR:-$HOME/.local/bin}"
 
@@ -307,7 +307,13 @@ case "${1:-}" in
   install) install_feint ;;
   start)
     guard_local "$FEINT_ENDPOINT"
-    command -v feint >/dev/null 2>&1 || install_feint
+    # install_feint unconditionally: it returns early when the version already
+    # matches, and it is the ONLY thing that compares one. This used to read
+    # `command -v feint || install_feint`, which installs when the binary is
+    # ABSENT and never asks which version a present one is — so FEINT_VERSION was
+    # honoured on a fresh machine and decorative on every machine that had already
+    # run the lane. Bumping the pin to 0.10.0 on 2026-08-21 kept running 0.9.0.
+    install_feint
     # Idempotent: `feint start` refuses when one is already listening, and a
     # target you cannot run twice is a target nobody re-runs after a failure.
     # Matched on the output, not the exit code: `feint status` exits 0 either
