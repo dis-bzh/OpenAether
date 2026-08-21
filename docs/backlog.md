@@ -138,6 +138,54 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
       **Closes:** a roll whose kept samples show zero consecutive failures, and
       the before/after to go with it. Rung: real cloud.
 
+- [ ] **`cluster-up` declares the version it will not land.** Bump
+      `talos_version` in the tfvars, run `task cluster-up`, and the machine config
+      carries the new installer image while every node keeps running the old one:
+      `talosctl upgrade` is reachable from `rolling-replace.sh` alone, and
+      `cluster-up` calls neither it, nor `cluster-upgrade`, nor `talosctl`
+      (verified by grep 2026-08-20). Nothing catches the gap either —
+      `cluster-verify` compares the running SCHEMATIC, never the running version,
+      and a version bump leaves the schematic untouched. HYPOTHESIS, not yet run
+      on a cluster: the plan afterwards is empty and `cluster-verify` says 11/11
+      while the fleet is a version behind. That is the worst shape a defect can
+      take, because every signal reads green.
+      This is the same principle the operator stated about idempotence: you run
+      the command and you land in the state you asked for. Today `cluster-up`
+      lands part of it. `ignore_changes` on the image attribute already stops the
+      destructive half (see provider-contract.md § Node image drift), so what is
+      missing is the deliberate half — detect the drift and route it through the
+      rolling path instead of leaving it declared and unapplied.
+      **Decide:** whether `cluster-up` performs the roll itself, or refuses and
+      names `cluster-upgrade`. Silently landing neither is the one option to drop.
+      **Closes:** a version bump followed by `cluster-up` alone, ending with 6/6
+      nodes on the new version read from their own Talos API — and a
+      `cluster-verify` check that would have gone red before the fix. Rung: real
+      cloud, and the local Docker rung cannot stand in (no disk, no `talosctl
+      upgrade`).
+
+- [ ] **Nothing sequences an upgrade across more than one minor.** `cluster-upgrade`
+      moves the fleet to whatever the tfvars pin, in one step. Kubernetes forbids
+      skipping a minor on the way up, and Talos has its own rules; a jump of two
+      or more is either refused by the API or lands somewhere unsupported. Nothing
+      in the repository computes the intermediate steps, and nothing refuses the
+      jump.
+      **Closes:** the step list derived from current and target, each step applied
+      and verified before the next, and a refusal — seen to fire — when the path
+      cannot be built. Rung: `task test` for the arithmetic, real cloud for one
+      two-minor climb.
+
+- [ ] **The version-pair guard checks the destination, not the path.**
+      `cluster/versions-guard.tf` asserts that (`talos_version`,
+      `kubernetes_version`) is a supported pair and fails an unknown Talos minor
+      on purpose — good, and it is tested. What it does not check is every pair
+      the cluster passes THROUGH on a multi-step upgrade: a valid start and a
+      valid end can be joined by a step that is neither. Its map also stops at
+      Talos 1.12 and 1.13, so it enforces nothing about a version it has never
+      heard of beyond refusing it outright.
+      **Closes:** the guard evaluated per step of the path above, with a mutation
+      that makes an intermediate pair invalid and is seen to go red. Rung:
+      `task test`.
+
 - [ ] **An infrastructure change must not break a running cluster.** Nothing has
       ever changed `vcpu`, `ram` or a disk size on a live cluster and watched
       what happens. Some of those force the provider to replace the instance,
