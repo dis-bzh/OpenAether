@@ -59,10 +59,14 @@ install_tofu() {
                 return 1
             fi
         fi
-        curl -fsSL https://get.opentofu.org/install-opentofu.sh -o install-opentofu.sh
-        chmod +x install-opentofu.sh
-        ./install-opentofu.sh --install-method standalone
-        rm -f install-opentofu.sh
+        # Downloads to $TMPDIR, not to the CWD: the `rm` this replaced sat
+        # AFTER the installer, so under `set -e` a failed install left a 50 KB
+        # third-party script in the root of a public repository.
+        local tmp
+        tmp="$(mktemp)"
+        trap 'rm -f "$tmp"' RETURN
+        curl -fsSL https://get.opentofu.org/install-opentofu.sh -o "$tmp"
+        sh "$tmp" --install-method standalone
     fi
 }
 
