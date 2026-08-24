@@ -28,8 +28,19 @@
   extends: ["config:recommended", "helpers:pinGitHubActionDigests"],
   automerge: false,
   platformAutomerge: false,
-  schedule: ["before 6am on monday"],
+  // Daily, not weekly. "before 6am on monday" is a six-hour window once a week
+  // — the narrowest useful schedule there is — and it was chosen to batch the
+  // noise. Cléa's daily report does that job now, so the weekly window bought
+  // nothing and cost a week of latency each time one was missed: helm 4.2.4
+  // was published 2026-08-13, the window of 2026-08-17 came and went, and no
+  // proposal ever arrived.
+  schedule: ["before 6am"],
   timezone: "Europe/Paris",
+  // Explicit, and it is the heartbeat. Issues were disabled on this repository
+  // until 2026-08-21, so Renovate had nowhere to report a configuration problem
+  // or its own state — three weeks of silence looked exactly like three weeks
+  // of nothing to do. If this issue does not appear, the App is not running.
+  dependencyDashboard: true,
   labels: ["dependencies"],
 
   "pre-commit": { enabled: true },

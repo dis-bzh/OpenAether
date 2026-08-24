@@ -11,6 +11,13 @@ exclude = ["CHANGELOG.md", "docs/**", "**/testdata/**"]
 [report]
 title = "Cléa — dependency report"
 label = "clea"
+# The bot that is supposed to propose the bumps. Its silence alone proves
+# nothing; crossed with a dependency it CAN see being behind, it proves it is
+# not running. That crossing went unmade here for three weeks: helm 4.2.4 was
+# published 2026-08-13, the Monday window of 2026-08-17 passed, and no proposal
+# ever came.
+watch_bot = "renovate[bot]"
+silent_after_days = 8
 
 # Inventories cross-checked against Cléa's own scan. An anchor Cléa can read and
 # an inventory here cannot see is a pin nothing is watching — `clea coverage`

@@ -304,6 +304,54 @@ PY
 if [ $? -eq 0 ]; then PASS=$((PASS + 8)); else FAIL=$((FAIL + 1)); fi
 
 echo
+echo "=== the bot heartbeat: silence only means something when crossed ==="
+python3 - "$CLEA" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("clea", sys.argv[1])
+clea = importlib.util.module_from_spec(spec); spec.loader.exec_module(clea)
+
+def state(days, behind=True, watched=True):
+    return {"generated_at": "now", "deps": [{
+        "dep": "helm/helm", "file": "scripts/setup.sh", "line": 225,
+        "current": "4.2.3", "latest": "4.2.4", "pinned": True,
+        "behind": behind, "watched": watched, "shape_ok": True}],
+        "bot": {"bot": "renovate[bot]", "number": 11, "at": "2026-07-30",
+                "days": days, "scanned": 100, "silent_after_days": 8}}
+
+warn = "and it has proposed nothing"
+checks = [
+    ("behind, watched, 24 days silent -> the report says so",
+     warn in clea.render_report(state(24))),
+    ("behind but within the window -> nothing concluded",
+     warn not in clea.render_report(state(3))),
+    ("silent but nothing behind -> silence proves nothing",
+     "proves\nnothing either way" in clea.render_report(state(24, behind=False))
+     or "proves nothing either way" in clea.render_report(state(24, behind=False))),
+    ("behind but the bot cannot see it -> not the bot's fault",
+     warn not in clea.render_report(state(24, watched=False))),
+]
+
+# The query itself: a bot with no pull request at all, and one that answers.
+PRS = [{"number": 40, "user": {"login": "a-human"}, "created_at": "2026-08-20T00:00:00Z"},
+       {"number": 11, "user": {"login": "renovate[bot]"}, "created_at": "2026-07-30T05:50:28Z"}]
+clea._gh_json = lambda path, token: PRS
+got = clea.bot_activity("o/r", "renovate[bot]", None)
+checks.append(("the newest pull request by the bot is found, not the newest overall",
+               got["number"] == 11 and got["days"] is not None and got["days"] > 20))
+clea._gh_json = lambda path, token: [PRS[0]]
+none = clea.bot_activity("o/r", "renovate[bot]", None)
+checks.append(("a bot with no pull request at all is reported, not assumed fine",
+               none["number"] is None and none["scanned"] == 1))
+checks.append(("and the report says which", "No pull request from" in
+               clea.render_report({"deps": [], "bot": dict(none, silent_after_days=8)})))
+
+for name, ok in checks:
+    print(("  \033[32m\u2713\033[0m " if ok else "  \033[31m\u2717\033[0m ") + name)
+sys.exit(1 if [c for c in checks if not c[1]] else 0)
+PY
+if [ $? -eq 0 ]; then PASS=$((PASS + 7)); else FAIL=$((FAIL + 1)); fi
+
+echo
 echo "=== a rate-limited datasource is an error, never 'up to date' ==="
 python3 - "$CLEA" <<'PY'
 import http.server, importlib.util, socket, sys, threading

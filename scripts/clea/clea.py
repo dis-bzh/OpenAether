@@ -578,6 +578,30 @@ def latest_url_text(dep: str, _token: str | None, url: str | None = None,
     return {"tag": body.strip(), "released_at": None, "notes_url": url}
 
 
+def bot_activity(repo: str, bot: str, token: str | None) -> dict:
+    """When did the bot that proposes the bumps last propose one?
+
+    On its own this says little — a bot with nothing to propose is silent and
+    correct. It becomes a signal when crossed with what Cléa found: a
+    dependency that IS behind and that the bot's own inventory CAN see, with no
+    proposal for days, means the bot is not running. That crossing is what went
+    unmade here for three weeks.
+    """
+    prs = _gh_json(f"/repos/{repo}/pulls?state=all&per_page=100"
+                   f"&sort=created&direction=desc", token)
+    for pr in prs:
+        if (pr.get("user") or {}).get("login") == bot:
+            at = pr.get("created_at")
+            days = None
+            if at:
+                seen = datetime.fromisoformat(at.replace("Z", "+00:00"))
+                days = (datetime.now(timezone.utc) - seen).days
+            return {"bot": bot, "number": pr.get("number"), "at": at,
+                    "days": days, "scanned": len(prs)}
+    return {"bot": bot, "number": None, "at": None, "days": None,
+            "scanned": len(prs)}
+
+
 DATASOURCES = {
     "github-releases": latest_github_releases,
     "github-tags": latest_github_tags,
@@ -810,8 +834,30 @@ def cmd_scan(args) -> int:
                 {"dep": a.dep, "file": a.path, "line": a.line,
                  "current": a.value, "inventory": "renovate"}
                 for a in anchors if a.key not in covered]
+            watched = {(a.path, a.line) for a in anchors if a.key in covered}
+            for entry in deps:
+                entry["watched"] = (entry["file"], entry["line"]) in watched
         except CleaError as exc:
             errors.append(str(exc))
+
+    # The bot's heartbeat. Skipped loudly rather than quietly: "we did not ask"
+    # and "the bot is fine" must not look the same in the report.
+    bot = cfg["report"].get("watch_bot")
+    slug = cfg["report"].get("repo") or os.environ.get("GITHUB_REPOSITORY")
+    if bot and slug:
+        try:
+            state["bot"] = bot_activity(slug, bot, token)
+            state["bot"]["silent_after_days"] = cfg["report"].get("silent_after_days", 8)
+        except CleaError as exc:
+            errors.append(f"{bot} activity on {slug}: {exc}")
+    elif bot:
+        errors.append(f"{bot}: no repository to ask about — set GITHUB_REPOSITORY "
+                      "or [report] repo in clea.toml")
+
+    # Re-taken here, not at construction: the inventory and the heartbeat run
+    # after the state dict is built, and a copy made earlier would silently drop
+    # exactly the failures this report exists to show.
+    state["errors"] = list(dict.fromkeys(errors))
 
     Path(args.state).write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
     behind = [d for d in deps if d.get("behind")]
@@ -950,6 +996,37 @@ def render_report(state: dict) -> str:
                                     "note"]), ""]
     else:
         lines += ["Every pin is anchored, readable and watched.", ""]
+
+    bot = state.get("bot")
+    if bot:
+        actionable = [d for d in deps
+                      if d.get("behind") and d.get("pinned") and d.get("watched")]
+        limit = bot.get("silent_after_days", 8)
+        days = bot.get("days")
+        lines += [f"## {bot['bot']}", ""]
+        if bot.get("number") is None:
+            lines += [f"No pull request from `{bot['bot']}` in the last "
+                      f"{bot.get('scanned', 0)} on this repository.", ""]
+        else:
+            lines += [f"Last proposal: [#{bot['number']}]"
+                      f"(../pull/{bot['number']}), {bot.get('at', '?')} "
+                      f"({days} days ago).", ""]
+        if actionable and (days is None or days > limit):
+            lines += [f"> ⚠️ **{len(actionable)} dependency(ies) are behind that "
+                      f"`{bot['bot']}` can see, and it has proposed nothing for "
+                      f"{days if days is not None else 'longer than that list'} "
+                      "days.** Silence alone means nothing — a bot with nothing "
+                      "to propose is silent and correct. Silence *while* "
+                      "something it watches is behind means it is not running.",
+                      ""]
+            lines += [f"> - `{d['dep']}` {d['current']} → {d['latest']} "
+                      f"(`{d['file']}:{d['line']}`)" for d in actionable] + [""]
+        elif actionable:
+            lines += [f"{len(actionable)} behind and within its window — nothing "
+                      "to conclude yet.", ""]
+        else:
+            lines += ["Nothing it watches is behind, so its silence proves "
+                      "nothing either way.", ""]
 
     failed = [p for p in state.get("probes", []) if not p["green"]]
     if failed:

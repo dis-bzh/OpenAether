@@ -35,6 +35,16 @@ deux bots se disputent une même dépendance.
 | cluster local | toutes les semaines, dimanche 03:41 UTC | `task local-up` sur le couple Talos / Kubernetes publié en amont, puis `task local-verify`, en 1 plan de contrôle + 1 worker |
 | cloud réel | jamais | à la main, par quelqu'un qui regarde — voir [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
 
+Le scan demande aussi quand `renovate[bot]` a proposé quelque chose pour la
+dernière fois. **Ce nombre seul ne veut rien dire** — un bot qui n'a rien à
+proposer se tait, et il a raison. Il ne devient un signal que croisé avec ce que
+Cléa a trouvé : une dépendance en retard *et* visible par l'inventaire du bot,
+sans proposition depuis des jours, signifie que le bot ne tourne pas. Ce
+croisement n'a pas été fait ici pendant trois semaines : helm 4.2.4 est sorti le
+2026-08-13, la fenêtre planifiée du 2026-08-17 est passée, et personne ne l'a vu
+avant l'écriture de Cléa. `[report] watch_bot` et `silent_after_days` dans
+`clea.toml` sont toute la configuration.
+
 `.github/workflows/clea.yml` est tout le câblage. Il ne porte aucune
 identification de provider et doit échouer plutôt que d'en acquérir une.
 

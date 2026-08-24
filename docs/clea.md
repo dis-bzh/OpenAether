@@ -33,6 +33,15 @@ dependency.
 | local cluster | weekly, Sunday 03:41 UTC | `task local-up` on the Talos and Kubernetes pair upstream publishes, then `task local-verify`, at 1 control plane + 1 worker |
 | real cloud | never | by hand, by someone watching — see [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
 
+The scan also asks when `renovate[bot]` last proposed anything. **That number
+alone means nothing** — a bot with nothing to propose is silent and correct. It
+becomes a signal only when crossed with what Cléa found: a dependency that is
+behind *and* that the bot's own inventory can see, with no proposal for days,
+means the bot is not running. That crossing went unmade here for three weeks:
+helm 4.2.4 was published 2026-08-13, the scheduled window of 2026-08-17 came and
+went, and nobody noticed until Cléa was written. `[report] watch_bot` and
+`silent_after_days` in `clea.toml` are the whole configuration.
+
 `.github/workflows/clea.yml` is the whole wiring. It carries no provider
 credential and must fail rather than acquire one.
 

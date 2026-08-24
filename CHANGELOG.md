@@ -48,6 +48,11 @@ in git. 0.1.0 is the first entry describing something proven.
     publishes, then `task local-verify`. Real cloud stays manual.
   - **One report issue**, rewritten in place, which also carries the previous
     run's state so "this moved since yesterday" needs no artifact store.
+  - **A heartbeat on the bot that proposes the bumps.** The scan records when
+    `renovate[bot]` last opened a pull request, and crosses it with what Cléa
+    found: a dependency behind *and* visible to the bot's own inventory, with no
+    proposal for days, means the bot is not running. Silence on its own raises
+    nothing — a bot with nothing to propose is silent and correct.
   - What it refuses to do: a datasource that answers nothing, a tree with no
     anchors and a writer that writes nothing all exit 1. An unauthenticated
     GitHub API answer is an error naming `GITHUB_TOKEN`, never "up to date" —
@@ -61,6 +66,21 @@ in git. 0.1.0 is the first entry describing something proven.
     both go green. The GitHub datasources answered 403 in that session and were
     reported as failures, which is the behaviour that matters most: a
     datasource that did not answer is not a dependency that is up to date.
+
+### Changed
+
+- **Renovate moves from a six-hour weekly window to a daily one**, and
+  `dependencyDashboard` becomes explicit. It has proposed nothing since its
+  config landed on 2026-07-30 — its nine pull requests were created three hours
+  *before* that file existed — and one measurement rules the schedule out as the
+  explanation: helm 4.2.4 was published 2026-08-13, `setup.sh:225` pins 4.2.3,
+  that anchor is one Renovate could always see, and the window of 2026-08-17
+  passed four days later with nothing. The weekly window existed to batch noise;
+  Cléa's daily report does that now, so it cost a week of latency and bought
+  nothing. The dashboard is the visible heartbeat: issues were disabled on this
+  repository until 2026-08-21, so Renovate had nowhere to report a configuration
+  problem or its own state, and three weeks of silence looked exactly like three
+  weeks of nothing to do.
 
 ### Fixed
 
