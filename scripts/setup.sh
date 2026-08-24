@@ -111,8 +111,10 @@ install_shellcheck() {
 
 install_yamllint() {
     echo "Installing yamllint..."
-    if command -v pip3 &> /dev/null; then
-        pip3 install --user yamllint
+    # `python3 -m pip`, not `command -v pip3` — see install_checkov for why:
+    # Python without a pip3 BINARY is the normal case on Ubuntu 24.04.
+    if python3 -m pip --version &> /dev/null; then
+        python3 -m pip install --user yamllint
     elif command -v apt-get &> /dev/null; then
         $SUDO apt-get update && $SUDO apt-get install -y yamllint
     else
@@ -127,10 +129,23 @@ install_checkov() {
     # `pip3` is not always a binary even where Python is: prefer pipx, fall back
     # to `python3 -m pip`, and say so rather than leaving `task security` to die
     # with "executable file not found".
+    # Kept in this order on purpose: the first three need no sudo, the fourth does.
+    local venv="$HOME/.local/share/openaether/checkov-venv"
     if command -v pipx &> /dev/null; then
         pipx install checkov
     elif python3 -m pip --version &> /dev/null; then
         python3 -m pip install --user checkov
+    elif mkdir -p "$(dirname "$venv")" && python3 -m venv "$venv" &> /dev/null && [ -x "$venv/bin/pip" ]; then
+        # Ubuntu 24.04 ships python3 with NEITHER pip nor pipx, so the two
+        # branches above miss and the apt one below wants sudo. A venv needs
+        # neither and carries its own pip. Measured 2026-08-24 on exactly that
+        # machine, where `task security` could not be completed at all.
+        # The condition CREATES the venv rather than probing with `--help`:
+        # `import venv` succeeds without python3-venv installed and only the
+        # creation fails, so anything cheaper would answer the wrong question.
+        "$venv/bin/pip" install --quiet checkov
+        mkdir -p "$HOME/.local/bin"
+        ln -sf "$venv/bin/checkov" "$HOME/.local/bin/checkov"
     elif command -v apt-get &> /dev/null; then
         $SUDO apt-get update && $SUDO apt-get install -y pipx && pipx install checkov
     else

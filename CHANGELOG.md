@@ -29,6 +29,16 @@ in git. 0.1.0 is the first entry describing something proven.
   [`docs/admin-access.md`](docs/admin-access.md) now says what a leaked
   kubeconfig costs, instead of leaving the reader to find out.
 
+### Fixed
+
+- **`task security` could not be completed on a machine set up by
+  `scripts/setup.sh`.** `install_checkov` tried pipx, then `python3 -m pip`,
+  then apt — and Ubuntu 24.04 ships python3 with neither pip nor pipx, so the
+  only branch left wanted sudo. A venv needs neither and carries its own pip;
+  it now sits between them, and `install_yamllint` finally gets the
+  "`pip3` is not always a binary" lesson its neighbour documented and never
+  received.
+
 ### Added
 
 - **`task talosconfig-new`** — issues a role-scoped talosconfig with a TTL
