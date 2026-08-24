@@ -105,6 +105,10 @@ jobs:
       - name: Setup TFLint
         run: ./scripts/internal/install-tflint.sh
 
+      # Same installer as setup.sh, for the same reason as TFLint above.
+      - name: Setup actionlint
+        run: ./scripts/internal/install-actionlint.sh
+
       # Not `arduino/setup-task`: that action asks the releases API for the
       # version, UNAUTHENTICATED, from a runner IP shared with every other GitHub
       # customer — which is what took `main` red on 2026-08-13 with nothing wrong

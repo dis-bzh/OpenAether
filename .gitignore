@@ -135,3 +135,7 @@ __pycache__/
 
 # Probe samples from a roll — kept so the next investigation has a baseline.
 .upgrade-probe-*.log
+
+# Cléa writes this on a local `task clea-scan`; on a probe branch the committed
+# artefact is clea-probe.json, not this.
+clea-state.json

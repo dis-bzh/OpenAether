@@ -52,9 +52,10 @@ every apply plans to a file and applies THAT file, and a saved plan never prompt
 Destroy always takes two commands and no flag collapses them. S3 credentials are
 namespaced by the cloud that HOLDS the bucket, and a cross-provider backup is
 proven — an encrypted tfstate at Outscale while the cluster runs on Scaleway.
-333 offline assertions across 11 harnesses, every one mutation-tested; the
-emulated lane runs feint 0.10.0 against Scaleway provider 2.81.0, the version the
-clusters run.
+406 offline assertions across 13 harnesses, every one mutation-tested — 330 of
+them from the eleven harnesses that existed before Cléa, three fewer than the
+333 this page claimed and nothing had re-counted since; the emulated lane runs
+feint 0.10.0 against Scaleway provider 2.81.0, the version the clusters run.
 
 **The root cause behind a week of upgrade failures is fixed**, and it was ours:
 the shared schematic shipped `siderolabs/qemu-guest-agent`, which never starts on
@@ -72,6 +73,33 @@ further LBU in that Net and use a new one — a redeploy on a fresh Net succeede
 on 2026-08-20, the new LBU `active` with 3 backends, and **request 399530 is
 closed**. One Net from before the fix still refuses deletion on a dependency no
 read returns; only Outscale can clear that, and a second request is open for it.
+
+**Dependency watch, since 2026-08-24.** Cléa (`scripts/clea/`, `docs/clea.md`)
+reads every version this repository claims, resolves what upstream published,
+and probes a bump by installing it from cold and upgrading over the old one in
+a bare container — daily for tools, weekly for the local Talos/Kubernetes pair,
+never for a cloud. Renovate keeps proposing the bumps; Cléa watches, probes and
+reports into one issue, rewritten in place.
+
+It found nine of twenty-one version anchors inert (Renovate had never been told
+to read them, now fixed), and that Renovate had proposed nothing since its
+config landed — its nine pull requests predate `renovate.json5` by three hours,
+and helm 4.2.4 (published 2026-08-13) and flux 2.9.4 (2026-08-07) both sat
+unproposed through their scheduled windows. The schedule is now daily; whether
+that alone was the cause is [#88](https://github.com/dis-bzh/OpenAether-infra/issues/88).
+
+Running it, on a workstation rather than only in CI, found five more defects
+that a green pipeline never showed: `command -v sudo` asking whether sudo
+*exists* rather than whether it can be *used* (eight sites); `install_tofu`
+preferring snap, which cannot install a named version; a tool's version
+assembled from two commands; the CoreDNS readiness gate failing on a cluster it
+had just watched come up; and the teardown proof printing nothing on a clean
+account, indistinguishable from a check that never ran. All five are fixed.
+
+**The local lane's pin mismatch is measured, not yet closed.** Talos `v1.13.9` /
+Kubernetes `v1.36.4` — upstream's current pair — boots on the Docker lane:
+`task local-verify` 6/6. The two roots still pin different versions, and no
+real cloud has run the newer pair — [#87](https://github.com/dis-bzh/OpenAether-infra/issues/87).
 
 **Not proven**: no lane has ever run unattended to completion; nobody has
 deployed under a non-empty `bucket_suffix`; and the failover — provider A treated

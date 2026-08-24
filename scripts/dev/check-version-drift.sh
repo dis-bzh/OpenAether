@@ -39,11 +39,13 @@ HELM_MAJOR="$(pin "$RENDER" HELM_MAJOR_EXPECTED)"
 FEINT="$(pin scripts/dev/feint.sh FEINT_VERSION)"
 HELM_SETUP="$(pin scripts/setup.sh HELM_VERSION)"
 HELM_CI="$(sed -nE 's/^[[:space:]]*HELM_VERSION:[[:space:]]*"([^"]+)".*/\1/p' .github/workflows/ci.yml | head -1)"
+TOFU_SETUP="$(pin scripts/setup.sh TOFU_VERSION)"
+TOFU_CI="$(sed -nE 's/^[[:space:]]*tofu_version:[[:space:]]*"([^"]+)".*/\1/p' .github/workflows/ci.yml | head -1)"
 
 # ZERO FLOOR. If the extractors return nothing the comparisons below all pass
 # vacuously, and this file becomes a green line that proves nothing — the exact
 # shape it is written against.
-for v in CILIUM HELM_MAJOR FEINT HELM_SETUP HELM_CI; do
+for v in CILIUM HELM_MAJOR FEINT HELM_SETUP HELM_CI TOFU_SETUP TOFU_CI; do
   [ -n "${!v}" ] || { echo "✗ could not extract ${v} — the extractor is broken, not the repository" >&2; exit 1; }
 done
 
@@ -59,6 +61,15 @@ if [ "${HELM_SETUP%%.*}" = "$HELM_MAJOR" ]; then
   ok "helm major ${HELM_MAJOR}: what setup.sh installs is what the renderer accepts"
 else
   bad "helm: setup.sh installs major ${HELM_SETUP%%.*}, ${RENDER} refuses anything but ${HELM_MAJOR} — a fresh clone cannot render"
+fi
+
+# OpenTofu: unpinned in setup.sh until 2026-08-23, where the official installer
+# asked the GitHub API for the newest version and a 403 took the whole bootstrap
+# down before anything was installed.
+if [ "$TOFU_SETUP" = "$TOFU_CI" ]; then
+  ok "OpenTofu ${TOFU_SETUP}: setup.sh and ci.yml agree"
+else
+  bad "OpenTofu: setup.sh installs ${TOFU_SETUP}, ci.yml pins ${TOFU_CI} — a contributor and CI would not run the same binary"
 fi
 
 # Cilium: the pin versus the artifact actually committed from it.

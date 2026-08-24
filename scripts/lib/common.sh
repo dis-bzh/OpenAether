@@ -10,6 +10,39 @@
 # and consistent — change a rule here, not in five places.
 # ==============================================================================
 
+# --- Can sudo actually be USED here, or does it merely exist? -----------------
+# `command -v sudo` answers the wrong question, and eight places asked it. On a
+# workstation where /usr/local/bin is not writable and sudo wants a password,
+# every installer chose the sudo branch and then died on a prompt nobody could
+# answer — under `set -e` that ends the whole bootstrap. Measured 2026-08-24.
+# Same shape as asking whether a binary exists rather than which version it is.
+oa_sudo_usable() {
+  command -v sudo >/dev/null 2>&1 || return 1
+  sudo -n true 2>/dev/null && return 0
+  [ -t 0 ]   # a human is here and can be asked
+}
+
+# --- Where to install a binary. Echoes the directory. -------------------------
+# /usr/local/bin when it is writable or reachable with a usable sudo; otherwise
+# ~/.local/bin, which needs no privilege at all.
+oa_bin_dir() {
+  if [ -w /usr/local/bin ] || oa_sudo_usable; then
+    printf '/usr/local/bin'
+  else
+    printf '%s/.local/bin' "${HOME}"
+  fi
+}
+
+# --- The sudo prefix needed to write into <dir>. Echoes "sudo" or nothing. ----
+# A directory that does not exist yet is judged by its parent, so creating
+# ~/.local/bin does not ask for a password.
+oa_sudo_for() {
+  local d="${1:?usage: oa_sudo_for <dir>}"
+  [ -d "$d" ] || d="$(dirname "$d")"
+  [ -w "$d" ] && return 0
+  oa_sudo_usable && printf 'sudo'
+}
+
 # --- AWS CLI quirk: S3-compatible stores (OOS, OVH, Scaleway) reject the AWS
 # CLI v2.23+ default trailing checksum. Call once before any `aws` command.
 oa_aws_compat() {

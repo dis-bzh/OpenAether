@@ -11,63 +11,138 @@ echo -e "${GREEN}🌐 Checking OpenAether Development Environment...${NC}"
 # Root in a container has no sudo and needs none. Bare `sudo` calls exited 127
 # there, and set -e took the whole bootstrap with them: on a clean machine this
 # died at yamllint and never reached task, flux or helm.
+# shellcheck source=scripts/lib/common.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+
 if [ "$(id -u)" -eq 0 ]; then
     SUDO=""
-elif command -v sudo &> /dev/null; then
+elif oa_sudo_usable; then
     SUDO="sudo"
 else
     SUDO=""
-    echo -e "${RED}⚠ Neither root nor sudo: system-wide installs will fail.${NC}"
+    echo -e "${RED}⚠ Neither root nor a usable sudo: system-wide installs will fail.${NC}"
 fi
 
-# Helper to check command existence
+# The versions this repository pins, at the top so the checks below can compare
+# against them. They used to live inside their install functions, where nothing
+# could read them — see check_cmd.
+#
+# TOFU_VERSION MUST stay equal to tofu_version in .github/workflows/ci.yml, and
+# HELM_VERSION to HELM_VERSION there and to HELM_MAJOR_EXPECTED in
+# scripts/bootstrap/render-bootstrap-manifests.sh, which refuses to render on any
+# other major. check-version-drift.sh compares all of them.
+#
+# renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
+TOFU_VERSION="1.12.5"
+# renovate: datasource=github-releases depName=fluxcd/flux2 extractVersion=^v(?<version>.*)$
+FLUX_VERSION="2.9.3"
+# renovate: datasource=github-releases depName=helm/helm extractVersion=^v(?<version>.*)$
+HELM_VERSION="4.2.3"
+
+# check_cmd <tool> [pinned-version]
+#
+# PRESENT IS NOT CURRENT. With no second argument this only asks whether the
+# binary exists, and that was the only question it ever asked: setup.sh
+# installed the pin on a fresh machine and refused every upgrade afterwards, in
+# silence, on every machine that had run it once. Measured 2026-08-23 by the
+# Cléa probe — cold install reached helm 4.2.4, upgrading over 4.2.3 left 4.2.3.
+# The same shape was found and fixed for feint on 2026-08-21
+# (scripts/dev/feint.sh:310).
+#
+# Only the tools this file PINS get the second argument. For the others there is
+# no version to compare against, and inventing one would be a check that cannot
+# fail; pinning them is a separate decision, in docs/backlog.md.
 check_cmd() {
-    if ! command -v "$1" &> /dev/null; then
-        echo -e "${RED}✖ $1 is missing${NC}"
+    local tool="$1" want="${2:-}" version
+    if ! command -v "$tool" &> /dev/null; then
+        echo -e "${RED}✖ $tool is missing${NC}"
         return 1
-    else
-        VERSION=$("$1" version 2>/dev/null || "$1" --version 2>/dev/null || echo "detected")
-        echo -e "${GREEN}✔ $1 is installed${NC} ($VERSION)"
-        return 0
     fi
+    # First NON-EMPTY answer, and `--version` asked first. Measured on this
+    # repository's seven tools: helm, kubectl and talosctl answer only `version`;
+    # flux, tflint and task answer only `--version`, and `task version` prints
+    # the task LIST. Exit codes do not discriminate — several return 0 with no
+    # output — and the previous `$(a || b)` form concatenated both answers when
+    # the first failed after printing, which is a version string assembled from
+    # two commands.
+    version=""
+    for flag in --version version; do
+        version="$("$tool" "$flag" 2>/dev/null || true)"
+        if [ -n "$version" ]; then break; fi
+    done
+    [ -n "$version" ] || version="detected"
+    # Bounded on both sides: 4.2.3 must not match 4.2.30, and the leading v is
+    # optional because half of these print it and half do not.
+    if [ -n "$want" ] && ! grep -qE "(^|[^0-9.])v?${want//./\\.}([^0-9.]|$)" <<< "$version"; then
+        echo -e "${RED}↻ $tool is not the pinned ${want}${NC} (found: $(head -1 <<< "$version"))"
+        return 1
+    fi
+    echo -e "${GREEN}✔ $tool is installed${NC} ($version)"
+    return 0
 }
 
 install_tofu() {
-    echo "Installing OpenTofu..."
-    if command -v snap &> /dev/null; then
-        $SUDO snap install --classic opentofu
-    elif command -v brew &> /dev/null; then
-        brew install opentofu
-    else
-        # The official installer unzips its download and verifies the signature,
-        # refusing to run without unzip, and without either cosign or gpg. A
-        # minimal image has none of them: it aborted here, and set -e meant
-        # nothing at all got installed — not even the tools further down.
-        local need=()
-        # curl belongs here too: it is used ten lines down, and a bare ubuntu:24.04
-        # has none of these. Listing only two of the three left the same abort this
-        # comment describes — exit 127, nothing installed.
-        command -v curl &> /dev/null || need+=(curl ca-certificates)
-        command -v unzip &> /dev/null || need+=(unzip)
-        { command -v gpg &> /dev/null || command -v cosign &> /dev/null; } || need+=(gnupg)
-        if [ ${#need[@]} -gt 0 ]; then
-            if command -v apt-get &> /dev/null; then
-                $SUDO apt-get update && $SUDO apt-get install -y "${need[@]}"
-            else
-                echo "⚠️  OpenTofu's installer needs: ${need[*]}"
-                echo "    Install them, then re-run ./scripts/setup.sh"
-                return 1
-            fi
+    # Pinned, and passed to the installer explicitly. Without it the official
+    # script asks the GitHub API which version is newest — UNAUTHENTICATED, 60
+    # requests an hour from an IP shared with every other customer of the
+    # platform. That is what took `main` red on 2026-08-13 through a different
+    # tool, and here it is worse: this is the FIRST step, so `set -e` takes the
+    # whole bootstrap with it and nothing at all gets installed. Measured
+    # 2026-08-23 in a bare ubuntu:24.04, exit 2, by the Cléa probe.
+    # MUST stay equal to tofu_version in .github/workflows/ci.yml —
+    # check-version-drift.sh compares them.
+    #
+    # snap and brew used to come first here, and both had to go. Neither can
+    # install a NAMED version — `snap install --classic opentofu` serves
+    # whatever the channel holds — so on any machine with snap the pin above
+    # was decorative. That is how this repository's own workstation ended up on
+    # 1.12.6 against a pinned 1.12.5 (measured 2026-08-24). A pin an installer
+    # cannot honour is a pin that guarantees drift, and check-version-drift.sh
+    # now compares this one. The standalone installer honours it, and installs
+    # without root when asked to.
+    echo "Installing OpenTofu v${TOFU_VERSION}..."
+    # The official installer unzips its download and verifies the signature,
+    # refusing to run without unzip, and without either cosign or gpg. A
+    # minimal image has none of them: it aborted here, and set -e meant
+    # nothing at all got installed — not even the tools further down.
+    local need=()
+    # curl belongs here too: it is used ten lines down, and a bare ubuntu:24.04
+    # has none of these. Listing only two of the three left the same abort this
+    # comment describes — exit 127, nothing installed.
+    command -v curl &> /dev/null || need+=(curl ca-certificates)
+    command -v unzip &> /dev/null || need+=(unzip)
+    { command -v gpg &> /dev/null || command -v cosign &> /dev/null; } || need+=(gnupg)
+    if [ ${#need[@]} -gt 0 ]; then
+        if command -v apt-get &> /dev/null; then
+            $SUDO apt-get update && $SUDO apt-get install -y "${need[@]}"
+        else
+            echo "⚠️  OpenTofu's installer needs: ${need[*]}"
+            echo "    Install them, then re-run ./scripts/setup.sh"
+            return 1
         fi
-        # Downloads to $TMPDIR, not to the CWD: the `rm` this replaced sat
-        # AFTER the installer, so under `set -e` a failed install left a 50 KB
-        # third-party script in the root of a public repository.
-        local tmp
-        tmp="$(mktemp)"
-        trap 'rm -f "$tmp"' RETURN
-        curl -fsSL https://get.opentofu.org/install-opentofu.sh -o "$tmp"
-        sh "$tmp" --install-method standalone
     fi
+    # Downloads to $TMPDIR, not to the CWD: the `rm` this replaced sat
+    # AFTER the installer, so under `set -e` a failed install left a 50 KB
+    # third-party script in the root of a public repository.
+    local tmp
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' RETURN
+    curl -fsSL https://get.opentofu.org/install-opentofu.sh -o "$tmp"
+    # Where the binary goes follows the same rule as every other tool here:
+    # the system path when it is reachable, the per-user one otherwise. The
+    # default (/opt/opentofu + /usr/local/bin) needs root, and asking for it
+    # on a machine that cannot give it is what aborted this step.
+    local bin data
+    bin="$(oa_bin_dir)"
+    if [ "$bin" = /usr/local/bin ]; then
+        data=/opt/opentofu
+    else
+        data="${HOME}/.local/share/openaether/opentofu"
+    fi
+    $(oa_sudo_for "$bin") sh "$tmp" --install-method standalone \
+        --opentofu-version "${TOFU_VERSION}" \
+        --install-path "$data" --symlink-path "$bin"
+    [ "$bin" = /usr/local/bin ] || echo "NOTE: tofu installed to $bin. Ensure it's in your PATH."
 }
 
 install_talosctl() {
@@ -85,15 +160,11 @@ install_kubectl() {
     echo "Installing kubectl..."
     curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
     chmod +x kubectl
-    if [ -w /usr/local/bin ]; then
-        mv kubectl /usr/local/bin/
-    elif command -v sudo &> /dev/null; then
-        $SUDO mv kubectl /usr/local/bin/
-    else
-        mkdir -p ~/.local/bin
-        mv kubectl ~/.local/bin/
-        echo "NOTE: kubectl installed to ~/.local/bin. Ensure it's in your PATH."
-    fi
+    local dir sudo_cmd
+    dir="$(oa_bin_dir)"; sudo_cmd="$(oa_sudo_for "$dir")"
+    mkdir -p "$dir"
+    $sudo_cmd mv kubectl "$dir/kubectl"
+    [ "$dir" = /usr/local/bin ] || echo "NOTE: kubectl installed to $dir. Ensure it's in your PATH."
 }
 
 install_shellcheck() {
@@ -214,23 +285,17 @@ install_image_tools() {
 }
 
 install_flux() {
-    # renovate: datasource=github-releases depName=fluxcd/flux2 extractVersion=^v(?<version>.*)$
-    local FLUX_VERSION="2.9.3"
     local ARCH="linux_amd64"
     echo "Installing Flux CLI v${FLUX_VERSION}..."
     local tmp
     tmp="$(mktemp -d)"
     curl -fsSL "https://github.com/fluxcd/flux2/releases/download/v${FLUX_VERSION}/flux_${FLUX_VERSION}_${ARCH}.tar.gz" -o "$tmp/flux.tar.gz"
     tar -xzf "$tmp/flux.tar.gz" -C "$tmp"
-    if [ -w /usr/local/bin ]; then
-        install -m 755 "$tmp/flux" /usr/local/bin/flux
-    elif command -v sudo &> /dev/null; then
-        $SUDO install -m 755 "$tmp/flux" /usr/local/bin/flux
-    else
-        mkdir -p ~/.local/bin
-        install -m 755 "$tmp/flux" ~/.local/bin/flux
-        echo "NOTE: flux installed to ~/.local/bin. Ensure it's in your PATH."
-    fi
+    local dir sudo_cmd
+    dir="$(oa_bin_dir)"; sudo_cmd="$(oa_sudo_for "$dir")"
+    mkdir -p "$dir"
+    $sudo_cmd install -m 755 "$tmp/flux" "$dir/flux"
+    [ "$dir" = /usr/local/bin ] || echo "NOTE: flux installed to $dir. Ensure it's in your PATH."
     rm -rf "$tmp"
 }
 
@@ -241,23 +306,17 @@ install_helm() {
     # those required 4, so a fresh clone got a toolchain that could not run
     # `task local-up` — the credential-free rung the README calls the best first
     # step. The mismatch was invisible to anyone who already had helm 4.
-    # renovate: datasource=github-releases depName=helm/helm extractVersion=^v(?<version>.*)$
-    local HELM_VERSION="4.2.3"
     local ARCH="linux-amd64"
     echo "Installing Helm v${HELM_VERSION}..."
     local tmp
     tmp="$(mktemp -d)"
     curl -fsSL "https://get.helm.sh/helm-v${HELM_VERSION}-${ARCH}.tar.gz" -o "$tmp/helm.tar.gz"
     tar -xzf "$tmp/helm.tar.gz" -C "$tmp"
-    if [ -w /usr/local/bin ]; then
-        install -m 755 "$tmp/${ARCH}/helm" /usr/local/bin/helm
-    elif command -v sudo &> /dev/null; then
-        $SUDO install -m 755 "$tmp/${ARCH}/helm" /usr/local/bin/helm
-    else
-        mkdir -p ~/.local/bin
-        install -m 755 "$tmp/${ARCH}/helm" ~/.local/bin/helm
-        echo "NOTE: helm installed to ~/.local/bin. Ensure it's in your PATH."
-    fi
+    local dir sudo_cmd
+    dir="$(oa_bin_dir)"; sudo_cmd="$(oa_sudo_for "$dir")"
+    mkdir -p "$dir"
+    $sudo_cmd install -m 755 "$tmp/${ARCH}/helm" "$dir/helm"
+    [ "$dir" = /usr/local/bin ] || echo "NOTE: helm installed to $dir. Ensure it's in your PATH."
     rm -rf "$tmp"
 }
 
@@ -277,7 +336,7 @@ install_precommit() {
 }
 
 # 1. Check OpenTofu
-if ! check_cmd tofu; then
+if ! check_cmd tofu "$TOFU_VERSION"; then
     install_tofu
 fi
 
@@ -320,6 +379,12 @@ if ! check_cmd kubectl-cnpg; then
     "$(dirname "${BASH_SOURCE[0]}")/internal/install-kubectl-cnpg.sh"
 fi
 
+# 5b-ter. actionlint — `task lint` calls it. A workflow file is the one thing in
+# this repository that cannot be run before it is merged.
+if ! check_cmd actionlint; then
+    "$(dirname "${BASH_SOURCE[0]}")/internal/install-actionlint.sh"
+fi
+
 # 5c. Check checkov (`task security` runs it directly; only CI ever had it)
 if ! check_cmd checkov; then
     install_checkov
@@ -335,13 +400,13 @@ if [ "$MISSING_IMG_TOOLS" -eq 1 ]; then
 fi
 
 # 7. Check Flux CLI
-if ! check_cmd flux; then
+if ! check_cmd flux "$FLUX_VERSION"; then
     install_flux
 fi
 
 # 8. Check Helm — render-bootstrap-manifests.sh runs `helm template`, so every
 # path that renders Cilium or Flux needs it, including `task local-up`.
-if ! check_cmd helm; then
+if ! check_cmd helm "$HELM_VERSION"; then
     install_helm
 fi
 

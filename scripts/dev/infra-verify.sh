@@ -121,10 +121,26 @@ fi
 
 # CoreDNS proves the CNI actually carries traffic, which "the pod is Running"
 # does not: a broken datapath leaves DNS pods up and every lookup dead.
-if K -n kube-system get deploy coredns -o jsonpath='{.status.readyReplicas}' 2>/dev/null | grep -qE '^[1-9]'; then
-  ok "CoreDNS has a ready replica — the datapath carries traffic"
+#
+# Bounded wait, like the nodes above and for the same reason. This was an
+# INSTANT read, and every node being Ready does not mean CoreDNS has finished
+# rolling out: measured 2026-08-24 on the Docker lane, `local-verify` run right
+# after `local-up` reported "no ready replica" against a cluster that was 2/2
+# forty seconds later. A gate that fails on a healthy cluster is worse than no
+# gate — it is the one people learn to re-run until it passes.
+DNS_TIMEOUT="${DNS_TIMEOUT:-180}"
+deadline=$((SECONDS + DNS_TIMEOUT))
+dns_ready=""
+while :; do
+  dns_ready="$(K -n kube-system get deploy coredns -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
+  [[ "$dns_ready" =~ ^[1-9] ]] && break
+  [ "$SECONDS" -lt "$deadline" ] || break
+  sleep 5
+done
+if [[ "$dns_ready" =~ ^[1-9] ]]; then
+  ok "CoreDNS has ${dns_ready} ready replica(s) — the datapath carries traffic"
 else
-  bad "CoreDNS has no ready replica — the CNI is up but the network is not"
+  bad "after ${DNS_TIMEOUT}s CoreDNS has no ready replica — the CNI is up but the network is not"
 fi
 
 info "The floor is the floor — what 1.0.0 says is NOT there"

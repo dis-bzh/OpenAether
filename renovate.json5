@@ -5,10 +5,17 @@
 // Native managers cover OpenTofu providers (`terraform`), CI pins
 // (`github-actions`) and pre-commit hook revs (`pre-commit`). Everything
 // else — Talos, Kubernetes, the OpenTofu CLI itself, Cilium, Flux — lives in
-// a bash var, a Taskfile default or a Terraform variable default, which
+// a bash var, a workflow env key or a Terraform variable default, which
 // Renovate can't see on its own. Those are tracked with the standard
 // `# renovate: datasource=... depName=...` anchor comment placed one line
 // above the value; see customManagers below.
+//
+// The three custom managers below match on the SHAPE of a value, not on the
+// names of the keys that hold it: nine anchors were once inert because their
+// file or their key had never been named here, and Renovate ignores an anchor
+// it was not told to read without saying anything. `clea coverage`
+// (scripts/clea/) now compares this file against every anchor in the tree and
+// fails on the difference — `task lint` runs it.
 //
 // GitHub Actions and pre-commit hooks are both pinned to a commit SHA (with
 // the tag kept as a trailing comment) rather than a mutable tag — a tag can
@@ -21,8 +28,19 @@
   extends: ["config:recommended", "helpers:pinGitHubActionDigests"],
   automerge: false,
   platformAutomerge: false,
-  schedule: ["before 6am on monday"],
+  // Daily, not weekly. "before 6am on monday" is a six-hour window once a week
+  // — the narrowest useful schedule there is — and it was chosen to batch the
+  // noise. Cléa's daily report does that job now, so the weekly window bought
+  // nothing and cost a week of latency each time one was missed: helm 4.2.4
+  // was published 2026-08-13, the window of 2026-08-17 came and went, and no
+  // proposal ever arrived.
+  schedule: ["before 6am"],
   timezone: "Europe/Paris",
+  // Explicit, and it is the heartbeat. Issues were disabled on this repository
+  // until 2026-08-21, so Renovate had nowhere to report a configuration problem
+  // or its own state — three weeks of silence looked exactly like three weeks
+  // of nothing to do. If this issue does not appear, the App is not running.
+  dependencyDashboard: true,
   labels: ["dependencies"],
 
   "pre-commit": { enabled: true },
@@ -59,51 +77,28 @@
   customManagers: [
     {
       customType: "regex",
-      description: "Terraform variable defaults (talos_version, kubernetes_version) — the `terraform` manager only reads required_providers, not variable defaults.",
-      fileMatch: ["^infrastructure/opentofu/cluster/variables\\.tf$"],
+      description: "Terraform variable defaults — talos_version and kubernetes_version, in the cloud root AND in the local Docker lane. The `terraform` manager reads required_providers, never a variable default.",
+      managerFilePatterns: ["/^infrastructure/.*variables\\.tf$/"],
       matchStrings: [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s*\\n\\s*default\\s*=\\s*\"(?<currentValue>[^\"]+)\"",
       ],
     },
     {
       customType: "regex",
-      description: "Taskfile.yml VERSION defaults (talos-image, up) — same Talos pin, kept in sync with cluster/variables.tf by this same tracker.",
-      fileMatch: ["^Taskfile\\.yml$"],
+      description: "Every version pinned in a shell script: VAR=\"x\", local VAR=\"x\", VAR=\"${VAR:-x}\". One manager for all of them, matched on the SHAPE. Four anchors — feint, task, tflint, kubectl-cnpg — sat in files no fileMatch named, and Renovate ignores an anchor it was not told to read, in silence. `clea coverage` now fails on that.",
+      managerFilePatterns: ["/^scripts/.*\\.sh$/"],
       matchStrings: [
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s*\\n\\s*VERSION: '\\{\\{\\.VERSION \\| default \"(?<currentValue>[^\"]+)\"\\}\\}'",
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: extractVersion=(?<extractVersion>\\S+))?(?: registryUrl=(?<registryUrl>\\S+))?\\s*\\n\\s*(?:local |export )?\\w+=\"\\$\\{\\w+:-(?<currentValue>[^}\"]+)\\}\"",
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: extractVersion=(?<extractVersion>\\S+))?(?: registryUrl=(?<registryUrl>\\S+))?\\s*\\n\\s*(?:local |export )?\\w+=\"(?<currentValue>[^\"$]+)\"",
       ],
     },
     {
       customType: "regex",
-      description: "render-bootstrap-manifests.sh: CILIUM_VERSION and FLUX_VERSION, bash `VAR=\"${VAR:-default}\"` form.",
-      fileMatch: ["^scripts/bootstrap/render-bootstrap-manifests\\.sh$"],
+      description: "Workflow values the github-actions manager cannot see: an action input, an env pin, a pip install. Matched on the shape rather than on named keys — GITLEAKS_VERSION and HELM_VERSION in ci.yml were invisible because only tofu_version and TALOS_VERSION had ever been named, and nothing said so.",
+      managerFilePatterns: ["/^\\.github/workflows/.*\\.ya?ml$/"],
       matchStrings: [
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: registryUrl=(?<registryUrl>\\S+))?\\s*\\n\\w+=\"\\$\\{\\w+:-(?<currentValue>[^}]+)\\}\"",
-      ],
-    },
-    {
-      customType: "regex",
-      description: "setup.sh install_flux(): the Flux CLI version for local dev, `local VAR=\"value\"` form (no leading v — extractVersion strips it from the fetched tag).",
-      fileMatch: ["^scripts/setup\\.sh$"],
-      matchStrings: [
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: extractVersion=(?<extractVersion>\\S+))?\\s*\\n\\s*local \\w+=\"(?<currentValue>[^\"]+)\"",
-      ],
-    },
-    {
-      customType: "regex",
-      description: "ci.yml: values fed to CLI tools the github-actions manager can't see — the OpenTofu CLI version (opentofu/setup-opentofu's `with:` input) and talosctl (downloaded + checksum-verified directly in the talos job, not via an action).",
-      fileMatch: ["^\\.github/workflows/ci\\.yml$"],
-      matchStrings: [
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: extractVersion=(?<extractVersion>\\S+))?\\s*\\n\\s*tofu_version:\\s*\"(?<currentValue>[^\"]+)\"",
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s*\\n\\s*TALOS_VERSION:\\s*\"(?<currentValue>[^\"]+)\"",
-      ],
-    },
-    {
-      customType: "regex",
-      description: "security.yml: gitleaks CLI, downloaded + checksum-verified directly — gitleaks/gitleaks-action requires a paid org license (dis-bzh is an org), so we run the (always free) CLI instead of the Action github-actions would have tracked.",
-      fileMatch: ["^\\.github/workflows/security\\.yml$"],
-      matchStrings: [
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: extractVersion=(?<extractVersion>\\S+))?\\s*\\n\\s*GITLEAKS_VERSION:\\s*\"(?<currentValue>[^\"]+)\"",
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: extractVersion=(?<extractVersion>\\S+))?\\s*\\n\\s*[\\w.-]+:\\s*\"(?<currentValue>[^\"]+)\"",
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: extractVersion=(?<extractVersion>\\S+))?\\s*\\n\\s*run: pip install \\S+==(?<currentValue>\\S+)",
       ],
     },
   ],

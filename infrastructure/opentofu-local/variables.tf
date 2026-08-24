@@ -8,13 +8,20 @@ variable "environment" {
   default = "dev"
 }
 
+# ⚠️ These two are BEHIND the cloud root (infrastructure/opentofu/cluster/
+# variables.tf), and nothing compared them until they were anchored: the
+# credential-free lane the README calls the best first step was exercising a
+# different Talos/Kubernetes pair than the one that ships. Anchored here so a
+# bot proposes the move and the weekly local lane is what proves it boots.
 variable "talos_version" {
-  type    = string
+  type = string
+  # renovate: datasource=github-releases depName=siderolabs/talos
   default = "v1.13.3"
 }
 
 variable "kubernetes_version" {
-  type    = string
+  type = string
+  # renovate: datasource=github-releases depName=kubernetes/kubernetes
   default = "v1.35.3"
 }
 

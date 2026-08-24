@@ -17,15 +17,11 @@ set -euo pipefail
 # renovate: datasource=github-releases depName=go-task/task extractVersion=^v(?<version>.*)$
 TASK_VERSION="3.52.0"
 
-BIN_DIR="${1:-}"
-if [ -z "$BIN_DIR" ]; then
-  if [ -w /usr/local/bin ]; then BIN_DIR=/usr/local/bin
-  elif command -v sudo >/dev/null 2>&1; then BIN_DIR=/usr/local/bin
-  else BIN_DIR="$HOME/.local/bin"
-  fi
-fi
-SUDO=""
-[ -w "$BIN_DIR" ] || [ ! -d "$BIN_DIR" ] || SUDO="sudo"
+# shellcheck source=scripts/lib/common.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
+
+BIN_DIR="${1:-$(oa_bin_dir)}"
+SUDO="$(oa_sudo_for "$BIN_DIR")"
 
 # `task --version` prints a bare "3.52.0" today and "Task version: v3.x.y" on
 # older releases, so match either, and bound it so 3.52.0 does not match 3.52.01.
