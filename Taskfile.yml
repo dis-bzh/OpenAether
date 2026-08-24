@@ -125,6 +125,12 @@ tasks:
       # One tool, one version, everywhere it is claimed. Four instances of that
       # defect landed in one week and every one was mechanically checkable.
       - ./scripts/dev/check-version-drift.sh
+      # And one version, watched by something. check-version-drift.sh compares
+      # the pins to each other; this compares them to the inventory that is
+      # supposed to bump them. Nine anchors were inert when it was written —
+      # a pin nothing watches is a pin nobody bumps, and it looks identical to
+      # a healthy one. Offline, milliseconds.
+      - python3 scripts/clea/clea.py coverage
       # Required inputs must be named where the operator will look. A variable
       # with no default that no document mentions is a deploy that works for us
       # and fails for a stranger — the release criterion is that the docs are
@@ -304,6 +310,10 @@ tasks:
       # graph; this does.
       - ./scripts/dev/test-unattended.sh
       - ./scripts/dev/test-talos-image.sh
+      # Cléa reads every version this repository claims and rewrites it on a
+      # probe branch. Its reader, its writer and its comparator are all places a
+      # silent wrong answer would produce a confident report.
+      - ./scripts/dev/test-clea.sh
 
   test:
     desc: Run OpenTofu tests (cluster root)
@@ -327,6 +337,16 @@ tasks:
       # providers and modules resolved first. -upgrade: see `validate`.
       - tofu init -backend=false -upgrade
       - tofu test
+
+  clea-scan:
+    desc: >-
+      Ask upstream what it has published, offline-safe except for the calls it
+      makes: writes clea-state.json and prints the report. Needs GITHUB_TOKEN —
+      unauthenticated the API allows 60 requests an hour from a shared IP.
+      Usage: task clea-scan
+    cmds:
+      - python3 scripts/clea/clea.py scan --state clea-state.json
+      - python3 scripts/clea/clea.py report --state clea-state.json
 
   cluster-security:
     desc: "Run runtime security validation tests on the cluster"
@@ -364,7 +384,8 @@ tasks:
       # A task-level `vars:` entry SHADOWS the value passed on the command line,
       # so `task talos-image VERSION=v1.13.7` built v1.13.8 and said nothing.
       # Resolve the fallback under its own name and let VERSION win explicitly.
-      # renovate: datasource=github-releases depName=siderolabs/talos
+      # Not an anchor site: talos-version.sh reads the pin from the env's tfvars
+      # or cluster/variables.tf, which is where the only anchor belongs.
       PINNED_VERSION:
         sh: ./scripts/internal/talos-version.sh {{.ROLE}}-{{.PROVIDER}}.tfvars
       IMAGE_VERSION: '{{.VERSION | default .PINNED_VERSION}}'
@@ -392,7 +413,7 @@ tasks:
       # ask | auto — the value names WHO answers the approval, never whether
       # there is one: every apply still plans, then applies that saved plan.
       APPROVE: '{{.APPROVE | default "ask"}}'
-      # renovate: datasource=github-releases depName=siderolabs/talos
+      # Not an anchor site: see talos-image above.
       VERSION:
         sh: ./scripts/internal/talos-version.sh {{.ROLE}}-{{.PROVIDER}}.tfvars
     cmds:

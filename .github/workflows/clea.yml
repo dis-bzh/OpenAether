@@ -1,0 +1,407 @@
+# Cléa — what this repository pins, what upstream published, and whether the gap
+# survives being installed.
+#
+# Nothing here can reach a cloud: no provider credential is passed, and the lane
+# must fail rather than acquire one. Renovate still owns proposing the bumps —
+# Cléa watches, probes and reports. Two systems opening PRs for the same
+# dependency is a collision this repository has already paid for once (see
+# .github/dependabot.yml).
+#
+# ⚠️ GitHub disables a scheduled workflow after 60 days with no repository
+# activity. A silent Cléa is what this file exists to notice in others; check
+# the report issue's date before trusting it.
+name: Clea
+
+on:
+  schedule:
+    # Daily, tools only. Deliberately not on the hour: a shared runner pool is
+    # busiest at :00, and nothing here is time-critical.
+    - cron: "17 4 * * *"
+    # Weekly, the local Talos cluster on Docker plus the heavy installers.
+    - cron: "41 3 * * 0"
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: "daily (tools) | weekly (local cluster + heavy installers)"
+        type: choice
+        options: [daily, weekly]
+        default: daily
+
+# One Cléa at a time: two runs would race on the same probe branches.
+concurrency:
+  group: clea
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # push clea/probe/* branches
+  issues: write     # rewrite the report issue
+
+env:
+  WEEKLY: ${{ github.event.schedule == '41 3 * * 0' || inputs.lane == 'weekly' }}
+
+jobs:
+  scan:
+    name: Scan upstream
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      state: ${{ steps.scan.outputs.state }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      issue: ${{ steps.issue.outputs.number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      # The report issue is also the state store: `clea report` embeds the state
+      # in an HTML comment at the end of its body. No artifact, no cache, and
+      # the durable record is the thing a human already reads.
+      - name: Previous state, from the report issue
+        id: issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          LABEL="$(python3 scripts/clea/clea.py config report.label)"
+          api="https://api.github.com/repos/${{ github.repository }}"
+          curl -sS -H "Authorization: Bearer $GH_TOKEN" \
+               -H "Accept: application/vnd.github+json" \
+               "$api/issues?labels=${LABEL}&state=open&per_page=1" > issues.json
+          number="$(python3 -c 'import json;d=json.load(open("issues.json"));print(d[0]["number"] if d else "")')"
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          if [ -n "$number" ]; then
+            python3 -c 'import json;print(json.load(open("issues.json"))[0]["body"] or "")' > previous.md
+          else
+            : > previous.md
+          fi
+
+      # Authenticated, always. Unauthenticated the API allows 60 requests an
+      # hour from an IP shared with every other GitHub customer — which is what
+      # took `main` red on 2026-08-13 with nothing wrong in the code.
+      - name: clea scan
+        id: scan
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 scripts/clea/clea.py scan --previous previous.md --state clea-state.json
+          {
+            echo "state<<CLEA_EOF"
+            cat clea-state.json
+            echo "CLEA_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: What to probe
+        id: matrix
+        run: |
+          set -euo pipefail
+          # if/then, not `[ … ] && flag=…`: under `set -e` a false test is a
+          # failing command and takes the step with it. That shape has cost this
+          # repository a whole lane before.
+          if [ "${WEEKLY}" = "true" ]; then flag=--heavy-only; else flag=--daily; fi
+          matrix="$(python3 scripts/clea/clea.py matrix --state clea-state.json "$flag")"
+          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
+          echo "${matrix}" >> "$GITHUB_STEP_SUMMARY"
+
+      # Offline, and it gates: a pin no inventory watches is a pin nobody bumps.
+      # It runs here too, not only in `task lint`, because the state of the tree
+      # on a schedule is what the report is about.
+      - name: clea coverage
+        continue-on-error: true
+        run: python3 scripts/clea/clea.py coverage | tee -a "$GITHUB_STEP_SUMMARY"
+
+  probe:
+    name: Probe ${{ matrix.entry.dep }}
+    needs: scan
+    if: needs.scan.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        entry: ${{ fromJSON(needs.scan.outputs.matrix) }}
+    # Through the environment, never interpolated into a shell or a heredoc: a
+    # dependency name reaches a `run:` block as data, and ${{ }} would make it
+    # code. Trusted today, and the rule costs nothing.
+    env:
+      DEP: ${{ matrix.entry.dep }}
+      VERSION: ${{ matrix.entry.version }}
+      SLUG: ${{ matrix.entry.slug }}
+      INSTALLER: ${{ matrix.entry.installer }}
+      VERSION_CMD: ${{ matrix.entry.version_cmd }}
+      INSTALLER_STDIN: ${{ matrix.entry.installer_stdin }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
+
+      # First, and on the untouched tree: probe.sh installs the CURRENT pin so
+      # there is something to upgrade over, and restores the tree when it is
+      # done. Bumping before this would leave nothing to upgrade from.
+      - name: Install from cold, then upgrade over the old version
+        id: probe
+        if: matrix.entry.installer != ''
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          ./scripts/clea/probe.sh "$DEP" "$VERSION" "$INSTALLER" "$VERSION_CMD" \
+            "$INSTALLER_STDIN" 2>&1 | tee probe.log
+
+      - name: Apply the bump
+        run: |
+          set -euo pipefail
+          git checkout -- .
+          python3 scripts/clea/clea.py bump "$DEP" "$VERSION"
+
+      # The repository's own installer, not a hand-written list of steps: a
+      # second list is a second pin to drift, and this is also the only place
+      # anything continuously exercises setup.sh.
+      - name: The toolchain this repository ships
+        run: printf 'y\n' | ./scripts/setup.sh
+
+      # Cilium and Flux are pinned in a generator whose OUTPUT is committed.
+      # Bumping the pin without re-rendering leaves the two disagreeing, which
+      # is a real failure — so render here and let the branch carry both halves.
+      - name: Regenerate what the bump makes stale
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' > regen.sh
+          import tomllib
+          with open("clea.toml", "rb") as handle:
+              for command in tomllib.load(handle).get("lane", {}).get("regen", []):
+                  print(command)
+          PY
+          bash -x regen.sh
+
+      # For a dependency whose only consumer is a CI job, this is the whole
+      # probe: a push carrying GITHUB_TOKEN does not trigger a workflow, so
+      # whatever must run on a probe branch runs here or nowhere.
+      - name: The repository's own gates, with the bump applied
+        id: gates
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python3 - <<'PY' > gates.sh
+          import tomllib
+          with open("clea.toml", "rb") as handle:
+              for command in tomllib.load(handle).get("lane", {}).get("repo", []):
+                  print(f'echo "=== {command} ==="')
+                  print(command)
+          PY
+          bash -e gates.sh 2>&1 | tee gates.log
+
+      - name: Verdict, and the branch that carries it
+        env:
+          GREEN: ${{ steps.probe.outcome != 'failure' && steps.gates.outcome != 'failure' }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib
+          log = ""
+          for name in ("probe.log", "gates.log"):
+              path = pathlib.Path(name)
+              if path.is_file():
+                  log += path.read_text(errors="replace")[-2000:]
+          json.dump({
+              "dep": os.environ["DEP"],
+              "version": os.environ["VERSION"],
+              "green": os.environ["GREEN"] == "true",
+              "branch": "clea/probe/" + os.environ["SLUG"],
+              "run": os.environ["RUN_URL"],
+              "log": log,
+          }, open("clea-probe.json", "w"), indent=2)
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # -u and one explicit path, never -A: setup.sh leaves install-opentofu.sh
+          # in the root when its download fails, and a probe branch is not the
+          # place to publish a vendored installer.
+          git add -u
+          git add clea-probe.json
+          git commit -q -m "chore(clea): probe ${DEP} ${VERSION}"
+          # Pushed green or red on purpose: a red branch is the reproduction, and
+          # deleting it leaves a report describing something nobody can re-run.
+          git push --force-with-lease origin "HEAD:clea/probe/${SLUG}"
+
+  cluster:
+    name: Local Talos cluster
+    needs: scan
+    if: |
+      always() && needs.scan.result == 'success' &&
+      (github.event.schedule == '41 3 * * 0' || inputs.lane == 'weekly')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # One control plane, one worker. This repository's own default is 3 + 3,
+      # which is six Talos containers on a shared runner; the topology below is
+      # supported (non-HA, control plane tainted) and this lane asks whether the
+      # Talos/Kubernetes pair BOOTS, not whether it is highly available.
+      TF_VAR_control_plane_count: "1"
+      TF_VAR_worker_count: "1"
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      # Also the cold-install probe for helm and flux, which have no installer
+      # of their own — they are steps inside this script.
+      - name: The toolchain this repository ships
+        run: printf 'y\n' | ./scripts/setup.sh
+
+      - name: Bump Talos and Kubernetes to what upstream publishes
+        continue-on-error: true
+        env:
+          STATE: ${{ needs.scan.outputs.state }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$STATE" > clea-state.json
+          python3 - <<'PY' > bumps.sh
+          import json
+          state = json.load(open("clea-state.json"))
+          wanted = ("siderolabs/talos", "kubernetes/kubernetes")
+          for dep in state["deps"]:
+              if dep["dep"] in wanted and dep.get("behind") and dep.get("pinned"):
+                  print(f'python3 scripts/clea/clea.py bump {dep["dep"]} {dep["latest"]}')
+          PY
+          bash -x bumps.sh
+          git --no-pager diff --stat
+
+      - name: task local-up
+        id: up
+        run: |
+          ./scripts/bootstrap/render-bootstrap-manifests.sh --local
+          task local-up
+
+      - name: task local-verify
+        id: verify
+        run: task local-verify
+
+      - name: task local-down
+        if: always()
+        run: task local-down || true
+
+      - name: Verdict
+        if: always()
+        env:
+          UP: ${{ steps.up.outcome }}
+          VERIFY: ${{ steps.verify.outcome }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import datetime, json, os, re, pathlib
+          text = pathlib.Path("infrastructure/opentofu-local/variables.tf").read_text()
+
+          def pin(name):
+              m = re.search(r'variable "%s"[\s\S]*?default\s*=\s*"([^"]+)"' % name, text)
+              return m.group(1) if m else "?"
+
+          green = os.environ["UP"] == "success" and os.environ["VERIFY"] == "success"
+          json.dump({
+              "dep": "local-cluster",
+              "version": pin("talos_version"),
+              "green": green,
+              "branch": "clea/probe/local-cluster",
+              "run": os.environ["RUN_URL"],
+              "cluster_lane": {
+                  "verdict": "deployed and verified" if green else
+                             f'up={os.environ["UP"]}, verify={os.environ["VERIFY"]}',
+                  "at": datetime.datetime.now(datetime.timezone.utc)
+                        .isoformat(timespec="seconds"),
+                  "talos": pin("talos_version"),
+                  "k8s": pin("kubernetes_version"),
+              },
+          }, open("clea-probe.json", "w"), indent=2)
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -u
+          git add clea-probe.json
+          git commit -q -m "chore(clea): local cluster lane"
+          git push --force-with-lease origin HEAD:clea/probe/local-cluster
+
+  report:
+    name: Report
+    needs: [scan, probe, cluster]
+    if: always() && needs.scan.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
+
+      - name: Collect the probe verdicts from their own branches
+        env:
+          STATE: ${{ needs.scan.outputs.state }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$STATE" > clea-state.json
+          git fetch -q origin "+refs/heads/clea/probe/*:refs/remotes/origin/clea/probe/*" || true
+          python3 - <<'PY'
+          import json, subprocess
+          state = json.load(open("clea-state.json"))
+          refs = subprocess.run(["git", "for-each-ref", "--format=%(refname:short)",
+                                 "refs/remotes/origin/clea/probe/*"],
+                                capture_output=True, text=True).stdout.split()
+          probes, cluster = [], None
+          for ref in refs:
+              blob = subprocess.run(["git", "show", f"{ref}:clea-probe.json"],
+                                    capture_output=True, text=True)
+              if blob.returncode:
+                  continue
+              try:
+                  probe = json.loads(blob.stdout)
+              except ValueError:
+                  continue
+              if probe.get("cluster_lane"):
+                  cluster = probe["cluster_lane"]
+              else:
+                  probes.append(probe)
+          state["probes"] = probes
+          if cluster:
+              state["cluster_lane"] = cluster
+          json.dump(state, open("clea-state.json", "w"), indent=2)
+          print(f"{len(probes)} probe verdict(s), cluster lane: {bool(cluster)}")
+          PY
+
+      - name: Rewrite the report issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NUMBER: ${{ needs.scan.outputs.issue }}
+        run: |
+          set -euo pipefail
+          python3 scripts/clea/clea.py report --state clea-state.json --out report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          api="https://api.github.com/repos/${{ github.repository }}"
+          # The label may not exist yet; 422 means it already does.
+          label="$(python3 scripts/clea/clea.py config report.label)"
+          curl -sS -o /dev/null -X POST -H "Authorization: Bearer $GH_TOKEN" \
+               "$api/labels" \
+               -d "{\"name\":\"${label}\",\"color\":\"0e8a16\",\"description\":\"Clea dependency report\"}" || true
+          python3 - <<'PY' > payload.json
+          import json, sys, tomllib
+          with open("clea.toml", "rb") as handle:
+              report = tomllib.load(handle).get("report", {})
+          json.dump({"title": report.get("title", "Clea"),
+                     "body": open("report.md").read(),
+                     "labels": [report.get("label", "clea")]}, sys.stdout)
+          PY
+          if [ -n "${NUMBER}" ]; then
+            curl -sS -o /dev/null -X PATCH -H "Authorization: Bearer $GH_TOKEN" \
+                 "$api/issues/${NUMBER}" --data @payload.json
+            echo "report issue #${NUMBER} rewritten"
+          else
+            curl -sS -o /dev/null -X POST -H "Authorization: Bearer $GH_TOKEN" \
+                 "$api/issues" --data @payload.json
+            echo "report issue created"
+          fi
+
+      - name: Probe branches whose bump already landed
+        run: |
+          set -euo pipefail
+          python3 scripts/clea/clea.py prune > stale.txt || true
+          while read -r branch; do
+            [ -n "$branch" ] || continue
+            echo "pruning ${branch}"
+            git push -q origin --delete "$branch" || true
+          done < stale.txt

@@ -1,0 +1,129 @@
+# Cléa's inventory for this repository. The engine (scripts/clea/) knows nothing
+# about OpenAether; everything specific is here. Dropping Cléa into another
+# project is copying that directory and rewriting this file.
+
+[scan]
+# The same anchor Renovate reads, deliberately: one convention, not two. A
+# second inventory is a second thing to drift.
+marker = "# renovate:"
+exclude = ["CHANGELOG.md", "docs/**", "**/testdata/**"]
+
+[report]
+title = "Cléa — dependency report"
+label = "clea"
+
+# Inventories cross-checked against Cléa's own scan. An anchor Cléa can read and
+# an inventory here cannot see is a pin nothing is watching — `clea coverage`
+# fails on it.
+[[inventory]]
+kind = "renovate"
+config = "renovate.json5"
+# Its own matchStrings quote the anchor text verbatim; without this it matches
+# itself and reports anchors that do not exist.
+exclude = ["renovate.json5"]
+
+# --- Tools this repository installs itself -----------------------------------
+# Two probes are derived from each row, and the engine needs nothing else:
+#   install : bare container, bump first, run the installer once
+#   upgrade : bare container, installer at the OLD pin, bump, installer again
+# The second one is the interesting one. `scripts/dev/feint.sh:310` records why:
+# the pin moved to 0.10.0 on 2026-08-21 and every machine that had already run
+# the lane kept 0.9.0, because presence was checked and version was not.
+
+[[tool]]
+name = "go-task/task"
+installer = "scripts/internal/install-task.sh"
+version_cmd = "task --version"
+
+[[tool]]
+name = "terraform-linters/tflint"
+installer = "scripts/internal/install-tflint.sh"
+version_cmd = "tflint --version"
+
+[[tool]]
+name = "cloudnative-pg/cloudnative-pg"
+installer = "scripts/internal/install-kubectl-cnpg.sh"
+version_cmd = "kubectl-cnpg version"
+
+[[tool]]
+name = "stephrobert/feint"
+installer = "scripts/dev/feint.sh install"
+version_cmd = "feint version"
+
+# helm and flux have no installer of their own: they are steps inside setup.sh,
+# which installs the whole toolchain. Too slow for a daily matrix entry, so they
+# ride the weekly lane. `daily = false` is the only thing that says so.
+[[tool]]
+name = "helm/helm"
+installer = "scripts/setup.sh"
+installer_stdin = "y\n"
+version_cmd = "helm version --short"
+daily = false
+
+[[tool]]
+name = "fluxcd/flux2"
+installer = "scripts/setup.sh"
+installer_stdin = "y\n"
+version_cmd = "flux --version"
+daily = false
+
+# --- What the repository consumes without pinning it -------------------------
+# No version is written down anywhere, so no two machines are guaranteed the
+# same tool. Cléa cannot bump these — it can only make the movement visible,
+# which is more than exists today.
+
+[[unpinned]]
+name = "kubernetes/kubernetes"
+datasource = "url-text"
+url = "https://dl.k8s.io/release/stable.txt"
+extract = "^(?P<v>v[0-9][0-9A-Za-z.-]*)$"
+consumed_by = "scripts/setup.sh (install_kubectl)"
+
+[[unpinned]]
+name = "siderolabs/talos"
+datasource = "github-releases"
+consumed_by = "scripts/setup.sh (install_talosctl, via talos.dev/install)"
+
+[[unpinned]]
+name = "aws/aws-cli"
+datasource = "github-releases"
+consumed_by = "scripts/setup.sh (install_awscli_bundle)"
+
+[[unpinned]]
+name = "checkov"
+datasource = "pypi"
+consumed_by = "scripts/setup.sh (install_checkov)"
+
+[[unpinned]]
+name = "yamllint"
+datasource = "pypi"
+consumed_by = "scripts/setup.sh (install_yamllint), .github/workflows/ci.yml"
+
+[[unpinned]]
+name = "pre-commit"
+datasource = "pypi"
+consumed_by = "scripts/setup.sh (install_precommit)"
+
+[[unpinned]]
+name = "koalaman/shellcheck"
+datasource = "github-releases"
+consumed_by = "scripts/setup.sh (install_shellcheck), .github/workflows/ci.yml"
+
+# --- The repository's own gates, run on every probe branch -------------------
+# Not a copy of CI: a bot push carries GITHUB_TOKEN, and GitHub does not trigger
+# workflows from one. Whatever must run on a probe branch runs here or nowhere.
+[lane]
+# Run after the bump, before the gates. Cilium and Flux are pinned in a
+# generator whose output is committed; bumping the pin without re-rendering
+# leaves the two disagreeing, and `task render-check` is what says so. Rendering
+# here means the probe branch carries both halves — the bump and its artifact.
+regen = ["./scripts/bootstrap/render-bootstrap-manifests.sh"]
+
+# The gates, on the bumped tree. `task lint` is the one that earns its place:
+# it runs check-version-drift.sh, which is exactly the "did the bump leave a
+# second copy behind" question.
+repo = [
+  "task lint",
+  "task render-check",
+  "task test-scripts",
+]

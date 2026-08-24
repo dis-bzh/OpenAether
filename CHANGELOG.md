@@ -14,31 +14,6 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ## [Unreleased]
 
-### Security
-
-- **`admin_ip` refuses to open the cluster to the internet.** The variable had
-  no `validation`, so `["0.0.0.0/0"]` was accepted in silence — and it feeds
-  bastion sshd *and* the 6443 LB ACL on all four providers at once. Behind that
-  ACL sits a `system:masters` kubeconfig Kubernetes cannot revoke. Three rules
-  now reject an empty list, an entry without a prefix (including the `YOUR_IP/32`
-  of a copied example) and any `/0` — read from the prefix, so `198.51.100.7/0`
-  is caught too. Nine cases in
-  `cluster/tests/admin-ip-validation.tftest.hcl`; each rule was deleted in turn
-  and the suite watched to go red before it was kept.
-- **Admin access is documented as unrevocable where it is unrevocable.**
-  [`docs/admin-access.md`](docs/admin-access.md) now says what a leaked
-  kubeconfig costs, instead of leaving the reader to find out.
-
-### Fixed
-
-- **`task security` could not be completed on a machine set up by
-  `scripts/setup.sh`.** `install_checkov` tried pipx, then `python3 -m pip`,
-  then apt — and Ubuntu 24.04 ships python3 with neither pip nor pipx, so the
-  only branch left wanted sudo. A venv needs neither and carries its own pip;
-  it now sits between them, and `install_yamllint` finally gets the
-  "`pip3` is not always a binary" lesson its neighbour documented and never
-  received.
-
 ### Added
 
 - **`task talosconfig-new`** — issues a role-scoped talosconfig with a TTL
@@ -54,6 +29,77 @@ in git. 0.1.0 is the first entry describing something proven.
   `Enabled: RBAC` with no `machine.features.rbac` anywhere in this repository,
   an `os:reader` config is refused a host read the admin config gets, and it
   cannot mint itself an `os:admin` one.
+
+- **Cléa — a daily watch on what this repository pins, and a probe that installs
+  the bump before anyone merges it.** `scripts/clea/` holds a generic engine
+  (Python, standard library only, no knowledge of this project); `clea.toml`
+  holds everything specific to it; `.github/workflows/clea.yml` runs it. Renovate
+  keeps proposing the bumps — Cléa watches, probes and reports, and no lane of it
+  can reach a cloud.
+  - **Daily**: resolve every pin against upstream, then for each tool that moved,
+    install it from cold and upgrade it over the old version in a bare
+    `ubuntu:24.04`, then run `task lint`, `task render-check` and
+    `task test-scripts` on the bumped tree. The upgrade half is the one that
+    finds things: an installer that checks whether a binary exists, rather than
+    which version it is, installs correctly once and refuses every upgrade after
+    that — which is exactly what `scripts/dev/feint.sh` had done until
+    2026-08-21.
+  - **Weekly**: `task local-up` on the Talos and Kubernetes pair upstream
+    publishes, then `task local-verify`. Real cloud stays manual.
+  - **One report issue**, rewritten in place, which also carries the previous
+    run's state so "this moved since yesterday" needs no artifact store.
+  - What it refuses to do: a datasource that answers nothing, a tree with no
+    anchors and a writer that writes nothing all exit 1. An unauthenticated
+    GitHub API answer is an error naming `GITHUB_TOKEN`, never "up to date" —
+    60 requests an hour from a shared runner IP is what took `main` red on
+    2026-08-13. Documented in [`docs/clea.md`](docs/clea.md).
+
+### Fixed
+
+- **`task security` could not be completed on a machine set up by
+  `scripts/setup.sh`.** `install_checkov` tried pipx, then `python3 -m pip`,
+  then apt — and Ubuntu 24.04 ships python3 with neither pip nor pipx, so the
+  only branch left wanted sudo. A venv needs neither and carries its own pip;
+  it now sits between them, and `install_yamllint` finally gets the
+  "`pip3` is not always a binary" lesson its neighbour documented and never
+  received.
+
+- **Nine of twenty-one version anchors were inert, and nothing said so.** The
+  `# renovate:` comment was there and Renovate had never been told to read the
+  file or the key, so the pin looked watched and was not: `go-task/task`,
+  `terraform-linters/tflint`, `cloudnative-pg/cloudnative-pg`,
+  `stephrobert/feint`, and `commitizen`, `gitleaks` and `helm` inside
+  `ci.yml`. The two anchors in `Taskfile.yml` marked no version at all — the
+  value moved into `talos-version.sh` and the anchors stayed behind. The six
+  custom managers are now three, matched on the **shape** of a value rather than
+  on the names of the keys that hold it, and written in the current
+  `managerFilePatterns` spelling rather than the deprecated `fileMatch`.
+  `task lint` now runs `clea coverage`, which fails on the next one.
+
+- **`infrastructure/opentofu-local/variables.tf` carried no anchor at all**, so
+  the credential-free lane drifted to Talos `v1.13.3` / Kubernetes `v1.35.3`
+  against `v1.13.9` / `v1.36.3` in the cloud root. Anchored, so a proposal now
+  reaches it; the pins themselves are not moved here because nothing has yet
+  proven the newer pair boots — `docs/backlog.md` holds the entry and the weekly
+  lane is what will close it.
+
+---
+
+### Security
+
+- **`admin_ip` refuses to open the cluster to the internet.** The variable had
+  no `validation`, so `["0.0.0.0/0"]` was accepted in silence — and it feeds
+  bastion sshd *and* the 6443 LB ACL on all four providers at once. Behind that
+  ACL sits a `system:masters` kubeconfig Kubernetes cannot revoke. Three rules
+  now reject an empty list, an entry without a prefix (including the `YOUR_IP/32`
+  of a copied example) and any `/0` — read from the prefix, so `198.51.100.7/0`
+  is caught too. Nine cases in
+  `cluster/tests/admin-ip-validation.tftest.hcl`; each rule was deleted in turn
+  and the suite watched to go red before it was kept.
+- **Admin access is documented as unrevocable where it is unrevocable.**
+  [`docs/admin-access.md`](docs/admin-access.md) now says what a leaked
+  kubeconfig costs, instead of leaving the reader to find out.
+
 
 ## [0.1.0] — 2026-08-20
 
