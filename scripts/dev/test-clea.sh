@@ -281,6 +281,32 @@ expect 1 "a probe that cannot start a container exits non-zero" \
        acme/two v0.10.0 /bin/true "echo 0.10.0"
 
 echo
+echo "=== one dependency, two shapes, one bump ==="
+# This repository pins fluxcd/flux2 as `v2.9.3` where the value builds a release
+# URL and as `2.9.3` where it builds a filename. Both are correct, and only the
+# upstream TAG can become both — `bump` re-applies extractVersion per site. The
+# matrix used to carry one anchor's extracted form, chosen by whichever file
+# sorted first: right by luck, wrong the moment a path changed.
+cp -r "$TMP/basic" "$TMP/shapes"
+cat > "$TMP/shapes/scripts/two-shapes.sh" <<'EOF'
+#!/usr/bin/env bash
+# clea-test: datasource=github-releases depName=acme/twoshape
+URL_VERSION="${URL_VERSION:-v3.0.0}"
+# clea-test: datasource=github-releases depName=acme/twoshape extractVersion=^v(?<version>.*)$
+FILE_VERSION="3.0.0"
+EOF
+expect 0 "the tag moves both shapes at once" \
+  -- python3 "$CLEA" --root "$TMP/shapes" bump acme/twoshape v3.1.0
+if grep -q 'URL_VERSION:-v3.1.0' "$TMP/shapes/scripts/two-shapes.sh" &&
+   grep -q 'FILE_VERSION="3.1.0"' "$TMP/shapes/scripts/two-shapes.sh"; then
+  ok "each site got its own form — v3.1.0 and 3.1.0"
+else
+  bad "one of the two shapes was not written: $(grep VERSION "$TMP/shapes/scripts/two-shapes.sh" | tr '\n' ' ')"
+fi
+expect 1 "an extracted form cannot move the site that keeps the v" \
+  -- python3 "$CLEA" --root "$TMP/shapes" bump acme/twoshape 3.2.0
+
+echo
 echo "=== version comparison, and the pair every hand-rolled comparator gets wrong ==="
 python3 - "$CLEA" <<'PY'
 import importlib.util, sys, pathlib

@@ -784,7 +784,13 @@ def cmd_scan(args) -> int:
             upstream = resolve(anchor.datasource, anchor.dep,
                                registry_url=anchor.attrs.get("registryUrl"))
             latest = apply_extract(upstream["tag"], anchor.attrs.get("extractVersion"))
-            entry.update(latest=latest, released_at=upstream.get("released_at"),
+            # The RAW tag is kept beside the extracted one. `bump` re-applies
+            # extractVersion per site, so it must be handed the tag: this
+            # repository pins fluxcd/flux2 as `v2.9.3` where the value builds a
+            # release URL and as `2.9.3` where it builds a filename, and only
+            # the tag can become both.
+            entry.update(tag=upstream["tag"],
+                         latest=latest, released_at=upstream.get("released_at"),
                          notes_url=upstream.get("notes_url"),
                          behind=is_newer(anchor.value, latest),
                          shape_ok=same_shape(anchor.value, latest))
@@ -922,7 +928,12 @@ def cmd_matrix(args) -> int:
             continue
         seen[key] = {
             "dep": key,
-            "version": dep["latest"],
+            # The tag, not one anchor's extracted form. Deduplicating by
+            # dependency kept whichever file sorted first, so a dependency
+            # pinned in two shapes was bumped with the shape of whichever
+            # happened to come first — right by luck here, wrong the moment a
+            # path changed.
+            "version": dep.get("tag") or dep["latest"],
             "slug": slugify(key),
             "installer": tool.get("installer", ""),
             "version_cmd": tool.get("version_cmd", ""),
