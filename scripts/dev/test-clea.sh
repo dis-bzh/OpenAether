@@ -514,5 +514,69 @@ PY
 if [ $? -eq 0 ]; then PASS=$((PASS + 4)); else FAIL=$((FAIL + 1)); fi
 
 echo
+echo "=== a probe matches its anchor by the SAME tag the matrix used to bump it ==="
+# cmd_matrix hands the probe dep.get("tag") or dep["latest"] — the raw upstream
+# tag, unstripped, because a dependency can be pinned in two shapes across its
+# anchors and only the tag becomes both (see fluxcd/flux2 above). render_report
+# used to compare a probe's recorded version against `latest` — THIS anchor's
+# own extracted form — which is a DIFFERENT STRING whenever extractVersion
+# actually strips something. opentofu/opentofu, go-task/task and
+# cloudnative-pg/cloudnative-pg all ran green and pushed a verdict on this
+# workflow's sixth real run (2026-08-24) and were reported "not probed" anyway
+# — three of seven, silently wrong in the direction that hides success.
+python3 - "$CLEA" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("clea", sys.argv[1])
+clea = importlib.util.module_from_spec(spec); spec.loader.exec_module(clea)
+
+# acme/stripped: extractVersion strips the v, so tag ("v9.0.0") and latest
+# ("9.0.0") are different strings for the same real version — exactly the
+# opentofu/go-task/cloudnative-pg shape.
+state = {
+    "generated_at": "now",
+    "deps": [{"dep": "acme/stripped", "file": "f", "line": 1, "current": "8.0.0",
+              "latest": "9.0.0", "tag": "v9.0.0", "pinned": True, "behind": True,
+              "shape_ok": True, "notes_url": None}],
+    # The matrix bumped it with the TAG, so that is what the probe recorded —
+    # matching cmd_matrix's own dep.get("tag") or dep["latest"] expression.
+    "probes": [{"dep": "acme/stripped", "version": "v9.0.0", "green": True,
+               "branch": "clea/probe/acme-stripped", "run": "x", "log": ""}],
+}
+report = clea.render_report(state)
+checks = [
+    ("a stripped-tag dependency's real probe is found",
+     "✅ probed green" in report),
+    ("and it is not reported as unprobed",
+     "not probed" not in report),
+]
+for name, ok in checks:
+    print(("  \033[32m\u2713\033[0m " if ok else "  \033[31m\u2717\033[0m ") + name)
+sys.exit(1 if [c for c in checks if not c[1]] else 0)
+PY
+if [ $? -eq 0 ]; then PASS=$((PASS + 2)); else FAIL=$((FAIL + 1)); fi
+
+echo
+echo "=== ANSI color has no reason to survive into stored data ==="
+# GitHub's own issue-body storage does not return raw terminal escape sequences
+# unchanged — \u001b[32m came back as the literal three characters \^[ on a
+# real run, which is not valid JSON and broke the embedded state entirely. The
+# strip has to happen before the log ever reaches json.dump, not after.
+python3 - <<'PY'
+import re, sys
+ansi = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+sample = "\x1b[32m\u2713\x1b[0m the dependency is named\n  \x1b[31m\u2717\x1b[0m one failed"
+stripped = ansi.sub("", sample)
+checks = [
+    ("no ESC byte survives", "\x1b" not in stripped),
+    ("the readable text is untouched", "the dependency is named" in stripped
+     and "one failed" in stripped),
+]
+for name, ok in checks:
+    print(("  \033[32m\u2713\033[0m " if ok else "  \033[31m\u2717\033[0m ") + name)
+sys.exit(1 if [c for c in checks if not c[1]] else 0)
+PY
+if [ $? -eq 0 ]; then PASS=$((PASS + 2)); else FAIL=$((FAIL + 1)); fi
+
+echo
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
