@@ -1,5 +1,13 @@
 # Backlog
 
+> **FROZEN — do not add to this file.** Work is tracked in **GitHub issues** now
+> (see `CLAUDE.md`), because at 696 lines this had become a tracker maintained by
+> hand and nobody could read it. The 48 open entries below are still the truth
+> until they are converted, one issue each. Two parts of this file are NOT tasks
+> and will not become issues: **Where we stand**, which is what you open at the
+> start of a session, and the **Traps worth remembering**, which are knowledge
+> rather than work.
+
 What is left to do, and why. **Open items only** — a done entry belongs to git
 history, not here. English only (rewritten every session; two copies would drift).
 

@@ -122,13 +122,24 @@ Le projet ne doit pas grossir en lignes plus vite qu'en fonctionnalités.
 Avant d'écrire un pavé : que perd-on à le réduire à deux lignes ? Le plus
 souvent, rien.
 
-## Backlog
+## Suivi du travail — issues GitHub
 
-Toute amélioration identifiée (« mieux que l'existant ») va dans
-**`docs/backlog.md`** — le lire en début de chantier, y ajouter les découvertes,
-retirer ce qui est fait. Sa section **« Où on en est »** (en tête) dit ce qui
-tourne, ce qui est validé en cloud réel et par où reprendre : **c'est le premier
-fichier à ouvrir en début de session**. Parcours post-déploiement :
+Toute amélioration identifiée (« mieux que l'existant ») ouvre une **issue
+GitHub**, comme dans Feint. Une issue nomme ce qui cloche, **ce qui la ferme**
+(l'observation qui prouve que c'est réglé) et le **barreau** visé : `task test`
+mocké → `task feint-*` émulé → cloud réel.
+
+Un constat sans changement à proposer est une **issue**, pas une PR. Une PR
+propose un changement ; c'est ce qui distingue les deux.
+
+`docs/backlog.md` est l'ancien tracker, tenu à la main, devenu illisible à
+696 lignes. **Il ne reçoit plus de nouvelle entrée** — toutes ses tâches sont
+converties : les entrées applicatives en issues d'`OpenAether-apps`, les autres
+en issues ici. Restent deux blocs qui ne sont pas des tâches et qu'il faut
+reloger avant de supprimer le fichier — « Où on en est » (le briefing de début
+de session, et donc toujours le premier à ouvrir) et les « Traps worth
+remembering » (du savoir, pas du travail) — plus les ~26 fichiers qui pointent
+encore dessus, code source compris. Parcours post-déploiement :
 `docs/admin-access.md`.
 
 Avant de toucher au DAG Flux d'`OpenAether-apps` : `task apps-validate`
