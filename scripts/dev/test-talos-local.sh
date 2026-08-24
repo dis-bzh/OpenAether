@@ -74,7 +74,10 @@ if [[ "${1:-}" == "--destroy" ]]; then
     docker volume rm "$vol" 2>/dev/null || true
   done
   docker network rm "${CLUSTER_NAME}-net" 2>/dev/null || true
-  rm -f "${TOFU_DIR}/kubeconfig" "${TOFU_DIR}/talosconfig"
+  # The glob matters: `talosconfig-new.sh` writes role-scoped siblings
+  # (talosconfig.reader), and naming only the two files left one behind — a
+  # live credential on disk under a teardown that reported clean.
+  rm -f "${TOFU_DIR}/kubeconfig" "${TOFU_DIR}"/talosconfig*
   # Wipe the ephemeral local state too: `tofu destroy` leaves it populated
   # (machine_secrets is prevent_destroy'd), and a stale state breaks the next
   # fresh apply (CA mismatch / skipped bootstrap). No backend, so this is safe.
@@ -86,18 +89,28 @@ if [[ "${1:-}" == "--destroy" ]]; then
   # emptied, so "0 resources in the state" afterwards proves only that the file
   # is gone. Until this check, `✓ Local cluster destroyed` printed whatever
   # happened; a sweep that removed nothing looked exactly like a clean teardown.
+  # Credentials count as "left behind" too. The sweep above is `rm -f`, which
+  # cannot fail and so cannot report — and the whole point of this block is
+  # that best-effort cleanup must still be ASKED whether it worked.
+  cred=0
+  for f in "${TOFU_DIR}/kubeconfig" "${TOFU_DIR}"/talosconfig*; do
+    [ -e "$f" ] && cred=$((cred + 1))
+  done
   left=""
   for kind in "container:$(docker ps -aq --filter "name=${CLUSTER_NAME}-" 2>/dev/null | wc -l)" \
     "volume:$(docker volume ls -q --filter "name=${CLUSTER_NAME}-" 2>/dev/null | wc -l)" \
-    "network:$(docker network ls -q --filter "name=${CLUSTER_NAME}-net" 2>/dev/null | wc -l)"; do
+    "network:$(docker network ls -q --filter "name=${CLUSTER_NAME}-net" 2>/dev/null | wc -l)" \
+    "credential:${cred}"; do
     [ "${kind##*:}" -gt 0 ] && left="${left}${kind%%:*}=${kind##*:} "
   done
   if [ -n "$left" ]; then
-    echo "✗ still present after the teardown: ${left}— remove them by hand, or the next" >&2
-    echo "  deploy inherits half a cluster (a stale container answers, and the bootstrap skips)." >&2
+    echo "✗ still present after the teardown: ${left}— remove them by hand." >&2
+    echo "  A docker leftover means the next deploy inherits half a cluster (a stale" >&2
+    echo "  container answers and the bootstrap skips); a credential leftover means a" >&2
+    echo "  key to a cluster that no longer exists is sitting on this disk." >&2
     exit 1
   fi
-  success "Local cluster destroyed — docker reports no container, volume or network left"
+  success "Local cluster destroyed — no container, volume or network in docker, no credential on disk"
   exit 0
 fi
 

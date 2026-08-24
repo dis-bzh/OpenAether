@@ -46,6 +46,13 @@ go.work.sum
 # Talos & Kubernetes Credentials
 kubeconfig*
 talosconfig*
+# ⚠️ Those two globs have no slash, so they match at ANY depth — including a
+# SCRIPT whose name starts with them. `scripts/ops/talosconfig-new.sh` was
+# silently ignored on 2026-08-24, which would have pushed a Taskfile calling a
+# file that is not in the repository. Keep the globs broad (they guard a public
+# repo against a real credential) and exempt the code by name.
+!scripts/**/talosconfig*.sh
+!scripts/**/kubeconfig*.sh
 controlplane.yaml
 worker.yaml
 

@@ -961,6 +961,26 @@ tasks:
     cmds:
       - ./scripts/bootstrap/talos-tunnels.sh close infrastructure/opentofu/cluster
 
+  talosconfig-new:
+    desc: >-
+      Issue a short-lived, role-scoped talosconfig from the admin one — the deploy hands out
+      os:admin valid a YEAR, and read-only work does not need it.
+      Usage: task talosconfig-new PROVIDER=scaleway [ROLES=os:reader] [TTL=8h]
+    # PROVIDER is REQUIRED, not defaulted — see cluster-upgrade above for why.
+    requires:
+      vars: [PROVIDER]
+    # The Docker lane has its own name for this, and it is `task local-rbac`,
+    # which mints one as part of proving the roles are enforced.
+    preconditions: *refuse-local
+    vars:
+      ROLES: '{{.ROLES | default "os:reader"}}'
+      TTL: '{{.TTL | default "8h"}}'
+    # ⚠️ Proven on the Docker lane only (task local-rbac). On a cloud lane the
+    # Talos API is reached through the bastion, so the tunnels must be open —
+    # `task tunnels-up PROVIDER=…` first. That path has never been run.
+    cmds:
+      - ./scripts/ops/talosconfig-new.sh {{.PROVIDER}} --roles {{.ROLES}} --ttl {{.TTL}}
+
   backup-state:
     desc: >-
       Replicate the (encrypted) tfstate to the -backup store (post-apply). Set BACKUP_AWS_* for a cross-provider
@@ -1356,10 +1376,25 @@ tasks:
     cmds:
       - ./scripts/dev/infra-verify.sh local
 
+  local-rbac:
+    desc: >-
+      Ask the local Docker cluster whether Talos ENFORCES the roles in a talosconfig: an os:reader
+      config is refused a host read that the admin config gets, and cannot mint itself an os:admin.
+      Usage: task local-rbac
+    # Rung zero for the whole scoped-credential idea. Until 2026-08-24 nobody
+    # knew whether roles were enforced at all, and the answer was priced at a
+    # real cloud run; it costs a container.
+    cmds:
+      - ./scripts/dev/test-talos-rbac.sh local
+
   local-test:
     desc: "Full end-to-end local test: 3 CP + 3 workers + etcd quorum + Cilium + Flux + GitOps"
     cmds:
       - ./scripts/dev/test-talos-local.sh
+      # The cluster is up and credentialed at this point, so the role assertions
+      # cost seconds here. A harness nobody invokes is this repository's most
+      # repeated defect.
+      - ./scripts/dev/test-talos-rbac.sh local
 
   local-status:
     desc: "Check local cluster health (3 CP + 3 workers)"

@@ -124,7 +124,19 @@ sceller, rekey et rotation — ces gestes restent au root token hors ligne,
 délibérés et rares.
 
 ⚠️ Si ton IP publique change : mettre à jour `admin_ip` puis `task infra-apply`, sinon
-le bastion devient injoignable.
+le bastion devient injoignable. `admin_ip` refuse désormais une liste vide, une
+adresse sans préfixe et un `/0` — c'est la liste d'autorisation devant sshd du
+bastion ET devant 6443.
+
+⚠️ **Le kubeconfig n'est pas révocable.** `talosctl kubeconfig` émet un
+certificat client pour `O=system:masters`, qui court-circuite RBAC, et
+Kubernetes ne sait pas révoquer un certificat client : un kubeconfig qui fuite
+reste valable jusqu'à son expiration, et le seul remède est de faire tourner la
+CA du cluster. Traiter ce fichier comme le secret qu'il est — il est aussi dans
+le tfstate et dans les deux stores d'artefacts. Pour le travail en lecture
+seule, porter moins : `task talosconfig-new PROVIDER=…` émet un talosconfig
+`os:reader` qui expire en heures et ne peut pas s'en forger un d'admin (prouvé
+par `task local-rbac`).
 
 ## 7. SSO Grafana via Zitadel (OIDC)
 

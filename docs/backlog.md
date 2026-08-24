@@ -13,9 +13,9 @@ decided.
 
 **Taking one.** Every entry names the rung it needs, at the end: `task test` and
 `mocked` close on a laptop, `emulated` needs Feint and still no cloud account,
-`real cloud` spends money on somebody's project. Grep for `Rung:` — today 6 of the
-open entries are closable with no cloud account, and 23 name no rung at all, which
-is a defect in this file rather than in them.
+`real cloud` spends money on somebody's project. Grep for `Rung:` — today 7 of the
+open entries are closable with no cloud account, and 19 name no rung at all, which
+is a defect in this file rather than in them, a `Decide:` aside.
 
 ⚠️ This file twice drifted into a lab notebook — 215 lines on 2026-07-29, then
 1449 on 2026-08-19, entries of 30 lines re-telling incidents that were already
@@ -99,6 +99,57 @@ attempted.
 applies, then decide whether 0.1.0 ships a staging lane at all.
 
 ## Open — infrastructure
+
+- [ ] **The Scaleway node perimeter is not the one the comment describes.**
+      `scw/security.tf:45` says "Talos API — From Bastion ONLY" and allows 50000
+      from the bastion's **public** IP, which the bastion never uses: it reaches
+      the nodes over its private NIC. The rule is dead. What actually admits that
+      traffic is `:53-72` — `port = 0`, `protocol = "ANY"`, for `172.16.0.0/12`,
+      `10.0.0.0/8` and `100.64.0.0/10`, the last being Scaleway's shared carrier
+      range. So the documented posture and the enforced one differ, and nothing
+      at any rung would notice.
+      **Closes:** the dead rule deleted, the mesh rule scoped to this module's own
+      subnet, and a mocked assertion that no inbound rule carries `port == 0`.
+      Rung: mocked, then one real deploy to confirm health checks still pass.
+
+- [ ] **The tooling to carry less exists, and nothing carries less.**
+      `task talosconfig-new` issues an `os:reader` config that expires in hours,
+      and `task local-rbac` proves the roles are enforced — but every read-only
+      task still runs on the `os:admin` config the deploy wrote, valid a year,
+      the same file for every operation and every person. The cloud path of
+      `talosconfig-new` has also never been run: it needs the bastion tunnels
+      open, and only the Docker lane has exercised it.
+      Wiring it is not free — `cluster-verify` and friends are proven on three
+      clouds, an 8 h credential has to be re-minted, and a task that mints one
+      per run turns a read into a write against the Talos API.
+      **Decide first:** re-mint per run, or cache one until it expires?
+      **Then closes:** `task cluster-verify PROVIDER=… ` green while its
+      `TALOSCONFIG` carries `os:reader`, and `task talosconfig-new` run once
+      through the tunnels. Rung: real cloud.
+
+- [ ] **The SSH-CA hooks have shipped inert since they were written.**
+      `_shared/bastion-cloud-init.yaml.tftpl:86` sets `TrustedUserCAKeys` and
+      `AuthorizedPrincipalsFile` to an empty file and an empty directory;
+      `bastion-harden-check.sh:140` already asserts they are there. Every bastion
+      therefore still authenticates a static key that only a `tofu apply` can
+      revoke, on a design that was finished except for the CA. Two template
+      variables close it, `""` keeping today's behaviour byte for byte.
+      ⚠️ A certificate with no `permit-port-forwarding` extension authenticates
+      and then refuses every `-L`: `talos-tunnels.sh` would report 0/6 against a
+      healthy bastion, which is exactly the 2026-08-18 failure.
+      **Closes:** on Feint, a signed certificate authenticates, the same key
+      without its certificate is REFUSED, and `ssh -o ExitOnForwardFailure=yes -L`
+      succeeds. Rung: emulated.
+
+- [ ] **Decide:** does OpenAether run an always-on host outside every cluster?
+      Every ambitious answer to admin access collapses into this one question — an
+      OIDC issuer for the apiserver, an SSH CA service, and a WireGuard control
+      plane all need it, and none of them may live in the cluster it guards. The
+      answer settles whether the four `bastion.tf` and `admin_ip` ever leave the
+      provider contract (the largest agnosticism win available, ~350 lines) or
+      whether the bastion stays and is hardened in place. Inputs: how many
+      operators there are, and whether this project will run a stateful service
+      with a restore that has been tested. **Not a task until it is answered.**
 
 - [ ] **Nobody has measured whether a service keeps answering during an upgrade.**
       The probe that produced the 5/7/8-second figures asks

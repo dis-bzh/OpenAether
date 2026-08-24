@@ -12,6 +12,49 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ---
 
+## [Unreleased]
+
+### Security
+
+- **`admin_ip` refuses to open the cluster to the internet.** The variable had
+  no `validation`, so `["0.0.0.0/0"]` was accepted in silence — and it feeds
+  bastion sshd *and* the 6443 LB ACL on all four providers at once. Behind that
+  ACL sits a `system:masters` kubeconfig Kubernetes cannot revoke. Three rules
+  now reject an empty list, an entry without a prefix (including the `YOUR_IP/32`
+  of a copied example) and any `/0` — read from the prefix, so `198.51.100.7/0`
+  is caught too. Nine cases in
+  `cluster/tests/admin-ip-validation.tftest.hcl`; each rule was deleted in turn
+  and the suite watched to go red before it was kept.
+- **Admin access is documented as unrevocable where it is unrevocable.**
+  [`docs/admin-access.md`](docs/admin-access.md) now says what a leaked
+  kubeconfig costs, instead of leaving the reader to find out.
+
+### Fixed
+
+- **`task security` could not be completed on a machine set up by
+  `scripts/setup.sh`.** `install_checkov` tried pipx, then `python3 -m pip`,
+  then apt — and Ubuntu 24.04 ships python3 with neither pip nor pipx, so the
+  only branch left wanted sudo. A venv needs neither and carries its own pip;
+  it now sits between them, and `install_yamllint` finally gets the
+  "`pip3` is not always a binary" lesson its neighbour documented and never
+  received.
+
+### Added
+
+- **`task talosconfig-new`** — issues a role-scoped talosconfig with a TTL
+  (`os:reader`, 8 h by default) from the admin one, which the deploy hands out
+  as `os:admin` valid a **year**, identical for every task and every person.
+  It refuses to report success if the node grants roles other than those asked.
+  ⚠️ Proven on the Docker lane only; the cloud path needs open tunnels and has
+  never been run.
+- **`task local-rbac`** — asks the Docker cluster whether Talos *enforces* those
+  roles, which nothing here had ever established. Seven assertions, and each
+  denial carries its admin control beside it so a broken command cannot read as
+  a refused one. Measured 2026-08-24 on Talos v1.13.3: the node reports
+  `Enabled: RBAC` with no `machine.features.rbac` anywhere in this repository,
+  an `os:reader` config is refused a host read the admin config gets, and it
+  cannot mint itself an `os:admin` one.
+
 ## [0.1.0] — 2026-08-20
 
 > **This tag does not point at the commit first cut as 0.1.0.** That one,
