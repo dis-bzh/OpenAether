@@ -149,9 +149,10 @@ in git. 0.1.0 is the first entry describing something proven.
 - **`infrastructure/opentofu-local/variables.tf` carried no anchor at all**, so
   the credential-free lane drifted to Talos `v1.13.3` / Kubernetes `v1.35.3`
   against `v1.13.9` / `v1.36.3` in the cloud root. Anchored, so a proposal now
-  reaches it; the pins themselves are not moved here because nothing has yet
-  proven the newer pair boots — `docs/backlog.md` holds the entry and the weekly
-  lane is what will close it.
+  reaches it; the pins themselves are not moved here. Measured 2026-08-24 on the
+  Docker lane: the newer pair (`v1.13.9` / `v1.36.4`) boots, 6/6 on
+  `task local-verify`. Unifying the two roots and a real-cloud upgrade are
+  [#87](https://github.com/dis-bzh/OpenAether-infra/issues/87).
 
 ---
 

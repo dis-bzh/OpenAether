@@ -80,8 +80,8 @@ supprime une branche dès que sa montée de version a atterri sur `main`.
 - **Un outil que ce dépôt n'épingle pas** n'a aucune version à laquelle se
   comparer : sa lane de mise à jour ne peut que rapporter ce qu'elle a trouvé.
   `talosctl`, `kubectl`, l'AWS CLI, shellcheck, yamllint, checkov et pre-commit
-  sont dans cet état — `docs/backlog.md` porte l'entrée, et les épingler est une
-  décision à part.
+  sont dans cet état, et les épingler est une décision à part — ouvrir une issue
+  pour qui la prend.
 
 ## Le lancer à la main
 

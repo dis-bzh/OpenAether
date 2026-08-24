@@ -75,8 +75,8 @@ landed on `main`.
   but if the render fails, `task render-check` is what says so.
 - **A tool this repository does not pin** has no version to compare against, so
   its upgrade lane can only report what it found. `talosctl`, `kubectl`, the AWS
-  CLI, shellcheck, yamllint, checkov and pre-commit are all in that state —
-  `docs/backlog.md` holds the entry, and pinning them is a separate decision.
+  CLI, shellcheck, yamllint, checkov and pre-commit are all in that state, and
+  pinning them is a separate decision — open one if you take it.
 
 ## Running it by hand
 
