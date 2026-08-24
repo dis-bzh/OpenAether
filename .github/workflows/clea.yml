@@ -240,10 +240,21 @@ jobs:
           # workflow ever writes to clea/probe/*, so there is nothing to
           # protect against, and the branch is meant to always reflect only
           # the latest probe.
-          remote=origin
-          [ -n "${CLEA_WORKFLOW_TOKEN}" ] &&
-            remote="https://x-access-token:${CLEA_WORKFLOW_TOKEN}@github.com/${{ github.repository }}.git"
-          git push --force "$remote" "HEAD:clea/probe/${SLUG}"
+          # A URL-embedded credential does NOT override actions/checkout's own
+          # token: it persists GITHUB_TOKEN as an `http.…/.extraheader` git
+          # config entry, and that header wins over Basic-Auth in the push URL
+          # — confirmed against actions/checkout#162. The push still failed
+          # with CLEA_WORKFLOW_TOKEN embedded in the remote URL, identically to
+          # having no token at all, because it was never actually used. The
+          # documented override is `-c http…extraheader=…`, a ONE-SHOT config
+          # value for this single command only, never persisted.
+          if [ -n "${CLEA_WORKFLOW_TOKEN}" ]; then
+            basic="$(printf 'x-access-token:%s' "${CLEA_WORKFLOW_TOKEN}" | base64 -w0)"
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}" \
+              push --force origin "HEAD:clea/probe/${SLUG}"
+          else
+            git push --force origin "HEAD:clea/probe/${SLUG}"
+          fi
 
   cluster:
     name: Local Talos cluster
@@ -344,10 +355,15 @@ jobs:
           git commit -q -m "chore(clea): local cluster lane"
           # --force: see the probe job's push for why --force-with-lease
           # cannot work here — this checkout never fetched the branch either.
-          remote=origin
-          [ -n "${CLEA_WORKFLOW_TOKEN}" ] &&
-            remote="https://x-access-token:${CLEA_WORKFLOW_TOKEN}@github.com/${{ github.repository }}.git"
-          git push --force "$remote" HEAD:clea/probe/local-cluster
+          # See the probe job's push for why the URL-embedded token never
+          # worked, and why this form does.
+          if [ -n "${CLEA_WORKFLOW_TOKEN}" ]; then
+            basic="$(printf 'x-access-token:%s' "${CLEA_WORKFLOW_TOKEN}" | base64 -w0)"
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}" \
+              push --force origin HEAD:clea/probe/local-cluster
+          else
+            git push --force origin HEAD:clea/probe/local-cluster
+          fi
 
   report:
     name: Report
