@@ -153,6 +153,19 @@ def outscale_leftovers(cluster: str) -> list[str]:
 
 CHECKS = {"openstack": openstack_leftovers, "outscale": outscale_leftovers}
 
+# What each check actually enumerates, and what it does not. Printed on success
+# because a teardown proof that says NOTHING when the account is clean looks
+# exactly like one that did not run — `docs/backlog.md` lists that shape twice,
+# once for a purge script and once for "an empty server list is not an empty
+# account", where seven block volumes billed for three days behind a clean
+# instance list.
+SCOPE = {
+    "openstack": "servers, load balancers",
+    "outscale": "VMs, unassociated public IPs",
+}
+UNCHECKED = ("volumes, snapshots, images and buckets are NOT enumerated here — "
+             "see scripts/ops/purge-orphans/")
+
 
 def main() -> int:
     if len(sys.argv) != 3:
@@ -175,6 +188,8 @@ def main() -> int:
         return 2
 
     if not leftovers:
+        print(f"✓ {provider}/{cluster}: nothing left (checked: {SCOPE[provider]})")
+        print(f"  {UNCHECKED}")
         return 0
     for item in leftovers:
         print(item)
