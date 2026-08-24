@@ -221,12 +221,21 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json, os, pathlib
+          import json, os, pathlib, re
+          # ANSI stripped before this goes anywhere near JSON. This blob is
+          # embedded in a GitHub issue body (as an HTML-comment-wrapped JSON
+          # state, for the next scan's --previous diff) and round-tripped back
+          # out of it — and GitHub's own issue-body storage does not return raw
+          # terminal escape sequences unchanged: `\u001b[32m` came back on this
+          # workflow's sixth real run as the literal three characters `\^[`,
+          # which is not valid JSON and broke the embedded state entirely.
+          # Terminal color has no reason to survive into stored data anyway.
+          ansi = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
           log = ""
           for name in ("probe.log", "gates.log"):
               path = pathlib.Path(name)
               if path.is_file():
-                  log += path.read_text(errors="replace")[-2000:]
+                  log += ansi.sub("", path.read_text(errors="replace"))[-2000:]
           json.dump({
               "dep": os.environ["DEP"],
               "version": os.environ["VERSION"],

@@ -971,8 +971,23 @@ def render_report(state: dict) -> str:
     if behind:
         rows = []
         for d in behind:
+            # Matched on the TAG, not on `latest`. `cmd_matrix` hands the probe
+            # `dep.get("tag") or dep["latest"]` — the raw upstream tag, unstripped
+            # — because a dependency can be pinned in two shapes across its
+            # anchors (see fluxcd/flux2) and only the tag becomes both. `latest`
+            # is THIS anchor's own extracted form, and for anything with an
+            # extractVersion clause that actually strips something (opentofu,
+            # go-task, cloudnative-pg — anything using `^v(?<version>.*)$`),
+            # tag and latest are DIFFERENT STRINGS for the same real version:
+            # "v1.12.6" vs "1.12.6". Comparing against `latest` here meant three
+            # of seven real probes never matched their own anchors and were
+            # reported "not probed" despite running and pushing green — found
+            # 2026-08-24 on this workflow's sixth real run, where exactly the
+            # three dependencies with a stripping extractVersion were affected
+            # and the four without one were not.
+            expect = d.get("tag") or d["latest"]
             probe = next((p for p in state.get("probes", [])
-                          if p["dep"] == d["dep"] and p["version"] == d["latest"]), None)
+                          if p["dep"] == d["dep"] and p["version"] == expect), None)
             verdict = "not probed"
             if probe:
                 verdict = ("✅ probed green — `%s`" % probe["branch"]) if probe["green"] \
