@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Our own work lives in [`docs/backlog.md`](../blob/main/docs/backlog.md),
+        Our own work lives in [the issues](../issues),
         not here — issues are for what **you** hit. Which means the useful thing
         is not a diagnosis but what you ran and what it printed: the diagnosis is
         often wrong at the time an issue is opened, and the report outlives it.

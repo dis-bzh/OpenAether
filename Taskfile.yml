@@ -101,7 +101,7 @@ tasks:
           echo "  NOT covered here — only a cloud run can show that the provider accepts these"
           echo "  arguments, that the stored state is ciphertext, that an upgrade keeps the API"
           echo "  up, and that the teardown leaves the account empty. All four HAVE been shown on"
-          echo "  real clouds: see the table in docs/backlog.md for which, when, and how long."
+          echo "  real clouds: see the table in docs/status.md for which, when, and how long."
 
   lint:
     desc: Lint and format code (OpenTofu, YAML)

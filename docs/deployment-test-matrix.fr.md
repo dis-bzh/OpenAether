@@ -13,7 +13,7 @@
 >
 > Un ✅ est le compte rendu d'un run à sa date, pas une revendication de la
 > 0.1.0. Ce sur quoi cette version repose, c'est le management HA Scaleway et OVH
-> mesuré le 2026-08-19 et celui d'Outscale mesuré le 2026-08-20 — `backlog.md`
+> mesuré le 2026-08-19 et celui d'Outscale mesuré le 2026-08-20 — `docs/status.md`
 > § « Where we stand ». Les lignes datées d'avant, `CAPI-*` comprises, précèdent
 > le recentrage.
 
@@ -105,7 +105,7 @@ Deux couches de réglages orthogonales :
 
 | ID | Rôle | CP/W | k8s_lb_mode | Ce qu'il exerce en propre | Statut |
 |---|---|---|---|---|---|
-| `OSC-mgmt-ha` | mgmt | 3+1 | managed | Le LB renvoie un **nom DNS**, pas une IP ; utilisateur SSH outscale. 3+3 ne tient pas dans le quota de 40 Go de RAM, donc HA ici ne concerne que le control plane — et **tous les nœuds sont en eu-west-2a**, le module ne lisant jamais au-delà de la première subregion. Trois control planes, un seul domaine de panne. | ✅ *(2026-08-20, sur un Net **neuf** — LB `active` avec 3 backends. Le blocage venait d'un timeout interne au service LBU d'Outscale, demande 399530 close ; le Net antérieur au correctif refuse toujours d'être supprimé. Le ✅ du 2026-08-13 ne tient pas : son upgrade Talos est revenu en arrière au redémarrage suivant, cf. `backlog.md`)* |
+| `OSC-mgmt-ha` | mgmt | 3+1 | managed | Le LB renvoie un **nom DNS**, pas une IP ; utilisateur SSH outscale. 3+3 ne tient pas dans le quota de 40 Go de RAM, donc HA ici ne concerne que le control plane — et **tous les nœuds sont en eu-west-2a**, le module ne lisant jamais au-delà de la première subregion. Trois control planes, un seul domaine de panne. | ✅ *(2026-08-20, sur un Net **neuf** — LB `active` avec 3 backends. Le blocage venait d'un timeout interne au service LBU d'Outscale, demande 399530 close ; le Net antérieur au correctif refuse toujours d'être supprimé. Le ✅ du 2026-08-13 ne tient pas : son upgrade Talos est revenu en arrière au redémarrage suivant, cf. les issues ouvertes)* |
 | `OSC-work-ha` | workload | 3+3 | managed | Rôle workload ; volumes BSU si couplé au stockage. | ⬜ |
 | `OSC-vip-reject` | — | tout | vip | Test négatif : la validation doit rejeter `vip`. | 🧪 |
 
@@ -148,7 +148,7 @@ pas : `emulated-cloud.fr.md`.
 
 Hors de portée de cette voie, et pourquoi : type de volume racine Scaleway,
 `volume_link` Outscale, `data.outscale_images` (fait segfaulter le provider).
-Cf. `backlog.md`.
+Cf. les issues ouvertes.
 
 ### Scénarios d'exploitation transverses
 
@@ -160,7 +160,7 @@ Cf. `backlog.md`.
 | `OP-destroy` | `task cluster-down` / `task infra-down` | Chemin de destruction ordonné (enfants puis management). | ✅ |
 | `OP-tftest` | mocké | Suite de tests unitaires (sans credentials). | ✅ (CI) |
 | `OP-backup` | `backup_enabled=true`, réplica cross-provider (`<MAGASIN>_AWS_*`) | DR : tfstate + kube/talosconfig vers primaire et réplica ; restic chiffré client. | ✅ *(local + cloud réel SCW+OVH)* |
-| `OP-rolling-replace` | `task cluster-roll` | Un nœud à la fois (evict etcd, cordon/drain). Pas « sans coupure » : l'API est injoignable 5 à 8 s, cf. `backlog.md`. | ✅ *(Scaleway et OVH le 2026-08-19, Outscale le 2026-08-20 — il porte l'upgrade Talos)* |
+| `OP-rolling-replace` | `task cluster-roll` | Un nœud à la fois (evict etcd, cordon/drain). Pas « sans coupure » : l'API est injoignable 5 à 8 s, cf. les issues ouvertes. | ✅ *(Scaleway et OVH le 2026-08-19, Outscale le 2026-08-20 — il porte l'upgrade Talos)* |
 
 ## C) Priorités (plus forte valeur, non testé, apply réel)
 

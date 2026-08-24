@@ -132,15 +132,19 @@ mocké → `task feint-*` émulé → cloud réel.
 Un constat sans changement à proposer est une **issue**, pas une PR. Une PR
 propose un changement ; c'est ce qui distingue les deux.
 
-`docs/backlog.md` est l'ancien tracker, tenu à la main, devenu illisible à
-696 lignes. **Il ne reçoit plus de nouvelle entrée** — toutes ses tâches sont
-converties : les entrées applicatives en issues d'`OpenAether-apps`, les autres
-en issues ici. Restent deux blocs qui ne sont pas des tâches et qu'il faut
-reloger avant de supprimer le fichier — « Où on en est » (le briefing de début
-de session, et donc toujours le premier à ouvrir) et les « Traps worth
-remembering » (du savoir, pas du travail) — plus les ~26 fichiers qui pointent
-encore dessus, code source compris. Parcours post-déploiement :
-`docs/admin-access.md`.
+Il y a eu `docs/backlog.md`, un tracker tenu à la main jusqu'à 696 lignes, et
+illisible bien avant. Il est supprimé, et son contenu réparti selon sa nature :
+
+- les **tâches** sont des issues — applicatives dans `OpenAether-apps`, les
+  autres ici ;
+- **« Où on en est »** est devenu `docs/status.md` : ce qui tourne, ce qui est
+  mesuré sur compte réel et depuis quand. **C'est le premier fichier à ouvrir en
+  début de session** — il dit par où reprendre, pas ce qui reste à faire ;
+- les **pièges** sont allés dans les skills qui s'en servent (`teardown`,
+  `cluster-upgrade`, `provider-module`, `change-process`), et ceux de la couche
+  applicative dans `OpenAether-apps`.
+
+Parcours post-déploiement : `docs/admin-access.md`.
 
 Avant de toucher au DAG Flux d'`OpenAether-apps` : `task apps-validate`
 (intégrité du DAG + profils `pick.py` à jour).

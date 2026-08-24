@@ -7,7 +7,7 @@
 > 2026-08-19, Outscale on 2026-08-20 — HA topologies, every node upgraded **in
 > place** rather than replaced and each node's own Talos API asked what it runs.
 > Earlier runs on Outscale and on OVH reverted on the next reboot, and
-> `backlog.md` says why.
+> the open issues say why.
 >
 > The scripted version of this same procedure is `task cluster-upgrade`
 > ([`scripts/dev/cluster-upgrade.sh`](../scripts/dev/cluster-upgrade.sh)). It is
@@ -71,7 +71,7 @@ task infra-apply ROLE=management PROVIDER=<p>
 
 Talos reconciles the static pods and the kubelets; wait for every node to report
 the new version before moving on. Note that this bypasses `talosctl upgrade-k8s`,
-which sequences those components behind health checks — see `backlog.md`.
+which sequences those components behind health checks — see the open issues.
 
 ## Then Talos, in place
 
@@ -186,13 +186,13 @@ kubectl delete pod <targetPrimary> -n <ns>
 
 `kubectl cnpg promote` is not the answer here: with the plugin this repository
 pins, it exits 0, prints "will be promoted" and leaves `targetPrimary`
-untouched. Open in `backlog.md`.
+untouched. Open as an issue.
 
 ⚠️ **The first apply after a `talos_version` bump fails on OVH and Outscale**
 with "Provider produced inconsistent final plan", once per machine config.
 Nothing is left half-applied; re-run it. This is upstream
 `siderolabs/terraform-provider-talos` #352, fixed only in the 0.12.0 pre-release
-line — details and the decision still open in `backlog.md`.
+line — details and the decision still open as an issue.
 
 ## What to check, beyond "it came back"
 

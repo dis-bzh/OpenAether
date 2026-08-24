@@ -168,7 +168,7 @@ EOT
   sleep 15
 done
 
-# 4. Safety net — the provider is stuck (known bug: see docs/backlog.md).
+# 4. Safety net — the provider is stuck (known bug: see the GitHub issues).
 warn "timeout after ${TIMEOUT}s — the provider did not finish the cascade."
 warn "Lifting finalizers on the remaining infra objects (the VMs may survive!):"
 for kind in scalewaymachine oscmachine openstackmachine scalewaycluster osccluster openstackcluster; do

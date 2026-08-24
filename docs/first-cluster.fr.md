@@ -200,7 +200,7 @@ Six buckets existent ensuite : l'état et les artefacts, chacun avec son jumeau
 `-backup`, plus l'image et sa zone de préparation.
 
 Relancer reprend où ça s'est arrêté — **sauf si ta modification ajoute un nœud**,
-qui est un défaut ouvert connu (`docs/backlog.md`), pas une erreur de ta part.
+qui est un défaut ouvert connu (voir les issues), pas une erreur de ta part.
 
 ## 5. Joindre le cluster
 
@@ -320,7 +320,7 @@ seconde clé, ni de réinitialisation.
 Honnête au moment de la 0.1.0 — la première version de ce projet qui livre
 quelque chose de prouvé, et c'est la raison d'être de ce document.
 
-Ce qui **est** mesuré, avec les dates (`docs/backlog.md`, « Where we stand ») :
+Ce qui **est** mesuré, avec les dates (`docs/status.md`) :
 
 - `task cluster-verify` donne **11/11 sur Scaleway, sur OVH et sur Outscale** —
   les deux premiers le 2026-08-19, Outscale le 2026-08-20.

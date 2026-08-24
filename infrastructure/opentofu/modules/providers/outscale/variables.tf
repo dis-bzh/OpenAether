@@ -44,7 +44,7 @@ variable "availability_zones" {
   # with `element(...)`; outscale does not. A 3-control-plane cluster here is HA
   # against a node failure and not against a subregion failure.
   # Fixing it means one subnet per subregion, which moves resource addresses and
-  # therefore rebuilds the cluster — see docs/backlog.md.
+  # therefore rebuilds the cluster — see the GitHub issues.
   description = "Subregions. NOTE: only the first is used — this module does not spread nodes (see the comment above)"
   type        = list(string)
   default     = ["eu-west-2a", "eu-west-2b", "eu-west-2c"]

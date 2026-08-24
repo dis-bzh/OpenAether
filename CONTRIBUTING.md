@@ -13,7 +13,7 @@ order in the backlog is a guess about what matters, something that broke on
 somebody is a fact.
 
 **Our own work is not in issues.** It lives in
-[`docs/backlog.md`](docs/backlog.md), where every entry names the command that
+[the open issues](https://github.com/dis-bzh/OpenAether-infra/issues), where every one names the command that
 would close it. Keeping the two apart is the point: a working list wants to be
 read offline, in one file, at the start of a session; an intake wants to be
 where a stranger can reach it. Duplicating one into the other would give us two
@@ -97,7 +97,7 @@ same tool: the `commit-msg` hook refuses a subject as you write it, and the
   from the repository root, which would put these rules on the full-history and
   whole-tree scans too, where every hit is a synthetic fixture.
 - Comments explain the *why*, not the *what* — 1-3 lines, no incident narratives.
-- Open work items live in `docs/backlog.md`, not scattered TODOs — read it before
+- Open work items live in the GitHub issues, not scattered TODOs — read them before
   starting non-trivial work, and drop an entry once it's done (that's what git
   history is for). Write an entry as **the symptom, not the diagnosis**: the
   diagnosis is often wrong when the entry is written, and the entry outlives it.
