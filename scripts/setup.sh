@@ -359,6 +359,12 @@ if ! check_cmd kubectl-cnpg; then
     "$(dirname "${BASH_SOURCE[0]}")/internal/install-kubectl-cnpg.sh"
 fi
 
+# 5b-ter. actionlint — `task lint` calls it. A workflow file is the one thing in
+# this repository that cannot be run before it is merged.
+if ! check_cmd actionlint; then
+    "$(dirname "${BASH_SOURCE[0]}")/internal/install-actionlint.sh"
+fi
+
 # 5c. Check checkov (`task security` runs it directly; only CI ever had it)
 if ! check_cmd checkov; then
     install_checkov

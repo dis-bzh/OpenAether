@@ -60,7 +60,7 @@ hand and in what order.
 
 ## Before opening a PR
 
-    task lint         # tofu fmt, yamllint (infrastructure/ + .github/workflows/ + root configs), tflint
+    task lint         # tofu fmt, yamllint, tflint, actionlint, language, version drift, pin coverage
     task validate ROOT=cluster
     task validate ROOT=talos-image
     task test
@@ -105,7 +105,11 @@ same tool: the `commit-msg` hook refuses a subject as you write it, and the
   actions, pre-commit hooks) are proposed by Renovate and never auto-merged —
   review the diff, especially anything labeled `needs-regen` (the pinned version
   bumped but a vendored manifest needs regenerating by hand) or
-  `vendored-manifest`.
+  `vendored-manifest`. **A new pin needs an anchor**: the
+  `# renovate: datasource=… depName=…` comment on the line above the value.
+  `task lint` fails on a pin no inventory watches — nine of them were inert
+  once, and an unwatched pin looks exactly like a healthy one. See
+  [`docs/clea.md`](docs/clea.md).
 
 ## AI-assisted contributions
 
