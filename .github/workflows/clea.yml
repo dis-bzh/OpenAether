@@ -131,9 +131,22 @@ jobs:
       INSTALLER_STDIN: ${{ matrix.entry.installer_stdin }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
+      # persist-credentials: false — the full opt-out, not a partial one.
+      # actions/checkout does not write GITHUB_TOKEN as a simple top-level
+      # `.git/config` key: it writes an `includeIf.gitdir:…` entry pointing at
+      # a separate temp file, and unsetting the key directly (attempted here
+      # previously) silently touches nothing, because the value never lived
+      # in the file that command writes to. `--unset-all` reported no error
+      # and changed nothing; the persisted credential kept winning over the
+      # URL-embedded one, identically to never having overridden it at all —
+      # confirmed 2026-08-24 on this workflow's fifth real run, same
+      # "GitHub App … without `workflows` permission" rejection as the very
+      # first attempt. With nothing persisted at all, only the credential this
+      # job builds explicitly is ever in play.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # First, and on the untouched tree: probe.sh installs the CURRENT pin so
       # there is something to upgrade over, and restores the tree when it is
@@ -201,6 +214,10 @@ jobs:
           # `workflow` scope can. Falls back to the default token when unset,
           # which still pushes every OTHER probe branch fine.
           CLEA_WORKFLOW_TOKEN: ${{ secrets.CLEA_WORKFLOW_TOKEN }}
+          # The checkout above no longer persists this anywhere — see why on
+          # that step. Every push now builds its own credential explicitly,
+          # this one included.
+          DEFAULT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -240,27 +257,19 @@ jobs:
           # workflow ever writes to clea/probe/*, so there is nothing to
           # protect against, and the branch is meant to always reflect only
           # the latest probe.
-          # A URL-embedded credential does NOT override actions/checkout's own
-          # token: it persists GITHUB_TOKEN as an `http.…/.extraheader` git
-          # config entry, and that header wins over Basic-Auth in the push URL
-          # — confirmed against actions/checkout#162. Adding a SECOND
-          # extraheader with `-c` did not replace it either: the key is
-          # multi-valued in git on purpose (so several headers can combine),
-          # so `-c` on top of the persisted one sent TWO Authorization headers
-          # and GitHub's server refused the request outright — "remote:
-          # Duplicate header: \"Authorization\"", HTTP 400. The persisted one
-          # has to go before a replacement means anything; `--local` matches
-          # exactly what actions/checkout set (confirmed in its own cleanup
-          # log), and `|| true` covers CLEA_WORKFLOW_TOKEN being unset, where
-          # there is nothing to remove.
-          if [ -n "${CLEA_WORKFLOW_TOKEN}" ]; then
-            git config --local --unset-all http.https://github.com/.extraheader || true
-            git push --force \
-              "https://x-access-token:${CLEA_WORKFLOW_TOKEN}@github.com/${{ github.repository }}.git" \
-              "HEAD:clea/probe/${SLUG}"
-          else
-            git push --force origin "HEAD:clea/probe/${SLUG}"
-          fi
+          # Two things a URL-embedded credential ran into before this checkout
+          # stopped persisting one of its own: (1) actions/checkout's default
+          # credential is not a simple config key to unset — it lives behind
+          # an `includeIf` pointing at a temp file, so `--unset-all` on the
+          # visible key silently touched nothing; (2) layering a second
+          # credential with `-c` on top of a persisted one sent two
+          # Authorization headers and GitHub refused the request outright.
+          # With nothing persisted at all (checkout above), the credential
+          # built here is the only one in play, whichever it is.
+          token="${CLEA_WORKFLOW_TOKEN:-$DEFAULT_TOKEN}"
+          git push --force \
+            "https://x-access-token:${token}@github.com/${{ github.repository }}.git" \
+            "HEAD:clea/probe/${SLUG}"
 
   cluster:
     name: Local Talos cluster
@@ -279,7 +288,12 @@ jobs:
       TF_VAR_worker_count: "1"
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
+      # See the probe job's checkout: persist-credentials: false is the full
+      # opt-out, needed for the same reason — nothing here relies on ambient
+      # git auth except the final push, which builds its own credential.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
 
       # Also the cold-install probe for helm and flux, which have no installer
       # of their own — they are steps inside this script.
@@ -327,6 +341,7 @@ jobs:
           # bumps above, and it is also anchored inside ci.yml — the same
           # GITHUB_TOKEN restriction applies here.
           CLEA_WORKFLOW_TOKEN: ${{ secrets.CLEA_WORKFLOW_TOKEN }}
+          DEFAULT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -361,16 +376,12 @@ jobs:
           git commit -q -m "chore(clea): local cluster lane"
           # --force: see the probe job's push for why --force-with-lease
           # cannot work here — this checkout never fetched the branch either.
-          # See the probe job's push for the extraheader precedence AND the
-          # duplicate-header failure this form avoids.
-          if [ -n "${CLEA_WORKFLOW_TOKEN}" ]; then
-            git config --local --unset-all http.https://github.com/.extraheader || true
-            git push --force \
-              "https://x-access-token:${CLEA_WORKFLOW_TOKEN}@github.com/${{ github.repository }}.git" \
-              HEAD:clea/probe/local-cluster
-          else
-            git push --force origin HEAD:clea/probe/local-cluster
-          fi
+          # See the probe job's push for why the credential is built
+          # explicitly rather than relying on anything persisted.
+          token="${CLEA_WORKFLOW_TOKEN:-$DEFAULT_TOKEN}"
+          git push --force \
+            "https://x-access-token:${token}@github.com/${{ github.repository }}.git" \
+            HEAD:clea/probe/local-cluster
 
   report:
     name: Report
