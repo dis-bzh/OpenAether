@@ -96,12 +96,24 @@ assembled from two commands; the CoreDNS readiness gate failing on a cluster it
 had just watched come up; and the teardown proof printing nothing on a clean
 account, indistinguishable from a check that never ran. All five are fixed.
 
-**The local lane's pin mismatch is measured, not yet closed.** Talos `v1.13.9` /
-Kubernetes `v1.36.4` — upstream's current pair — boots on the Docker lane:
-`task local-verify` 6/6. The two roots still pin different versions, and no
-real cloud has run the newer pair — [#87](https://github.com/dis-bzh/OpenAether-infra/issues/87).
+**The local and cloud roots now pin the same Talos and Kubernetes.** They had
+drifted to `v1.13.3` / `v1.35.3` against `v1.13.9` / `v1.36.3` before either
+was anchored; `infrastructure/opentofu-local/variables.tf` now carries the
+cloud root's exact pin. Measured 2026-08-24 on the Docker lane at the shipped
+default topology (3 control planes + 3 workers, not a smaller probe): all six
+nodes Ready, Cilium on 6/6, `task local-verify` 6/6, versions read from the
+cluster itself rather than the tool that deployed it — `kubectl get nodes`
+reports `v1.36.3` on all six, and `talosctl version` against the control
+plane's own API reports server tag `v1.13.9`. `task local-down` afterward left
+no container, volume, network or credential.
+[#87](https://github.com/dis-bzh/OpenAether-infra/issues/87) is closed on that
+basis; what it does not answer is below.
 
-**Not proven**: no lane has ever run unattended to completion; nobody has
+**Not proven**: whether `v1.13.9` — the cloud root's own pin, unrelated to the
+change above — has been through the same real-cloud upgrade evidence this page
+records for `v1.13.7`→`v1.13.8`; the table stops one patch short of what is
+currently pinned, and nothing here re-ran it. No lane has ever run unattended
+to completion; nobody has
 deployed under a non-empty `bucket_suffix`; and the failover — provider A treated
 as gone, the cluster rebuilt on B from B's replica alone — has never been
 attempted.

@@ -8,21 +8,23 @@ variable "environment" {
   default = "dev"
 }
 
-# ⚠️ These two are BEHIND the cloud root (infrastructure/opentofu/cluster/
-# variables.tf), and nothing compared them until they were anchored: the
-# credential-free lane the README calls the best first step was exercising a
-# different Talos/Kubernetes pair than the one that ships. Anchored here so a
-# bot proposes the move and the weekly local lane is what proves it boots.
+# Kept EQUAL to the cloud root's pin (infrastructure/opentofu/cluster/
+# variables.tf) — they drifted six patches and a whole Kubernetes minor apart
+# before either was anchored (see docs/status.md, "Dependency watch"), and
+# nothing compared them until they were. The two are bumped together by hand:
+# Renovate proposes each independently, and a PR that moves one without the
+# other is a regression, not a bump — check-version-drift.sh does not (yet)
+# compare them to each other, only to their own anchors.
 variable "talos_version" {
   type = string
   # renovate: datasource=github-releases depName=siderolabs/talos
-  default = "v1.13.3"
+  default = "v1.13.9"
 }
 
 variable "kubernetes_version" {
   type = string
   # renovate: datasource=github-releases depName=kubernetes/kubernetes
-  default = "v1.35.3"
+  default = "v1.36.3"
 }
 
 variable "talos_bootstrap" {
