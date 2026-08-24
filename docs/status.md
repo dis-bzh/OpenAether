@@ -52,7 +52,7 @@ every apply plans to a file and applies THAT file, and a saved plan never prompt
 Destroy always takes two commands and no flag collapses them. S3 credentials are
 namespaced by the cloud that HOLDS the bucket, and a cross-provider backup is
 proven — an encrypted tfstate at Outscale while the cluster runs on Scaleway.
-406 offline assertions across 13 harnesses, every one mutation-tested — 330 of
+413 offline assertions across 13 harnesses, every one mutation-tested — 330 of
 them from the eleven harnesses that existed before Cléa, three fewer than the
 333 this page claimed and nothing had re-counted since; the emulated lane runs
 feint 0.10.0 against Scaleway provider 2.81.0, the version the clusters run.

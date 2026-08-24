@@ -483,5 +483,36 @@ PY
 if [ $? -eq 0 ]; then PASS=$((PASS + 5)); else FAIL=$((FAIL + 1)); fi
 
 echo
+echo "=== a probe that failed before it could push is named, not silent ==="
+# GITHUB_TOKEN cannot push a change to a workflow file, in any repository —
+# measured 2026-08-24 on this workflow's first real run, three probes
+# (commitizen, opentofu/opentofu, siderolabs/talos, all anchored inside
+# .github/workflows/ci.yml) failed at exactly that step. Without this section
+# they would just be ABSENT from the report — indistinguishable from a
+# dependency that was never behind at all.
+python3 - "$CLEA" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("clea", sys.argv[1])
+clea = importlib.util.module_from_spec(spec); spec.loader.exec_module(clea)
+state = {"generated_at": "now", "deps": [], "probes": [],
+         "stalled_probes": [{"dep": "commitizen", "job": "Probe commitizen",
+                             "url": "https://example.invalid/run/1"}]}
+report = clea.render_report(state)
+checks = [
+    ("the section header appears", "could not record a verdict" in report),
+    ("the dependency is named", "commitizen" in report),
+    ("the job's own URL is linked, not just asserted", "example.invalid/run/1" in report),
+    ("an empty list produces no section at all — not just the standing "
+     "disclaimer bullet, which names the same section on purpose",
+     "## Probes that could not record a verdict"
+     not in clea.render_report({**state, "stalled_probes": []})),
+]
+for name, ok in checks:
+    print(("  \033[32m\u2713\033[0m " if ok else "  \033[31m\u2717\033[0m ") + name)
+sys.exit(1 if [c for c in checks if not c[1]] else 0)
+PY
+if [ $? -eq 0 ]; then PASS=$((PASS + 4)); else FAIL=$((FAIL + 1)); fi
+
+echo
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -1050,6 +1050,20 @@ def render_report(state: dict) -> str:
             lines += [f"### `{probe['dep']}` → `{probe['version']}`", "",
                       "```", probe.get("log", "(no log captured)").strip(), "```", ""]
 
+    # A probe job can fail before it ever reaches the step that pushes its
+    # verdict — GITHUB_TOKEN cannot push a change to a file under
+    # .github/workflows/, with no `permissions:` grant able to fix that; a
+    # transient runner failure would land here too. Either way, "no branch" and
+    # "nothing to report" must not read the same: the dependency was tried and
+    # the run knows it failed, even with no verdict to show.
+    stalled = state.get("stalled_probes", [])
+    if stalled:
+        lines += ["## Probes that could not record a verdict", "",
+                  "The job ran and failed before it could push its branch — a "
+                  "gap in the reporting path, not necessarily in the bump "
+                  "itself. See the run for why.", ""]
+        lines += [f"- `{s['dep']}` — [{s['job']}]({s['url']})" for s in stalled] + [""]
+
     if state.get("errors"):
         # Grouped on the message with its URL removed: one rate limit produces
         # one failure per dependency, and twenty copies of the same sentence is
@@ -1075,7 +1089,12 @@ def render_report(state: dict) -> str:
               "run by hand, by someone watching — see `CONTRIBUTING.md`.",
               "- A green probe means the tool installs from cold, upgrades over its "
               "previous version, and the repository's own checks still pass. It does not "
-              "mean the new version behaves the same on a running cluster."]
+              "mean the new version behaves the same on a running cluster.",
+              "- **A dependency pinned only inside `.github/workflows/` cannot be "
+              "probed** unless a `CLEA_WORKFLOW_TOKEN` secret is set (a classic PAT, "
+              "scope `workflow`) — GITHUB_TOKEN cannot push such a change in any "
+              "repository, and no `permissions:` grant can fix that. See "
+              "\"Probes that could not record a verdict\" below if this run hit one."]
     cluster = state.get("cluster_lane")
     if cluster:
         lines += [f"- Weekly local cluster lane: **{cluster.get('verdict', '?')}**, "

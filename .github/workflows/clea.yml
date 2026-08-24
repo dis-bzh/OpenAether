@@ -194,6 +194,13 @@ jobs:
       - name: Verdict, and the branch that carries it
         env:
           GREEN: ${{ steps.probe.outcome != 'failure' && steps.gates.outcome != 'failure' }}
+          # Optional. GITHUB_TOKEN cannot push a change to a file under
+          # .github/workflows/ — three anchors live there (commitizen,
+          # opentofu/opentofu, siderolabs/talos, all in ci.yml) — and no
+          # `permissions:` grant exists for it; only a classic PAT with the
+          # `workflow` scope can. Falls back to the default token when unset,
+          # which still pushes every OTHER probe branch fine.
+          CLEA_WORKFLOW_TOKEN: ${{ secrets.CLEA_WORKFLOW_TOKEN }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -222,7 +229,10 @@ jobs:
           git commit -q -m "chore(clea): probe ${DEP} ${VERSION}"
           # Pushed green or red on purpose: a red branch is the reproduction, and
           # deleting it leaves a report describing something nobody can re-run.
-          git push --force-with-lease origin "HEAD:clea/probe/${SLUG}"
+          remote=origin
+          [ -n "${CLEA_WORKFLOW_TOKEN}" ] &&
+            remote="https://x-access-token:${CLEA_WORKFLOW_TOKEN}@github.com/${{ github.repository }}.git"
+          git push --force-with-lease "$remote" "HEAD:clea/probe/${SLUG}"
 
   cluster:
     name: Local Talos cluster
@@ -285,6 +295,10 @@ jobs:
         env:
           UP: ${{ steps.up.outcome }}
           VERIFY: ${{ steps.verify.outcome }}
+          # See the probe job's Verdict step: `talos_version` is one of the
+          # bumps above, and it is also anchored inside ci.yml — the same
+          # GITHUB_TOKEN restriction applies here.
+          CLEA_WORKFLOW_TOKEN: ${{ secrets.CLEA_WORKFLOW_TOKEN }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -317,7 +331,10 @@ jobs:
           git add -u
           git add clea-probe.json
           git commit -q -m "chore(clea): local cluster lane"
-          git push --force-with-lease origin HEAD:clea/probe/local-cluster
+          remote=origin
+          [ -n "${CLEA_WORKFLOW_TOKEN}" ] &&
+            remote="https://x-access-token:${CLEA_WORKFLOW_TOKEN}@github.com/${{ github.repository }}.git"
+          git push --force-with-lease "$remote" HEAD:clea/probe/local-cluster
 
   report:
     name: Report
@@ -333,12 +350,13 @@ jobs:
       - name: Collect the probe verdicts from their own branches
         env:
           STATE: ${{ needs.scan.outputs.state }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           printf '%s' "$STATE" > clea-state.json
           git fetch -q origin "+refs/heads/clea/probe/*:refs/remotes/origin/clea/probe/*" || true
           python3 - <<'PY'
-          import json, subprocess
+          import json, os, subprocess, urllib.request
           state = json.load(open("clea-state.json"))
           refs = subprocess.run(["git", "for-each-ref", "--format=%(refname:short)",
                                  "refs/remotes/origin/clea/probe/*"],
@@ -360,8 +378,34 @@ jobs:
           state["probes"] = probes
           if cluster:
               state["cluster_lane"] = cluster
+
+          # A probe job can fail before it ever reaches its own verdict-push
+          # step — most durably, GITHUB_TOKEN cannot push a change to a file
+          # under .github/workflows/, and no `permissions:` grant can fix
+          # that (there is no such scope; only a PAT with the classic
+          # `workflow` scope can, and that is a credential decision, not a
+          # workflow-file one). Cross-referenced against the run's own job
+          # list — data the platform already has, not a second push path —
+          # so a dependency that failed to record a verdict is at least named
+          # rather than silently missing from the report.
+          got = {p["dep"] for p in probes}
+          req = urllib.request.Request(
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}"
+              f"/actions/runs/{os.environ['GITHUB_RUN_ID']}/jobs?per_page=100",
+              headers={"Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                       "Accept": "application/vnd.github+json"})
+          jobs = json.load(urllib.request.urlopen(req, timeout=30))["jobs"]
+          stalled = [
+              {"dep": j["name"].removeprefix("Probe "),
+               "job": j["name"], "url": j["html_url"]}
+              for j in jobs
+              if j["name"].startswith("Probe ") and j["conclusion"] == "failure"
+              and j["name"].removeprefix("Probe ") not in got]
+          state["stalled_probes"] = stalled
+
           json.dump(state, open("clea-state.json", "w"), indent=2)
-          print(f"{len(probes)} probe verdict(s), cluster lane: {bool(cluster)}")
+          print(f"{len(probes)} probe verdict(s), {len(stalled)} stalled, "
+                f"cluster lane: {bool(cluster)}")
           PY
 
       - name: Rewrite the report issue

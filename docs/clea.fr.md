@@ -82,6 +82,15 @@ supprime une branche dès que sa montée de version a atterri sur `main`.
   `talosctl`, `kubectl`, l'AWS CLI, shellcheck, yamllint, checkov et pre-commit
   sont dans cet état, et les épingler est une décision à part — ouvrir une issue
   pour qui la prend.
+- **`commitizen`, `opentofu/opentofu` et `siderolabs/talos`** — ancrés (aussi)
+  dans `.github/workflows/ci.yml` — font échouer leur sonde avec « refusing to
+  allow a GitHub App to create or update workflow… without `workflows`
+  permission ». Mesuré au premier vrai passage de ce workflow, le 2026-08-24.
+  `GITHUB_TOKEN` ne peut pousser ce changement dans aucun dépôt, et aucune
+  permission `permissions:` ne le corrige. Un secret `CLEA_WORKFLOW_TOKEN` (PAT
+  classique, scope `workflow`) referme le trou une fois posé ; sans lui, le
+  rapport nomme quand même les trois plutôt que de les faire disparaître — voir
+  « Probes that could not record a verdict » dans sa propre section.
 
 ## Le lancer à la main
 
