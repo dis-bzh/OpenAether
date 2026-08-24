@@ -71,6 +71,18 @@ in git. 0.1.0 is the first entry describing something proven.
     both go green. The GitHub datasources answered 403 in that session and were
     reported as failures, which is the behaviour that matters most: a
     datasource that did not answer is not a dependency that is up to date.
+  - **The workflow's own first real run found what a bare-container probe
+    could not.** Triggered by hand 2026-08-24 (`daily` lane): three probes —
+    `commitizen`, `opentofu/opentofu`, `siderolabs/talos` — failed with
+    "refusing to allow a GitHub App to create or update workflow… without
+    `workflows` permission". All three are anchored (also) inside
+    `.github/workflows/ci.yml`, and `GITHUB_TOKEN` cannot push a change to a
+    workflow file in any repository — there is no `permissions:` grant for it.
+    Two fixes: the Report job now cross-references the run's own job list, so
+    a probe that fails before it can push is *named*, not silently absent from
+    the report; and an optional `CLEA_WORKFLOW_TOKEN` secret (classic PAT,
+    scope `workflow`), wired into both push sites with a clean fallback to the
+    default token when unset, closes the gap for real where it is set.
 
 ### Changed
 

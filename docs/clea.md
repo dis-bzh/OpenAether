@@ -77,6 +77,14 @@ landed on `main`.
   its upgrade lane can only report what it found. `talosctl`, `kubectl`, the AWS
   CLI, shellcheck, yamllint, checkov and pre-commit are all in that state, and
   pinning them is a separate decision — open one if you take it.
+- **`commitizen`, `opentofu/opentofu` and `siderolabs/talos`** — anchored (also)
+  inside `.github/workflows/ci.yml` — fail their probe with "refusing to allow
+  a GitHub App to create or update workflow… without `workflows` permission".
+  Measured on this workflow's first real run, 2026-08-24. `GITHUB_TOKEN` cannot
+  push that change in any repository, and no `permissions:` grant fixes it.
+  A `CLEA_WORKFLOW_TOKEN` secret (classic PAT, scope `workflow`) closes it when
+  set; without one, the report still names the three rather than dropping them
+  silently — see "Probes that could not record a verdict" in its own section.
 
 ## Running it by hand
 
