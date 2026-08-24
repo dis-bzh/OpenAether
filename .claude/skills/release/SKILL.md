@@ -42,7 +42,7 @@ constraint belongs back in this file the same day.
 ## The notes must admit what is not fixed
 
 Someone upgrading a cluster that matters will hit the open items before they hit
-the features. Name them, say what happens, and point at `docs/backlog.md`. A
+the features. Name them, say what happens, and point at the open issues. A
 release note that only lists what works is a release note that will be believed
 about the rest.
 

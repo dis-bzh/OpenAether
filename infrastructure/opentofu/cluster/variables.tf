@@ -64,7 +64,7 @@ variable "skip_health_check" {
     That data source times out on clusters that are demonstrably healthy (HA
     managements on OVH and Outscale: every node Ready, etcd HEALTH OK on all
     control planes, complete Flux DAG) and returns a bare "context deadline
-    exceeded" — see docs/backlog.md.
+    exceeded" — see the GitHub issues.
 
     Enabling this costs the guardrail that catches a silently failed bootstrap,
     so verify health out of band (`talosctl -n <cp> service etcd`,

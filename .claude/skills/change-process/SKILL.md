@@ -31,7 +31,7 @@ it go green. A check you have only ever seen pass is a check you have not tested
 
 ## Before you start
 
-1. Read `docs/backlog.md`, starting with **"Where we stand"** — it says what runs,
+1. Read `docs/status.md` — it says what runs,
    what is proven on real cloud, and where to pick up.
 2. Read `CLAUDE.md` (repository rules) and `CONTRIBUTING.md` (the three rungs).
 3. If you are touching the Flux DAG in `OpenAether-apps`: `task apps-validate`.
@@ -70,6 +70,14 @@ commit different bytes.
 a one-second probe against the endpoint in the kubeconfig, and the count of
 failed samples. "Idempotent" is `tofu plan` reporting no changes, quoted.
 
+- **A create that times out leaves the resource tainted**, and re-running DESTROYS
+  what the provider was still building. Ask the provider's own API for the status,
+  then `tofu untaint` — `task infra-apply` prints the addresses and the command.
+- **A resource count driven by a phase variable is not idempotent.** Gating
+  `control_plane_count`/`worker_count` on `var.talos_bootstrap` zeroed them on every
+  re-run and dropped `talos_machine_bootstrap` from state, which was then RECREATED
+  — re-sending the bootstrap RPC to a live etcd.
+
 ## Before you open the PR
 
 - `task lint`, `task validate ROOT=cluster`, `task validate ROOT=talos-image`,
@@ -79,13 +87,19 @@ failed samples. "Idempotent" is `tofu plan` reporting no changes, quoted.
   matrix that says a provider was never exercised, a changelog that says a script
   is fixed, an example pinning a tag that no longer exists. A stale claim misleads
   more than a missing one.
-- **Close what you finished in `docs/backlog.md`, and add what you found.** The
+- **Close the issues you finished, and open one for what you found.** The
   backlog holds open items only; a finished entry belongs to git history. Re-read
   it at the end of the session, not only at the start.
 - **CHANGELOG entry** written for a reader who was not there: what broke, how it
   showed itself, what it now does, and the evidence.
 - Real-cloud work is not finished until teardown and `scripts/ops/purge-orphans/`
   both report clean. Nothing left billing.
+
+- **Three files can pin the same tool and only one be enforced.** helm was pinned
+  in CI and in the renderer but not in `setup.sh`, invisible to everyone who
+  already had helm 4.
+- **A generated artifact drifts silently** — hence `task render-check` and
+  `pick.py --check`. Prefer a guardrail that compares over one that assumes.
 
 ## Never
 

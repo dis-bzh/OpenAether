@@ -10,7 +10,7 @@
 # ⚠️ The pinned plugin does NOT match what is deployed: 1.23.6 against a 1.23.1
 # operator on 2026-08-15, where `promote` exited 0, printed "will be promoted"
 # and left `status.targetPrimary` untouched. Same minor, so the mismatch is not
-# obviously the cause — open in backlog.md. Keep the minor aligned with the
+# obviously the cause — open as a GitHub issue. Keep the minor aligned with the
 # operator in OpenAether-apps (apps/base/cnpg/) when that moves.
 #
 # Usage: install-kubectl-cnpg.sh [bin-dir]   (default: /usr/local/bin, else ~/.local/bin)

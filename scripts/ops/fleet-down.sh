@@ -119,7 +119,7 @@ if [ ! -r "$KUBECONFIG" ] || ! kubectl cluster-info >/dev/null 2>&1; then
         task cluster-down PROVIDER=<provider> -- --force-no-edges --yes
       The bare -- is not optional: without it Task keeps the flags itself.
     • when in doubt: inventory on the provider side FIRST (look for the child
-      clusters' prefix among VMs, LBs, networks) — see docs/backlog.md
+      clusters' prefix among VMs, LBs, networks) — see the GitHub issues
 EOT
     exit 1
   fi

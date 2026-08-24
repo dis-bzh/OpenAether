@@ -125,6 +125,11 @@ name rather than removing them; that report is the deliverable, not noise.
 not the state file. Report the counts. A session is not finished until something
 that queries the account says zero.
 
+**And two ways that proof has lied.** A `| tail` on the purge output hid the
+servers it lists first, so a populated account read as clean — never conclude
+from truncated output. And an empty *server* list is not an empty account: seven
+Scaleway block volumes billed for three days behind one. Ask for volumes too.
+
 ## Before you touch it
 
 `scripts/dev/test-teardown.sh` is the harness, and it found the `--force-no-edges`

@@ -409,7 +409,7 @@ cnpg_maintenance() { # <true|false>
   # Resume AFTER restoring, so Flux finds the objects already back where git
   # wants them. Leaving a Kustomization suspended is the failure mode this
   # function must not have, and since the full-platform verifier went with the
-  # staging lane, nothing checks it any more — see docs/backlog.md.
+  # staging lane, nothing checks it any more — see the GitHub issues.
   [[ "$on" == "true" ]] || cnpg_flux_suspend false
 
   # ⚠️ The patch returning 0 is not the setting taking effect. On OVH
@@ -422,7 +422,7 @@ cnpg_maintenance() { # <true|false>
   #
   # Confirm on the way IN only: on the way out the budgets coming back is Flux's
   # and the operator's business. Nothing checks that end state now that the
-  # full-platform verifier is gone — see docs/backlog.md.
+  # full-platform verifier is gone — see the GitHub issues.
   [[ "$on" == "true" ]] || return 0
   local waited=0 left rc
   while [[ $waited -lt 120 ]]; do

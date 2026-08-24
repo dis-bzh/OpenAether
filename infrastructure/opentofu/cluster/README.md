@@ -184,7 +184,7 @@ There is no failover command. `failover-management.sh` was deleted in 0.5.0: it
 re-implemented `task cluster-up` with a hardcoded SSH key and its own tunnel loop, had
 never been run, and a broken skeleton is a worse starting point than none. The
 prerequisite — a state and artifacts replica on a SECOND provider — is real and
-measured (`docs/backlog.md`); rebuilding a cluster from it is designed work that
+measured (`docs/status.md`); rebuilding a cluster from it is designed work that
 has not been done. `envs/failover-*.tfvars.example` still describes the role.
 
 ### Upgrade Cilium or Flux

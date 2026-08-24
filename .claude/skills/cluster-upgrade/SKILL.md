@@ -124,6 +124,15 @@ code from the same repository. A competing hypothesis, already recorded for
 OpenStack in `rolling-replace.sh`, is that the instance boots the image volume
 rather than the installed disk, so the reboot simply discards the upgrade.
 
+**Talos drops the META `Upgrade` fallback only at `stage=running`.** A node that
+is Ready but stuck at `Booting` reverts on its next reboot, and `upgrade --wait`
+never returns. One unstartable extension holds the boot sequence open, so check
+`talosctl services` before blaming the provider.
+
+**And a version tag is not an image.** The schematic carries the extensions, and
+a new installer reference does not reinstall a running node. Compare the running
+schematic (`talosctl get extensions`), never the tag.
+
 ## A stuck drain is one budget's fault, not the stack's
 
 A worker drains clean — measured 2026-08-13, exit 0, zero non-DaemonSet pods

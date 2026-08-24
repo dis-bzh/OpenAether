@@ -164,7 +164,7 @@ Talos API, never from the tool that performed the upgrade.
 ### Known limits
 
 Read these before deploying something that matters. Open items:
-[`docs/backlog.md`](docs/backlog.md).
+[the open issues](https://github.com/dis-bzh/OpenAether-infra/issues).
 
 - **No Flux and no applications.** `deploy_flux` defaults to `false`. Flux is
   disabled, not amputated — the Talos module already reads an empty manifest as

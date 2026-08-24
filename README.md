@@ -20,7 +20,7 @@ bare machine to a cluster you can reach, upgrade and destroy.
 **You want to contribute.** [`CONTRIBUTING.md`](CONTRIBUTING.md) has the rules
 that are not obvious — what counts as proof, the three rungs a change has to
 climb, and how commits made with an AI assistant are signed. The open work is
-[`docs/backlog.md`](docs/backlog.md), and its entries name the rung each one
+[the open issues](https://github.com/dis-bzh/OpenAether-infra/issues), and each one names the rung it
 needs: `task test` and `mocked` are the ones you can close without a cloud
 account.
 
@@ -44,7 +44,7 @@ own Talos API. OVH the same day, Outscale on 2026-08-20. An upgrade is not
 seamless: longest apiserver outage 5 s on Scaleway, 7 s on OVH, 8 s on Outscale
 — all three worse than the best figures this project ever recorded, for a
 reason that is not established. Proxmox has **never been applied on real
-hardware**. Open items: [`docs/backlog.md`](docs/backlog.md).
+hardware**. Open items: [the open issues](https://github.com/dis-bzh/OpenAether-infra/issues).
 
 ## Architecture
 
@@ -263,7 +263,7 @@ task security            # hardening checks
 | [docs/emulated-cloud.md](docs/emulated-cloud.md) | Testing Scaleway/Outscale against a local emulator — and the limits of that |
 | [docs/upgrade.md](docs/upgrade.md) | Moving Kubernetes and Talos on a cluster that has to stay up |
 | [docs/release-checklist.md](docs/release-checklist.md) | What to run before tagging a release, in the order that fails cheapest |
-| [docs/backlog.md](docs/backlog.md) | **Source of truth**: current state, debt, improvements (English only — living working document) |
+| [docs/status.md](docs/status.md) | **Source of truth**: current state, debt, improvements (English only — living working document) |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | **Read before a first pull request**: what counts as proof, the three rungs, commit trailers, AI-assisted contributions |
 
 ## Security

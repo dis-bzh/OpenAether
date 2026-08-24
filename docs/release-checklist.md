@@ -1,6 +1,6 @@
 # Release checklist — 0.1.0
 
-English only, like `backlog.md`: rewritten each release, and two copies would drift.
+English only: rewritten each release, and two copies would drift.
 
 What to run before tagging 0.1.0 and telling anyone about it. Ordered by what
 fails cheapest. **Stop at the first red** — every later step assumes the earlier
@@ -85,7 +85,7 @@ baseline and not a picture of what was already there.
 - [x] `local-test` reaches its green banner **and** its checks are fatal. Green
       first; then `kubectl -n kube-system delete daemonset cilium` and it went
       RED — `✗ Cilium pods running: 0/6 — the cluster has no working CNI`, exit
-      201. The CNI check is fatal; `backlog.md` still has the two next to it that
+      201. The CNI check is fatal; two issues next to it still say they
       are only warnings.
 - [x] `local-down` leaves no container, volume or network behind → 1/0/4 before,
       1/0/4 after, nothing added. The diff was itself checked against two
@@ -298,7 +298,7 @@ and does not belong here twice. What a *release* adds to it:
 - [x] `task infra-plan ... STRICT=1` exits 0 afterwards → `plan empty after the
       upgrade`, and a full `task cluster-up` after it printed `No changes.` on all
       three roots.
-- [x] whatever it shook out is in `backlog.md` before the tag, including what you
+- [x] whatever it shook out is filed as an issue before the tag, including what you
       chose not to fix → this cycle added: the purge scripts' uncounted deletions
       (fixed), `ovh.py`'s missing refused-call counter (not fixed), encrypted
       worker volumes applied and never read back, no way to ask what is in the
@@ -317,7 +317,7 @@ Only once everything above is green.
       including the ones that failed → `L-ha` re-run, the new `SCW-mgmt-ha-2az`
       row that is what 0.1.0 rests on, and `SCW-storage` corrected: it said
       "never applied anywhere", which was wrong.
-- [x] `docs/backlog.md` — drop what is now done, add what this shook out →
+- [x] the issues — close what is now done, open what this shook out →
       idempotency-after-upgrade and the staging-lane decision removed as done;
       seven entries added.
 - [x] `CHANGELOG.md` names what 0.1.0 claims **and** what it does not → four

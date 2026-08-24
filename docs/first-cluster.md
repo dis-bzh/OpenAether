@@ -193,7 +193,7 @@ Six buckets exist afterwards: state and artifacts, each with a `-backup` twin,
 plus the image and its staging area.
 
 Re-running resumes — **except when your edit adds a node**, which is a known
-open defect (`docs/backlog.md`), not something you did wrong.
+open defect (see the issues), not something you did wrong.
 
 ## 5. Talk to it
 
@@ -311,7 +311,7 @@ second key and no reset.
 Honest as of 0.1.0 — the first release of this project that ships anything
 proven, and the reason this document exists.
 
-What **is** measured, with dates (`docs/backlog.md`, "Where we stand"):
+What **is** measured, with dates (`docs/status.md`):
 
 - `task cluster-verify` scores **11/11 on Scaleway, on OVH and on Outscale** —
   the first two on 2026-08-19, Outscale on 2026-08-20.
