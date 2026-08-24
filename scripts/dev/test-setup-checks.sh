@@ -123,13 +123,25 @@ sudostub() { # <rc of `sudo -n true`>
 }
 lib() { PATH="$TMP/bin:$PATH" bash -c '. "$1"; shift; "$@"' _ "$LIB" "$@"; }
 
+# Only the stub directory on PATH. Removing the sudo stub is NOT enough: a
+# GitHub runner has a real, PASSWORDLESS sudo, so the "absent" case fell through
+# to it and judged absent sudo usable — green on a workstation, red in CI. The
+# same mistake as the missing-tool cases above, made two sections after the
+# comment warning about it.
+#
+# /bin/bash by absolute path, because with PATH reduced to the stub directory
+# `bash` itself stops being findable: the call dies 127 and the `&&` chain reads
+# that as the answer, so the assertion passes having run nothing. oa_sudo_usable
+# calls no external command, so the bare PATH costs it nothing.
+lib_bare() { env PATH="$TMP/bin" /bin/bash -c '. "$1"; shift; "$@"' _ "$LIB" "$@"; }
+
 sudostub 0
 lib oa_sudo_usable && ok "passwordless sudo is usable" || bad "passwordless sudo judged unusable"
 sudostub 1
 lib oa_sudo_usable && bad "sudo that would prompt was judged usable with no terminal" \
                    || ok "sudo that would prompt, with no terminal, is not usable"
 rm -f "$TMP/bin/sudo"
-lib oa_sudo_usable && bad "absent sudo judged usable" || ok "absent sudo is not usable"
+lib_bare oa_sudo_usable && bad "absent sudo judged usable" || ok "absent sudo is not usable"
 
 echo
 echo "=== and where a binary should go ==="
