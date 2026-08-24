@@ -13,7 +13,7 @@ decided.
 
 **Taking one.** Every entry names the rung it needs, at the end: `task test` and
 `mocked` close on a laptop, `emulated` needs Feint and still no cloud account,
-`real cloud` spends money on somebody's project. Grep for `Rung:` — today 8 of the
+`real cloud` spends money on somebody's project. Grep for `Rung:` — today 9 of the
 open entries are closable with no cloud account, and 19 name no rung at all, which
 is a defect in this file rather than in them, a `Decide:` aside.
 
@@ -126,17 +126,23 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
       Rung: mocked, then one real deploy to confirm health checks still pass.
 
 - [ ] **No credential in the admin path has ever been issued for less than a
-      year, or to a person.** One `os:admin` talosconfig (`modules/talos/main.tf:93`,
-      `crt_ttl` never set, so the provider default applies) and one `system:masters`
-      kubeconfig serve every operator and every task; both live in the tfstate,
-      in two gpg'd S3 stores and in clear on the operator's disk. Revoking either
-      means rotating a CA — and `talos_machine_secrets` carries `prevent_destroy`.
-      `machine.features.rbac` appears nowhere in this repository, so whether Talos
-      even enforces the roles is unknown.
-      **Closes:** `talosctl --talosconfig <reader> read /etc/hosts` DENIED on a live
-      cluster, the reader config issued by a `task talosconfig-new` wrapping
-      `talosctl config new --roles os:reader --crt-ttl 8h`. Rung: real cloud, one
-      command, no spend.
+      year, or to a person.** The talosconfig this repository hands out reports
+      `Roles: os:admin` and `Certificate expires: 1 year from now` — `crt_ttl` is
+      never set (`modules/talos/main.tf:93`), so the provider default stands. That
+      one config, plus a `system:masters` kubeconfig, serves every operator and
+      every task; both live in the tfstate, in two gpg'd S3 stores and in clear on
+      the operator's disk. Revoking either means rotating a CA, and
+      `talos_machine_secrets` carries `prevent_destroy`.
+      **The excuse is gone**: Talos enforces its roles with nothing added. Measured
+      on the Docker lane (v1.13.3) on 2026-08-24 — the node answers `Enabled: RBAC`,
+      and against an `os:reader` config minted at `--crt-ttl 8h`, `read /etc/hosts`
+      and `config new --roles os:admin` both return `PermissionDenied` with rc=1
+      while the admin config returns rc=0. `machine.features.rbac` appears nowhere
+      here and did not need to.
+      **Closes:** `task talosconfig-new` wrapping `talosctl config new --roles
+      os:reader --crt-ttl 8h`, the reader config used by the read-only tasks, and
+      the two denials above asserted in a harness. Rung: mocked — `task local-up`
+      proves it, no cloud account.
 
 - [ ] **The SSH-CA hooks have shipped inert since they were written.**
       `_shared/bastion-cloud-init.yaml.tftpl:86` sets `TrustedUserCAKeys` and
