@@ -243,15 +243,21 @@ jobs:
           # A URL-embedded credential does NOT override actions/checkout's own
           # token: it persists GITHUB_TOKEN as an `http.…/.extraheader` git
           # config entry, and that header wins over Basic-Auth in the push URL
-          # — confirmed against actions/checkout#162. The push still failed
-          # with CLEA_WORKFLOW_TOKEN embedded in the remote URL, identically to
-          # having no token at all, because it was never actually used. The
-          # documented override is `-c http…extraheader=…`, a ONE-SHOT config
-          # value for this single command only, never persisted.
+          # — confirmed against actions/checkout#162. Adding a SECOND
+          # extraheader with `-c` did not replace it either: the key is
+          # multi-valued in git on purpose (so several headers can combine),
+          # so `-c` on top of the persisted one sent TWO Authorization headers
+          # and GitHub's server refused the request outright — "remote:
+          # Duplicate header: \"Authorization\"", HTTP 400. The persisted one
+          # has to go before a replacement means anything; `--local` matches
+          # exactly what actions/checkout set (confirmed in its own cleanup
+          # log), and `|| true` covers CLEA_WORKFLOW_TOKEN being unset, where
+          # there is nothing to remove.
           if [ -n "${CLEA_WORKFLOW_TOKEN}" ]; then
-            basic="$(printf 'x-access-token:%s' "${CLEA_WORKFLOW_TOKEN}" | base64 -w0)"
-            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}" \
-              push --force origin "HEAD:clea/probe/${SLUG}"
+            git config --local --unset-all http.https://github.com/.extraheader || true
+            git push --force \
+              "https://x-access-token:${CLEA_WORKFLOW_TOKEN}@github.com/${{ github.repository }}.git" \
+              "HEAD:clea/probe/${SLUG}"
           else
             git push --force origin "HEAD:clea/probe/${SLUG}"
           fi
@@ -355,12 +361,13 @@ jobs:
           git commit -q -m "chore(clea): local cluster lane"
           # --force: see the probe job's push for why --force-with-lease
           # cannot work here — this checkout never fetched the branch either.
-          # See the probe job's push for why the URL-embedded token never
-          # worked, and why this form does.
+          # See the probe job's push for the extraheader precedence AND the
+          # duplicate-header failure this form avoids.
           if [ -n "${CLEA_WORKFLOW_TOKEN}" ]; then
-            basic="$(printf 'x-access-token:%s' "${CLEA_WORKFLOW_TOKEN}" | base64 -w0)"
-            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}" \
-              push --force origin HEAD:clea/probe/local-cluster
+            git config --local --unset-all http.https://github.com/.extraheader || true
+            git push --force \
+              "https://x-access-token:${CLEA_WORKFLOW_TOKEN}@github.com/${{ github.repository }}.git" \
+              HEAD:clea/probe/local-cluster
           else
             git push --force origin HEAD:clea/probe/local-cluster
           fi
