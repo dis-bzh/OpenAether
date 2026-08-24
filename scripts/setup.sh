@@ -55,7 +55,19 @@ check_cmd() {
         echo -e "${RED}✖ $tool is missing${NC}"
         return 1
     fi
-    version=$("$tool" version 2>/dev/null || "$tool" --version 2>/dev/null || echo "detected")
+    # First NON-EMPTY answer, and `--version` asked first. Measured on this
+    # repository's seven tools: helm, kubectl and talosctl answer only `version`;
+    # flux, tflint and task answer only `--version`, and `task version` prints
+    # the task LIST. Exit codes do not discriminate — several return 0 with no
+    # output — and the previous `$(a || b)` form concatenated both answers when
+    # the first failed after printing, which is a version string assembled from
+    # two commands.
+    version=""
+    for flag in --version version; do
+        version="$("$tool" "$flag" 2>/dev/null || true)"
+        if [ -n "$version" ]; then break; fi
+    done
+    [ -n "$version" ] || version="detected"
     # Bounded on both sides: 4.2.3 must not match 4.2.30, and the leading v is
     # optional because half of these print it and half do not.
     if [ -n "$want" ] && ! grep -qE "(^|[^0-9.])v?${want//./\\.}([^0-9.]|$)" <<< "$version"; then

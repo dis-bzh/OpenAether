@@ -29,8 +29,18 @@ grep -q 'command -v' "$TMP/fn.sh" || {
   exit 1
 }
 
-stub() { # <name> <what `version` prints>
-  printf '#!/bin/sh\nprintf "%%s\\n" "%s"\n' "$2" > "$TMP/bin/$1"
+stub() { # <name> <what both probes print>
+  stub2 "$1" "$2" "$2"
+}
+
+stub2() { # <name> <what --version prints> <what version prints> [rc-of--version]
+  cat > "$TMP/bin/$1" <<EOF
+#!/bin/sh
+case "\$1" in
+  --version) [ -n "$2" ] && printf '%s\n' "$2"; exit ${4:-0} ;;
+  version)   [ -n "$3" ] && printf '%s\n' "$3"; exit 0 ;;
+esac
+EOF
   chmod +x "$TMP/bin/$1"
 }
 mkdir -p "$TMP/bin"
@@ -56,6 +66,27 @@ run 0 "the pinned version installed" helm 4.2.3
 run 1 "a different version is refused, not accepted as present" helm 4.2.4
 grep -q '↻' "$TMP/last" && ok "and it says the version is not the pinned one" \
   || bad "the refusal does not name what it found"
+
+echo
+echo "=== which probe answers differs per tool, and emptiness is the signal ==="
+# Measured on this repository's own seven: helm, kubectl and talosctl answer
+# only `version`; flux, tflint and task answer only `--version`, and
+# `task version` prints the task LIST. Exit codes do not discriminate — several
+# return 0 with nothing at all.
+stub2 onlyversion "" "v1.2.3"
+run 0 "a tool that answers only on version" onlyversion 1.2.3
+stub2 onlydash "v1.2.3" ""
+run 0 "a tool that answers only on --version" onlydash 1.2.3
+stub2 mute "" ""
+run 1 "a tool that answers neither cannot satisfy a pin" mute 1.2.3
+run 0 "and with no pin it is still just present" mute
+
+# The one that matters: `$(a || b)` concatenated both answers when the first
+# printed and then failed, so a version string was assembled out of two
+# commands and TWO different pins would both match it.
+stub2 noisy "9.9.9" "1.2.3" 1
+run 0 "the first non-empty answer is the answer" noisy 9.9.9
+run 1 "and the second is not appended to it" noisy 1.2.3
 
 echo
 echo "=== the comparison is bounded on both sides ==="
