@@ -227,9 +227,12 @@ class Anchor:
 def _read_value(lines: list[str], start: int):
     """First recognised version in the window under the anchor at index `start`.
 
-    Returns (value, line, form, span) or (None, reason) — the reason names what
-    was read instead, because "no value here" and "this line reads
-    `{{.VERSION | default .PINNED}}`" send a reader to two different places.
+    Returns (found, reason): `found` is (value, line, form, span) or None;
+    `reason` is set only when `found` is None, and names what was read instead
+    — "no value here" and "this line reads `{{.VERSION | default .PINNED}}`"
+    send a reader to two different places. Always a 2-tuple: a return whose
+    ARITY depends on which branch ran is its own kind of landmine for whatever
+    reads it next.
     """
     rejected: list[str] = []
     for offset in range(1, VALUE_WINDOW + 1):
@@ -245,10 +248,11 @@ def _read_value(lines: list[str], start: int):
                 continue
             value = m.group("v")
             if VERSION_LIKE.match(value):
-                return value, idx + 1, form, m.span("v")
+                return (value, idx + 1, form, m.span("v")), None
             rejected.append(f"line {idx + 1} reads {value!r} ({form}), which is not a version")
-    return None, ("; ".join(rejected) if rejected
-                  else f"nothing version-shaped in the {VALUE_WINDOW} lines below")
+    reason = ("; ".join(rejected) if rejected
+              else f"nothing version-shaped in the {VALUE_WINDOW} lines below")
+    return None, reason
 
 
 def _walk(root: Path, include: list[str], exclude: list[str]):
@@ -303,9 +307,9 @@ def scan_anchors(root: Path, marker: str, exclude: list[str],
             if "depName" not in attrs:
                 continue
             anchor = Anchor(rel, i + 1, attrs)
-            got = _read_value(lines, i)
-            if got[0] is None:
-                anchor.reason = got[1]
+            got, reason = _read_value(lines, i)
+            if got is None:
+                anchor.reason = reason
                 novalue.append(anchor)
                 continue
             anchor.value, anchor.value_line, anchor.form, anchor.span = got
