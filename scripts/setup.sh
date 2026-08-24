@@ -20,20 +20,63 @@ else
     echo -e "${RED}⚠ Neither root nor sudo: system-wide installs will fail.${NC}"
 fi
 
-# Helper to check command existence
+# The versions this repository pins, at the top so the checks below can compare
+# against them. They used to live inside their install functions, where nothing
+# could read them — see check_cmd.
+#
+# TOFU_VERSION MUST stay equal to tofu_version in .github/workflows/ci.yml, and
+# HELM_VERSION to HELM_VERSION there and to HELM_MAJOR_EXPECTED in
+# scripts/bootstrap/render-bootstrap-manifests.sh, which refuses to render on any
+# other major. check-version-drift.sh compares all of them.
+#
+# renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
+TOFU_VERSION="1.12.5"
+# renovate: datasource=github-releases depName=fluxcd/flux2 extractVersion=^v(?<version>.*)$
+FLUX_VERSION="2.9.3"
+# renovate: datasource=github-releases depName=helm/helm extractVersion=^v(?<version>.*)$
+HELM_VERSION="4.2.3"
+
+# check_cmd <tool> [pinned-version]
+#
+# PRESENT IS NOT CURRENT. With no second argument this only asks whether the
+# binary exists, and that was the only question it ever asked: setup.sh
+# installed the pin on a fresh machine and refused every upgrade afterwards, in
+# silence, on every machine that had run it once. Measured 2026-08-23 by the
+# Cléa probe — cold install reached helm 4.2.4, upgrading over 4.2.3 left 4.2.3.
+# The same shape was found and fixed for feint on 2026-08-21
+# (scripts/dev/feint.sh:310).
+#
+# Only the tools this file PINS get the second argument. For the others there is
+# no version to compare against, and inventing one would be a check that cannot
+# fail; pinning them is a separate decision, in docs/backlog.md.
 check_cmd() {
-    if ! command -v "$1" &> /dev/null; then
-        echo -e "${RED}✖ $1 is missing${NC}"
+    local tool="$1" want="${2:-}" version
+    if ! command -v "$tool" &> /dev/null; then
+        echo -e "${RED}✖ $tool is missing${NC}"
         return 1
-    else
-        VERSION=$("$1" version 2>/dev/null || "$1" --version 2>/dev/null || echo "detected")
-        echo -e "${GREEN}✔ $1 is installed${NC} ($VERSION)"
-        return 0
     fi
+    version=$("$tool" version 2>/dev/null || "$tool" --version 2>/dev/null || echo "detected")
+    # Bounded on both sides: 4.2.3 must not match 4.2.30, and the leading v is
+    # optional because half of these print it and half do not.
+    if [ -n "$want" ] && ! grep -qE "(^|[^0-9.])v?${want//./\\.}([^0-9.]|$)" <<< "$version"; then
+        echo -e "${RED}↻ $tool is not the pinned ${want}${NC} (found: $(head -1 <<< "$version"))"
+        return 1
+    fi
+    echo -e "${GREEN}✔ $tool is installed${NC} ($version)"
+    return 0
 }
 
 install_tofu() {
-    echo "Installing OpenTofu..."
+    # Pinned, and passed to the installer explicitly. Without it the official
+    # script asks the GitHub API which version is newest — UNAUTHENTICATED, 60
+    # requests an hour from an IP shared with every other customer of the
+    # platform. That is what took `main` red on 2026-08-13 through a different
+    # tool, and here it is worse: this is the FIRST step, so `set -e` takes the
+    # whole bootstrap with it and nothing at all gets installed. Measured
+    # 2026-08-23 in a bare ubuntu:24.04, exit 2, by the Cléa probe.
+    # MUST stay equal to tofu_version in .github/workflows/ci.yml —
+    # check-version-drift.sh compares them.
+    echo "Installing OpenTofu v${TOFU_VERSION}..."
     if command -v snap &> /dev/null; then
         $SUDO snap install --classic opentofu
     elif command -v brew &> /dev/null; then
@@ -66,7 +109,7 @@ install_tofu() {
         tmp="$(mktemp)"
         trap 'rm -f "$tmp"' RETURN
         curl -fsSL https://get.opentofu.org/install-opentofu.sh -o "$tmp"
-        sh "$tmp" --install-method standalone
+        sh "$tmp" --install-method standalone --opentofu-version "${TOFU_VERSION}"
     fi
 }
 
@@ -214,8 +257,6 @@ install_image_tools() {
 }
 
 install_flux() {
-    # renovate: datasource=github-releases depName=fluxcd/flux2 extractVersion=^v(?<version>.*)$
-    local FLUX_VERSION="2.9.3"
     local ARCH="linux_amd64"
     echo "Installing Flux CLI v${FLUX_VERSION}..."
     local tmp
@@ -241,8 +282,6 @@ install_helm() {
     # those required 4, so a fresh clone got a toolchain that could not run
     # `task local-up` — the credential-free rung the README calls the best first
     # step. The mismatch was invisible to anyone who already had helm 4.
-    # renovate: datasource=github-releases depName=helm/helm extractVersion=^v(?<version>.*)$
-    local HELM_VERSION="4.2.3"
     local ARCH="linux-amd64"
     echo "Installing Helm v${HELM_VERSION}..."
     local tmp
@@ -277,7 +316,7 @@ install_precommit() {
 }
 
 # 1. Check OpenTofu
-if ! check_cmd tofu; then
+if ! check_cmd tofu "$TOFU_VERSION"; then
     install_tofu
 fi
 
@@ -335,13 +374,13 @@ if [ "$MISSING_IMG_TOOLS" -eq 1 ]; then
 fi
 
 # 7. Check Flux CLI
-if ! check_cmd flux; then
+if ! check_cmd flux "$FLUX_VERSION"; then
     install_flux
 fi
 
 # 8. Check Helm — render-bootstrap-manifests.sh runs `helm template`, so every
 # path that renders Cilium or Flux needs it, including `task local-up`.
-if ! check_cmd helm; then
+if ! check_cmd helm "$HELM_VERSION"; then
     install_helm
 fi
 

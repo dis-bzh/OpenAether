@@ -77,10 +77,11 @@ supprime une branche dès que sa montée de version a atterri sur `main`.
   committée. La lane re-génère avant de lancer les vérifications, pour que la
   branche de sonde porte les deux moitiés — mais si la génération échoue,
   `task render-check` est ce qui le dit.
-- **helm et flux n'ont pas d'installeur propre** : ce sont des étapes dans
-  `scripts/setup.sh`, qui vérifie qu'un binaire est présent et non quelle version
-  il porte. Leur lane de mise à jour est censée échouer tant que cela n'aura pas
-  changé ; `docs/backlog.md` porte l'entrée.
+- **Un outil que ce dépôt n'épingle pas** n'a aucune version à laquelle se
+  comparer : sa lane de mise à jour ne peut que rapporter ce qu'elle a trouvé.
+  `talosctl`, `kubectl`, l'AWS CLI, shellcheck, yamllint, checkov et pre-commit
+  sont dans cet état — `docs/backlog.md` porte l'entrée, et les épingler est une
+  décision à part.
 
 ## Le lancer à la main
 

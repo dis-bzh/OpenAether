@@ -106,6 +106,12 @@ Only `curl` and `ca-certificates` are added to the container. Anything else the
 installer needs and does not install is a finding, not a prerequisite to paper
 over.
 
+Set `CLEA_CA_BUNDLE` to a PEM wherever TLS is intercepted — a corporate proxy,
+or a sandbox. Without it every download inside the container fails with
+`self-signed certificate in certificate chain`, and the probe reports red for a
+reason that is not the bump. A bundle that cannot be read is refused rather than
+ignored, for the same reason.
+
 ## Configuration
 
 ```toml

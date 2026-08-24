@@ -13,8 +13,13 @@
 # paper over.
 #
 # Usage: probe.sh <dep> <version> <installer> <version-cmd> [stdin-for-installer]
-#   CLEA_IMAGE  base image           (default: ubuntu:24.04)
-#   CLEA_ROOT   repository to mount  (default: git toplevel)
+#   CLEA_IMAGE       base image           (default: ubuntu:24.04)
+#   CLEA_ROOT        repository to mount  (default: git toplevel)
+#   CLEA_CA_BUNDLE   PEM to trust inside the container. Needed wherever TLS is
+#                    intercepted — a corporate proxy, or the sandbox this was
+#                    first run in, where every download failed with
+#                    "self-signed certificate in certificate chain" and the
+#                    probe reported red for a reason that was not the bump.
 set -uo pipefail
 
 DEP="${1:?dep}"; VERSION="${2:?version}"; INSTALLER="${3:?installer}"
@@ -23,6 +28,12 @@ IMAGE="${CLEA_IMAGE:-ubuntu:24.04}"
 ROOT="${CLEA_ROOT:-$(git rev-parse --show-toplevel)}"
 CLEA="$ROOT/scripts/clea/clea.py"
 NAME="clea-probe-$(printf '%s' "$DEP" | tr -c 'a-zA-Z0-9' '-')-$$"
+CA="${CLEA_CA_BUNDLE:-}"
+if [ -n "$CA" ] && [ ! -r "$CA" ]; then
+  echo "✗ CLEA_CA_BUNDLE=${CA} is not readable — refusing to run a probe whose "\
+       "downloads would fail for a reason that is not the bump" >&2
+  exit 1
+fi
 
 # This script bumps a pin and restores the tree with `git checkout -- .`, which
 # would take uncommitted work with it. Refuse rather than find out.
@@ -45,20 +56,32 @@ trap cleanup EXIT
 # match 1.13.90. The leading v is optional because half the tools print it.
 version_re() { printf '(^|[^0-9.])v?%s([^0-9.]|$)' "$(printf '%s' "${1#v}" | sed 's/\./\\./g')"; }
 
+# Trust is passed by environment rather than by update-ca-certificates: that
+# tool indexes one certificate per file and quietly mishandles a bundle, which
+# would leave the same TLS failure with nothing on screen to explain it.
+CA_ENV=""
+[ -n "$CA" ] && CA_ENV="export CURL_CA_BUNDLE=/etc/clea-ca.crt SSL_CERT_FILE=/etc/clea-ca.crt REQUESTS_CA_BUNDLE=/etc/clea-ca.crt; "
+
 in_box() {
   if [ -n "$STDIN" ]; then
-    printf '%b' "$STDIN" | docker exec -i -w /repo "$NAME" bash -lc "$1"
+    printf '%b' "$STDIN" | docker exec -i -w /repo "$NAME" bash -lc "${CA_ENV}$1"
   else
-    docker exec -w /repo "$NAME" bash -lc "$1"
+    docker exec -w /repo "$NAME" bash -lc "${CA_ENV}$1"
   fi
+}
+
+start_box() {
+  docker rm -f "$NAME" >/dev/null 2>&1 || true
+  # shellcheck disable=SC2086 # the mount must stay unquoted: empty means none
+  docker run -d --name "$NAME" -v "$ROOT:/repo" \
+    ${CA:+-v "$CA:/etc/clea-ca.crt:ro"} -w /repo "$IMAGE" sleep 3600 >/dev/null \
+    || { echo "✗ could not start ${IMAGE}" >&2; return 1; }
+  in_box 'apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null'
 }
 
 echo "=== ${DEP} -> ${VERSION} ==="
 
-docker run -d --name "$NAME" -v "$ROOT:/repo" -w /repo "$IMAGE" sleep 3600 >/dev/null || {
-  echo "✗ could not start ${IMAGE}" >&2; exit 1; }
-in_box 'apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null' \
-  || { echo "✗ could not add curl to the container" >&2; exit 1; }
+start_box || exit 1
 
 # --- 1. upgrade: the OLD pin first, so there is something to upgrade over -----
 OLD_OUT="$(in_box "$INSTALLER >/dev/null 2>&1; $VERSION_CMD" 2>&1)"
@@ -86,9 +109,7 @@ else
 fi
 
 # --- 4. install from cold, in a container that never had it ------------------
-docker rm -f "$NAME" >/dev/null 2>&1
-docker run -d --name "$NAME" -v "$ROOT:/repo" -w /repo "$IMAGE" sleep 3600 >/dev/null
-in_box 'apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null'
+start_box || exit 1
 COLD_OUT="$(in_box "$INSTALLER 2>&1; echo ---; $VERSION_CMD" 2>&1)"
 if printf '%s' "$COLD_OUT" | grep -qE "$(version_re "$VERSION")"; then
   ok "cold install on a machine that never had it reached ${VERSION}"

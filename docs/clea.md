@@ -73,10 +73,10 @@ landed on `main`.
 - **A Cilium or Flux bump** moves a pin whose *output* is committed. The lane
   re-renders before running the gates, so the probe branch carries both halves —
   but if the render fails, `task render-check` is what says so.
-- **helm and flux have no installer of their own**: they are steps inside
-  `scripts/setup.sh`, which checks whether a binary is present and not which
-  version it is. Their upgrade lane is expected to fail until that changes;
-  `docs/backlog.md` holds the entry.
+- **A tool this repository does not pin** has no version to compare against, so
+  its upgrade lane can only report what it found. `talosctl`, `kubectl`, the AWS
+  CLI, shellcheck, yamllint, checkov and pre-commit are all in that state —
+  `docs/backlog.md` holds the entry, and pinning them is a separate decision.
 
 ## Running it by hand
 

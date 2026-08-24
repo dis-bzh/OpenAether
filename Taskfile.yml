@@ -314,6 +314,10 @@ tasks:
       # probe branch. Its reader, its writer and its comparator are all places a
       # silent wrong answer would produce a confident report.
       - ./scripts/dev/test-clea.sh
+      # setup.sh asked whether a tool was present, never which version it was —
+      # so it installed the pin once and refused every upgrade after that. Found
+      # by the Cléa probe, guarded here so it does not need Docker to stay fixed.
+      - ./scripts/dev/test-setup-checks.sh
 
   test:
     desc: Run OpenTofu tests (cluster root)

@@ -58,6 +58,11 @@ in git. 0.1.0 is the first entry describing something proven.
     GitHub API answer is an error naming `GITHUB_TOKEN`, never "up to date" —
     60 requests an hour from a shared runner IP is what took `main` red on
     2026-08-13. Documented in [`docs/clea.md`](docs/clea.md).
+  - **The probe found its first defect, and the same probe proved the fix.**
+    `setup.sh` installed helm 4.2.4 from cold and left 4.2.3 in place when
+    upgrading over it — the exact shape the upgrade lane exists to catch. After
+    the fix, three lanes of three green. That loop, not the daily report, is
+    what this is for.
   - **What the first real scan found**, running against live upstreams:
     `commitizen` pinned at 4.9.1 against 4.18.0 — nine minor versions, on one of
     the anchors that was inert — and the Cilium chart one patch behind at 1.20.0
@@ -91,6 +96,24 @@ in git. 0.1.0 is the first entry describing something proven.
   it now sits between them, and `install_yamllint` finally gets the
   "`pip3` is not always a binary" lesson its neighbour documented and never
   received.
+
+- **`scripts/setup.sh` asked whether a tool was present, never which version it
+  was** — so it installed the pin on a fresh machine and refused every upgrade
+  afterwards, in silence, on every machine that had run it once. Found by the
+  Cléa probe on a real bump: a cold install reached helm 4.2.4 while upgrading
+  over 4.2.3 left 4.2.3. `check_cmd` now takes the pin and compares, bounded on
+  both sides, for the three tools this file pins; the others have no version to
+  compare against and pinning them is a separate decision.
+  `scripts/dev/test-setup-checks.sh` guards it offline, so it does not need
+  Docker to stay fixed.
+
+- **The OpenTofu install asked the GitHub API which version was newest** —
+  unauthenticated, 60 requests an hour from a shared IP, and it is the FIRST
+  step, so a 403 there took the whole bootstrap down with `set -e` and nothing
+  at all got installed. Exit 2 on a bare `ubuntu:24.04`, measured 2026-08-23.
+  OpenTofu was the last tool here neither pinned nor verified; it now carries
+  the same pin as `ci.yml`, passed to the installer explicitly, and
+  `check-version-drift.sh` compares the two.
 
 - **Nine of twenty-one version anchors were inert, and nothing said so.** The
   `# renovate:` comment was there and Renovate had never been told to read the
