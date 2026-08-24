@@ -1,0 +1,19 @@
+{
+  "_comment": [
+    "Which Kubernetes minors each Talos minor supports. ONE source: versions-guard.tf",
+    "reads it with jsondecode, and scripts/dev/cluster-upgrade.sh reads it with jq to",
+    "build an upgrade path. Two copies of one fact is one too many — the Taskfile and",
+    "variables.tf disagreed about talos_version once, and the deploy built an image the",
+    "cluster then refused to find.",
+    "",
+    "Only ranges read from the upstream matrix belong here. An unknown Talos minor",
+    "fails on purpose rather than passing silently, so adding one forces a look at",
+    "the matrix rather than a guess."
+  ],
+  "_source": "https://docs.siderolabs.com/talos/v1.13/getting-started/support-matrix",
+  "_rule": "Talos supports the current Kubernetes minor and the five before it (n-5).",
+  "talos_minors": {
+    "1.12": { "k8s_min": 30, "k8s_max": 35 },
+    "1.13": { "k8s_min": 31, "k8s_max": 36 }
+  }
+}

@@ -74,6 +74,16 @@ on 2026-08-20, the new LBU `active` with 3 backends, and **request 399530 is
 closed**. One Net from before the fix still refuses deletion on a dependency no
 read returns; only Outscale can clear that, and a second request is open for it.
 
+**A bumped pin used to land nowhere, and every signal said otherwise.** Measured
+on a live Scaleway cluster 2026-08-21: with `talos_version` bumped and NOT
+applied, `cluster-verify` answered `11 passed, 0 failed`, exit 0 — the fleet a
+version behind its own configuration and nothing red anywhere, because the check
+compared the running *schematic*, which a version bump does not change. The
+verifier now compares the running versions too and answers `12 passed, 1 failed`
+on that same state. The convergence half was measured the same day: a seven-step
+climb from (Talos 1.12.7, Kubernetes 1.30.0) to (1.13.9, 1.36.3) on six nodes,
+longest apiserver outage **5 s**.
+
 **Dependency watch, since 2026-08-24.** Cléa (`scripts/clea/`, `docs/clea.md`)
 reads every version this repository claims, resolves what upstream published,
 and probes a bump by installing it from cold and upgrading over the old one in

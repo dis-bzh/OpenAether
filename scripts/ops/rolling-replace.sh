@@ -55,6 +55,14 @@ SCOPE="all"        # all | workers | cp
 DRY_RUN=0
 ASSUME_YES=0
 UPGRADE=0         # --upgrade: in-place `talosctl upgrade`, no VM replacement
+# The role used to be the literal "management", here and in the Taskfile, while
+# `task cluster-roll` declared a ROLE variable nothing read. So `cluster-upgrade
+# ROLE=workload` applied the workload tfvars in both its phases and then rolled
+# against the MANAGEMENT state. Defaulted, so every existing caller is unchanged.
+ROLE="management"
+# `--role=x`, one token: the loop below is a `for` over "$@" and cannot consume a
+# following word. Splitting it into a while/shift parser to gain a space would
+# rewrite the argument handling of every other flag for no benefit.
 for arg in "$@"; do
   case "$arg" in
     --workers-only) SCOPE="workers" ;;
@@ -62,9 +70,11 @@ for arg in "$@"; do
     --dry-run)      DRY_RUN=1 ;;
     --upgrade)      UPGRADE=1 ;;
     --yes|-y)       ASSUME_YES=1 ;;
+    --role=*)       ROLE="${arg#--role=}" ;;
     *) echo "✗ unknown flag: $arg" >&2; exit 2 ;;
   esac
 done
+[ -n "$ROLE" ] || { echo "✗ --role= given with no value" >&2; exit 2; }
 
 # Provider → module name in cluster/main.tf (junction modules, count-gated).
 case "$PROVIDER" in
@@ -88,7 +98,7 @@ if [[ "$PROVIDER" == "proxmox" ]]; then
 fi
 
 # --- config ------------------------------------------------------------------
-TFVARS="envs/management-${PROVIDER}.tfvars"
+TFVARS="envs/${ROLE}-${PROVIDER}.tfvars"
 TALOSCONFIG_FILE="${TALOSCONFIG:-./talosconfig}"
 KUBECONFIG_FILE="${KUBECONFIG:-./kubeconfig}"
 # 300s was not enough for a database switchover, and the run continued anyway.

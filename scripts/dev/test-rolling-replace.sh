@@ -421,5 +421,49 @@ grep -q 'etcd forfeit-leadership' "$ROOT/scripts/ops/rolling-replace.sh" \
   || bad "no forfeit-leadership — the last control plane still forces an election"
 
 
+
+echo
+echo "=== the roll reads the role's env file, not always management's ==="
+# `task cluster-roll` declared a ROLE variable that nothing read, and both the
+# Taskfile and this script spelled the env file `management-<provider>.tfvars`.
+# So `cluster-upgrade ROLE=workload` applied the workload tfvars in its two
+# phases and then rolled against the MANAGEMENT state. Three call sites had to
+# agree, and only a source read can see two of them — a stub kubectl cannot
+# observe which file `tofu init` was handed.
+SUT_R="$ROOT/scripts/ops/rolling-replace.sh"
+TFY="$ROOT/Taskfile.yml"
+
+grep -qE '^TFVARS="envs/\$\{ROLE\}-\$\{PROVIDER\}\.tfvars"$' "$SUT_R" \
+  && ok "rolling-replace builds the env path from the role" \
+  || bad "rolling-replace still hardcodes a role in TFVARS"
+
+[ "$(grep -c 'envs/management-\${PROVIDER}' "$SUT_R")" = 0 ] \
+  && ok "…and no hardcoded 'management' env path is left in it" \
+  || bad "a hardcoded management env path survives in rolling-replace"
+
+grep -q -- '--role=\*)' "$SUT_R" \
+  && ok "it accepts --role=" || bad "no --role= in the flag parser"
+
+# The default is what keeps every existing caller working: nothing else in the
+# repository passed a role before this change.
+grep -qE '^ROLE="management"$' "$SUT_R" \
+  && ok "…defaulting to management, so existing callers are unchanged" \
+  || bad "no management default — existing callers would break"
+
+# The Taskfile half. Both its lines have to move together: the tofu init that
+# selects the BACKEND, and the script call that selects the STATE it rolls.
+grep -q 'tf-backend.sh envs/{{.ROLE}}-{{.PROVIDER}}.tfvars' "$TFY" \
+  && ok "cluster-roll inits the backend for the role" \
+  || bad "cluster-roll still inits the management backend whatever the role"
+
+grep -q 'rolling-replace.sh {{.PROVIDER}} --role={{.ROLE}}' "$TFY" \
+  && ok "…and passes that role to the script" \
+  || bad "cluster-roll does not pass ROLE to rolling-replace"
+
+# And the caller that had the role all along and never forwarded it.
+[ "$(grep -c 'task cluster-roll PROVIDER="\$PROVIDER" ROLE="\$ROLE"' "$ROOT/scripts/dev/cluster-upgrade.sh")" = 2 ] \
+  && ok "cluster-upgrade forwards its role on both rolls" \
+  || bad "cluster-upgrade still rolls without saying which role"
+
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

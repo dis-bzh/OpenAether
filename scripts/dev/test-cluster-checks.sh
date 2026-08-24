@@ -482,6 +482,352 @@ YAML
     || bad "the Ready-condition filter selected '$got'"
 fi
 
+
+# =============================================================================
+# infra-verify: the fleet runs the versions the tfvars pin
+#
+# `cluster-up` writes the pinned installer image into the machine config and asks
+# no node to upgrade, so a bumped pin leaves the fleet behind with an empty plan
+# behind it — and the schematic check cannot see it, because a version bump does
+# not change the schematic. Until this section existed, infra-verify.sh was
+# symlinked into the fake root and never once executed: the only assertion about
+# the verifier was that cluster-upgrade CALLED it.
+#
+# PROVIDER=local on purpose: that path skips every `tofu output` and `aws s3`, so
+# the whole script is drivable by the stub kubectl alone.
+# =============================================================================
+echo
+echo "=== infra-verify: the fleet runs the versions the config pins ==="
+
+VERIFY_SH="$FAKE/scripts/dev/infra-verify.sh"
+LOCAL_DIR="$FAKE/infrastructure/opentofu-local"
+mkdir -p "$LOCAL_DIR"
+: >"$LOCAL_DIR/kubeconfig"; : >"$LOCAL_DIR/talosconfig"
+cat >"$LOCAL_DIR/variables.tf" <<'TFV'
+variable "talos_version" {
+  type    = string
+  default = "v0.0.2"
+}
+
+variable "kubernetes_version" {
+  type    = string
+  default = "v0.0.2"
+}
+TFV
+
+# Everything section 1 asks, answered green, so the run reaches the version
+# section instead of timing out in the bounded waits above it.
+BASE='get --raw=/readyz\t0\tok\n'
+BASE+='get nodes -l node-role.kubernetes.io/control-plane\t0\tcp-a Ready control-plane 9m\n'
+BASE+='k8s-app=cilium\t0\tcilium-a 1/1 Running%%cilium-b 1/1 Running\n'
+BASE+='readyReplicas\t0\t1\n'
+BASE+='get namespace flux-system\t1\tNotFound\n'
+BASE+='get nodes --no-headers\t0\tnode-a Ready control-plane 9m%%node-b Ready <none> 9m\n'
+
+verify_local() { run "$VERIFY_SH" local; }
+
+# The COUNT, not the message. Turning `unk` into `ok` leaves the sentence
+# identical — an assertion on the words alone survives that mutation, and did.
+unk_count() { sed -E 's/\x1b\[[0-9;]*m//g' <<<"$RUN_OUT" |
+                sed -nE 's/.*, ([0-9]+) could not be checked.*/\1/p' | tail -1; }
+
+# --- both pins matched --------------------------------------------------------
+plan 'osImage\t0\tTalos (v0.0.2)\n''kubeletVersion\t0\tv0.0.2\n'"$BASE"
+verify_local
+{ said 'every node runs the pinned Talos (v0.0.2)' && said 'every node runs the pinned Kubernetes (v0.0.2)'; } \
+  && ok "a fleet on the pinned versions passes" \
+  || bad "a fleet that matches its pins was not recognised as matching"
+
+# --- the case this section exists for -----------------------------------------
+# One patch behind, which is what a bumped tfvars and an un-rolled fleet look
+# like. The schematic is untouched by a version bump, so nothing else sees it.
+plan 'osImage\t0\tTalos (v0.0.1)\n''kubeletVersion\t0\tv0.0.2\n'"$BASE"
+verify_local
+{ said 'the fleet runs Talos v0.0.1, the config pins v0.0.2' && [ "$RUN_RC" -ne 0 ]; } \
+  && ok "a fleet a version behind its pin FAILS the run" \
+  || bad "a version behind the pin passed — the drift cluster-up leaves is invisible"
+
+# --- a roll that stopped half way ---------------------------------------------
+# Neither "matches" nor "drifted": saying "drifted" here would send the operator
+# to re-run an upgrade when the truth is that one is already half done.
+plan 'osImage\t0\tTalos (v0.0.1)%%Talos (v0.0.2)\n''kubeletVersion\t0\tv0.0.2\n'"$BASE"
+verify_local
+{ said 'the fleet is MIXED on Talos' && said 'v0.0.1,v0.0.2'; } \
+  && ok "a mixed fleet is named as mixed, not as drifted" \
+  || bad "a half-finished roll reads as a plain version drift"
+
+# --- the question could not be asked ------------------------------------------
+# `unk`, never `ok`: a node query that FAILED once read as "everything is on the
+# target" in this repository, which is the defect this whole file exists for.
+plan 'osImage\t1\tError from server: connection refused\n''kubeletVersion\t0\tv0.0.2\n'"$BASE"
+verify_local
+{ said 'could not read the running Talos' && [ "$(unk_count)" -ge 1 ] \
+  && ! said 'every node runs the pinned Talos'; } \
+  && ok "an unanswered version query is UNCHECKED ($(unk_count) unknown), not a pass" \
+  || bad "a failed node query read as a fleet on the target, or was not counted as unknown"
+
+# =============================================================================
+# cluster-upgrade: the path across minors
+#
+# Kubernetes forbids skipping a minor on the way up, and Talos supports a WINDOW
+# of Kubernetes minors — so a valid start and a valid end can be joined by a step
+# that is neither. (1.12, 1.30) → (1.13, 1.36) taken Talos-first lands on
+# (1.13, 1.30), below 1.13's floor of 1.31, and is refused at apply time — after
+# the step before it has already landed on a paying cluster.
+#
+# The functions are sourced rather than driven through the script: the harness
+# fixture pins v0.0.1/v0.0.2, which carries no minor semantics at all.
+# =============================================================================
+echo
+echo "=== cluster-upgrade: the path across minors ==="
+
+PATH_FNS="$STUB_DIR/pathfns.sh"
+_a=$(grep -n '^SUPPORT_JSON=' "$ROOT/scripts/dev/cluster-upgrade.sh" | cut -d: -f1)
+_b=$(awk -v a="$_a" 'NR>a && /^}$/ {n=NR} NR>a && /^TALOS_TO=/ {print n; exit}' "$ROOT/scripts/dev/cluster-upgrade.sh")
+{ printf 'ROOT=%q\n' "$ROOT"; sed -n "${_a},${_b}p" "$ROOT/scripts/dev/cluster-upgrade.sh"; } > "$PATH_FNS"
+# rc 127 from a failed extraction would make every negative below score a pass.
+# shellcheck source=/dev/null
+if source "$PATH_FNS" 2>/dev/null && declare -f version_path >/dev/null; then
+  ok "the path functions were extracted and are callable"
+else
+  bad "could not extract version_path — every assertion below would be vacuous"
+fi
+
+CLIMB="$(version_path v1.12.7 v1.30.0 v1.13.9 v1.36.3 2>/dev/null)"
+[ "$(printf '%s' "$CLIMB" | grep -c .)" = 7 ] \
+  && ok "(1.12.7, 1.30.0) → (1.13.9, 1.36.3) is a 7-step climb" \
+  || bad "expected 7 steps, got $(printf '%s' "$CLIMB" | grep -c .)"
+
+# EVERY pair on the way, not just the ends. This is the whole point.
+_bad=0
+while read -r tv kv; do
+  [ -n "$tv" ] || continue
+  pair_ok "$tv" "$kv" || { _bad=$((_bad + 1)); }
+done <<<"$CLIMB"
+[ "$_bad" = 0 ] \
+  && ok "…and every pair along it is inside the supported window" \
+  || bad "${_bad} step(s) of the climb are pairs the guard would refuse"
+
+# The first draft passed through v1.12.0 while the cluster ran v1.12.7 — a patch
+# DOWNGRADE, commanded by a function whose job is to go up.
+[ "$(printf '%s' "$CLIMB" | head -1 | awk '{print $1}')" = v1.12.7 ] \
+  && ok "the minor it is already on keeps its patch — no downgrade on the way through" \
+  || bad "step 1 moves Talos to $(printf '%s' "$CLIMB" | head -1 | awk '{print $1}'), off the running v1.12.7"
+
+[ "$(version_path v1.13.8 v1.36.3 v1.13.9 v1.36.3 2>/dev/null)" = "v1.13.9 v1.36.3" ] \
+  && ok "a patch bump is one step, not an empty list" \
+  || bad "a patch-only move produced $(version_path v1.13.8 v1.36.3 v1.13.9 v1.36.3 2>/dev/null | tr '\n' '/')"
+
+# Kubernetes alone, Talos held still — a real thing to want, and the ONLY route
+# that consults a Talos minor's CEILING. Every climb that also moves Talos takes
+# it first, so 1.12's k8s_max is never read on those: narrowing it to 31 changed
+# nothing and looked like a weak test until this case existed.
+_k8sonly="$(version_path v1.12.7 v1.30.0 v1.12.9 v1.35.0 2>/dev/null)"
+{ [ "$(printf '%s' "$_k8sonly" | grep -c .)" = 5 ] \
+  && [ "$(printf '%s' "$_k8sonly" | tail -1)" = "v1.12.9 v1.35.0" ]; } \
+  && ok "Kubernetes 1.30 → 1.35 on a held Talos is five steps, up to the ceiling" \
+  || bad "a Kubernetes-only climb to 1.12's ceiling produced $(printf '%s' "$_k8sonly" | tr '\n' '/')"
+
+# On the MESSAGE, not just the verdict: without the guard the loop refuses a
+# downgrade anyway, having tried and failed to climb — same exit code, and an
+# operator told "no supported step out of 1.13" when they asked to go DOWN reads
+# it as a broken map. The guard's whole value is the sentence.
+_dn="$(version_path v1.13.9 v1.36.3 v1.12.7 v1.30.0 2>&1)"; _dnrc=$?
+{ [ "$_dnrc" -ne 0 ] && grep -q 'goes DOWN' <<<"$_dn"; } \
+  && ok "a downgrade is refused AS a downgrade, not as a dead end" \
+  || bad "downgrade refused without saying so (rc=$_dnrc): ${_dn%%$'\n'*}"
+
+# Refused BEFORE printing: a caller shown steps and then a refusal has been told
+# to start something that cannot finish.
+# Also on the message. The loop would refuse this on its own after climbing and
+# failing, so the verdict alone does not distinguish "your target is not in the
+# matrix" from "I got stuck somewhere on the way" — and only the first is true.
+_out="$(version_path v1.12.7 v1.30.0 v1.99.0 v1.36.3 2>/dev/null)"; _rc=$?
+_err="$(version_path v1.12.7 v1.30.0 v1.99.0 v1.36.3 2>&1 >/dev/null)"
+{ [ "$_rc" -ne 0 ] && [ -z "$_out" ] && grep -q 'the TARGET' <<<"$_err"; } \
+  && ok "an unreachable TARGET is named as such, with no steps printed" \
+  || bad "refused without naming the target (rc=$_rc, steps=${_out:+yes}): ${_err%%$'\n'*}"
+
+# And the control: the guard must refuse something, or it guards nothing.
+pair_ok v1.13.9 v1.30.0 \
+  && bad "1.13 + Kubernetes 1.30 accepted — below the floor of 1.31" \
+  || ok "1.13 + Kubernetes 1.30 refused — the window is actually consulted"
+
+# The dispatch across a real seven-step path. The harness fixture pins v0.0.1 on
+# purpose — fictional, so nobody copies it into an environment — which means it
+# carries no minor semantics and exercises exactly one step. walk_path is a
+# function so this can feed it a path directly, with the two operations stubbed.
+_wa=$(grep -n '^walk_path() {' "$ROOT/scripts/dev/cluster-upgrade.sh" | cut -d: -f1)
+_wb=$(awk -v a="$_wa" 'NR>=a && /^}$/ {print NR; exit}' "$ROOT/scripts/dev/cluster-upgrade.sh")
+eval "$(sed -n "${_wa},${_wb}p" "$ROOT/scripts/dev/cluster-upgrade.sh")"
+declare -f walk_path >/dev/null \
+  && ok "walk_path was extracted and is callable" \
+  || bad "could not extract walk_path — the assertions below would be vacuous"
+
+CLIMB7="$(version_path v1.12.7 v1.30.0 v1.13.9 v1.36.3 2>/dev/null)"
+upgrade_k8s_to()   { echo "k8s $1"; }
+upgrade_talos_to() { echo "talos $1"; }
+_seq="$(walk_path v1.12.7 v1.30.0 7 <<<"$CLIMB7" | grep -E '^(k8s|talos) ' | tr '\n' '|')"
+_want='k8s v1.31.0|talos v1.13.9|k8s v1.32.0|k8s v1.33.0|k8s v1.34.0|k8s v1.35.0|k8s v1.36.3|'
+[ "$_seq" = "$_want" ] \
+  && ok "seven steps dispatch as one Kubernetes hop, then Talos, then five more" \
+  || bad "dispatch order wrong: $_seq"
+
+# An axis that does not move must not be touched. Talos appears once in that
+# sequence, not seven times — re-applying an unchanged version would re-roll six
+# nodes for nothing, six times over.
+[ "$(grep -c '^talos ' <<<"$(walk_path v1.12.7 v1.30.0 7 <<<"$CLIMB7")")" = 1 ] \
+  && ok "…and Talos is rolled once, not once per step" \
+  || bad "Talos was dispatched $(grep -c '^talos ' <<<"$(walk_path v1.12.7 v1.30.0 7 <<<"$CLIMB7")") times"
+
+# The within-step order is DEFENSIVE: version_path never emits a step that moves
+# both axes, so nothing in a real climb observes it, and swapping the two lines
+# changed no assertion. Feed it the step the builder cannot produce, and the
+# choice becomes checkable — Kubernetes first, because it reboots nothing and so
+# keeps the control-plane roll separate from the node roll.
+upgrade_k8s_to()   { echo "k8s $1"; }
+upgrade_talos_to() { echo "talos $1"; }
+_both="$(walk_path v1.12.7 v1.30.0 1 <<<"v1.13.9 v1.31.0" | grep -E '^(k8s|talos) ' | tr '\n' '|')"
+[ "$_both" = 'k8s v1.31.0|talos v1.13.9|' ] \
+  && ok "a step moving both axes does Kubernetes first — the reboot-free one" \
+  || bad "both-axis step dispatched as: $_both"
+
+# The one that matters most. `printf … | walk_path` put the loop in a subshell,
+# where a failing step exits the subshell and the run carries on to the next —
+# measured, the harness went 35/8. A step that fails must stop the climb.
+upgrade_k8s_to() { echo "k8s $1"; [ "$1" = v1.32.0 ] && { echo "BOOM" >&2; exit 1; }; return 0; }
+_out="$( walk_path v1.12.7 v1.30.0 7 <<<"$CLIMB7" 2>/dev/null )" || true
+{ grep -q 'k8s v1.32.0' <<<"$_out" && ! grep -q 'k8s v1.33.0' <<<"$_out"; } \
+  && ok "a step that fails stops the climb instead of walking past it" \
+  || bad "the climb continued after a failed step: $(tr '\n' '|' <<<"$_out")"
+# The defect a real cluster found, and every stub above hid. Inside the loop
+# `task cluster-roll` reaches ssh and talosctl, and BOTH READ STDIN — the same
+# stdin the here-string feeds the loop. Measured on Scaleway 2026-08-21: the
+# Talos roll of step 2 swallowed steps 3-7, the climb exited 0 announcing
+# v1.36.3, and the cluster sat on v1.31.0 with every check green. A stub that
+# drains stdin, as ssh does, reproduces it without a cloud.
+upgrade_k8s_to()   { echo "k8s $1"; }
+upgrade_talos_to() { echo "talos $1"; cat >/dev/null; }
+_eat="$(walk_path v1.12.7 v1.30.0 7 <<<"$CLIMB7" | grep -cE '^(k8s|talos) ' || true)"
+[ "$_eat" = 7 ] \
+  && ok "a step that reads stdin cannot swallow the rest of the climb" \
+  || bad "a stdin-reading step truncated the climb to ${_eat}/7 dispatches"
+
+unset -f upgrade_k8s_to upgrade_talos_to walk_path
+echo "=== converge-versions: the half of cluster-up that OpenTofu cannot do ==="
+
+# Its own stub, because both reads ask the SAME question — `custom-columns` on the
+# same field — so the shared plan cannot tell "before the roll" from "after" it.
+# This one keys on whether a roll has happened, which is exactly the distinction
+# the post-roll re-read exists to make.
+mkdir -p "$FAKE/scripts/internal" "$FAKE/scripts/lib" "$STUB_DIR/conv"
+ln -s "$ROOT/scripts/internal/converge-versions.sh" "$FAKE/scripts/internal/converge-versions.sh"
+ln -s "$ROOT/scripts/lib/common.sh" "$FAKE/scripts/lib/common.sh"
+CONVERGE="$FAKE/scripts/internal/converge-versions.sh"
+cat >"$STUB_DIR/conv/kubectl" <<'STUB'
+#!/usr/bin/env bash
+printf 'kubectl %s\n' "$*" >>"${STUB_LOG:-/dev/null}"
+# Talos moves after a `cluster-roll`, Kubernetes moves after an `infra-apply` —
+# they are two different commands now, so each field flips on its own trigger.
+if grep -q 'cluster-roll' "${STUB_LOG:-/dev/null}" 2>/dev/null
+  then t="${CONV_T_AFTER:-}"; else t="${CONV_T_BEFORE:-}"; fi
+if grep -q 'infra-apply' "${STUB_LOG:-/dev/null}" 2>/dev/null
+  then k="${CONV_K_AFTER:-}"; else k="${CONV_K_BEFORE:-}"; fi
+case "$*" in
+  *osImage*)        [ -n "$t" ] || exit 0; printf 'Talos (%s)\nTalos (%s)\n' "$t" "$t" ;;
+  *kubeletVersion*) [ -n "$k" ] || exit 0; printf '%s\n%s\n' "$k" "$k" ;;
+  *) exit 1 ;;
+esac
+STUB
+chmod +x "$STUB_DIR/conv/kubectl"
+cat >"$STUB_DIR/conv/task" <<'STUB'
+#!/usr/bin/env bash
+printf 'task %s\n' "$*" >>"${STUB_LOG:-/dev/null}"
+STUB
+chmod +x "$STUB_DIR/conv/task"
+
+conv() { # <t-before> <k-before> <t-after> <k-after> [--check]
+  : >"$STUB_LOG"
+  CONV_OUT="$(PATH="$STUB_DIR/conv:$PATH" \
+    CONV_T_BEFORE="$1" CONV_K_BEFORE="$2" CONV_T_AFTER="${3:-$1}" CONV_K_AFTER="${4:-$2}" \
+    "$CONVERGE" "$PROVIDER" "$ROLE" "$KEYFILE" ${5:+--check} 2>&1)"; CONV_RC=$?
+}
+rolled() { grep -q "cluster-roll.*$1" "$STUB_LOG" 2>/dev/null; }
+
+tfvars v0.0.2 v0.0.2
+
+# The NORMAL case first. cluster-up leaves the fleet matching its pin, so this
+# runs on every ordinary bring-up: if it rolled here it would re-roll every node
+# of every healthy cluster, for ever.
+conv v0.0.2 v0.0.2
+{ [ "$CONV_RC" -eq 0 ] && ! rolled . ; } \
+  && ok "a fleet already on the pin is not rolled" \
+  || bad "an up-to-date fleet was rolled anyway (rc=$CONV_RC): $CONV_OUT"
+
+conv v0.0.1 v0.0.1 v0.0.2 v0.0.2
+{ [ "$CONV_RC" -eq 0 ] && rolled cp-only && rolled workers-only; } \
+  && ok "a drifted fleet is rolled, control planes before workers" \
+  || bad "the drift was not converged (rc=$CONV_RC): $CONV_OUT"
+
+# The defect stage 3 found, one level up: the roll reporting success is the
+# CLIENT talking. Ask the fleet again, and refuse to claim what it does not say.
+conv v0.0.1 v0.0.1 v0.0.1 v0.0.1
+{ [ "$CONV_RC" -ne 0 ] && printf '%s' "$CONV_OUT" | grep -q 'after the roll'; } \
+  && ok "a roll that did not move the fleet fails instead of announcing success" \
+  || bad "a roll that changed nothing was reported as converged (rc=$CONV_RC)"
+
+# One axis at a time. The scenario above lags on BOTH, so the Talos check alone
+# catches it and the Kubernetes one can be deleted with every assertion still
+# green — measured, it survived the mutation. These two isolate each branch.
+conv v0.0.1 v0.0.1 v0.0.2 v0.0.1
+{ [ "$CONV_RC" -ne 0 ] && printf '%s' "$CONV_OUT" | grep -q 'Kubernetes v0.0.1'; } \
+  && ok "…and a Kubernetes-only lag is caught on its own" \
+  || bad "a Kubernetes-only lag survived the post-roll re-read (rc=$CONV_RC): $CONV_OUT"
+
+conv v0.0.1 v0.0.1 v0.0.1 v0.0.2
+{ [ "$CONV_RC" -ne 0 ] && printf '%s' "$CONV_OUT" | grep -q 'Talos v0.0.1'; } \
+  && ok "…and a Talos-only lag is caught on its own" \
+  || bad "a Talos-only lag survived the post-roll re-read (rc=$CONV_RC): $CONV_OUT"
+
+conv v0.0.1 v0.0.1 v0.0.2 v0.0.2 --check
+{ [ "$CONV_RC" -eq 0 ] && ! rolled . && printf '%s' "$CONV_OUT" | grep -q 'does not match'; } \
+  && ok "--check reports the drift before the approval and rolls nothing" \
+  || bad "--check rolled something or said nothing (rc=$CONV_RC): $CONV_OUT"
+
+# The defect found on 2026-08-24: a Kubernetes-only lag used to call
+# `cluster-roll --upgrade` unconditionally, which only ever runs `talosctl
+# upgrade` — the wrong mechanism for a version that moves through the machine
+# config alone. Assert on the MECHANISM, not on rolling-replace.sh's own
+# happen-to-be-harmless no-op: the Talos roll must not be invoked at all when
+# only Kubernetes lags, and the reverse.
+applied() { grep -q 'infra-apply' "$STUB_LOG" 2>/dev/null; }
+
+# Talos ALREADY on the pin, only Kubernetes lags — the case that used to call
+# cluster-roll unconditionally for a version that never moves through a roll.
+conv v0.0.2 v0.0.1 v0.0.2 v0.0.2
+{ [ "$CONV_RC" -eq 0 ] && applied && ! rolled cp-only && ! rolled workers-only; } \
+  && ok "a Kubernetes-only lag applies the config and never calls the Talos roll" \
+  || bad "a Kubernetes-only lag touched the roll (rc=$CONV_RC): $CONV_OUT"
+
+# Kubernetes ALREADY on the pin, only Talos lags.
+conv v0.0.1 v0.0.2 v0.0.2 v0.0.2
+{ [ "$CONV_RC" -eq 0 ] && rolled cp-only && rolled workers-only && ! applied; } \
+  && ok "a Talos-only lag rolls and never calls infra-apply on its own" \
+  || bad "a Talos-only lag skipped the roll or applied redundantly (rc=$CONV_RC): $CONV_OUT"
+
+
+# A fleet nobody could read is not a converged fleet. Before the apply that is
+# normal and silent; after it, claiming anything would be the original defect.
+conv "" ""
+{ [ "$CONV_RC" -ne 0 ] && printf '%s' "$CONV_OUT" | grep -q 'UNKNOWN'; } \
+  && ok "an unreadable fleet is refused, not called converged" \
+  || bad "an unreadable fleet did not stop the run (rc=$CONV_RC): $CONV_OUT"
+
+conv "" "" "" "" --check
+[ "$CONV_RC" -eq 0 ] \
+  && ok "…but before the apply, no cluster to read is not an error" \
+  || bad "--check failed with no cluster yet (rc=$CONV_RC): $CONV_OUT"
+
 echo
 printf '%s passed, %s failed, %s hung, %s skipped, %s known defect(s) in the scripts under test\n' \
   "$PASS" "$FAIL" "$HUNG" "$SKIPPED" "$KNOWN"
