@@ -111,5 +111,53 @@ run 1 "absent with a pin" clea-absent-by-construction 4.2.3
 run 1 "absent without one" clea-absent-by-construction
 
 echo
+echo "=== sudo that exists is not sudo that can be used ==="
+# Eight places asked `command -v sudo`. On a workstation where /usr/local/bin is
+# not writable and sudo wants a password, that answers yes and the installer
+# then dies on a prompt nobody can answer — under `set -e`, taking the whole
+# bootstrap with it. Measured 2026-08-24 on exactly such a machine.
+LIB="$ROOT/scripts/lib/common.sh"
+sudostub() { # <rc of `sudo -n true`>
+  printf '#!/bin/sh\n[ "$1" = -n ] && exit %s\nexec "$@"\n' "$1" > "$TMP/bin/sudo"
+  chmod +x "$TMP/bin/sudo"
+}
+lib() { PATH="$TMP/bin:$PATH" bash -c '. "$1"; shift; "$@"' _ "$LIB" "$@"; }
+
+sudostub 0
+lib oa_sudo_usable && ok "passwordless sudo is usable" || bad "passwordless sudo judged unusable"
+sudostub 1
+lib oa_sudo_usable && bad "sudo that would prompt was judged usable with no terminal" \
+                   || ok "sudo that would prompt, with no terminal, is not usable"
+rm -f "$TMP/bin/sudo"
+lib oa_sudo_usable && bad "absent sudo judged usable" || ok "absent sudo is not usable"
+
+echo
+echo "=== and where a binary should go ==="
+sudostub 0
+[ "$(lib oa_bin_dir)" = /usr/local/bin ] \
+  && ok "with a usable sudo, the system directory" \
+  || bad "with a usable sudo, got $(lib oa_bin_dir)"
+sudostub 1
+if [ -w /usr/local/bin ]; then
+  echo "  ~ /usr/local/bin is writable here (root?), so the fallback case is NOT exercised"
+elif [ "$(lib oa_bin_dir)" = "$HOME/.local/bin" ]; then
+  ok "with no usable sudo, the per-user directory"
+else
+  bad "with no usable sudo, got $(lib oa_bin_dir)"
+fi
+
+mkdir -p "$TMP/writable"
+[ -z "$(lib oa_sudo_for "$TMP/writable")" ] \
+  && ok "a writable directory needs no sudo" || bad "a writable directory asked for sudo"
+[ -z "$(lib oa_sudo_for "$TMP/writable/not-created-yet")" ] \
+  && ok "a directory yet to be created is judged by its parent" \
+  || bad "creating a subdirectory of a writable one asked for sudo"
+sudostub 0
+[ "$(lib oa_sudo_for /usr/local/bin)" = "sudo" ] || [ -w /usr/local/bin ] \
+  && ok "a directory needing privilege gets the prefix" \
+  || bad "a directory needing privilege got no prefix"
+rm -f "$TMP/bin/sudo"
+
+echo
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

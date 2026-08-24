@@ -97,6 +97,25 @@ in git. 0.1.0 is the first entry describing something proven.
   "`pip3` is not always a binary" lesson its neighbour documented and never
   received.
 
+- **`command -v sudo` asks whether sudo EXISTS, not whether it can be USED**,
+  and eight places asked it. On a workstation where `/usr/local/bin` is not
+  writable and sudo wants a password, that answers yes, the installer then dies
+  on a prompt nobody can answer, and `set -e` ends the bootstrap. The rule is
+  now one function in `scripts/lib/common.sh` — `oa_sudo_usable`, `oa_bin_dir`,
+  `oa_sudo_for` — used by `setup.sh` and by the four pinned installers instead
+  of the same six lines repeated: passwordless sudo, or a terminal to be asked
+  on, or neither, and a directory that does not exist yet is judged by its
+  parent.
+
+- **`install_tofu` preferred snap and brew, and neither can install a NAMED
+  version.** `snap install --classic opentofu` serves whatever the channel
+  holds, so on any machine with snap the pin was decorative — which is how this
+  repository's own workstation ran 1.12.6 against a pinned 1.12.5. A pin an
+  installer cannot honour is a pin that guarantees drift, and
+  `check-version-drift.sh` now compares this one. Only the standalone installer
+  remains: it takes `--opentofu-version`, and `--install-path` /
+  `--symlink-path` let it install without root.
+
 - **`scripts/setup.sh` asked whether a tool was present, never which version it
   was** — so it installed the pin on a fresh machine and refused every upgrade
   afterwards, in silence, on every machine that had run it once. Found by the

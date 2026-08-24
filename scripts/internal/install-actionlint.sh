@@ -17,16 +17,11 @@ set -euo pipefail
 # renovate: datasource=github-releases depName=rhysd/actionlint extractVersion=^v(?<version>.*)$
 ACTIONLINT_VERSION="1.7.12"
 
-BIN_DIR="${1:-}"
-if [ -z "$BIN_DIR" ]; then
-  if [ -w /usr/local/bin ] || command -v sudo >/dev/null 2>&1; then
-    BIN_DIR=/usr/local/bin
-  else
-    BIN_DIR="$HOME/.local/bin"
-  fi
-fi
-SUDO=""
-[ -w "$BIN_DIR" ] || [ ! -d "$BIN_DIR" ] || SUDO="sudo"
+# shellcheck source=scripts/lib/common.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
+
+BIN_DIR="${1:-$(oa_bin_dir)}"
+SUDO="$(oa_sudo_for "$BIN_DIR")"
 
 # Bounded, so 1.7.7 does not match 1.7.70.
 if command -v actionlint >/dev/null 2>&1 &&

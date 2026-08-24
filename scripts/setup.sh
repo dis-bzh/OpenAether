@@ -11,13 +11,16 @@ echo -e "${GREEN}🌐 Checking OpenAether Development Environment...${NC}"
 # Root in a container has no sudo and needs none. Bare `sudo` calls exited 127
 # there, and set -e took the whole bootstrap with them: on a clean machine this
 # died at yamllint and never reached task, flux or helm.
+# shellcheck source=scripts/lib/common.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+
 if [ "$(id -u)" -eq 0 ]; then
     SUDO=""
-elif command -v sudo &> /dev/null; then
+elif oa_sudo_usable; then
     SUDO="sudo"
 else
     SUDO=""
-    echo -e "${RED}⚠ Neither root nor sudo: system-wide installs will fail.${NC}"
+    echo -e "${RED}⚠ Neither root nor a usable sudo: system-wide installs will fail.${NC}"
 fi
 
 # The versions this repository pins, at the top so the checks below can compare
@@ -88,41 +91,58 @@ install_tofu() {
     # 2026-08-23 in a bare ubuntu:24.04, exit 2, by the Cléa probe.
     # MUST stay equal to tofu_version in .github/workflows/ci.yml —
     # check-version-drift.sh compares them.
+    #
+    # snap and brew used to come first here, and both had to go. Neither can
+    # install a NAMED version — `snap install --classic opentofu` serves
+    # whatever the channel holds — so on any machine with snap the pin above
+    # was decorative. That is how this repository's own workstation ended up on
+    # 1.12.6 against a pinned 1.12.5 (measured 2026-08-24). A pin an installer
+    # cannot honour is a pin that guarantees drift, and check-version-drift.sh
+    # now compares this one. The standalone installer honours it, and installs
+    # without root when asked to.
     echo "Installing OpenTofu v${TOFU_VERSION}..."
-    if command -v snap &> /dev/null; then
-        $SUDO snap install --classic opentofu
-    elif command -v brew &> /dev/null; then
-        brew install opentofu
-    else
-        # The official installer unzips its download and verifies the signature,
-        # refusing to run without unzip, and without either cosign or gpg. A
-        # minimal image has none of them: it aborted here, and set -e meant
-        # nothing at all got installed — not even the tools further down.
-        local need=()
-        # curl belongs here too: it is used ten lines down, and a bare ubuntu:24.04
-        # has none of these. Listing only two of the three left the same abort this
-        # comment describes — exit 127, nothing installed.
-        command -v curl &> /dev/null || need+=(curl ca-certificates)
-        command -v unzip &> /dev/null || need+=(unzip)
-        { command -v gpg &> /dev/null || command -v cosign &> /dev/null; } || need+=(gnupg)
-        if [ ${#need[@]} -gt 0 ]; then
-            if command -v apt-get &> /dev/null; then
-                $SUDO apt-get update && $SUDO apt-get install -y "${need[@]}"
-            else
-                echo "⚠️  OpenTofu's installer needs: ${need[*]}"
-                echo "    Install them, then re-run ./scripts/setup.sh"
-                return 1
-            fi
+    # The official installer unzips its download and verifies the signature,
+    # refusing to run without unzip, and without either cosign or gpg. A
+    # minimal image has none of them: it aborted here, and set -e meant
+    # nothing at all got installed — not even the tools further down.
+    local need=()
+    # curl belongs here too: it is used ten lines down, and a bare ubuntu:24.04
+    # has none of these. Listing only two of the three left the same abort this
+    # comment describes — exit 127, nothing installed.
+    command -v curl &> /dev/null || need+=(curl ca-certificates)
+    command -v unzip &> /dev/null || need+=(unzip)
+    { command -v gpg &> /dev/null || command -v cosign &> /dev/null; } || need+=(gnupg)
+    if [ ${#need[@]} -gt 0 ]; then
+        if command -v apt-get &> /dev/null; then
+            $SUDO apt-get update && $SUDO apt-get install -y "${need[@]}"
+        else
+            echo "⚠️  OpenTofu's installer needs: ${need[*]}"
+            echo "    Install them, then re-run ./scripts/setup.sh"
+            return 1
         fi
-        # Downloads to $TMPDIR, not to the CWD: the `rm` this replaced sat
-        # AFTER the installer, so under `set -e` a failed install left a 50 KB
-        # third-party script in the root of a public repository.
-        local tmp
-        tmp="$(mktemp)"
-        trap 'rm -f "$tmp"' RETURN
-        curl -fsSL https://get.opentofu.org/install-opentofu.sh -o "$tmp"
-        sh "$tmp" --install-method standalone --opentofu-version "${TOFU_VERSION}"
     fi
+    # Downloads to $TMPDIR, not to the CWD: the `rm` this replaced sat
+    # AFTER the installer, so under `set -e` a failed install left a 50 KB
+    # third-party script in the root of a public repository.
+    local tmp
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' RETURN
+    curl -fsSL https://get.opentofu.org/install-opentofu.sh -o "$tmp"
+    # Where the binary goes follows the same rule as every other tool here:
+    # the system path when it is reachable, the per-user one otherwise. The
+    # default (/opt/opentofu + /usr/local/bin) needs root, and asking for it
+    # on a machine that cannot give it is what aborted this step.
+    local bin data
+    bin="$(oa_bin_dir)"
+    if [ "$bin" = /usr/local/bin ]; then
+        data=/opt/opentofu
+    else
+        data="${HOME}/.local/share/openaether/opentofu"
+    fi
+    $(oa_sudo_for "$bin") sh "$tmp" --install-method standalone \
+        --opentofu-version "${TOFU_VERSION}" \
+        --install-path "$data" --symlink-path "$bin"
+    [ "$bin" = /usr/local/bin ] || echo "NOTE: tofu installed to $bin. Ensure it's in your PATH."
 }
 
 install_talosctl() {
@@ -140,15 +160,11 @@ install_kubectl() {
     echo "Installing kubectl..."
     curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
     chmod +x kubectl
-    if [ -w /usr/local/bin ]; then
-        mv kubectl /usr/local/bin/
-    elif command -v sudo &> /dev/null; then
-        $SUDO mv kubectl /usr/local/bin/
-    else
-        mkdir -p ~/.local/bin
-        mv kubectl ~/.local/bin/
-        echo "NOTE: kubectl installed to ~/.local/bin. Ensure it's in your PATH."
-    fi
+    local dir sudo_cmd
+    dir="$(oa_bin_dir)"; sudo_cmd="$(oa_sudo_for "$dir")"
+    mkdir -p "$dir"
+    $sudo_cmd mv kubectl "$dir/kubectl"
+    [ "$dir" = /usr/local/bin ] || echo "NOTE: kubectl installed to $dir. Ensure it's in your PATH."
 }
 
 install_shellcheck() {
@@ -275,15 +291,11 @@ install_flux() {
     tmp="$(mktemp -d)"
     curl -fsSL "https://github.com/fluxcd/flux2/releases/download/v${FLUX_VERSION}/flux_${FLUX_VERSION}_${ARCH}.tar.gz" -o "$tmp/flux.tar.gz"
     tar -xzf "$tmp/flux.tar.gz" -C "$tmp"
-    if [ -w /usr/local/bin ]; then
-        install -m 755 "$tmp/flux" /usr/local/bin/flux
-    elif command -v sudo &> /dev/null; then
-        $SUDO install -m 755 "$tmp/flux" /usr/local/bin/flux
-    else
-        mkdir -p ~/.local/bin
-        install -m 755 "$tmp/flux" ~/.local/bin/flux
-        echo "NOTE: flux installed to ~/.local/bin. Ensure it's in your PATH."
-    fi
+    local dir sudo_cmd
+    dir="$(oa_bin_dir)"; sudo_cmd="$(oa_sudo_for "$dir")"
+    mkdir -p "$dir"
+    $sudo_cmd install -m 755 "$tmp/flux" "$dir/flux"
+    [ "$dir" = /usr/local/bin ] || echo "NOTE: flux installed to $dir. Ensure it's in your PATH."
     rm -rf "$tmp"
 }
 
@@ -300,15 +312,11 @@ install_helm() {
     tmp="$(mktemp -d)"
     curl -fsSL "https://get.helm.sh/helm-v${HELM_VERSION}-${ARCH}.tar.gz" -o "$tmp/helm.tar.gz"
     tar -xzf "$tmp/helm.tar.gz" -C "$tmp"
-    if [ -w /usr/local/bin ]; then
-        install -m 755 "$tmp/${ARCH}/helm" /usr/local/bin/helm
-    elif command -v sudo &> /dev/null; then
-        $SUDO install -m 755 "$tmp/${ARCH}/helm" /usr/local/bin/helm
-    else
-        mkdir -p ~/.local/bin
-        install -m 755 "$tmp/${ARCH}/helm" ~/.local/bin/helm
-        echo "NOTE: helm installed to ~/.local/bin. Ensure it's in your PATH."
-    fi
+    local dir sudo_cmd
+    dir="$(oa_bin_dir)"; sudo_cmd="$(oa_sudo_for "$dir")"
+    mkdir -p "$dir"
+    $sudo_cmd install -m 755 "$tmp/${ARCH}/helm" "$dir/helm"
+    [ "$dir" = /usr/local/bin ] || echo "NOTE: helm installed to $dir. Ensure it's in your PATH."
     rm -rf "$tmp"
 }
 
