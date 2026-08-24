@@ -13,7 +13,7 @@ decided.
 
 **Taking one.** Every entry names the rung it needs, at the end: `task test` and
 `mocked` close on a laptop, `emulated` needs Feint and still no cloud account,
-`real cloud` spends money on somebody's project. Grep for `Rung:` — today 9 of the
+`real cloud` spends money on somebody's project. Grep for `Rung:` — today 7 of the
 open entries are closable with no cloud account, and 19 name no rung at all, which
 is a defect in this file rather than in them, a `Decide:` aside.
 
@@ -100,19 +100,6 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
 
 ## Open — infrastructure
 
-- [ ] **A typo in `admin_ip` publishes cluster-admin to the internet.**
-      `cluster/variables.tf:274` declares it with no `validation` block, so
-      `["0.0.0.0/0"]` is accepted in silence and opens bastion sshd *and* the 6443
-      LB ACL on every provider at once. What sits behind that ACL is the
-      `talosctl kubeconfig` certificate — `O=system:masters`, which bypasses RBAC,
-      and Kubernetes has no revocation for client certificates, so a leak is
-      survivable only by rotating the cluster CA. Nothing catches it: no test and
-      no script in this repository reads an ACL, an `allowed_cidrs` or a
-      security-group rule.
-      **Closes:** three validations (non-empty, refuse `0.0.0.0/0` and `::/0`,
-      valid CIDR) and `cluster/tests/admin-ip-validation.tftest.hcl` using
-      `expect_failures = [var.admin_ip]`, `task test` green. Rung: mocked.
-
 - [ ] **The Scaleway node perimeter is not the one the comment describes.**
       `scw/security.tf:45` says "Talos API — From Bastion ONLY" and allows 50000
       from the bastion's **public** IP, which the bastion never uses: it reaches
@@ -125,24 +112,20 @@ applies, then decide whether 0.1.0 ships a staging lane at all.
       subnet, and a mocked assertion that no inbound rule carries `port == 0`.
       Rung: mocked, then one real deploy to confirm health checks still pass.
 
-- [ ] **No credential in the admin path has ever been issued for less than a
-      year, or to a person.** The talosconfig this repository hands out reports
-      `Roles: os:admin` and `Certificate expires: 1 year from now` — `crt_ttl` is
-      never set (`modules/talos/main.tf:93`), so the provider default stands. That
-      one config, plus a `system:masters` kubeconfig, serves every operator and
-      every task; both live in the tfstate, in two gpg'd S3 stores and in clear on
-      the operator's disk. Revoking either means rotating a CA, and
-      `talos_machine_secrets` carries `prevent_destroy`.
-      **The excuse is gone**: Talos enforces its roles with nothing added. Measured
-      on the Docker lane (v1.13.3) on 2026-08-24 — the node answers `Enabled: RBAC`,
-      and against an `os:reader` config minted at `--crt-ttl 8h`, `read /etc/hosts`
-      and `config new --roles os:admin` both return `PermissionDenied` with rc=1
-      while the admin config returns rc=0. `machine.features.rbac` appears nowhere
-      here and did not need to.
-      **Closes:** `task talosconfig-new` wrapping `talosctl config new --roles
-      os:reader --crt-ttl 8h`, the reader config used by the read-only tasks, and
-      the two denials above asserted in a harness. Rung: mocked — `task local-up`
-      proves it, no cloud account.
+- [ ] **The tooling to carry less exists, and nothing carries less.**
+      `task talosconfig-new` issues an `os:reader` config that expires in hours,
+      and `task local-rbac` proves the roles are enforced — but every read-only
+      task still runs on the `os:admin` config the deploy wrote, valid a year,
+      the same file for every operation and every person. The cloud path of
+      `talosconfig-new` has also never been run: it needs the bastion tunnels
+      open, and only the Docker lane has exercised it.
+      Wiring it is not free — `cluster-verify` and friends are proven on three
+      clouds, an 8 h credential has to be re-minted, and a task that mints one
+      per run turns a read into a write against the Talos API.
+      **Decide first:** re-mint per run, or cache one until it expires?
+      **Then closes:** `task cluster-verify PROVIDER=… ` green while its
+      `TALOSCONFIG` carries `os:reader`, and `task talosconfig-new` run once
+      through the tunnels. Rung: real cloud.
 
 - [ ] **The SSH-CA hooks have shipped inert since they were written.**
       `_shared/bastion-cloud-init.yaml.tftpl:86` sets `TrustedUserCAKeys` and

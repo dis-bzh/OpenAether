@@ -130,7 +130,17 @@ bao token create -policy=openaether-reader -ttl=8h -display-name=<name>
 key rotation — those stay with the offline root token, deliberate and rare.
 
 ⚠️ If your public IP changes: update `admin_ip` then `task infra-apply`, or the bastion
-becomes unreachable.
+becomes unreachable. `admin_ip` refuses an empty list, a bare address and a `/0`
+since it validates — it is the allowlist in front of both bastion sshd and 6443.
+
+⚠️ **The kubeconfig cannot be revoked.** `talosctl kubeconfig` issues a client
+certificate for `O=system:masters`, which bypasses RBAC, and Kubernetes has no
+revocation for client certificates: a leaked kubeconfig is valid until it
+expires, and the only remedy is rotating the cluster CA. Treat the file as the
+secret it is — it is also in the tfstate and in both artifact stores. For
+read-only work, carry less: `task talosconfig-new PROVIDER=… ` issues an
+`os:reader` talosconfig that expires in hours and cannot mint an admin one
+(proven by `task local-rbac`).
 
 ## 7. Grafana SSO through Zitadel (OIDC)
 

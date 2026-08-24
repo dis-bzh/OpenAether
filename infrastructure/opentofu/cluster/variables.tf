@@ -274,6 +274,30 @@ variable "worker_storage" {
 variable "admin_ip" {
   description = "Allowed source IPs/CIDRs for admin access (SSH, K8s API LB ACL)"
   type        = list(string)
+
+  # This list is the ONLY thing between the internet and two doors: bastion
+  # sshd, and the 6443 ACL in front of a `system:masters` kubeconfig that
+  # Kubernetes cannot revoke. It reaches all four providers from here
+  # (main.tf), so one block covers what four modules would repeat.
+
+  validation {
+    condition     = length(var.admin_ip) > 0
+    error_message = "admin_ip must not be empty: with no allowed source the bastion is unreachable and the deploy is wasted."
+  }
+
+  validation {
+    # Rejects a bare address, and the `YOUR_IP/32` left in a copied example.
+    condition     = alltrue([for c in var.admin_ip : can(cidrhost(c, 0))])
+    error_message = "Every admin_ip entry must be a CIDR with its prefix, e.g. 203.0.113.4/32 — not a bare address."
+  }
+
+  validation {
+    # Prefix, not string match: catches 0.0.0.0/0, ::/0 and 198.51.100.7/0
+    # alike. Guarded by can(), so a malformed entry fails the rule above
+    # rather than blowing up on split()[1] here.
+    condition     = alltrue([for c in var.admin_ip : can(cidrhost(c, 0)) ? tonumber(split("/", c)[1]) > 0 : true])
+    error_message = "admin_ip must not contain a /0: that opens bastion SSH and the Kubernetes API ACL to the whole internet."
+  }
 }
 
 variable "bastion_ssh_keys" {
