@@ -15,7 +15,7 @@
 set -euo pipefail
 
 # renovate: datasource=github-releases depName=rhysd/actionlint extractVersion=^v(?<version>.*)$
-ACTIONLINT_VERSION="1.7.7"
+ACTIONLINT_VERSION="1.7.12"
 
 BIN_DIR="${1:-}"
 if [ -z "$BIN_DIR" ]; then

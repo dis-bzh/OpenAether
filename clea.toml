@@ -92,8 +92,11 @@ datasource = "github-releases"
 consumed_by = "scripts/setup.sh (install_talosctl, via talos.dev/install)"
 
 [[unpinned]]
+# github-TAGS, not releases: aws/aws-cli tags every version and publishes no
+# GitHub release, so `releases/latest` answers 404. A 404 is reported as a
+# failure rather than as "up to date", which is how this was noticed.
 name = "aws/aws-cli"
-datasource = "github-releases"
+datasource = "github-tags"
 consumed_by = "scripts/setup.sh (install_awscli_bundle)"
 
 [[unpinned]]
