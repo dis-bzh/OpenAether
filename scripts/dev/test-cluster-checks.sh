@@ -727,9 +727,12 @@ CONVERGE="$FAKE/scripts/internal/converge-versions.sh"
 cat >"$STUB_DIR/conv/kubectl" <<'STUB'
 #!/usr/bin/env bash
 printf 'kubectl %s\n' "$*" >>"${STUB_LOG:-/dev/null}"
+# Talos moves after a `cluster-roll`, Kubernetes moves after an `infra-apply` —
+# they are two different commands now, so each field flips on its own trigger.
 if grep -q 'cluster-roll' "${STUB_LOG:-/dev/null}" 2>/dev/null
-  then t="${CONV_T_AFTER:-}"; k="${CONV_K_AFTER:-}"
-  else t="${CONV_T_BEFORE:-}"; k="${CONV_K_BEFORE:-}"; fi
+  then t="${CONV_T_AFTER:-}"; else t="${CONV_T_BEFORE:-}"; fi
+if grep -q 'infra-apply' "${STUB_LOG:-/dev/null}" 2>/dev/null
+  then k="${CONV_K_AFTER:-}"; else k="${CONV_K_BEFORE:-}"; fi
 case "$*" in
   *osImage*)        [ -n "$t" ] || exit 0; printf 'Talos (%s)\nTalos (%s)\n' "$t" "$t" ;;
   *kubeletVersion*) [ -n "$k" ] || exit 0; printf '%s\n%s\n' "$k" "$k" ;;
@@ -790,6 +793,28 @@ conv v0.0.1 v0.0.1 v0.0.2 v0.0.2 --check
 { [ "$CONV_RC" -eq 0 ] && ! rolled . && printf '%s' "$CONV_OUT" | grep -q 'does not match'; } \
   && ok "--check reports the drift before the approval and rolls nothing" \
   || bad "--check rolled something or said nothing (rc=$CONV_RC): $CONV_OUT"
+
+# The defect found on 2026-08-24: a Kubernetes-only lag used to call
+# `cluster-roll --upgrade` unconditionally, which only ever runs `talosctl
+# upgrade` — the wrong mechanism for a version that moves through the machine
+# config alone. Assert on the MECHANISM, not on rolling-replace.sh's own
+# happen-to-be-harmless no-op: the Talos roll must not be invoked at all when
+# only Kubernetes lags, and the reverse.
+applied() { grep -q 'infra-apply' "$STUB_LOG" 2>/dev/null; }
+
+# Talos ALREADY on the pin, only Kubernetes lags — the case that used to call
+# cluster-roll unconditionally for a version that never moves through a roll.
+conv v0.0.2 v0.0.1 v0.0.2 v0.0.2
+{ [ "$CONV_RC" -eq 0 ] && applied && ! rolled cp-only && ! rolled workers-only; } \
+  && ok "a Kubernetes-only lag applies the config and never calls the Talos roll" \
+  || bad "a Kubernetes-only lag touched the roll (rc=$CONV_RC): $CONV_OUT"
+
+# Kubernetes ALREADY on the pin, only Talos lags.
+conv v0.0.1 v0.0.2 v0.0.2 v0.0.2
+{ [ "$CONV_RC" -eq 0 ] && rolled cp-only && rolled workers-only && ! applied; } \
+  && ok "a Talos-only lag rolls and never calls infra-apply on its own" \
+  || bad "a Talos-only lag skipped the roll or applied redundantly (rc=$CONV_RC): $CONV_OUT"
+
 
 # A fleet nobody could read is not a converged fleet. Before the apply that is
 # normal and silent; after it, claiming anything would be the original defect.

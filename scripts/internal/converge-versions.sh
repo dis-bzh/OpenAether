@@ -73,11 +73,29 @@ if [ "$CHECK_ONLY" = 1 ]; then
   exit 0
 fi
 
-# A Kubernetes-only move must NOT reboot nodes, and a Talos move must. Both are
-# what --upgrade already means to the roll; control planes first, because a
-# worker's upgrade drains against a healthy control plane.
-task cluster-roll PROVIDER="$PROVIDER" ROLE="$ROLE" KEY="$KEY" APPROVE=auto -- --cp-only --upgrade
-task cluster-roll PROVIDER="$PROVIDER" ROLE="$ROLE" KEY="$KEY" APPROVE=auto -- --workers-only --upgrade
+# Kubernetes moves through the machine config, not through a roll: an
+# `infra-apply` writes kubernetes_version into talos_machine_configuration_apply
+# and every kubelet picks it up on its own — cluster-upgrade.sh:upgrade_k8s_to()
+# does exactly this and rolls nothing. `cluster-roll --upgrade` only ever runs
+# `talosctl upgrade`, the TALOS image, so calling it for a Kubernetes-only lag
+# would roll every node for a version it does not carry. rolling-replace.sh does
+# make that harmless today — it compares the RUNNING image to the pinned one and
+# skips a node that already matches — but relying on that no-op is the wrong
+# thing to depend on, and if a Kubernetes-only lag ever coincides with a real
+# Talos lag, calling the roll unconditionally here would roll it against the
+# WRONG target: converge-versions never passes TALOS_IMAGE, so the roll derives
+# it from the state's current installer_image output, which is fine only because
+# the two moves never overlap in this script.
+if [ -n "$want_k8s" ] && [ "$have_k8s" != "$want_k8s" ]; then
+  task infra-apply ROLE="$ROLE" PROVIDER="$PROVIDER" KEY="$KEY" APPROVE=auto
+fi
+
+# Talos moves through a roll: control planes first, because a worker's upgrade
+# drains against a healthy control plane.
+if [ -n "$want_talos" ] && [ "$have_talos" != "$want_talos" ]; then
+  task cluster-roll PROVIDER="$PROVIDER" ROLE="$ROLE" KEY="$KEY" APPROVE=auto -- --cp-only --upgrade
+  task cluster-roll PROVIDER="$PROVIDER" ROLE="$ROLE" KEY="$KEY" APPROVE=auto -- --workers-only --upgrade
+fi
 
 # Ask again. The roll reporting success is the client talking; this is the fleet.
 got_talos="$(oa_fleet_versions '.status.nodeInfo.osImage')"
