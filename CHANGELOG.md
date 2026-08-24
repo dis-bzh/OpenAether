@@ -116,6 +116,19 @@ in git. 0.1.0 is the first entry describing something proven.
   remains: it takes `--opentofu-version`, and `--install-path` /
   `--symlink-path` let it install without root.
 
+- **`infrastructure/opentofu-local/variables.tf` pinned a different Talos and
+  Kubernetes than the cloud root** — `v1.13.3` / `v1.35.3` against `v1.13.9` /
+  `v1.36.3`, drifted before either was anchored. The credential-free lane the
+  README calls the best first step was exercising a pair that is not the one
+  that ships. Now pinned equal. Measured on the shipped default topology
+  (3 control planes + 3 workers, Docker): all six nodes Ready, Cilium on 6/6,
+  `task local-verify` 6/6 — versions read from the cluster itself, not the tool
+  that deployed it (`kubectl get nodes` → `v1.36.3` on all six; `talosctl
+  version` against the control plane's own API → server tag `v1.13.9`).
+  Closes [#87](https://github.com/dis-bzh/OpenAether-infra/issues/87). The
+  cloud root's own pin — `v1.13.9`, one patch past what this repository's
+  real-cloud evidence table covers — is untouched and unrelated.
+
 - **`scripts/setup.sh` asked whether a tool was present, never which version it
   was** — so it installed the pin on a fresh machine and refused every upgrade
   afterwards, in silence, on every machine that had run it once. Found by the
