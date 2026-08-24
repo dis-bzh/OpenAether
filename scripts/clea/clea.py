@@ -437,7 +437,7 @@ def http_get(url: str, token: str | None = None, accept: str | None = None) -> b
     except urllib.error.HTTPError as exc:
         body = ""
         try:
-            body = exc.read().decode("utf-8", "replace")[:400]
+            body = exc.read().decode("utf-8", "replace")[:200]
         except Exception:  # pragma: no cover - the status alone is enough
             pass
         if exc.code in (401, 403, 429):
@@ -494,31 +494,53 @@ def latest_helm(dep: str, _token: str | None, registry_url: str | None = None, *
     """Newest chart version in a Helm repository index.
 
     Line-scanned rather than YAML-parsed: PyYAML is not in the standard library
-    and this file refuses a dependency for one field.
+    and this file refuses a dependency for one field. That makes INDENT the only
+    structure available, and it has to be used — cilium's index is 1.7 MB and
+    embeds Kubernetes CRD listings inside an annotation, where `version: v2`
+    appears at depth 10. Reading every `version:` line collected 1673 of those
+    against 651 real ones, and `v2` outranks every 1.x, so the answer was v2.
+    Two guards, both needed: the key must sit at the chart item's own indent,
+    and a chart version is semver, which mandates MAJOR.MINOR.PATCH.
     """
     if not registry_url:
         raise CleaError(f"helm {dep}: no registryUrl on the anchor")
     text = http_get(registry_url.rstrip("/") + "/index.yaml").decode("utf-8", "replace")
+    semver = re.compile(r"(?:-\s+)?version:\s*[\"']?(\d+\.\d+\.\d+[0-9A-Za-z.+-]*)[\"']?$")
     versions: list[str] = []
     entry_indent: int | None = None
+    item_indent: int | None = None
+    key_indent: int | None = None
     inside = False
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
         indent = len(line) - len(line.lstrip())
-        if re.match(rf"^{re.escape(dep)}:\s*$", stripped) and not inside:
-            inside, entry_indent = True, indent
+        if not inside:
+            if re.match(rf"^{re.escape(dep)}:\s*$", stripped):
+                inside, entry_indent = True, indent
             continue
-        if inside:
-            if indent <= entry_indent and not stripped.startswith("-"):
-                break
-            m = re.match(r"-?\s*version:\s*\"?([^\"\s]+)\"?$", stripped)
-            if m:
-                versions.append(m.group(1))
+        if indent <= entry_indent and not stripped.startswith("-"):
+            break
+        # Locked on the FIRST list item and never moved: the annotations block
+        # inside a chart entry contains its own `- ` items at greater depth, and
+        # following those re-based the whole scan below the real keys — which is
+        # how 1.8.13 came back as the newest chart of a repository serving 1.20.
+        dashed = stripped.startswith("- ")
+        if dashed and item_indent is None:
+            item_indent, key_indent = indent, indent + 2
+        if key_indent is None:
+            key_indent = entry_indent + 2
+        if dashed and indent != item_indent:
+            continue
+        if (indent + 2 if dashed else indent) != key_indent:
+            continue
+        m = semver.match(stripped)
+        if m:
+            versions.append(m.group(1))
     versions = [v for v in versions if not is_prerelease(v)]
     if not versions:
-        raise CleaError(f"helm {dep}: no version under entries in {registry_url}")
+        raise CleaError(f"helm {dep}: no chart version under entries in {registry_url}")
     tag = max(versions, key=version_key)
     return {"tag": tag, "released_at": None, "notes_url": registry_url}
 
@@ -677,6 +699,16 @@ def _load_previous(path: str | None) -> dict:
         return {}
 
 
+def mark_movement(entry: dict, previous: dict[str, dict]) -> dict:
+    """Did upstream move since the last scan? Keyed on dependency AND file, so
+    the same tool pinned in two places is two rows, which is how a drift between
+    them shows up at all."""
+    was = previous.get(entry["dep"] + "@" + entry["file"], {})
+    entry["moved_since_last_scan"] = bool(
+        was.get("latest") and entry.get("latest") and was["latest"] != entry["latest"])
+    return entry
+
+
 def cmd_scan(args) -> int:
     root = repo_root(args.root)
     cfg = load_config(root / args.config)
@@ -738,10 +770,7 @@ def cmd_scan(args) -> int:
         tool = next((t for t in cfg["tool"] if t["name"] == anchor.dep), None)
         if tool:
             entry["tool"] = tool
-        was = prev_by_key.get(entry["dep"] + "@" + entry["file"], {})
-        entry["moved_since_last_scan"] = bool(
-            was.get("latest") and entry.get("latest") and was["latest"] != entry["latest"])
-        deps.append(entry)
+        deps.append(mark_movement(entry, prev_by_key))
 
     for item in cfg["unpinned"]:
         entry = {"dep": item["name"], "datasource": item["datasource"],
@@ -756,10 +785,7 @@ def cmd_scan(args) -> int:
         except CleaError as exc:
             entry.update(latest=None, error=str(exc), behind=False)
             errors.append(str(exc))
-        was = prev_by_key.get(entry["dep"] + "@" + entry["file"], {})
-        entry["moved_since_last_scan"] = bool(
-            was.get("latest") and entry.get("latest") and was["latest"] != entry["latest"])
-        deps.append(entry)
+        deps.append(mark_movement(entry, prev_by_key))
 
     state = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -767,7 +793,9 @@ def cmd_scan(args) -> int:
         "novalue": [{"dep": a.dep, "file": a.path, "line": a.line,
                      "reason": a.reason} for a in novalue],
         "unwatched": [],
-        "errors": errors,
+        # Deduplicated: one rate limit fails once per anchor, and the state is
+        # carried in an issue body with a hard size limit.
+        "errors": list(dict.fromkeys(errors)),
         "probes": previous.get("probes", []),
     }
 
@@ -788,11 +816,12 @@ def cmd_scan(args) -> int:
     Path(args.state).write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
     behind = [d for d in deps if d.get("behind")]
     print(f"{len(deps)} dependencies, {len(behind)} behind, "
-          f"{len(state['unwatched'])} unwatched, {len(errors)} error(s)")
+          f"{len(state['unwatched'])} unwatched, "
+          f"{len(state['errors'])} distinct error(s)")
 
     # A datasource that answered nothing is not a dependency that is up to date.
-    if errors and args.strict:
-        for message in errors:
+    if state["errors"] and args.strict:
+        for message in state["errors"]:
             print(f"  ✗ {message}", file=sys.stderr)
         return 1
     return 0
@@ -930,9 +959,23 @@ def render_report(state: dict) -> str:
                       "```", probe.get("log", "(no log captured)").strip(), "```", ""]
 
     if state.get("errors"):
+        # Grouped on the message with its URL removed: one rate limit produces
+        # one failure per dependency, and twenty copies of the same sentence is
+        # not twenty pieces of information.
+        grouped: dict[str, list[str]] = {}
+        for message in state["errors"]:
+            url, _, rest = message.partition(" -> ")
+            grouped.setdefault(rest or message, []).append(url)
         lines += ["## Datasources that did not answer", "",
                   "Not the same thing as up to date:", ""]
-        lines += [f"- {e}" for e in state["errors"]] + [""]
+        for message, urls in list(grouped.items())[:8]:
+            names = list(dict.fromkeys(u.rsplit("/repos/", 1)[-1] for u in urls))
+            shown = ", ".join(f"`{n}`" for n in names[:6])
+            more = f" and {len(names) - 6} more" if len(names) > 6 else ""
+            lines += [f"- **{len(names)}×** {message}", f"  — {shown}{more}"]
+        if len(grouped) > 8:
+            lines += [f"- …and {len(grouped) - 8} other failure(s)"]
+        lines += [""]
 
     lines += ["## What this did not test", "",
               "- **No real cloud, ever.** This lane carries no provider credential and "
@@ -949,7 +992,16 @@ def render_report(state: dict) -> str:
     else:
         lines += ["- The weekly local cluster lane has not reported yet."]
 
-    lines += ["", "<!-- clea-state " + json.dumps(state, separators=(",", ":")) + " -->"]
+    # A GitHub issue body caps at 65536 characters. The probe logs are already
+    # rendered above, so they are the first thing to drop from the copy carried
+    # forward — a state that makes the write fail loses the state entirely.
+    embedded = json.dumps(state, separators=(",", ":"))
+    if len(embedded) > 40000:
+        trimmed = dict(state)
+        trimmed["probes"] = [{k: v for k, v in p.items() if k != "log"}
+                             for p in state.get("probes", [])]
+        embedded = json.dumps(trimmed, separators=(",", ":"))
+    lines += ["", "<!-- clea-state " + embedded + " -->"]
     return "\n".join(lines) + "\n"
 
 

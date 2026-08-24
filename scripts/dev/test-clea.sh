@@ -257,6 +257,30 @@ else
 fi
 
 echo
+echo "=== the probe refuses rather than destroy or pretend ==="
+# It bumps a pin and restores the tree with `git checkout -- .`. Run on a dirty
+# tree that discards somebody's work, and a probe that cannot start a container
+# must not exit 0 — a lane that reports success having run nothing is the whole
+# failure this file is written against.
+PROBE="$ROOT/scripts/clea/probe.sh"
+git -C "$TMP/basic" init -q 2>/dev/null
+git -C "$TMP/basic" add -A 2>/dev/null
+git -C "$TMP/basic" -c user.email=t@t -c user.name=t commit -qm fixture 2>/dev/null
+echo "dirty" >> "$TMP/basic/scripts/install.sh"
+expect 1 "a dirty tree is refused before anything is touched" \
+  -- env CLEA_ROOT="$TMP/basic" "$PROBE" acme/two v0.10.0 /bin/true "echo 0.10.0"
+git -C "$TMP/basic" checkout -q -- .
+if [ -n "$(git -C "$TMP/basic" status --porcelain --untracked-files=no)" ]; then
+  bad "the refusal happened after the tree was already restored"
+else
+  ok "and the refusal came before the trap that would have discarded it"
+fi
+# PATH without docker: the container lanes cannot start, and that is a failure.
+expect 1 "a probe that cannot start a container exits non-zero" \
+  -- env CLEA_ROOT="$TMP/basic" PATH=/usr/bin:/bin "$PROBE" \
+       acme/two v0.10.0 /bin/true "echo 0.10.0"
+
+echo
 echo "=== version comparison, and the pair every hand-rolled comparator gets wrong ==="
 python3 - "$CLEA" <<'PY'
 import importlib.util, sys, pathlib
@@ -328,29 +352,61 @@ PY
 if [ $? -eq 0 ]; then PASS=$((PASS + 2)); else FAIL=$((FAIL + 1)); fi
 
 echo
-echo "=== the helm index reader picks the newest, not the first ==="
+echo "=== the helm index: indent is the only structure a line scanner has ==="
 python3 - "$CLEA" <<'PY'
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("clea", sys.argv[1])
 clea = importlib.util.module_from_spec(spec); spec.loader.exec_module(clea)
-INDEX = b"""apiVersion: v1
+# Built from the real shape of https://helm.cilium.io/index.yaml, which is
+# 1.7 MB and embeds Kubernetes CRD listings inside an annotation. Reading every
+# `version:` line collected `v2` from depth 10, and (2,) outranks (1,20,1), so
+# the newest chart of a repository serving 1.20 came back as v2. Following the
+# annotation's own list items then re-based the scan and it came back 1.8.13.
+# Both were seen against the live index before this fixture existed.
+INDEX = b'''apiVersion: v1
 entries:
   cilium:
-    - version: 1.20.0
-    - version: 1.19.2
-    - version: 1.21.0-rc.1
-    - version: 1.20.10
-  other:
-    - version: 99.0.0
-"""
+  - annotations:
+      artifacthub.io/crds: "- kind: CiliumNetworkPolicy\\n  version: v2\\n  name: x\\n"
+      artifacthub.io/links: |
+        - name: a
+          version: v2
+        - name: b
+          version: v2
+      artifacthub.io/prerelease: |
+          version: 99.9.9
+    apiVersion: v2
+    appVersion: 1.20.1
+    name: cilium
+    version: 1.20.1
+  - annotations:
+      deep:
+          version: v2
+    apiVersion: v2
+    version: 1.19.2
+  - apiVersion: v2
+    version: 1.21.0-rc.1
+  - apiVersion: v2
+    version: 1.8.13
+  zzz-other-chart:
+  - version: 99.0.0
+'''
 clea.http_get = lambda url, *a, **k: INDEX
-got = clea.latest_helm("cilium", None, registry_url="https://example.invalid")
-ok = got["tag"] == "1.20.10"
-print(("  \033[32m✓\033[0m " if ok else "  \033[31m✗\033[0m ")
-      + f"1.20.10 beats 1.20.0 and the rc, and the next entry is not read (got {got['tag']})")
-sys.exit(0 if ok else 1)
+got = clea.latest_helm("cilium", None, registry_url="https://example.invalid")["tag"]
+checks = [
+    ("v2 at depth 10 is not a chart version", got != "v2"),
+    ("the annotation's own list items do not re-base the scan", got != "1.8.13"),
+    ("1.20.1 beats 1.19.2, 1.8.13 and the rc", got == "1.20.1"),
+    ("the next entry is not read", got != "99.0.0"),
+    # Load-bearing on its own: 99.9.9 IS semver, so only the indent says no.
+    ("a semver-shaped value at the wrong depth is not a chart version",
+     got != "99.9.9"),
+]
+for name, ok in checks:
+    print(("  \033[32m\u2713\033[0m " if ok else "  \033[31m\u2717\033[0m ") + f"{name} (got {got})")
+sys.exit(1 if [c for c in checks if not c[1]] else 0)
 PY
-if [ $? -eq 0 ]; then PASS=$((PASS + 1)); else FAIL=$((FAIL + 1)); fi
+if [ $? -eq 0 ]; then PASS=$((PASS + 5)); else FAIL=$((FAIL + 1)); fi
 
 echo
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"

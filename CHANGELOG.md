@@ -53,6 +53,14 @@ in git. 0.1.0 is the first entry describing something proven.
     GitHub API answer is an error naming `GITHUB_TOKEN`, never "up to date" —
     60 requests an hour from a shared runner IP is what took `main` red on
     2026-08-13. Documented in [`docs/clea.md`](docs/clea.md).
+  - **What the first real scan found**, running against live upstreams:
+    `commitizen` pinned at 4.9.1 against 4.18.0 — nine minor versions, on one of
+    the anchors that was inert — and the Cilium chart one patch behind at 1.20.0
+    against 1.20.1. A Cilium bump was then walked through by hand: `task
+    render-check` goes red on the stale manifest, the render lane closes it, and
+    both go green. The GitHub datasources answered 403 in that session and were
+    reported as failures, which is the behaviour that matters most: a
+    datasource that did not answer is not a dependency that is up to date.
 
 ### Fixed
 
