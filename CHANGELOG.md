@@ -114,6 +114,14 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **`task local-down` refused to run on a clone that had only this repository.**
+  `test-talos-local.sh` resolves `APPS_DIR` and exits 1 when it cannot find
+  `OpenAether-apps/apps/flux/local` — before it reads `--destroy`, which never
+  uses that directory. So the one command that cleans up after a failed deploy
+  needed a second repository cloned, and refused exactly when containers,
+  volumes and state were already on disk. Measured 2026-08-26 on the Docker
+  lane; `--destroy` is now exempt from the check.
+
 - **`task security` could not be completed on a machine set up by
   `scripts/setup.sh`.** `install_checkov` tried pipx, then `python3 -m pip`,
   then apt — and Ubuntu 24.04 ships python3 with neither pip nor pipx, so the

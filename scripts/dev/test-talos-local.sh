@@ -31,11 +31,14 @@ if [[ ! -d "${APPS_DIR}/apps/flux/local" ]]; then
   # Fallback: apps/ still lives in this repo (pre-split or monorepo layout)
   if [[ -d "${ROOT_DIR}/apps/flux/local" ]]; then
     APPS_DIR="${ROOT_DIR}"
-  else
+  elif [[ "${1:-}" != "--destroy" ]]; then
     echo "ERROR: Cannot find apps/flux/local in APPS_DIR=${APPS_DIR}" >&2
     echo "       Clone dis-bzh/OpenAether-apps next to this repo, or set APPS_DIR." >&2
     exit 1
   fi
+  # --destroy is deliberately exempt: it never reads APPS_DIR, and a teardown
+  # that demands a SECOND repository is one that refuses exactly when a failed
+  # deploy has left containers, volumes and state behind.
 fi
 
 CLUSTER_NAME="openaether-local-dev"
