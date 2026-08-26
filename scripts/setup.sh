@@ -145,17 +145,6 @@ install_tofu() {
     [ "$bin" = /usr/local/bin ] || echo "NOTE: tofu installed to $bin. Ensure it's in your PATH."
 }
 
-install_talosctl() {
-    echo "Installing Talosctl..."
-    # Download first, then execute (avoid piping a partially-fetched script to a
-    # shell — a truncated download could otherwise run incomplete commands).
-    local tmp
-    tmp="$(mktemp)"
-    trap 'rm -f "$tmp"' RETURN
-    curl -fsSL https://talos.dev/install -o "$tmp"
-    bash "$tmp"
-}
-
 install_kubectl() {
     echo "Installing kubectl..."
     curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
@@ -340,10 +329,12 @@ if ! check_cmd tofu "$TOFU_VERSION"; then
     install_tofu
 fi
 
-# 2. Check talosctl
-if ! check_cmd talosctl; then
-    install_talosctl
-fi
+# 2. talosctl — pinned to the version the CLUSTERS run, like every other tool
+# here. Not behind check_cmd: that probes with `talosctl version`, which prints
+# the SERVER's tag too, so a stale client against a current cluster would
+# satisfy the pin. The installer asks with `--client`, and is a no-op when it
+# already holds.
+"$(dirname "${BASH_SOURCE[0]}")/internal/install-talosctl.sh"
 
 # 3. Check kubectl
 if ! check_cmd kubectl; then

@@ -86,6 +86,19 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Changed
 
+- **`talosctl` is pinned and checksum-verified** by
+  `scripts/internal/install-talosctl.sh`, instead of piping `talos.dev/install`
+  into a shell — the last tool in `setup.sh` that was neither, in a repository
+  that checksums helm, task, tflint and feint. The version is not a new anchor:
+  it is the cluster's own `talos_version` via `talos-version.sh`, so a
+  workstation cannot end up with a CLI two patches from the fleet it talks to,
+  and `siderolabs/talos` leaves `clea.toml`'s `[[unpinned]]` for a weekly probe
+  row. It runs unconditionally rather than behind `check_cmd`, which probes with
+  `talosctl version` — that prints the SERVER's tag too, so a stale client
+  against a current cluster would satisfy the pin. Surfaced on a machine whose
+  egress policy refuses `www.talos.dev`, where the old installer took the whole
+  bootstrap down with it at step 2 under `set -e`.
+
 - **Renovate moves from a six-hour weekly window to a daily one**, and
   `dependencyDashboard` becomes explicit. It has proposed nothing since its
   config landed on 2026-07-30 — its nine pull requests were created three hours

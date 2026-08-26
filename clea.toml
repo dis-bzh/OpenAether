@@ -74,6 +74,16 @@ installer_stdin = "y\n"
 version_cmd = "flux --version"
 daily = false
 
+# talosctl carries no pin of its own: install-talosctl.sh reads the cluster's
+# `talos_version`, so the probe answers a sharper question than "does it
+# install" — whether a Talos bump also hands you a CLI that matches the fleet.
+# Weekly, like the other heavy rows: the release asset is ~100 MB.
+[[tool]]
+name = "siderolabs/talos"
+installer = "scripts/internal/install-talosctl.sh"
+version_cmd = "talosctl version --client"
+daily = false
+
 # --- What the repository consumes without pinning it -------------------------
 # No version is written down anywhere, so no two machines are guaranteed the
 # same tool. Cléa cannot bump these — it can only make the movement visible,
@@ -85,11 +95,6 @@ datasource = "url-text"
 url = "https://dl.k8s.io/release/stable.txt"
 extract = "^(?P<v>v[0-9][0-9A-Za-z.-]*)$"
 consumed_by = "scripts/setup.sh (install_kubectl)"
-
-[[unpinned]]
-name = "siderolabs/talos"
-datasource = "github-releases"
-consumed_by = "scripts/setup.sh (install_talosctl, via talos.dev/install)"
 
 [[unpinned]]
 # github-TAGS, not releases: aws/aws-cli tags every version and publishes no
