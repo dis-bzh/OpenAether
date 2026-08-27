@@ -136,9 +136,14 @@ regen = ["./scripts/bootstrap/render-bootstrap-manifests.sh"]
 
 # The gates, on the bumped tree. `task lint` is the one that earns its place:
 # it runs check-version-drift.sh, which is exactly the "did the bump leave a
-# second copy behind" question.
+# second copy behind" question. `task test` earns its place the same way:
+# without it, bumping kubernetes/kubernetes to v1.37.0 probed green on
+# 2026-08-27 while cluster/versions-guard.tf's Talos-1.13 support window still
+# capped Kubernetes at 1.36 — a real incompatibility none of the other three
+# gates exercise.
 repo = [
   "task lint",
   "task render-check",
   "task test-scripts",
+  "task test",
 ]

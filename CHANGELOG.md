@@ -101,6 +101,17 @@ in git. 0.1.0 is the first entry describing something proven.
   (`cluster` and `talos-image`), `task test` and `task security` (checkov and
   gitleaks; `trivy` was not reachable from this sandbox) all green on the
   bumped tree.
+  - **`kubernetes/kubernetes` v1.36.3 → v1.37.0, also reported probed green,
+    is deliberately left out.** `task test` — not part of Cléa's own gate list
+    — fails immediately on the bumped tree:
+    `cluster/versions-guard.tf`'s Talos↔Kubernetes support matrix caps Talos
+    1.13 at Kubernetes 1.36, and none of the three checks Cléa's daily lane
+    does run (`task lint`, `task render-check`, `task test-scripts`) exercise
+    that guard. The pairing is unproven, not confirmed broken — Cléa's weekly
+    local-cluster lane is what would actually boot it, and the report says
+    that lane "has not reported yet". `clea.toml`'s `[lane].repo` now also runs
+    `task test`, so a probe branch hitting this guard is reported for what it
+    is instead of green.
 
 - **`talosctl` is pinned and checksum-verified** by
   `scripts/internal/install-talosctl.sh`, instead of piping `talos.dev/install`
