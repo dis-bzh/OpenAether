@@ -26,6 +26,30 @@ before spending money in the cloud.
 Plus, on top of the cluster: Cilium CNI on all 5 nodes, Flux, and the
 `ApplicationSet → Application` hub mechanism.
 
+## Host requirement: `CAP_SYS_RESOURCE`
+
+Talos's in-node containerd sets its own OOM score to `-999`, which needs
+`CAP_SYS_RESOURCE`. Sandboxes and some CI runners drop that capability from the
+BOUNDING set, and `--privileged` cannot get it back: Docker grants capabilities
+from its parent's bounding set, so a privileged container inherits the same hole.
+Check before spending fifteen minutes on it:
+
+```bash
+# The BOUNDING line, and only it: capsh names the capability twice more as a
+# NEGATION ("cap_sys_resource-ep", "!cap_sys_resource"), so a bare grep over the
+# whole output reports a missing capability as present.
+capsh --print | grep '^Bounding set' | grep -q cap_sys_resource ||
+  echo "MISSING — this lane cannot run here"
+```
+
+Without it the containers come up and look healthy while
+`talos_machine_bootstrap` retries to its timeout, and the reason is only in
+`docker logs openaether-local-dev-cp-0`: containerd `going to restart forever:
+failed to change OOMScoreAdj [...] to -999: permission denied`. No containerd
+means no `apid`, so the Talos API port never listens. There is no workaround —
+the qemu provisioner wants `/dev/kvm`, which such hosts do not expose either.
+Measured 2026-08-27 on a host where bit 24 was the only one of 41 missing.
+
 ## Quick start
 
 ```bash
