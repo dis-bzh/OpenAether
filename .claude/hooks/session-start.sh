@@ -38,6 +38,9 @@ echo "✅ Toolchain ready (tofu, talosctl, kubectl, yamllint, tflint, task, flux
 # Never fatal, and last on purpose: a session that cannot have Docker must still
 # come out of this hook with the toolchain above.
 start_dockerd() {
+  # Overridable so scripts/dev/test-session-start.sh can drive this against
+  # stubs without appending to a real /var/log on the machine running it.
+  local log="${DOCKERD_LOG:-/var/log/dockerd.log}"
   if ! command -v dockerd > /dev/null 2>&1; then
     echo "⚠ dockerd is not installed — the Docker lanes (task local-*) are unavailable."
     return 0
@@ -46,8 +49,8 @@ start_dockerd() {
     echo "✅ Docker daemon already running."
     return 0
   fi
-  $SUDO_CMD mkdir -p /var/log || true
-  $SUDO_CMD sh -c 'dockerd >> /var/log/dockerd.log 2>&1 &' || true
+  $SUDO_CMD mkdir -p "$(dirname "$log")" || true
+  $SUDO_CMD sh -c "dockerd >> '$log' 2>&1 &" || true
   # It answers in about a second; 20 is headroom, not an expectation.
   for _ in $(seq 1 20); do
     if docker info > /dev/null 2>&1; then
@@ -56,6 +59,6 @@ start_dockerd() {
     fi
     sleep 1
   done
-  echo "⚠ Docker daemon did not come up in 20s — see /var/log/dockerd.log."
+  echo "⚠ Docker daemon did not come up in 20s — see $log."
 }
 start_dockerd

@@ -52,10 +52,12 @@ every apply plans to a file and applies THAT file, and a saved plan never prompt
 Destroy always takes two commands and no flag collapses them. S3 credentials are
 namespaced by the cloud that HOLDS the bucket, and a cross-provider backup is
 proven — an encrypted tfstate at Outscale while the cluster runs on Scaleway.
-413 offline assertions across 13 harnesses, every one mutation-tested — 330 of
-them from the eleven harnesses that existed before Cléa, three fewer than the
-333 this page claimed and nothing had re-counted since; the emulated lane runs
-feint 0.10.0 against Scaleway provider 2.81.0, the version the clusters run.
+464 offline assertions across 14 harnesses, every one mutation-tested. Counted
+2026-08-27 from `task test-scripts` itself, and it had drifted again: 452 across
+13 before the SessionStart-hook harness was added, against the 413 this page
+claimed — the same defect the 333 above records, which is what a number nothing
+re-counts does. The emulated lane runs feint 0.10.0 against Scaleway provider
+2.81.0, the version the clusters run.
 
 **The root cause behind a week of upgrade failures is fixed**, and it was ours:
 the shared schematic shipped `siderolabs/qemu-guest-agent`, which never starts on
