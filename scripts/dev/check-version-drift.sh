@@ -41,11 +41,17 @@ HELM_SETUP="$(pin scripts/setup.sh HELM_VERSION)"
 HELM_CI="$(sed -nE 's/^[[:space:]]*HELM_VERSION:[[:space:]]*"([^"]+)".*/\1/p' .github/workflows/ci.yml | head -1)"
 TOFU_SETUP="$(pin scripts/setup.sh TOFU_VERSION)"
 TOFU_CI="$(sed -nE 's/^[[:space:]]*tofu_version:[[:space:]]*"([^"]+)".*/\1/p' .github/workflows/ci.yml | head -1)"
+# Talos has no second pin to compare: ci.yml installs it through
+# scripts/internal/install-talosctl.sh, which reads the cluster's own. So the
+# question is whether that is still true — TALOS_CI is EXPECTED to be empty, and
+# is not part of the zero floor below for that reason.
+TALOS_CLUSTER="$(scripts/internal/talos-version.sh 2>/dev/null || true)"
+TALOS_CI="$(sed -nE 's/^[[:space:]]*TALOS_VERSION:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/p' .github/workflows/ci.yml | head -1)"
 
 # ZERO FLOOR. If the extractors return nothing the comparisons below all pass
 # vacuously, and this file becomes a green line that proves nothing — the exact
 # shape it is written against.
-for v in CILIUM HELM_MAJOR FEINT HELM_SETUP HELM_CI TOFU_SETUP TOFU_CI; do
+for v in CILIUM HELM_MAJOR FEINT HELM_SETUP HELM_CI TOFU_SETUP TOFU_CI TALOS_CLUSTER; do
   [ -n "${!v}" ] || { echo "✗ could not extract ${v} — the extractor is broken, not the repository" >&2; exit 1; }
 done
 
@@ -70,6 +76,22 @@ if [ "$TOFU_SETUP" = "$TOFU_CI" ]; then
   ok "OpenTofu ${TOFU_SETUP}: setup.sh and ci.yml agree"
 else
   bad "OpenTofu: setup.sh installs ${TOFU_SETUP}, ci.yml pins ${TOFU_CI} — a contributor and CI would not run the same binary"
+fi
+
+# Talos: the drift here was invisible for a different reason than the others —
+# there was no rule comparing the pair at all, so ci.yml validated configs with
+# v1.13.7 while both roots pinned v1.13.9. The fix is structural rather than a
+# comparison: ci.yml installs through install-talosctl.sh, which reads the
+# cluster's pin, so the two cannot disagree. What is checked is that the
+# structure holds — a hardcoded version coming back is the regression.
+if ! grep -q 'install-talosctl\.sh' .github/workflows/ci.yml; then
+  bad "ci.yml no longer installs talosctl through scripts/internal/install-talosctl.sh — it can pin a version of its own again"
+elif [ -z "$TALOS_CI" ]; then
+  ok "Talos ${TALOS_CLUSTER}: ci.yml declares no version of its own, it installs the cluster's"
+elif [ "${TALOS_CI#v}" = "${TALOS_CLUSTER#v}" ]; then
+  ok "Talos ${TALOS_CLUSTER}: ci.yml names the same version the cluster pins"
+else
+  bad "Talos: ci.yml pins ${TALOS_CI}, the cluster pins ${TALOS_CLUSTER} — CI would validate configs against another release"
 fi
 
 # Cilium: the pin versus the artifact actually committed from it.

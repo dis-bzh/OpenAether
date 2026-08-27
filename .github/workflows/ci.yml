@@ -289,18 +289,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
+      # The repository's own installer, so this job cannot validate configs with
+      # a talosctl the clusters do not run. It reads talos-version.sh, the one
+      # place that decides `talos_version`. This step used to carry a second pin
+      # of its own and it had drifted two patches behind — v1.13.7 against the
+      # v1.13.9 both roots pin — with nothing comparing the pair.
       - name: Install talosctl (pinned + checksum-verified)
-        env:
-          # renovate: datasource=github-releases depName=siderolabs/talos
-          TALOS_VERSION: "v1.13.7"
         run: |
-          set -euo pipefail
-          base="https://github.com/siderolabs/talos/releases/download/${TALOS_VERSION}"
-          curl -fsSL -o talosctl-linux-amd64 "${base}/talosctl-linux-amd64"
-          curl -fsSL "${base}/sha256sum.txt" | grep ' talosctl-linux-amd64$' > sha256sum.txt
-          sha256sum -c sha256sum.txt
-          chmod +x talosctl-linux-amd64
-          sudo install -m 0755 talosctl-linux-amd64 /usr/local/bin/talosctl
+          ./scripts/internal/install-talosctl.sh
           talosctl version --client
 
       - name: Generate Talos secrets
