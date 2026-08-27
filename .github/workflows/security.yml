@@ -3,8 +3,12 @@ name: Security
 on:
   push:
     branches: [main]
+  # No `branches` filter and `edited` added, both measured on PR #100: a PR
+  # based on another PR's branch got NO run at all (not a red one — none), and
+  # retargeting it to main fired only `edited`, which the default types skip.
+  # An unvalidated stacked PR looks exactly like a green one in the list.
   pull_request:
-    branches: [main]
+    types: [opened, synchronize, reopened, edited]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
