@@ -41,6 +41,7 @@ start_dockerd() {
   # Overridable so scripts/dev/test-session-start.sh can drive this against
   # stubs without appending to a real /var/log on the machine running it.
   local log="${DOCKERD_LOG:-/var/log/dockerd.log}"
+  local containerd_pid="${CONTAINERD_PIDFILE:-/run/docker/containerd/containerd.pid}"
   if ! command -v dockerd > /dev/null 2>&1; then
     echo "⚠ dockerd is not installed — the Docker lanes (task local-*) are unavailable."
     return 0
@@ -50,15 +51,30 @@ start_dockerd() {
     return 0
   fi
   $SUDO_CMD mkdir -p "$(dirname "$log")" || true
-  $SUDO_CMD sh -c "dockerd >> '$log' 2>&1 &" || true
-  # It answers in about a second; 20 is headroom, not an expectation.
-  for _ in $(seq 1 20); do
-    if docker info > /dev/null 2>&1; then
-      echo "✅ Docker daemon started."
-      return 0
+  # TWO attempts, because one is not enough on a RESUMED container: it keeps a
+  # containerd pid from before the snapshot, dockerd sees that pid, refuses to
+  # start a managed containerd and gives up after 15 s — "failed to start
+  # containerd: timeout waiting for containerd to start". The pid is gone
+  # moments later and the retry comes up. Measured 2026-08-27 on a resume: first
+  # attempt timed out, second was serving in 2 s. Worst case 40 s, only ever on
+  # a session that was not going to have Docker at all.
+  local attempt
+  for attempt in 1 2; do
+    $SUDO_CMD sh -c "dockerd >> '$log' 2>&1 &" || true
+    # It answers in about a second; 20 is headroom, not an expectation.
+    for _ in $(seq 1 20); do
+      if docker info > /dev/null 2>&1; then
+        echo "✅ Docker daemon started."
+        return 0
+      fi
+      sleep 1
+    done
+    # Only a pidfile whose process is GONE. Killing a live containerd would take
+    # a working daemon down to fix one that is not running.
+    if [ -f "$containerd_pid" ] && ! kill -0 "$(cat "$containerd_pid" 2>/dev/null)" 2>/dev/null; then
+      $SUDO_CMD rm -f "$containerd_pid" || true
     fi
-    sleep 1
   done
-  echo "⚠ Docker daemon did not come up in 20s — see $log."
+  echo "⚠ Docker daemon did not come up after two tries — see $log."
 }
 start_dockerd

@@ -37,6 +37,7 @@ grep -q 'command -v dockerd' "$TMP/fn.sh" || {
 
 mkdir -p "$TMP/bin"
 LOG="$TMP/dockerd.log"
+PIDFILE="$TMP/containerd.pid"
 
 # `docker info` answers 0 once $TMP/ready exists, and every probe is counted:
 # a loop that forgot its ceiling shows up as a number instead of as a hang.
@@ -70,12 +71,12 @@ EOF
 chmod +x "$TMP/bin/docker" "$TMP/bin/sleep" "$TMP/bin/dockerd"
 
 reset() { rm -f "$TMP/ready" "$TMP/probes" "$TMP/sleeps" "$TMP/launched" \
-                "$TMP/comes-up-after" "$TMP/bin/mkdir" "$LOG"; }
+                "$TMP/comes-up-after" "$TMP/bin/mkdir" "$LOG" "$PIDFILE"; }
 
 OUT=""
 RC=0
 drive() { # [extra PATH entries in front]
-  OUT="$(PATH="$TMP/bin:${1:-/bin:/usr/bin}" DOCKERD_LOG="$LOG" \
+  OUT="$(PATH="$TMP/bin:${1:-/bin:/usr/bin}" DOCKERD_LOG="$LOG" CONTAINERD_PIDFILE="$PIDFILE" \
     /bin/bash -c 'set -euo pipefail; SUDO_CMD=""; . "$1"; start_dockerd' _ "$TMP/fn.sh" 2>&1)"
   RC=$?
 }
@@ -140,7 +141,6 @@ reset
 drive
 rc0 "a daemon that never answers is survivable"
 says "$LOG" "and it names the log to read"
-
 reset
 printf '#!/bin/sh\nexit 1\n' > "$TMP/bin/mkdir"
 chmod +x "$TMP/bin/mkdir"
@@ -148,17 +148,51 @@ drive
 rc0 "a log directory it cannot create is survivable"
 
 echo
+echo "=== a resumed container gets a second attempt ==="
+# A container restored from a snapshot keeps a containerd pid from before it.
+# dockerd sees the pid, refuses to start a managed containerd and gives up after
+# 15 s; the pid is gone moments later. Measured 2026-08-27 — one attempt left
+# the session with the warning and no daemon, a second came up in 2 s.
+reset
+drive
+if [ "$(wc -l < "$TMP/launched")" -eq 2 ]; then
+  ok "a first attempt that times out is followed by a second"
+else
+  bad "expected 2 launches, counted $(wc -l < "$TMP/launched")"
+fi
+
+# Clearing the pidfile is what makes the retry deterministic instead of hopeful.
+reset
+# Reaped HERE on purpose: a background child of a subshell is never reaped, and
+# `kill -0` succeeds on the zombie it leaves — a dead pid that reads as alive.
+sh -c 'exit 0' & dead_pid=$!
+wait "$dead_pid" 2>/dev/null || true
+echo "$dead_pid" > "$PIDFILE"
+drive
+if [ -f "$PIDFILE" ]; then bad "a containerd pidfile whose process is gone was kept"; else ok "a containerd pidfile whose process is gone is cleared"; fi
+
+# The dangerous half, and the reason this is not a pkill: a live containerd
+# belongs to a working daemon somewhere, and taking it down to fix one that is
+# not running trades a real outage for a hypothetical one.
+reset
+echo $$ > "$PIDFILE"
+drive
+if [ -f "$PIDFILE" ]; then ok "a LIVE containerd is left alone"; else bad "a live containerd's pidfile was deleted"; fi
+
+
+echo
 echo "=== the wait is bounded ==="
-# 1 probe before the launch, then the loop's own. A ceiling that drifts silently
-# is a hook that hangs a session for minutes with no output.
+# 1 probe before the first launch, then 20 per attempt, twice. A ceiling that
+# drifts silently is a hook that hangs a session for minutes with no output.
 reset
 drive
 probes="$(wc -l < "$TMP/probes")"
-if [ "$probes" -eq 21 ]; then
-  ok "it gives up after 20 tries rather than looping (1 + 20 probes)"
+if [ "$probes" -eq 41 ]; then
+  ok "it gives up rather than looping (1 + 2 × 20 probes)"
 else
-  bad "expected 1 + 20 probes, counted $probes"
+  bad "expected 1 + 2 × 20 probes, counted $probes"
 fi
+says "after two tries" "and says it tried twice"
 
 echo
 echo "$PASS passed, $FAIL failed"

@@ -52,7 +52,7 @@ every apply plans to a file and applies THAT file, and a saved plan never prompt
 Destroy always takes two commands and no flag collapses them. S3 credentials are
 namespaced by the cloud that HOLDS the bucket, and a cross-provider backup is
 proven — an encrypted tfstate at Outscale while the cluster runs on Scaleway.
-464 offline assertions across 14 harnesses, every one mutation-tested. Counted
+468 offline assertions across 14 harnesses, every one mutation-tested. Counted
 2026-08-27 from `task test-scripts` itself, and it had drifted again: 452 across
 13 before the SessionStart-hook harness was added, against the 413 this page
 claimed — the same defect the 333 above records, which is what a number nothing
