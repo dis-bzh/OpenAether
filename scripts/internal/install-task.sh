@@ -15,7 +15,7 @@
 set -euo pipefail
 
 # renovate: datasource=github-releases depName=go-task/task extractVersion=^v(?<version>.*)$
-TASK_VERSION="3.52.0"
+TASK_VERSION="3.53.1"
 
 # shellcheck source=scripts/lib/common.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"

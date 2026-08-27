@@ -33,7 +33,7 @@ fi
 # other major. check-version-drift.sh compares all of them.
 #
 # renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
-TOFU_VERSION="1.12.5"
+TOFU_VERSION="1.12.6"
 # renovate: datasource=github-releases depName=fluxcd/flux2 extractVersion=^v(?<version>.*)$
 FLUX_VERSION="2.9.3"
 # renovate: datasource=github-releases depName=helm/helm extractVersion=^v(?<version>.*)$
