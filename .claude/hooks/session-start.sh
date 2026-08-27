@@ -4,8 +4,11 @@
 # Claude Code on the web sessions.
 #
 # Requires the environment's network policy to allow outbound access to the
-# tool download domains (get.opentofu.org, talos.dev, dl.k8s.io, github.com,
-# pypi.org, ...). If egress is blocked, the installs below fail.
+# tool download domains (get.opentofu.org, dl.k8s.io, github.com, pypi.org, ...).
+# If egress is blocked, the installs below fail. The Docker lanes need one host
+# beyond those: pkg-containers.githubusercontent.com, which serves ghcr.io's
+# blobs — without it the daemon starts but `task local-up` cannot pull the Talos
+# image.
 set -euo pipefail
 
 # root in the remote environment, sudo elsewhere.
@@ -28,3 +31,50 @@ printf 'y\n' | ./scripts/setup.sh
 # uses. This copy was the third place the same download was written out by hand.
 
 echo "✅ Toolchain ready (tofu, talosctl, kubectl, yamllint, tflint, task, flux)."
+
+# 3. Docker daemon. The remote image ships dockerd STOPPED — /var/run/docker.sock
+# does not exist until something starts it — and every container lane here needs
+# it: `task local-up`/`local-down`, test-talos-local.sh, test-gates-local.sh.
+# Never fatal, and last on purpose: a session that cannot have Docker must still
+# come out of this hook with the toolchain above.
+start_dockerd() {
+  # Overridable so scripts/dev/test-session-start.sh can drive this against
+  # stubs without appending to a real /var/log on the machine running it.
+  local log="${DOCKERD_LOG:-/var/log/dockerd.log}"
+  local containerd_pid="${CONTAINERD_PIDFILE:-/run/docker/containerd/containerd.pid}"
+  if ! command -v dockerd > /dev/null 2>&1; then
+    echo "⚠ dockerd is not installed — the Docker lanes (task local-*) are unavailable."
+    return 0
+  fi
+  if docker info > /dev/null 2>&1; then
+    echo "✅ Docker daemon already running."
+    return 0
+  fi
+  $SUDO_CMD mkdir -p "$(dirname "$log")" || true
+  # TWO attempts, because one is not enough on a RESUMED container: it keeps a
+  # containerd pid from before the snapshot, dockerd sees that pid, refuses to
+  # start a managed containerd and gives up after 15 s — "failed to start
+  # containerd: timeout waiting for containerd to start". The pid is gone
+  # moments later and the retry comes up. Measured 2026-08-27 on a resume: first
+  # attempt timed out, second was serving in 2 s. Worst case 40 s, only ever on
+  # a session that was not going to have Docker at all.
+  local attempt
+  for attempt in 1 2; do
+    $SUDO_CMD sh -c "dockerd >> '$log' 2>&1 &" || true
+    # It answers in about a second; 20 is headroom, not an expectation.
+    for _ in $(seq 1 20); do
+      if docker info > /dev/null 2>&1; then
+        echo "✅ Docker daemon started."
+        return 0
+      fi
+      sleep 1
+    done
+    # Only a pidfile whose process is GONE. Killing a live containerd would take
+    # a working daemon down to fix one that is not running.
+    if [ -f "$containerd_pid" ] && ! kill -0 "$(cat "$containerd_pid" 2>/dev/null)" 2>/dev/null; then
+      $SUDO_CMD rm -f "$containerd_pid" || true
+    fi
+  done
+  echo "⚠ Docker daemon did not come up after two tries — see $log."
+}
+start_dockerd

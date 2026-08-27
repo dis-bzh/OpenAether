@@ -323,6 +323,11 @@ tasks:
       # so it installed the pin once and refused every upgrade after that. Found
       # by the Cléa probe, guarded here so it does not need Docker to stay fixed.
       - ./scripts/dev/test-setup-checks.sh
+      # The SessionStart hook runs under `set -e` and is the only thing that
+      # installs the toolchain in a web session. Its Docker block fails in ways
+      # the ENVIRONMENT chooses, and any of them returning non-zero leaves the
+      # session with no tools at all — a failure nothing would connect to Docker.
+      - ./scripts/dev/test-session-start.sh
 
   test:
     desc: Run OpenTofu tests (cluster root)
