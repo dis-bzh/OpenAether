@@ -86,6 +86,19 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Changed
 
+- **`talosctl` is pinned and checksum-verified** by
+  `scripts/internal/install-talosctl.sh`, instead of piping `talos.dev/install`
+  into a shell — the last tool in `setup.sh` that was neither, in a repository
+  that checksums helm, task, tflint and feint. The version is not a new anchor:
+  it is the cluster's own `talos_version` via `talos-version.sh`, so a
+  workstation cannot end up with a CLI two patches from the fleet it talks to,
+  and `siderolabs/talos` leaves `clea.toml`'s `[[unpinned]]` for a weekly probe
+  row. It runs unconditionally rather than behind `check_cmd`, which probes with
+  `talosctl version` — that prints the SERVER's tag too, so a stale client
+  against a current cluster would satisfy the pin. Surfaced on a machine whose
+  egress policy refuses `www.talos.dev`, where the old installer took the whole
+  bootstrap down with it at step 2 under `set -e`.
+
 - **Renovate moves from a six-hour weekly window to a daily one**, and
   `dependencyDashboard` becomes explicit. It has proposed nothing since its
   config landed on 2026-07-30 — its nine pull requests were created three hours
@@ -100,6 +113,14 @@ in git. 0.1.0 is the first entry describing something proven.
   weeks of nothing to do.
 
 ### Fixed
+
+- **`task local-down` refused to run on a clone that had only this repository.**
+  `test-talos-local.sh` resolves `APPS_DIR` and exits 1 when it cannot find
+  `OpenAether-apps/apps/flux/local` — before it reads `--destroy`, which never
+  uses that directory. So the one command that cleans up after a failed deploy
+  needed a second repository cloned, and refused exactly when containers,
+  volumes and state were already on disk. Measured 2026-08-26 on the Docker
+  lane; `--destroy` is now exempt from the check.
 
 - **`task security` could not be completed on a machine set up by
   `scripts/setup.sh`.** `install_checkov` tried pipx, then `python3 -m pip`,
