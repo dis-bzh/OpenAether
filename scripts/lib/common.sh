@@ -223,6 +223,21 @@ oa_fleet_versions() {
     sed -E 's/^Talos \((v[^)]+)\)$/\1/' | grep -E '^v' | sort -u | paste -sd, - || true
 }
 
+# Is version A strictly semver-lower than version B? Compares major.minor.patch
+# numerically, ignoring a leading "v"; a missing component reads as 0 (so v1.13
+# sorts as v1.13.0). Usage: oa_semver_lt <a> <b>
+oa_semver_lt() {
+  local a="${1#v}" b="${2#v}" i x y
+  local -a av bv
+  IFS=. read -r -a av <<<"$a"
+  IFS=. read -r -a bv <<<"$b"
+  for i in 0 1 2; do
+    x="${av[i]:-0}"; y="${bv[i]:-0}"
+    [ "$x" -eq "$y" ] || { [ "$x" -lt "$y" ]; return; }
+  done
+  return 1
+}
+
 # The tfvars wins, `variables.tf` is the tracked fallback: envs/management-*.tfvars
 # deliberately omit the pins on some clusters to inherit the default, so an empty
 # tfvars answer is a legitimate "use the default", never an error.
