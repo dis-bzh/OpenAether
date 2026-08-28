@@ -86,6 +86,33 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Changed
 
+- **Six dependencies Cléa's first report ([#91](https://github.com/dis-bzh/OpenAether-infra/issues/91)) found behind upstream and probed green, bumped for real**:
+  `go-task/task` 3.52.0 → 3.53.1, `cloudnative-pg/cloudnative-pg` 1.23.6 →
+  1.30.0, `opentofu/opentofu` 1.12.5 → 1.12.6 (four anchors in `ci.yml` plus
+  `setup.sh`), `cilium` 1.20.0 → 1.20.1 (chart re-rendered,
+  `task render-check` green against the new manifest) and `commitizen` 4.9.1 →
+  4.18.0. `helm/helm` and `fluxcd/flux2` stay put: the report's own verdict for
+  both is "not probed" (they ride the weekly lane, `daily = false`), so there is
+  nothing yet to act on. `stephrobert/feint` stays at 0.10.0: its probe failed
+  outright — the installer at the current pin reported no version, so the
+  upgrade lane had nothing to upgrade over — a defect in the installer, not
+  something this bump could paper over.
+  `task lint`, `task render-check`, `task test-scripts`, `task validate`
+  (`cluster` and `talos-image`), `task test` and `task security` (checkov and
+  gitleaks; `trivy` was not reachable from this sandbox) all green on the
+  bumped tree.
+  - **`kubernetes/kubernetes` v1.36.3 → v1.37.0, also reported probed green,
+    is deliberately left out.** `task test` — not part of Cléa's own gate list
+    — fails immediately on the bumped tree:
+    `cluster/versions-guard.tf`'s Talos↔Kubernetes support matrix caps Talos
+    1.13 at Kubernetes 1.36, and none of the three checks Cléa's daily lane
+    does run (`task lint`, `task render-check`, `task test-scripts`) exercise
+    that guard. The pairing is unproven, not confirmed broken — Cléa's weekly
+    local-cluster lane is what would actually boot it, and the report says
+    that lane "has not reported yet". `clea.toml`'s `[lane].repo` now also runs
+    `task test`, so a probe branch hitting this guard is reported for what it
+    is instead of green.
+
 - **`talosctl` is pinned and checksum-verified** by
   `scripts/internal/install-talosctl.sh`, instead of piping `talos.dev/install`
   into a shell — the last tool in `setup.sh` that was neither, in a repository
@@ -121,6 +148,13 @@ in git. 0.1.0 is the first entry describing something proven.
   others still worked — crashed the run instead of being counted and
   continuing. It now shares the same `UNREACHABLE` counter and exit code.
   [#63](https://github.com/dis-bzh/OpenAether-infra/issues/63)
+- **`converge-versions.sh` had no downgrade guard of its own.** It survived a
+  Talos/Kubernetes downgrade attempt only by accident, on two layers it does
+  not own (the talos provider's forced PKI replacement, and
+  `secrets_prevent_destroy` turning that into a hard refusal — a variable that
+  is explicitly false in `tofu test`). It now refuses a pin that is
+  semver-lower than what the fleet runs, naming both, before calling either
+  `infra-apply` or `cluster-roll`. [#90](https://github.com/dis-bzh/OpenAether-infra/issues/90)
 
 - **`task local-down` refused to run on a clone that had only this repository.**
   `test-talos-local.sh` resolves `APPS_DIR` and exits 1 when it cannot find

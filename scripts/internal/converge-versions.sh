@@ -55,6 +55,35 @@ if [ -z "$have_talos" ] && [ -z "$have_k8s" ]; then
   Check the cluster, then: task cluster-verify PROVIDER=${PROVIDER} ROLE=${ROLE}"
 fi
 
+# Refuse a pin that is semver-LOWER than what is running, before anything below
+# calls infra-apply or cluster-roll. This script has no downgrade guard of its
+# own otherwise — it only survives one today by accident, on two layers it does
+# not own: the pinned talos provider forces a PKI replacement on a lower
+# version, and secrets_prevent_destroy turns that into a hard refusal. Neither
+# is this script's to depend on; secrets_prevent_destroy is explicitly false in
+# `tofu test`, and nothing here would notice on a config where it were false for
+# real. A fleet can be MIXED mid-roll (comma-separated), so a pin counts as a
+# downgrade against ANY node still running above it, not only the lowest one.
+downgrade() { # <pin> <running-csv> — 0 if pin is a downgrade from any of running
+  local pin="$1" running="$2" v
+  [ -n "$pin" ] && [ -n "$running" ] || return 1
+  IFS=',' read -ra _running_vs <<<"$running"
+  for v in "${_running_vs[@]}"; do
+    oa_semver_lt "$pin" "$v" && return 0
+  done
+  return 1
+}
+if downgrade "$want_talos" "$have_talos"; then
+  fail "the config pins Talos ${want_talos}, the fleet runs ${have_talos} — that is a DOWNGRADE.
+  converge-versions.sh does not build a downgrade path (cluster-upgrade.sh refuses one for
+  the same reason). Revert the pin, or roll the cluster forward instead."
+fi
+if downgrade "$want_k8s" "$have_k8s"; then
+  fail "the config pins Kubernetes ${want_k8s}, the fleet runs ${have_k8s} — that is a DOWNGRADE.
+  converge-versions.sh does not build a downgrade path (cluster-upgrade.sh refuses one for
+  the same reason). Revert the pin, or roll the cluster forward instead."
+fi
+
 drift=0
 [ -n "$want_talos" ] && [ "$have_talos" != "$want_talos" ] && drift=1
 [ -n "$want_k8s" ]   && [ "$have_k8s"   != "$want_k8s"   ] && drift=1

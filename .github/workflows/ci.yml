@@ -34,7 +34,7 @@ jobs:
 
       - name: Install commitizen
         # renovate: datasource=pypi depName=commitizen
-        run: pip install commitizen==4.9.1
+        run: pip install commitizen==4.18.0
 
       - name: Conventional Commits
         run: cz check --rev-range origin/${{ github.base_ref }}..HEAD
@@ -101,7 +101,7 @@ jobs:
         uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4  # v2
         with:
           # renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
-          tofu_version: "1.12.5"
+          tofu_version: "1.12.6"
 
       # Same installer as setup.sh and the session-start hook, for the same reason
       # as Task below: one pinned version, verified against the project's own
@@ -194,7 +194,7 @@ jobs:
         uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4  # v2
         with:
           # renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
-          tofu_version: "1.12.5"
+          tofu_version: "1.12.6"
 
       - name: Setup Task
         run: ./scripts/internal/install-task.sh
@@ -219,7 +219,7 @@ jobs:
         uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4  # v2
         with:
           # renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
-          tofu_version: "1.12.5"
+          tofu_version: "1.12.6"
 
       - name: Setup Task
         run: ./scripts/internal/install-task.sh
@@ -257,7 +257,7 @@ jobs:
         uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4  # v2
         with:
           # renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
-          tofu_version: "1.12.5"
+          tofu_version: "1.12.6"
 
       - name: Setup Task
         run: ./scripts/internal/install-task.sh
