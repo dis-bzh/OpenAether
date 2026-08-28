@@ -199,6 +199,91 @@ else
   bad "ovh.py: it never reached its own summary — the refusal ended the run early"
 fi
 
+# --- outscale.py: Talos snapshots/images are visible, and "clean" stops lying -
+# The core of #71: a duplicate snapshot from a failed image build sat in the
+# account while outscale.py never even asked ReadSnapshots/ReadImages, so
+# "account is clean" was true of everything it looked at and false of the
+# account. Three scenarios below; the first is the regression guard (this fix
+# must not cry wolf on the ordinary empty case), the other two are #71 itself
+# and its twin in the --apply success path.
+echo
+echo "=== outscale.py: snapshot/image artifacts are seen, not silently skipped ==="
+
+run_osc_canned() { # <CANNED python-dict-literal as a string> [extra argv...]
+  local canned="$1"; shift
+  env OUTSCALE_ACCESS_KEY_ID=stub OUTSCALE_SECRET_KEY=stub OSC_REGION=eu-west-2 \
+      python3 - "$ROOT/scripts/ops/purge-orphans/outscale.py" "$@" <<PY 2>&1
+import runpy, sys, json, io, urllib.request, urllib.error
+
+CANNED = $canned
+
+def fake(req, *a, **k):
+    action = req.full_url.rsplit('/', 1)[-1]
+    return io.BytesIO(json.dumps(CANNED.get(action, {})).encode())
+
+urllib.request.urlopen = fake
+sys.argv = sys.argv[1:]
+try:
+    runpy.run_path(sys.argv[0], run_name='__main__')
+except SystemExit as e:
+    sys.exit(e.code if isinstance(e.code, int) else 1)
+PY
+}
+
+# 1. Genuinely empty account — every Read* (including the two new ones)
+#    returns nothing. Must still say "clean": the case this fix must not break.
+out="$(run_osc_canned '{}')"; rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "outscale.py: a genuinely empty account (incl. no snapshots/images) still exits 0"
+else
+  bad "outscale.py: a genuinely empty account no longer exits 0 (rc=${rc}) — false positive"
+fi
+if grep -qiE 'account is clean' <<<"$out"; then
+  ok "outscale.py: it still says clean when nothing at all is present"
+else
+  bad "outscale.py: it stopped saying clean on a genuinely empty account"
+fi
+
+# 2. Only a leftover snapshot — every Net-dependency listing is empty
+#    (TOTAL stays 0), but ReadSnapshots answers one. This is #71 itself.
+ONLY_SNAPSHOT='{"ReadSnapshots": {"Snapshots": [{"SnapshotId": "snap-orphan", "State": "completed", "VolumeSize": 10}]}}'
+out="$(run_osc_canned "$ONLY_SNAPSHOT")"; rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "outscale.py: an orphan snapshot with nothing else present exits non-zero (rc=${rc})"
+else
+  bad "outscale.py: an orphan snapshot present and it still exited 0 — the #71 bug"
+fi
+if grep -qiE 'account is clean' <<<"$out"; then
+  bad "outscale.py: it said the account is clean while an orphan snapshot sat there"
+else
+  ok "outscale.py: it does not claim clean while the snapshot is present"
+fi
+if grep -q 'snap-orphan' <<<"$out"; then
+  ok "outscale.py: it names the orphan snapshot in its output"
+else
+  bad "outscale.py: the snapshot was found but never named — a transcript reader can't act on it"
+fi
+
+# 3. Net resources purged successfully AND an image is left over — the
+#    "N resource(s) deleted. The account is clean." branch must not lie either.
+DELETED_PLUS_IMAGE='{"ReadNets": {"Nets": [{"NetId": "vpc-stub", "IpRange": "10.0.0.0/16"}]}, "ReadImages": {"Images": [{"ImageId": "ami-orphan", "ImageName": "old-talos-build"}]}}'
+out="$(run_osc_canned "$DELETED_PLUS_IMAGE" --apply)"; rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "outscale.py --apply: resources deleted but an image remains still exits non-zero (rc=${rc})"
+else
+  bad "outscale.py --apply: an image remained after a successful purge and it exited 0"
+fi
+if grep -qiE 'account is clean' <<<"$out" && ! grep -qiE 'NOT fully clean' <<<"$out"; then
+  bad "outscale.py --apply: claimed clean while ami-orphan was still listed"
+else
+  ok "outscale.py --apply: does not claim a plain clean while the image remains"
+fi
+if grep -q 'ami-orphan' <<<"$out"; then
+  ok "outscale.py --apply: names the leftover image after a successful net purge"
+else
+  bad "outscale.py --apply: the leftover image was never named post-purge"
+fi
+
 echo
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

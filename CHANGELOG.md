@@ -141,6 +141,18 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **`outscale.py`'s purge never looked at snapshots or images**, so a
+  duplicate snapshot from a failed image build sat in the account while
+  "account is clean" was true of everything the script asked and false of
+  the account. It now lists both (`ReadSnapshots`/`ReadImages`) and refuses
+  to claim clean while either is present — reported, never auto-deleted:
+  same policy `scaleway.py` already documents for Talos build artifacts, and
+  `fleet-down.sh`'s own "left standing on purpose" list. Two paths used to
+  say "clean" wrongly: an account with nothing else at all (`TOTAL == 0`),
+  and — found while fixing the first — the successful `--apply` path itself,
+  which said "resource(s) deleted, the account is clean" even with an image
+  still sitting there.
+  [#71](https://github.com/dis-bzh/OpenAether-infra/issues/71)
 - **`ovh.py`'s purge could not tell a refused endpoint from an empty account.**
   `scaleway.py` and `outscale.py` both count a refused call and refuse to
   claim "clean" on zero findings and zero reachable endpoints; `ovh.py` had no

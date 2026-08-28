@@ -60,8 +60,10 @@ docker run --rm -v /tmp/repo.tar:/tmp/repo.tar:ro ubuntu:24.04 bash -c '
       script that no longer exists.
 - [ ] no bucket is orphaned by a rename in this release. `…-talos-staging` became
       `…-talos-import` (2026-08-20): the old one still holds every QCOW2 it was
-      ever given, on every cloud built from. `task purge-orphans PROVIDER=…` lists
-      it; emptying and deleting it is by hand.
+      ever given, on every cloud built from. `python3
+      scripts/ops/purge-orphans/<provider>.py` lists it (there is no `task`
+      wrapper — see the script's own README); emptying and deleting it is by
+      hand.
 
 ## 2. Local Docker — the credential-free rung
 

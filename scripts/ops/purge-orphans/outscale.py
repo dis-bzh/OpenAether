@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Purges an orphaned Outscale Net (CAPI): dependencies first, then the Net.
 Order imposed by Outscale: LBU → NAT → route tables → internet service →
-security groups → subnets → net. Usage: purge-orphans-osc.py [--apply]"""
+security groups → subnets → net. Also REPORTS (never deletes) leftover
+snapshots and images — see the ARTIFACTS block below.
+Usage: purge-orphans-osc.py [--apply]"""
 import os, sys, json, hmac, hashlib, datetime, urllib.request
 
 APPLY = '--apply' in sys.argv
@@ -102,12 +104,42 @@ for sn in call('ReadSubnets').get('Subnets', []):
     do('DeleteSubnet', {'SubnetId': sn['SubnetId']}, f"subnet {sn['SubnetId']}")
 for net in call('ReadNets').get('Nets', []):
     do('DeleteNet', {'NetId': net['NetId']}, f"net {net['NetId']} ({net.get('IpRange')})")
+
+# Snapshots and images are Talos build artifacts, deliberately never deleted by
+# this script — same policy scaleway.py already documents, and the reason
+# fleet-down.sh's own step 3 only LISTS them (see docs, "Left standing on
+# purpose"). Rebuilding an image costs about an hour on Outscale; a wrong
+# guess here is not recoverable the way a re-run of the loop above is.
+#
+# Called with no Filters, like every other Read* above: none of them scope to
+# the caller's account explicitly either, and this script has always trusted
+# that Outscale's auth signature does that scoping — extending, not inventing,
+# an assumption the rest of the file already makes for Nets and security groups.
+#
+# What this closes: a duplicate snapshot from a failed image build sat in the
+# account while this script never looked, so "account is clean" was true of
+# everything it asked and false of the account (#71, 2026-08-19). A resource
+# class this script cannot see is a resource class it cannot report on.
+ARTIFACTS = call('ReadSnapshots').get('Snapshots', []) + call('ReadImages').get('Images', [])
+if ARTIFACTS:
+    print(f"\n⚠ {len(ARTIFACTS)} snapshot/image artifact(s) present — never auto-purged, review by hand:")
+    for a in ARTIFACTS:
+        if 'SnapshotId' in a:
+            print(f"    snapshot {a['SnapshotId']} ({a.get('State', '?')}, {a.get('VolumeSize', '?')}GB)")
+        else:
+            print(f"    image {a.get('ImageId')} ({a.get('ImageName') or a.get('State', '?')})")
+
 if TOTAL == 0 and UNREACHABLE:
     print(f"\n✗ {UNREACHABLE} call(s) refused — found nothing, but nothing was actually asked.")
     print("  This is NOT an all-clear: check OUTSCALE_ACCESS_KEY_ID / _SECRET_KEY and re-run.")
     sys.exit(2)
-if TOTAL == 0:
+if TOTAL == 0 and not ARTIFACTS:
     print("Nothing to purge — the account is clean.")
+elif TOTAL == 0:
+    # Only artifacts were found. They are never counted into TOTAL/--apply —
+    # see the block above — but "the account is clean" would still be a lie.
+    print(f"\n{len(ARTIFACTS)} artifact(s) present — the account is NOT fully clean (see above).")
+    sys.exit(1)
 elif not APPLY:
     print(f"\n{TOTAL} resource(s) targeted. Re-run with --apply to delete them.")
     # Non-zero: see the note in scaleway.py. Callers read this exit code as
@@ -116,5 +148,8 @@ elif not APPLY:
 elif FAILED:
     print(f"\n✗ {FAILED} of {TOTAL} deletion(s) failed — the account is NOT clean.")
     sys.exit(3)
+elif ARTIFACTS:
+    print(f"\n{TOTAL} resource(s) deleted. {len(ARTIFACTS)} artifact(s) still present (see above) — not fully clean.")
+    sys.exit(1)
 else:
     print(f"\n{TOTAL} resource(s) deleted. The account is clean.")
