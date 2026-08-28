@@ -141,6 +141,13 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **`ovh.py`'s purge could not tell a refused endpoint from an empty account.**
+  `scaleway.py` and `outscale.py` both count a refused call and refuse to
+  claim "clean" on zero findings and zero reachable endpoints; `ovh.py` had no
+  such counter, so a partial refusal — one endpoint answering 403 while the
+  others still worked — crashed the run instead of being counted and
+  continuing. It now shares the same `UNREACHABLE` counter and exit code.
+  [#63](https://github.com/dis-bzh/OpenAether-infra/issues/63)
 - **`converge-versions.sh` had no downgrade guard of its own.** It survived a
   Talos/Kubernetes downgrade attempt only by accident, on two layers it does
   not own (the talos provider's forced PKI replacement, and

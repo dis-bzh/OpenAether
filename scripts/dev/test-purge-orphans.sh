@@ -129,6 +129,76 @@ if grep -qiE 'resource\(s\) deleted\. The account is clean' <<<"$out"; then
 else
   ok "outscale.py --apply: it does not claim a deletion that did not happen"
 fi
+
+# --- ovh.py: auth succeeds, servers are found, one other endpoint is refused --
+# ovh.py's get() raises rather than swallowing, so a TOTAL auth failure already
+# crashes non-zero — not this gap (verified below, unchanged). The gap is a
+# PARTIAL refusal: auth works, servers list fine, then floating-ips answers
+# 403. Before the fix that exception propagated out of get() uncaught: the run
+# died mid-listing with a traceback, never reaching routers/networks/security
+# groups or its own summary — which is not "clean", but the run's own findings
+# vanished with it. It must count the refusal and keep going, like its
+# siblings, and still report what it DID find.
+echo
+echo "=== ovh.py: auth OK, servers found, floating-ips refused 403 ==="
+
+run_403_ovh_partial() {
+  env OS_AUTH_URL=https://stub.invalid/v3 OS_USERNAME=stub OS_PASSWORD=stub \
+      OS_PROJECT_ID=stub OS_REGION_NAME=stub \
+      python3 - "$ROOT/scripts/ops/purge-orphans/ovh.py" <<'PY' 2>&1
+import runpy, sys, json, io, urllib.request, urllib.error
+
+class FakeResp(io.BytesIO):
+    def __init__(self, data, headers=None):
+        super().__init__(data)
+        self.headers = headers or {}
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+
+CATALOG = {"token": {"catalog": [
+    {"type": "network", "endpoints": [{"interface": "public", "region": "stub", "url": "https://stub.invalid/network"}]},
+    {"type": "compute", "endpoints": [{"interface": "public", "region": "stub", "url": "https://stub.invalid/compute"}]},
+]}}
+
+def fake(req, *a, **k):
+    u = req.full_url
+    if u.endswith('/auth/tokens'):
+        return FakeResp(json.dumps(CATALOG).encode(), headers={'X-Subject-Token': 'stub'})
+    if u.endswith('/servers'):
+        return FakeResp(json.dumps({'servers': [{'id': 'srv-stub', 'name': 'stub-server'}]}).encode())
+    raise urllib.error.HTTPError(u, 403, 'Forbidden', {}, io.BytesIO(b'{}'))
+
+urllib.request.urlopen = fake
+sys.argv = [sys.argv[1]]
+try:
+    runpy.run_path(sys.argv[0], run_name='__main__')
+except SystemExit as e:
+    sys.exit(e.code if isinstance(e.code, int) else 1)
+PY
+}
+
+out="$(run_403_ovh_partial)"; rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "ovh.py: found resources + a refused endpoint still exits non-zero (rc=${rc})"
+else
+  bad "ovh.py: exited 0 with a refused endpoint in the middle of the run"
+fi
+if grep -qi 'traceback' <<<"$out"; then
+  bad "ovh.py: a refused endpoint crashed the run instead of being counted — later listings never ran"
+else
+  ok "ovh.py: a refused endpoint does not crash the run"
+fi
+if grep -qiE 'unreachable' <<<"$out"; then
+  ok "ovh.py: it names the refusal in its output"
+else
+  bad "ovh.py: it refused silently — a transcript reader cannot tell"
+fi
+if grep -qiE 'resource\(s\) targeted' <<<"$out"; then
+  ok "ovh.py: it still reaches its own summary after the refusal"
+else
+  bad "ovh.py: it never reached its own summary — the refusal ended the run early"
+fi
+
 echo
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
