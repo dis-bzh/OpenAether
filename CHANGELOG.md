@@ -141,6 +141,14 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **`converge-versions.sh` had no downgrade guard of its own.** It survived a
+  Talos/Kubernetes downgrade attempt only by accident, on two layers it does
+  not own (the talos provider's forced PKI replacement, and
+  `secrets_prevent_destroy` turning that into a hard refusal — a variable that
+  is explicitly false in `tofu test`). It now refuses a pin that is
+  semver-lower than what the fleet runs, naming both, before calling either
+  `infra-apply` or `cluster-roll`. [#90](https://github.com/dis-bzh/OpenAether-infra/issues/90)
+
 - **`task local-down` refused to run on a clone that had only this repository.**
   `test-talos-local.sh` resolves `APPS_DIR` and exits 1 when it cannot find
   `OpenAether-apps/apps/flux/local` — before it reads `--destroy`, which never

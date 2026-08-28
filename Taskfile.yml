@@ -328,6 +328,9 @@ tasks:
       # the ENVIRONMENT chooses, and any of them returning non-zero leaves the
       # session with no tools at all — a failure nothing would connect to Docker.
       - ./scripts/dev/test-session-start.sh
+      # converge-versions.sh had no downgrade guard of its own — it only
+      # survived one by accident, on two layers upstream it does not own.
+      - ./scripts/dev/test-converge-versions.sh
 
   test:
     desc: Run OpenTofu tests (cluster root)
