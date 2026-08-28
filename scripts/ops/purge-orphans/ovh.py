@@ -28,6 +28,28 @@ def get(u):
     return json.load(urllib.request.urlopen(urllib.request.Request(u, headers=H), timeout=60))
 
 
+# Counted, not just printed — same reasoning as scaleway.py/outscale.py. A total
+# auth failure above still crashes non-zero (get() raises, uncaught), which is
+# not this gap; what get() left open is a PARTIAL refusal, one endpoint 403 while
+# the others answer, which used to crash the whole run instead of being counted
+# and continuing like its siblings do.
+UNREACHABLE = 0
+
+
+def listing(url, key):
+    global UNREACHABLE
+    try:
+        return get(url).get(key, [])
+    except urllib.error.HTTPError as e:
+        UNREACHABLE += 1
+        print(f"  ⚠ unreachable: {url.split('?')[0]} (HTTP {e.code})")
+        return []
+    except Exception as e:
+        UNREACHABLE += 1
+        print(f"  ⚠ unreachable: {url.split('?')[0]} ({str(e)[:60]})")
+        return []
+
+
 # Counted so a clean project SAYS it is clean. This script is the last thing
 # standing between a failed teardown and a bill, and it used to report that by
 # printing nothing at all — which reads like a finding, not like an all-clear.
@@ -60,21 +82,21 @@ except StopIteration:
     lb_ep = None
 
 # 1. servers (VMs block the deletion of ports/networks)
-for s in get(comp + '/servers')['servers']:
+for s in listing(comp + '/servers', 'servers'):
     delete(comp + f"/servers/{s['id']}", f"server {s['name']}")
 
 # 2. load balancers Octavia
 if lb_ep:
-    for lb in get(lb_ep + '/v2.0/lbaas/loadbalancers')['loadbalancers']:
+    for lb in listing(lb_ep + '/v2.0/lbaas/loadbalancers', 'loadbalancers'):
         delete(lb_ep + f"/v2.0/lbaas/loadbalancers/{lb['id']}?cascade=true", f"LB {lb['name']}")
 
 # 3. floating IPs
-for f in get(net + '/v2.0/floatingips')['floatingips']:
+for f in listing(net + '/v2.0/floatingips', 'floatingips'):
     delete(net + f"/v2.0/floatingips/{f['id']}", f"FIP {f['floating_ip_address']}")
 
 # 4. routers (detach the interfaces first)
-for r in get(net + '/v2.0/routers')['routers']:
-    for p in get(net + f"/v2.0/ports?device_id={r['id']}")['ports']:
+for r in listing(net + '/v2.0/routers', 'routers'):
+    for p in listing(net + f"/v2.0/ports?device_id={r['id']}", 'ports'):
         if p.get('device_owner', '').startswith('network:router_interface'):
             if APPLY:
                 body = json.dumps({"port_id": p['id']}).encode()
@@ -90,13 +112,17 @@ for r in get(net + '/v2.0/routers')['routers']:
     delete(net + f"/v2.0/routers/{r['id']}", f"router {r['name']}")
 
 # 5. networks + security groups
-for n in get(net + '/v2.0/networks')['networks']:
+for n in listing(net + '/v2.0/networks', 'networks'):
     if n.get('project_id') == os.environ['OS_PROJECT_ID']:
         delete(net + f"/v2.0/networks/{n['id']}", f"network {n['name']}")
-for g in get(net + '/v2.0/security-groups')['security_groups']:
+for g in listing(net + '/v2.0/security-groups', 'security_groups'):
     if g['name'] != 'default' and g.get('project_id') == os.environ['OS_PROJECT_ID']:
         delete(net + f"/v2.0/security-groups/{g['id']}", f"SG {g['name']}")
 
+if TOTAL == 0 and UNREACHABLE:
+    print(f"\n✗ {UNREACHABLE} endpoint(s) refused to answer — found nothing, but nothing was")
+    print("  actually asked. This is NOT an all-clear: check the credentials and re-run.")
+    sys.exit(2)
 if TOTAL == 0:
     print("Nothing to purge — the project is clean.")
 elif not APPLY:

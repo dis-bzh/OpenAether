@@ -114,6 +114,14 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **`ovh.py`'s purge could not tell a refused endpoint from an empty account.**
+  `scaleway.py` and `outscale.py` both count a refused call and refuse to
+  claim "clean" on zero findings and zero reachable endpoints; `ovh.py` had no
+  such counter, so a partial refusal — one endpoint answering 403 while the
+  others still worked — crashed the run instead of being counted and
+  continuing. It now shares the same `UNREACHABLE` counter and exit code.
+  [#63](https://github.com/dis-bzh/OpenAether-infra/issues/63)
+
 - **`task local-down` refused to run on a clone that had only this repository.**
   `test-talos-local.sh` resolves `APPS_DIR` and exits 1 when it cannot find
   `OpenAether-apps/apps/flux/local` — before it reads `--destroy`, which never
