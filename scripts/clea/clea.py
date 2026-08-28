@@ -183,6 +183,16 @@ VALUE_FORMS: list[tuple[str, re.Pattern[str]]] = [
     ("action-sha", re.compile(r"^\s*(?:-\s*)?uses:\s*\S+@\S+\s*#\s*(?P<v>\S+)")),
 ]
 
+# These two forms pin a commit — the `@sha` in `action-sha`, the `rev: sha` in
+# `precommit-rev` — and capture only the human tag AFTER it as `value`. `bump`
+# rewrites exactly the span it captured, so bumping one of these would move the
+# tag comment and leave the commit it is supposed to describe untouched: a pin
+# that CLAIMS the new version while still RUNNING the old one, which is worse
+# than not tracking it at all — it looks bumped. `cmd_bump` refuses both shapes
+# outright rather than write that. See `renovate-native` in `inventory_coverage`
+# for the other half: what makes leaving them untracked unnecessary.
+UNSAFE_BUMP_FORMS = frozenset({"action-sha", "precommit-rev"})
+
 # How far below the anchor the value may sit. Renovate's own regexes allow one
 # line; three covers a YAML `env:` key that opens its block on the next line.
 VALUE_WINDOW = 3
@@ -372,6 +382,50 @@ def renovate_coverage(root: Path, config: str, exclude: list[str]) -> set[tuple[
                 for m in rx.finditer(text):
                     covered.add((rel, text[: m.start()].count("\n") + 1))
     return covered
+
+
+def inventory_coverage(root: Path, scan: dict,
+                       inventories: list[dict]) -> dict[str, set[tuple[str, int]]]:
+    """Anchor positions each declared inventory can see, one set per kind.
+
+    `renovate` cross-checks a real Renovate config's `customManagers`, byte
+    for byte — the same question `renovate_coverage` always answered.
+
+    `renovate-native` is not a cross-check at all: it is the list of `form`s
+    (from VALUE_FORMS) that Renovate's OWN built-in managers already read
+    without any anchor, via `helpers:pinGitHubActionDigests` for `action-sha`
+    and `pinDigests` for `precommit-rev`. Both update the commit AND the tag
+    comment in one write. A `customManagers` entry matching the same line
+    could only ever move the comment — `cmd_bump` refuses exactly these two
+    forms for that reason (`UNSAFE_BUMP_FORMS`) — so routing them through
+    `renovate` coverage would demand the one kind of watcher that is unsafe to
+    build, for a dependency a different, safe watcher already has. Naming the
+    form here is what keeps this an explicit, per-project claim rather than a
+    blanket exemption: a form not listed still has to be seen by `renovate`.
+    """
+    seen: dict[str, set[tuple[str, int]]] = {}
+    for inventory in inventories:
+        kind = inventory.get("kind")
+        if kind == "renovate":
+            seen["renovate"] = renovate_coverage(
+                root, inventory["config"], scan["exclude"] + inventory.get("exclude", []))
+        elif kind == "renovate-native":
+            forms = set(inventory.get("forms", []))
+            if not forms:
+                raise CleaError(
+                    'clea.toml: [[inventory]] kind = "renovate-native" needs a '
+                    "non-empty forms list — naming which VALUE_FORMS shapes it vouches for")
+            known = {form for form, _ in VALUE_FORMS}
+            unknown = forms - known
+            if unknown:
+                raise CleaError(
+                    f"clea.toml: renovate-native names unknown form(s) {sorted(unknown)} "
+                    f"— known forms are {sorted(known)}")
+            anchors, _ = scan_anchors(root, scan["marker"], scan["exclude"], scan["include"])
+            seen["renovate-native"] = {a.key for a in anchors if a.form in forms}
+        else:
+            raise CleaError(f"clea.toml: unknown inventory kind {kind!r}")
+    return seen
 
 
 # ---------------------------------------------------------------------------
@@ -672,14 +726,7 @@ def cmd_coverage(args) -> int:
               "not the repository", file=sys.stderr)
         return 1
 
-    seen: dict[str, set[tuple[str, int]]] = {}
-    for inventory in cfg["inventory"]:
-        kind = inventory.get("kind")
-        if kind == "renovate":
-            seen["renovate"] = renovate_coverage(
-                root, inventory["config"], scan["exclude"] + inventory.get("exclude", []))
-        else:
-            raise CleaError(f"clea.toml: unknown inventory kind {kind!r}")
+    seen = inventory_coverage(root, scan, cfg["inventory"])
 
     failures = 0
     print(f"=== {len(anchors)} anchors read, {len(novalue)} carrying no version ===")
@@ -690,16 +737,24 @@ def cmd_coverage(args) -> int:
               "something could.")
         failures += 1
 
+    # An anchor fails only if NO declared inventory reaches it. `renovate` and
+    # `renovate-native` watch disjoint, complementary shapes by design — each
+    # legitimately misses what the other covers, and requiring every kind to
+    # see every anchor would fail both halves for doing their job.
+    combined: set[tuple[str, int]] = set().union(*seen.values()) if seen else set()
     for name, covered in seen.items():
         missing = [a for a in anchors if a.key not in covered]
         if missing:
             print(f"\n  {name} cannot see {len(missing)} of {len(anchors)}:")
             for anchor in missing:
+                flag = ("  ← no inventory sees this one"
+                        if len(seen) > 1 and anchor.key not in combined else "")
                 print(f"  ✗ {anchor.path}:{anchor.line} — {anchor.dep} = {anchor.value} "
-                      f"({anchor.form})")
-            failures += len(missing)
+                      f"({anchor.form}){flag}")
         else:
             print(f"  ✓ {name} sees all {len(anchors)}")
+    if seen:
+        failures += len([a for a in anchors if a.key not in combined])
 
     print()
     if failures:
@@ -833,22 +888,22 @@ def cmd_scan(args) -> int:
         "probes": previous.get("probes", []),
     }
 
-    for inventory in cfg["inventory"]:
-        if inventory.get("kind") != "renovate":
-            continue
-        try:
-            covered = renovate_coverage(
-                root, inventory["config"],
-                scan["exclude"] + inventory.get("exclude", []))
+    # Union across every declared inventory kind: `renovate` and
+    # `renovate-native` watch disjoint, complementary shapes (see
+    # `inventory_coverage`), so a dependency is watched if EITHER sees it.
+    try:
+        seen = inventory_coverage(root, scan, cfg["inventory"])
+        if seen:
+            covered = set().union(*seen.values())
             state["unwatched"] = [
                 {"dep": a.dep, "file": a.path, "line": a.line,
-                 "current": a.value, "inventory": "renovate"}
+                 "current": a.value, "inventory": ",".join(sorted(seen))}
                 for a in anchors if a.key not in covered]
             watched = {(a.path, a.line) for a in anchors if a.key in covered}
             for entry in deps:
                 entry["watched"] = (entry["file"], entry["line"]) in watched
-        except CleaError as exc:
-            errors.append(str(exc))
+    except CleaError as exc:
+        errors.append(str(exc))
 
     # The bot's heartbeat. Skipped loudly rather than quietly: "we did not ask"
     # and "the bot is fine" must not look the same in the report.
@@ -1161,6 +1216,14 @@ def cmd_bump(args) -> int:
     changed = 0
     for anchor in targets:
         new_value = apply_extract(args.version, anchor.attrs.get("extractVersion"))
+        if anchor.form in UNSAFE_BUMP_FORMS:
+            print(f"✗ {anchor.path}:{anchor.value_line} — {anchor.form} pins a commit "
+                  f"that this write does not touch: rewriting the comment to "
+                  f"{new_value!r} would claim that version while still running "
+                  f"whatever {anchor.value!r} already points at. Renovate resolves "
+                  "the commit and the comment together (helpers:pinGitHubActionDigests "
+                  "/ pinDigests) — bump this one there, or by hand.", file=sys.stderr)
+            return 1
         if not same_shape(anchor.value or "", new_value):
             print(f"✗ {anchor.path}:{anchor.value_line} — {anchor.value!r} and "
                   f"{new_value!r} do not carry the same v prefix; the consumers of "
