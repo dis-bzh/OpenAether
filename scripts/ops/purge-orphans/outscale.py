@@ -2,7 +2,8 @@
 """Purges an orphaned Outscale Net (CAPI): dependencies first, then the Net.
 Order imposed by Outscale: LBU → NAT → route tables → internet service →
 security groups → subnets → net. Also REPORTS (never deletes) leftover
-snapshots and images — see the ARTIFACTS block below.
+snapshots — see the ARTIFACTS block below. Images are deliberately NOT
+enumerated here yet; see that block for why.
 Usage: purge-orphans-osc.py [--apply]"""
 import os, sys, json, hmac, hashlib, datetime, urllib.request
 
@@ -105,40 +106,66 @@ for sn in call('ReadSubnets').get('Subnets', []):
 for net in call('ReadNets').get('Nets', []):
     do('DeleteNet', {'NetId': net['NetId']}, f"net {net['NetId']} ({net.get('IpRange')})")
 
-# Snapshots and images are Talos build artifacts, deliberately never deleted by
-# this script — same policy scaleway.py already documents, and the reason
-# fleet-down.sh's own step 3 only LISTS them (see docs, "Left standing on
-# purpose"). Rebuilding an image costs about an hour on Outscale; a wrong
-# guess here is not recoverable the way a re-run of the loop above is.
+# Snapshots are Talos build artifacts, deliberately never deleted by this
+# script — same policy scaleway.py already documents, and the reason
+# fleet-down.sh's own step 3 only LISTS artifacts (see docs, "Left standing on
+# purpose"). Rebuilding one costs about an hour on Outscale; a wrong guess
+# here is not recoverable the way a re-run of the delete loop above is.
 #
-# Called with no Filters, like every other Read* above: none of them scope to
-# the caller's account explicitly either, and this script has always trusted
-# that Outscale's auth signature does that scoping — extending, not inventing,
-# an assumption the rest of the file already makes for Nets and security groups.
+# Images are NOT enumerated here, on purpose, unlike snapshots: ReadImages'
+# documented default scope is every OMI you hold LAUNCH PERMISSIONS on, which
+# — unlike a Net or a security group — can include Outscale's own public
+# catalogue. An unscoped call risks flooding this report with images that were
+# never this account's to begin with, teaching an operator to ignore it. That
+# needs an account-id filter verified against a live account before it is
+# safe to add (#107); snapshots have no such public-catalogue precedent and
+# are scoped the same way every other Read* call in this file already is.
 #
-# What this closes: a duplicate snapshot from a failed image build sat in the
+# What THIS closes: a duplicate snapshot from a failed image build sat in the
 # account while this script never looked, so "account is clean" was true of
 # everything it asked and false of the account (#71, 2026-08-19). A resource
-# class this script cannot see is a resource class it cannot report on.
-ARTIFACTS = call('ReadSnapshots').get('Snapshots', []) + call('ReadImages').get('Images', [])
+# class this script cannot see is a resource class it cannot report on — and
+# that cuts both ways: a REFUSED question is not a clean answer either, so
+# ARTIFACTS_UNVERIFIED tracks a failed ReadSnapshots call separately from a
+# genuinely empty one. Measured in review: without this, a refused
+# ReadSnapshots call after some OTHER resource was found and deleted fell
+# through every branch below to the same false "the account is clean" this
+# fix exists to stop.
+_unreachable_before_artifacts = UNREACHABLE
+ARTIFACTS = call('ReadSnapshots').get('Snapshots', [])
+ARTIFACTS_UNVERIFIED = UNREACHABLE > _unreachable_before_artifacts
 if ARTIFACTS:
-    print(f"\n⚠ {len(ARTIFACTS)} snapshot/image artifact(s) present — never auto-purged, review by hand:")
-    for a in ARTIFACTS:
-        if 'SnapshotId' in a:
-            print(f"    snapshot {a['SnapshotId']} ({a.get('State', '?')}, {a.get('VolumeSize', '?')}GB)")
-        else:
-            print(f"    image {a.get('ImageId')} ({a.get('ImageName') or a.get('State', '?')})")
+    print(f"\n⚠ {len(ARTIFACTS)} snapshot(s) present — never auto-purged, review by hand:")
+    for s in ARTIFACTS:
+        print(f"    snapshot {s.get('SnapshotId')} ({s.get('State', '?')}, {s.get('VolumeSize', '?')}GB)")
+elif ARTIFACTS_UNVERIFIED:
+    print("\n⚠ snapshot visibility was refused — cannot confirm the account holds none.")
 
-if TOTAL == 0 and UNREACHABLE:
+# TOTAL>0 is NOT "dirty" on its own — a successful purge (below, FAILED==0)
+# with TOTAL>0 is the ordinary clean-after-work case, same as before this
+# fix. Only the two branches that already claimed "clean" (nothing to purge,
+# and everything purged with nothing failed) need to also ask about
+# snapshots; the other two (dry-run, a failed delete) were already non-zero
+# and stay exactly as they were. A blanket "is anything at all non-zero"
+# flag was tried here first and wrongly turned a plain, fully successful
+# purge into a false "not fully clean" — a second bug shaped like the first.
+def _artifact_reason():
+    return f"{len(ARTIFACTS)} snapshot(s)" if ARTIFACTS else "snapshot visibility (refused, unconfirmed)"
+
+
+if UNREACHABLE and TOTAL == 0 and not ARTIFACTS:
+    # Nothing else was found ANYWHERE and something refused to answer — fires
+    # whether the refusal was the snapshot call or an earlier one. A
+    # CONFIRMED snapshot below already proves dirty on its own and takes
+    # priority (the `not ARTIFACTS` guard), so the two messages never talk
+    # over each other the way an unconditional check here used to.
     print(f"\n✗ {UNREACHABLE} call(s) refused — found nothing, but nothing was actually asked.")
     print("  This is NOT an all-clear: check OUTSCALE_ACCESS_KEY_ID / _SECRET_KEY and re-run.")
     sys.exit(2)
-if TOTAL == 0 and not ARTIFACTS:
+if TOTAL == 0 and not ARTIFACTS and not ARTIFACTS_UNVERIFIED:
     print("Nothing to purge — the account is clean.")
 elif TOTAL == 0:
-    # Only artifacts were found. They are never counted into TOTAL/--apply —
-    # see the block above — but "the account is clean" would still be a lie.
-    print(f"\n{len(ARTIFACTS)} artifact(s) present — the account is NOT fully clean (see above).")
+    print(f"\n{_artifact_reason()} present — the account is NOT fully clean (see above).")
     sys.exit(1)
 elif not APPLY:
     print(f"\n{TOTAL} resource(s) targeted. Re-run with --apply to delete them.")
@@ -148,8 +175,14 @@ elif not APPLY:
 elif FAILED:
     print(f"\n✗ {FAILED} of {TOTAL} deletion(s) failed — the account is NOT clean.")
     sys.exit(3)
-elif ARTIFACTS:
-    print(f"\n{TOTAL} resource(s) deleted. {len(ARTIFACTS)} artifact(s) still present (see above) — not fully clean.")
+elif ARTIFACTS or ARTIFACTS_UNVERIFIED:
+    # TOTAL>0, APPLY, nothing failed — this is the branch reviewers found
+    # unreachable: a refused ReadSnapshots after some OTHER resource was
+    # deleted used to fall straight to the final "clean" else below with
+    # ARTIFACTS silently empty. Checked AFTER FAILED on purpose: a deletion
+    # failure is the more urgent fact and must not be downgraded to a
+    # leftover snapshot's milder "not fully clean" wording.
+    print(f"\n{TOTAL} resource(s) deleted. {_artifact_reason()} still present (see above) — not fully clean.")
     sys.exit(1)
 else:
     print(f"\n{TOTAL} resource(s) deleted. The account is clean.")
