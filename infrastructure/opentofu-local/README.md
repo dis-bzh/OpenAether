@@ -55,7 +55,7 @@ Measured 2026-08-27 on a host where bit 24 was the only one of 41 missing.
 ```bash
 # One command — full deploy + verify (etcd quorum, Cilium, Flux, GitOps)
 TF_VAR_encryption_passphrase="local-test-passphrase-32chars-minimum" \
-  ./scripts/test-talos-local.sh
+  ./scripts/dev/test-talos-local.sh
 
 # Or via task:
 task local-render-manifests   # render simplified Cilium (no WireGuard)

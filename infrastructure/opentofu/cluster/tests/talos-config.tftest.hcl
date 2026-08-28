@@ -156,7 +156,7 @@ run "cilium_placeholder_detection_covered_by_precondition" {
 
   assert {
     condition     = !strcontains(var.cilium_manifest, "CILIUM-MANIFEST-PLACEHOLDER")
-    error_message = "Cilium manifest must not be the unrendered placeholder — run scripts/render-bootstrap-manifests.sh first."
+    error_message = "Cilium manifest must not be the unrendered placeholder — run scripts/bootstrap/render-bootstrap-manifests.sh first."
   }
 }
 
@@ -403,4 +403,20 @@ run "flux_present_when_asked" {
     condition     = contains(module.talos.inline_manifest_names, "flux-bootstrap")
     error_message = "The bootstrap manifest is governed by the same switch — a half-empty pair injects an empty manifest."
   }
+}
+
+# The vendored flux-install.yaml creates exactly ONE namespace, flux-system, and
+# every namespaced object in it points there. Any other value renders
+# inlineManifests aimed at a namespace nothing creates — and Talos applies
+# inlineManifests with no ordering and no namespace creation, so it fails on a
+# paid cluster with every offline gate green. `namespace: gitops` is valid YAML,
+# so no schema validator can catch it; only this can.
+run "flux_namespace_cannot_leave_the_vendored_manifest" {
+  command = plan
+
+  variables {
+    flux_namespace = "gitops"
+  }
+
+  expect_failures = [var.flux_namespace]
 }

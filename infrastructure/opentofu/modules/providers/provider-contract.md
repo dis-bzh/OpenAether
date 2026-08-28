@@ -27,7 +27,13 @@ this contract to be consumed by the Talos module and the root `main.tf`.
 | `control_plane_count` | `number` | Number of control plane nodes to provision |
 | `worker_count` | `number` | Number of worker nodes to provision |
 | `admin_ip` | `list(string)` | Allowed CIDRs for admin access (SSH, K8s API ACLs) |
-| `bastion_ssh_key` | `string` | SSH public key for bastion access |
+| `bastion_ssh_keys` | `list(string)` | SSH public keys for bastion access (a list, so several admins can hold one) |
+
+> These tables are checked, not decorative: `scripts/dev/check-provider-contract.sh`
+> compares every module against them by name and by type, and `task lint` runs it.
+> It was written because this row said `bastion_ssh_key` / `string` while all four
+> modules had always declared `bastion_ssh_keys` / `list(string)` — a contract with
+> zero implementers, pointed at by CLAUDE.md as the authority.
 
 ## Rules
 

@@ -34,7 +34,7 @@ anymore. An explicit value in the tfvars always overrides the convention.
 State lives on the **target provider's** S3 — its own bucket per provider
 (`s3-openaether-<provider>-talos-image` / `talos-image.tfstate`), so building one
 provider's image never disturbs another's. The state bucket (and the Scaleway
-staging bucket) are **auto-created** by `scripts/talos-image.sh`. Proxmox has no
+staging bucket) are **auto-created** by `scripts/bootstrap/talos-image.sh`. Proxmox has no
 native object storage, so its state lives on an external S3-compatible store
 (same convention as the cluster root's Proxmox backend).
 
@@ -60,7 +60,7 @@ What this builder needs:
 
 ```bash
 task image-build PROVIDER=scaleway                 # or ovh, outscale, proxmox ; [VERSION=v1.13.3]
-# equivalent: ./scripts/talos-image.sh scaleway v1.13.3
+# equivalent: ./scripts/bootstrap/talos-image.sh scaleway v1.13.3
 ```
 
 - **Scaleway** — the cluster looks the image up by **name**

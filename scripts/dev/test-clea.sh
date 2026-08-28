@@ -579,4 +579,6 @@ if [ $? -eq 0 ]; then PASS=$((PASS + 2)); else FAIL=$((FAIL + 1)); fi
 
 echo
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+# A floor, not just a verdict: `FAIL -eq 0` is also true when the harness died
+# before asserting anything, which is the shape this repository keeps meeting.
+[ "$PASS" -gt 0 ] && [ "$FAIL" -eq 0 ]
