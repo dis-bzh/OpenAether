@@ -43,11 +43,24 @@ repos:
       - id: check-merge-conflict
       - id: detect-private-key
 
-  # Secret detection
+  # Secret detection. gitleaks-system, not the default `gitleaks` hook: that one
+  # is `language: golang` and pre-commit builds it from source on first use —
+  # which panics inside wasilibs/go-re2's WASM regex engine in this project's
+  # sandbox (`invalid table access`, in wazero), reproduced across a full
+  # go-build-cache wipe and two Go toolchains. gitleaks-system shells out to
+  # the pinned, checksum-verified binary scripts/internal/install-gitleaks.sh
+  # installs instead — the exact same version, built upstream, carries no
+  # such defect. See #126.
   - repo: https://github.com/gitleaks/gitleaks
     rev: b69b5157a01fe4234a74a9acd186044152a80c43  # v8.22.1
     hooks:
-      - id: gitleaks
+      - id: gitleaks-system
+        # Unlike its `gitleaks`/`gitleaks-docker` siblings, upstream's own
+        # gitleaks-system hook omits this — so pre-commit's default (true)
+        # appends every changed file as a positional arg, and gitleaks' `git`
+        # subcommand accepts at most one ("accepts at most 1 arg(s), received
+        # 60"). It scans the whole staged diff itself; it needs no filenames.
+        pass_filenames: false
 
   # OpenTofu / Terraform formatting
   - repo: https://github.com/antonbabenko/pre-commit-terraform
