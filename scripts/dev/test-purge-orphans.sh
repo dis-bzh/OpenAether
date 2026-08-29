@@ -199,6 +199,162 @@ else
   bad "ovh.py: it never reached its own summary — the refusal ended the run early"
 fi
 
+# --- outscale.py: leftover snapshots are visible, and "clean" stops lying ----
+# The core of #71: a duplicate snapshot from a failed image build sat in the
+# account while outscale.py never even asked ReadSnapshots, so "account is
+# clean" was true of everything it looked at and false of the account. Images
+# are deliberately out of scope here — see the comment in outscale.py for why.
+#
+# Five scenarios: #1 is the regression guard (must not cry wolf on the
+# ordinary empty case), #2 is #71 itself, #3 is its twin in the --apply
+# success path, #4 reproduces the bug review actually caught — a REFUSED
+# ReadSnapshots after some other resource was purged clean — and #5 checks
+# that a failed deletion still wins the exit code over a leftover snapshot.
+echo
+echo "=== outscale.py: snapshot artifacts are seen, not silently skipped ==="
+
+run_osc_canned() { # <CANNED python-dict-literal as a string> [extra argv...]
+  local canned="$1"; shift
+  env OUTSCALE_ACCESS_KEY_ID=stub OUTSCALE_SECRET_KEY=stub OSC_REGION=eu-west-2 \
+      python3 - "$ROOT/scripts/ops/purge-orphans/outscale.py" "$@" <<PY 2>&1
+import runpy, sys, json, io, urllib.request, urllib.error
+
+CANNED = $canned
+
+def fake(req, *a, **k):
+    action = req.full_url.rsplit('/', 1)[-1]
+    return io.BytesIO(json.dumps(CANNED.get(action, {})).encode())
+
+urllib.request.urlopen = fake
+sys.argv = sys.argv[1:]
+try:
+    runpy.run_path(sys.argv[0], run_name='__main__')
+except SystemExit as e:
+    sys.exit(e.code if isinstance(e.code, int) else 1)
+PY
+}
+
+# Same as run_osc_canned, but any action named in FAIL_ACTIONS raises HTTP 403
+# instead of answering — needed to reproduce a REFUSED call (not just an empty
+# one) alongside other calls that succeed normally.
+run_osc_canned_fail() { # <CANNED python-dict-literal> <FAIL_ACTIONS python-list-literal> [extra argv...]
+  local canned="$1"; local fail_actions="$2"; shift 2
+  env OUTSCALE_ACCESS_KEY_ID=stub OUTSCALE_SECRET_KEY=stub OSC_REGION=eu-west-2 \
+      python3 - "$ROOT/scripts/ops/purge-orphans/outscale.py" "$@" <<PY 2>&1
+import runpy, sys, json, io, urllib.request, urllib.error
+
+CANNED = $canned
+FAIL_ACTIONS = $fail_actions
+
+def fake(req, *a, **k):
+    action = req.full_url.rsplit('/', 1)[-1]
+    if action in FAIL_ACTIONS:
+        raise urllib.error.HTTPError(req.full_url, 403, 'Forbidden', {},
+                                     io.BytesIO(b'{"message":"denied"}'))
+    return io.BytesIO(json.dumps(CANNED.get(action, {})).encode())
+
+urllib.request.urlopen = fake
+sys.argv = sys.argv[1:]
+try:
+    runpy.run_path(sys.argv[0], run_name='__main__')
+except SystemExit as e:
+    sys.exit(e.code if isinstance(e.code, int) else 1)
+PY
+}
+
+# 1. Genuinely empty account — every Read* (including the two new ones)
+#    returns nothing. Must still say "clean": the case this fix must not break.
+out="$(run_osc_canned '{}')"; rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "outscale.py: a genuinely empty account (incl. no snapshots/images) still exits 0"
+else
+  bad "outscale.py: a genuinely empty account no longer exits 0 (rc=${rc}) — false positive"
+fi
+if grep -qiE 'account is clean' <<<"$out"; then
+  ok "outscale.py: it still says clean when nothing at all is present"
+else
+  bad "outscale.py: it stopped saying clean on a genuinely empty account"
+fi
+
+# 2. Only a leftover snapshot — every Net-dependency listing is empty
+#    (TOTAL stays 0), but ReadSnapshots answers one. This is #71 itself.
+ONLY_SNAPSHOT='{"ReadSnapshots": {"Snapshots": [{"SnapshotId": "snap-orphan", "State": "completed", "VolumeSize": 10}]}}'
+out="$(run_osc_canned "$ONLY_SNAPSHOT")"; rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "outscale.py: an orphan snapshot with nothing else present exits non-zero (rc=${rc})"
+else
+  bad "outscale.py: an orphan snapshot present and it still exited 0 — the #71 bug"
+fi
+if grep -qiE 'account is clean' <<<"$out"; then
+  bad "outscale.py: it said the account is clean while an orphan snapshot sat there"
+else
+  ok "outscale.py: it does not claim clean while the snapshot is present"
+fi
+if grep -q 'snap-orphan' <<<"$out"; then
+  ok "outscale.py: it names the orphan snapshot in its output"
+else
+  bad "outscale.py: the snapshot was found but never named — a transcript reader can't act on it"
+fi
+
+# 3. Net resources purged successfully AND a snapshot is left over — the
+#    "N resource(s) deleted. The account is clean." branch must not lie either.
+DELETED_PLUS_SNAPSHOT='{"ReadNets": {"Nets": [{"NetId": "vpc-stub", "IpRange": "10.0.0.0/16"}]}, "ReadSnapshots": {"Snapshots": [{"SnapshotId": "snap-leftover", "State": "completed", "VolumeSize": 5}]}}'
+out="$(run_osc_canned "$DELETED_PLUS_SNAPSHOT" --apply)"; rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "outscale.py --apply: resources deleted but a snapshot remains still exits non-zero (rc=${rc})"
+else
+  bad "outscale.py --apply: a snapshot remained after a successful purge and it exited 0"
+fi
+if grep -qiE 'account is clean' <<<"$out" && ! grep -qiE 'NOT fully clean' <<<"$out"; then
+  bad "outscale.py --apply: claimed clean while snap-leftover was still listed"
+else
+  ok "outscale.py --apply: does not claim a plain clean while the snapshot remains"
+fi
+if grep -q 'snap-leftover' <<<"$out"; then
+  ok "outscale.py --apply: names the leftover snapshot after a successful net purge"
+else
+  bad "outscale.py --apply: the leftover snapshot was never named post-purge"
+fi
+
+# 4. The bug review actually caught: a Net is purged successfully (TOTAL>0,
+#    FAILED==0) AND ReadSnapshots itself is REFUSED (not merely empty) — a
+#    first fix attempt fell through this exact combination to the plain
+#    "account is clean" message, because the unreachable-artifacts check only
+#    guarded the TOTAL==0 branch.
+ONE_NET='{"ReadNets": {"Nets": [{"NetId": "vpc-stub", "IpRange": "10.0.0.0/16"}]}}'
+out="$(run_osc_canned_fail "$ONE_NET" "['ReadSnapshots']" --apply)"; rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "outscale.py --apply: net purged + ReadSnapshots refused still exits non-zero (rc=${rc})"
+else
+  bad "outscale.py --apply: net purged + ReadSnapshots refused exited 0 — the exact bug review caught"
+fi
+if grep -qiE '^[0-9]+ resource\(s\) deleted\. The account is clean\.$' <<<"$out"; then
+  bad "outscale.py --apply: claimed a plain clean while snapshot visibility was refused"
+else
+  ok "outscale.py --apply: does not claim a plain clean when snapshot visibility was refused"
+fi
+if grep -qiE 'visibility was refused|refused, unconfirmed' <<<"$out"; then
+  ok "outscale.py --apply: says snapshot visibility was refused, not silently clean"
+else
+  bad "outscale.py --apply: a refused ReadSnapshots after a successful purge left no trace in the output"
+fi
+
+# 5. A deletion FAILS in the same run a snapshot is ALSO present — the failed
+#    deletion (exit 3) must win over the milder "leftover snapshot" wording
+#    (exit 1): FAILED is checked first in outscale.py on purpose.
+NET_PLUS_SNAPSHOT='{"ReadNets": {"Nets": [{"NetId": "vpc-stub", "IpRange": "10.0.0.0/16"}]}, "ReadSnapshots": {"Snapshots": [{"SnapshotId": "snap-alongside", "State": "completed", "VolumeSize": 5}]}}'
+out="$(run_osc_canned_fail "$NET_PLUS_SNAPSHOT" "['DeleteNet']" --apply)"; rc=$?
+if [ "$rc" -eq 3 ]; then
+  ok "outscale.py --apply: a failed deletion alongside a leftover snapshot exits 3, not 1"
+else
+  bad "outscale.py --apply: expected exit 3 (failed deletion wins), got rc=${rc}"
+fi
+if grep -qiE 'deletion\(s\) failed' <<<"$out"; then
+  ok "outscale.py --apply: reports the failed deletion, not just the leftover snapshot"
+else
+  bad "outscale.py --apply: the failed-deletion message is missing when a snapshot is also present"
+fi
+
 echo
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
 # A floor, not just a verdict: `FAIL -eq 0` is also true when the harness died

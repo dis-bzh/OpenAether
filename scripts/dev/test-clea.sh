@@ -307,6 +307,124 @@ expect 1 "an extracted form cannot move the site that keeps the v" \
   -- python3 "$CLEA" --root "$TMP/shapes" bump acme/twoshape 3.2.0
 
 echo
+echo "=== action-sha and precommit-rev: bump cannot move the digest they also pin ==="
+# Both shapes capture only the trailing comment (`# v1.0.0`) as the value — the
+# commit right before it is a SEPARATE identifier the reader never touches. A
+# naive bump would leave that stale: the tree would claim the new version and
+# keep running the old one, silently, which is worse than not tracking it at
+# all. Measured against a real anchor: this is exactly what a bare `# clea-test:`
+# marker over `uses: acme/action@<sha>  # v1.0.0` would do if bump did not refuse.
+cp -r "$TMP/basic" "$TMP/pin"
+cat > "$TMP/pin/.github/workflows/action.yml" <<'EOF'
+jobs:
+  a:
+    steps:
+      # clea-test: datasource=github-releases depName=acme/action
+      - uses: acme/action@1111111111111111111111111111111111111111  # v1.0.0
+EOF
+cat > "$TMP/pin/.pre-commit-config.yaml" <<'EOF'
+repos:
+  - repo: https://example.invalid/acme/hook
+    # clea-test: datasource=github-releases depName=acme/hook
+    rev: 2222222222222222222222222222222222222222  # v2.0.0
+EOF
+says "both new anchors are read, alongside the original seven" "9 anchors read" \
+  -- python3 "$CLEA" --root "$TMP/pin" coverage
+expect 1 "bumping the action refuses rather than orphan its digest" \
+  -- python3 "$CLEA" --root "$TMP/pin" bump acme/action v1.1.0
+says "and says why, not just that it can't" "still running" \
+  -- python3 "$CLEA" --root "$TMP/pin" bump acme/action v1.1.0
+if grep -q '1111111111111111111111111111111111111111.*# v1.0.0' "$TMP/pin/.github/workflows/action.yml"; then
+  ok "the line is untouched — no half-bumped pin left behind"
+else
+  bad "the refusal still wrote something: $(grep uses: "$TMP/pin/.github/workflows/action.yml")"
+fi
+expect 1 "bumping the pre-commit hook refuses the same way" \
+  -- python3 "$CLEA" --root "$TMP/pin" bump acme/hook v2.1.0
+if grep -q '2222222222222222222222222222222222222222.*# v2.0.0' "$TMP/pin/.pre-commit-config.yaml"; then
+  ok "the hook's rev is untouched too"
+else
+  bad "the refusal still wrote something: $(grep rev: "$TMP/pin/.pre-commit-config.yaml")"
+fi
+
+echo
+echo "=== renovate-native: an explicit, per-form claim, not a blanket exemption ==="
+# The two forms above can't be safely covered by a customManagers cross-check
+# (that's the point of the section above), so a project may instead vouch for
+# them by FORM: "Renovate's own github-actions / pre-commit managers already
+# read this shape, with no anchor at all." coverage must accept that claim only
+# for the forms actually named, and still demand the customManagers proof —
+# or a real gap — for everything else.
+cp -r "$TMP/pin" "$TMP/native"
+cat >> "$TMP/native/clea.toml" <<'EOF'
+[[inventory]]
+kind = "renovate-native"
+forms = ["action-sha"]
+EOF
+expect 1 "naming only action-sha still leaves precommit-rev, and the plain seven, unwatched" \
+  -- python3 "$CLEA" --root "$TMP/native" coverage
+OUT="$(python3 "$CLEA" --root "$TMP/native" coverage 2>&1)"
+if printf '%s' "$OUT" | grep -q 'acme/action ='; then
+  bad "the covered anchor (acme/action) still shows up as missing"
+else
+  ok "the covered anchor (acme/action) is not listed as missing"
+fi
+if printf '%s' "$OUT" | grep -q 'acme/hook ='; then
+  ok "the uncovered anchor (acme/hook) is still listed as missing"
+else
+  bad "acme/hook should still be reported unwatched"
+fi
+
+# Widen the customManagers side to the plain seven ONLY (excluded by filename,
+# not by luck): if it also reached the two pinned files, renovate-native's own
+# contribution to the union below would go untested.
+cp -r "$TMP/pin" "$TMP/native2"
+cat > "$TMP/native2/renovate.json5" <<'EOF'
+{
+  customManagers: [
+    { customType: "regex",
+      managerFilePatterns: ["scripts/*.sh", ".github/workflows/ci.yml", "infra/*.tf", "Taskfile.yml"],
+      matchStrings: ["# clea-test: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[a-z0-9/-]+)"] },
+  ],
+}
+EOF
+cat >> "$TMP/native2/clea.toml" <<'EOF'
+[[inventory]]
+kind = "renovate"
+config = "renovate.json5"
+exclude = ["renovate.json5"]
+
+[[inventory]]
+kind = "renovate-native"
+forms = ["action-sha", "precommit-rev"]
+EOF
+expect 0 "renovate covers the plain seven, renovate-native covers the two pinned ones — together, everything" \
+  -- python3 "$CLEA" --root "$TMP/native2" coverage
+# And each kind alone would still fail, proving the union is doing the work
+# rather than either kind quietly reaching everything on its own.
+rm "$TMP/native2/clea.toml"
+cp "$TMP/pin/clea.toml" "$TMP/native2/clea.toml"
+cat >> "$TMP/native2/clea.toml" <<'EOF'
+[[inventory]]
+kind = "renovate"
+config = "renovate.json5"
+exclude = ["renovate.json5"]
+EOF
+expect 1 "renovate alone does not reach the two pinned anchors" \
+  -- python3 "$CLEA" --root "$TMP/native2" coverage
+
+mkdir -p "$TMP/badform"; cp -r "$TMP/pin/." "$TMP/badform/"
+cat >> "$TMP/badform/clea.toml" <<'EOF'
+[[inventory]]
+kind = "renovate-native"
+forms = ["not-a-real-form"]
+EOF
+expect 1 "naming a form that does not exist is refused, not silently ignored" \
+  -- python3 "$CLEA" --root "$TMP/badform" coverage
+says "and it names the bad form, not just failing quietly" "not-a-real-form" \
+  -- python3 "$CLEA" --root "$TMP/badform" coverage
+
+echo
 echo "=== version comparison, and the pair every hand-rolled comparator gets wrong ==="
 python3 - "$CLEA" <<'PY'
 import importlib.util, sys, pathlib

@@ -29,6 +29,20 @@ config = "renovate.json5"
 # itself and reports anchors that do not exist.
 exclude = ["renovate.json5"]
 
+# `action-sha` (`uses: owner/action@<sha>  # vY`) and `precommit-rev`
+# (`rev: <sha>  # vY`) pin a commit that the anchor's own value never touches —
+# a customManagers entry matching either shape could only rewrite the trailing
+# comment, leaving the digest stale and the pin lying about what it runs.
+# `cmd_bump` refuses to write either shape for that reason. Renovate's BUILT-IN
+# managers already update the digest and the comment together — github-actions
+# with `helpers:pinGitHubActionDigests` (extended above), pre-commit with
+# `pinDigests` (packageRules above) — with no anchor needed at all. This is
+# that fact, declared: the two forms it names are watched by that native
+# manager, not by anything in renovate.json5's customManagers.
+[[inventory]]
+kind = "renovate-native"
+forms = ["action-sha", "precommit-rev"]
+
 # --- Tools this repository installs itself -----------------------------------
 # Two probes are derived from each row, and the engine needs nothing else:
 #   install : bare container, bump first, run the installer once

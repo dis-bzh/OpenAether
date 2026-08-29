@@ -62,11 +62,21 @@ version_re() { printf '(^|[^0-9.])v?%s([^0-9.]|$)' "$(printf '%s' "${1#v}" | sed
 CA_ENV=""
 [ -n "$CA" ] && CA_ENV="export CURL_CA_BUNDLE=/etc/clea-ca.crt SSL_CERT_FILE=/etc/clea-ca.crt REQUESTS_CA_BUNDLE=/etc/clea-ca.crt; "
 
+# A workstation's login shell adds ~/.local/bin to PATH from a check in
+# /etc/skel/.profile — but only when the directory ALREADY EXISTS at shell
+# startup. `feint.sh install` creates it during THIS same `bash -lc`, one
+# command before the version check that needs it, which is one command too
+# late for that check to have seen it. Measured on the feint 0.11.0 probe: the
+# install itself reported "installed feint v0.11.0 → /root/.local/bin/feint",
+# exit 0, and the very next command in the same shell answered "feint:
+# command not found" — a real bump read back as a broken installer.
+PATH_ENV='export PATH="$HOME/.local/bin:$PATH"; '
+
 in_box() {
   if [ -n "$STDIN" ]; then
-    printf '%b' "$STDIN" | docker exec -i -w /repo "$NAME" bash -lc "${CA_ENV}$1"
+    printf '%b' "$STDIN" | docker exec -i -w /repo "$NAME" bash -lc "${PATH_ENV}${CA_ENV}$1"
   else
-    docker exec -w /repo "$NAME" bash -lc "${CA_ENV}$1"
+    docker exec -w /repo "$NAME" bash -lc "${PATH_ENV}${CA_ENV}$1"
   fi
 }
 
