@@ -141,6 +141,9 @@ tasks:
       # and fails for a stranger — the release criterion is that the docs are
       # followable, not that we know the answers.
       - ./scripts/dev/check-doc-inputs.sh
+      # A script nobody invokes is the failure mode task test-scripts exists
+      # for, one level up: the check does the work, it is simply never asked.
+      - ./scripts/dev/check-script-reachability.sh
 
   fmt:
     desc: Format OpenTofu code
@@ -331,6 +334,10 @@ tasks:
       # converge-versions.sh had no downgrade guard of its own — it only
       # survived one by accident, on two layers upstream it does not own.
       - ./scripts/dev/test-converge-versions.sh
+      # Against an isolated throwaway git repo, not this one — proves
+      # check-script-reachability.sh actually flags an unreferenced script
+      # and clears once it's wired in, not just that today's tree is clean.
+      - ./scripts/dev/test-script-reachability.sh
 
   test:
     desc: Run OpenTofu tests (cluster root)
