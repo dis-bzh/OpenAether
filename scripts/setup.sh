@@ -381,6 +381,16 @@ if ! check_cmd checkov; then
     install_checkov
 fi
 
+# 5d. gitleaks — `task security` runs it directly, and pre-commit's own
+# `language: golang` hook builds it from source on first use. In this
+# project's sandbox that build panics inside wasilibs/go-re2's WASM engine
+# (see #126); the pinned release binary does not carry the same defect. The
+# `.pre-commit-config.yaml` gitleaks hook is `language: system` for exactly
+# this reason — it shells out to whatever this installs.
+if ! check_cmd gitleaks; then
+    "$(dirname "${BASH_SOURCE[0]}")/internal/install-gitleaks.sh"
+fi
+
 # 6. Check Talos image + backup tools (used by `task image-build` and the S3 backups)
 MISSING_IMG_TOOLS=0
 for t in curl zstd qemu-img aws gpg jq; do

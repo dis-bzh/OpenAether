@@ -141,6 +141,22 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **The `gitleaks` pre-commit hook could not run at all in some sandboxes**,
+  blocking every local commit. `.pre-commit-config.yaml` used the upstream
+  `gitleaks` hook (`language: golang`), which pre-commit compiles from source
+  on first use; that build panics inside `wasilibs/go-re2`'s WASM regex
+  engine (`invalid table access`, in `wazero`) on at least one environment —
+  reproduced across a full `go`-build-cache wipe and two Go toolchains, while
+  the exact same version as an official release binary runs clean against the
+  same tree. New `scripts/internal/install-gitleaks.sh` (pinned,
+  checksum-verified, same shape as `install-task.sh`) installs that binary;
+  `.pre-commit-config.yaml` now uses upstream's own `gitleaks-system` hook id
+  against it instead of building one, with the `pass_filenames: false`
+  upstream's `gitleaks-system` entry omits (without it pre-commit appends
+  every changed file as a positional arg, and gitleaks' `git` subcommand
+  accepts at most one). `check-version-drift.sh` now compares the two pins.
+  [#126](https://github.com/dis-bzh/OpenAether-infra/issues/126)
+
 - **`outscale.py`'s purge never looked at leftover snapshots**, so a
   duplicate snapshot from a failed image build sat in the account while
   "account is clean" was true of everything the script asked and false of
