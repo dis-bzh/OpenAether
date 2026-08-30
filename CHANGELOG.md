@@ -16,6 +16,16 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **`check-commit-authors.sh` could read its own `git log` failure as "no
+  commit is authored by a tool" (#132).** `set -e` does not propagate a
+  failure inside a process substitution (`< <(git log … )`) — a malformed
+  rev-range from a future CI edit would leave the `while read` loop with
+  nothing to read, zero iterations, and the script printed its success line
+  over a check that never ran. `git log` now writes to a file first and its
+  own exit status is checked before anything reads it. Not yet exercised by
+  CI's own wiring (the `commits` job always passes a valid range), so this
+  was latent, not live — reproduced and fixed anyway.
+
 - **Six gates were reporting green on something they had stopped checking.**
   Found by auditing what the pipeline actually constrains, and each one is
   reproduced in both directions — broken on purpose, watched go red, fixed,

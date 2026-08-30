@@ -16,14 +16,27 @@ set -euo pipefail
 range="${1:?usage: check-commit-authors.sh <rev-range>}"
 tools='claude|copilot|chatgpt|gpt-[0-9]|gemini|cursor|codex|devin|aider|noreply@anthropic\.com|users\.noreply\.github\.com/copilot'
 
+# `git log` written to a file first, not read from a process substitution: a
+# failure inside `< <(...)` (a malformed rev-range, say) does not propagate
+# through `set -e` — the pipeline it fails in is not a simple command `set -e`
+# tracks — so the `while read` loop would just see EOF, run zero iterations,
+# and this script would print its own success line over a check that never
+# ran (#132). A file's exit status is the ordinary kind.
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+if ! git log --format='%H%x09%an <%ae>%x09%cn <%ce>' "$range" > "$tmp"; then
+  echo "✗ git log $range failed — commit authors could not be checked" >&2
+  exit 1
+fi
+
 bad=0
-while IFS=$'\t' read -r sha ident; do
+while IFS=$'\t' read -r sha ident _committer; do
   [ -n "$sha" ] || continue
   if grep -qiE "$tools" <<<"$ident"; then
     echo "✗ $sha is authored by a tool: $ident" >&2
     bad=1
   fi
-done < <(git log --format='%H%x09%an <%ae>%x09%cn <%ce>' "$range" | cut -f1,2)
+done < "$tmp"
 
 if [ "$bad" -eq 1 ]; then
   cat >&2 <<'EOT'
