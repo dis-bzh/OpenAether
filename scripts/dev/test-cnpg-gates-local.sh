@@ -43,7 +43,7 @@ FAIL=0
 pass() { printf '  \033[32m✓\033[0m %s\n' "$*"; PASS=$((PASS + 1)); }
 bad()  { printf '  \033[31m✗\033[0m %s\n' "$*"; FAIL=$((FAIL + 1)); }
 step() { printf '▶ %s\n' "$*"; }
-report() { printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]; }
+report() { printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$PASS" -gt 0 ] && [ "$FAIL" -eq 0 ]; }
 
 # --- the functions under test, with a REAL kubectl -----------------------------
 # Same extraction as test-gates-local.sh: the gates are read out of the ops script

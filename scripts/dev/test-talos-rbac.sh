@@ -83,7 +83,7 @@ TALOSCONFIG="$READER" talosctl -n "$NODE" config new "$ESC" --roles os:admin >/d
   && ok "os:reader cannot mint itself an os:admin config — scoping does not escalate back" \
   || bad "os:reader minted an os:admin config: the scoped credential is worthless"
 
-if [ "$FAIL" -eq 0 ]; then
+if [ "$FAIL" -eq 0 ] && [ "$PASS" -gt 0 ]; then
   printf '\n\033[32m✓ %s assertions passed — roles are enforced on %s\033[0m\n' "$PASS" "$LANE"
 else
   printf '\n\033[31m✗ %s passed, %s FAILED\033[0m\n' "$PASS" "$FAIL" >&2

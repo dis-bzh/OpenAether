@@ -8,7 +8,7 @@
 #   region / endpoint = s3_primary_*
 #
 # Usage:
-#   tofu init -reconfigure $(scripts/tf-backend.sh envs/management-scaleway.tfvars)
+#   tofu init -reconfigure $(scripts/internal/tf-backend.sh envs/management-scaleway.tfvars)
 # ==============================================================================
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"

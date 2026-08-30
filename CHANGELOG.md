@@ -14,7 +14,89 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Six gates were reporting green on something they had stopped checking.**
+  Found by auditing what the pipeline actually constrains, and each one is
+  reproduced in both directions — broken on purpose, watched go red, fixed,
+  watched go green.
+  - **`tflint` linted one directory out of fourteen.** The config lived in
+    `cluster/`, and `tflint --recursive` resolves `.tflint.hcl` per directory —
+    so the preset, the naming rule and the documentation rules applied nowhere
+    else and the gate exited 0. Hoisting the file alone does **not** fix it (a
+    parent config is never found either): `scripts/dev/tflint-all.sh` names the
+    config through `TFLINT_CONFIG_FILE` and proves it loaded against a fixture
+    that must draw a rule only this config enables — by rule *name*, since the
+    default rules reject that fixture too and the exit code proves nothing.
+    First finding on the newly-linted directories: `talos-image/variables.tf`'s
+    `encryption_passphrase` had no description.
+  - **`try()` hid a broken provider contract.** `cluster/main.tf`'s junction
+    point read every provider output through `try(module.x[0].out, null)`, which
+    cannot tell "this provider is inactive" from "this output does not exist".
+    Measured: with `k8s_lb_ip` deleted from a provider module, `tofu validate`
+    answered **Success!** and an apply would have yielded `null`, falling back to
+    the literal `127.0.0.1` and failing at Talos, on a paid cluster. Now `one()`,
+    which returns null at count 0 and refuses an undeclared attribute: the same
+    tree answers `This object does not have an attribute named "k8s_lb_ip"`.
+  - **Sixteen of the eighteen shell assertion harnesses could pass without
+    asserting anything.** Thirteen ended on a bare `[ "$FAIL" -eq 0 ]` — true
+    when the file died before its first assertion — and three more said the same
+    thing in their own shape (`report()`, an `RC` accumulator, an `if`). All
+    eighteen now carry the floor that `test-talos-image.sh` and
+    `test-unattended.sh` already had. Worse, `test-endpoint-probe.sh` printed ✓ for a function that did not
+    exist: `fn … && bad … || ok …` takes the `||` branch on rc 127 too. New
+    `oa_require_fn` refuses to grade a function that is not defined.
+  - **Two checks abstained in silence.** `render-bootstrap-manifests.sh --check`
+    printed one warning mid-scroll when upstream was unreachable and `task
+    preflight` still announced "every free rung passed"; it now fails, says
+    *could not check* rather than *does not match*, and takes
+    `RENDER_CHECK_ALLOW_OFFLINE=1` for a deliberate offline run — which
+    `preflight` then reports as incomplete. `talos-image.sh` was worse: when the
+    Factory answered with no schematic id in it (a rate limit, an error body — a
+    *failing* curl aborts under `set -e`, so that was never the case), both the
+    refusal and the reassurance were skipped and the run went straight to "image
+    already up to date", one step from a billable publish. Now refused, or
+    stated aloud under `TALOS_IMAGE_ALLOW_OFFLINE=1`, and covered by four new
+    assertions in `test-talos-image.sh`.
+  - **`provider-contract.md` had zero implementers on one of its rows.** It
+    required a variable named `bastion_ssh_key` of type `string`; all four
+    modules have always declared `bastion_ssh_keys` as `list(string)`, and a grep
+    for the contract's name found exactly one hit in the repository — the
+    contract's own line. This is the document `CLAUDE.md` and the
+    `provider-module` skill both call the authority. The tables are now executed
+    by `scripts/dev/check-provider-contract.sh`, by name and by type.
+  - **The French detector could not read an HCL `description` heredoc**, so a
+    whole French sentence sat mid-paragraph in an otherwise English block in
+    `ovh/variables.tf` — in text `tofu` prints to the operator. The heredoc body
+    is neither a comment nor a `description=` line, which is all the scanner
+    looked at. Detector extended, sentence translated.
+
+- **The French `admin-access` runbook was missing the fix that PR #14 landed for
+  the English one**: the four CNPG/Longhorn seed paths and the warning above
+  them. A French-speaking operator following it hit the silent auth failure that
+  block exists to prevent — and both files carried the same last commit, which is
+  exactly why "we commit them together" is not parity.
+
+- **A tool could be the git author of a commit, and nothing looked.** The trailer
+  check reads the message; GitHub builds a squash commit's `Co-authored-by` from
+  the *branch* commits' authors, so by the time a message carries the trailer it
+  is already on `main` — seventeen of the fifty commits there do. Measured on
+  PR #106: its `0764f61` is authored by `Claude <noreply@anthropic.com>`. New
+  `scripts/dev/check-commit-authors.sh`, run in CI on the PR range, which is the
+  only place it can still be refused.
+
 ### Added
+
+- **`task purge-orphans PROVIDER=… [APPLY=1]`.** `docs/release-checklist.md`
+  already told the reader to run it; it did not exist. The scripts it wraps are
+  the last sentence between a failed teardown and a bill, and they were reachable
+  from prose only.
+- **`flux_namespace` is validated.** The vendored `flux-install.yaml` creates
+  exactly one namespace, `flux-system`, and every namespaced object in it points
+  there. Any other value renders inlineManifests aimed at a namespace nothing
+  creates — and Talos applies inlineManifests with no ordering and no namespace
+  creation, so it fails on a paid cluster with every offline gate green. No
+  schema validator can see it: `namespace: gitops` is valid YAML.
 
 - **`task talosconfig-new`** — issues a role-scoped talosconfig with a TTL
   (`os:reader`, 8 h by default) from the admin one, which the deploy hands out

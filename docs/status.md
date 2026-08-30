@@ -52,11 +52,12 @@ every apply plans to a file and applies THAT file, and a saved plan never prompt
 Destroy always takes two commands and no flag collapses them. S3 credentials are
 namespaced by the cloud that HOLDS the bucket, and a cross-provider backup is
 proven — an encrypted tfstate at Outscale while the cluster runs on Scaleway.
-468 offline assertions across 14 harnesses, every one mutation-tested. Counted
-2026-08-27 from `task test-scripts` itself, and it had drifted again: 452 across
-13 before the SessionStart-hook harness was added, against the 413 this page
-claimed — the same defect the 333 above records, which is what a number nothing
-re-counts does. The emulated lane runs feint 0.10.0 against Scaleway provider
+486 offline assertions across 15 harnesses. Counted 2026-08-28 from `task
+test-scripts` itself, and **it had drifted again before anything was added**:
+the tree already answered 482 across 15 against the 468 across 14 this page
+claimed. That is the third time this number has been wrong here, which is the
+whole argument for not writing numbers nothing re-counts — see
+[#111](https://github.com/dis-bzh/OpenAether-infra/issues/111). The emulated lane runs feint 0.10.0 against Scaleway provider
 2.81.0, the version the clusters run.
 
 **The root cause behind a week of upgrade failures is fixed**, and it was ours:
@@ -129,6 +130,17 @@ to completion; nobody has
 deployed under a non-empty `bucket_suffix`; and the failover — provider A treated
 as gone, the cluster rebuilt on B from B's replica alone — has never been
 attempted.
+
+**Six gates were green on something they had stopped checking**, found on
+2026-08-28 by auditing what the pipeline actually constrains rather than what it
+runs. Each is reproduced in both directions and fixed — see the CHANGELOG. The
+two that would have cost money: `tofu validate` answered `Success!` with a
+required provider-contract output deleted (`try()` cannot tell an inactive
+provider from a missing attribute), and `talos-image.sh` went straight to "image
+already up to date" when the Factory answered without a schematic id, one step
+from a billable publish with the pin never verified. `tflint` was linting one
+directory in fourteen. `provider-contract.md` — the document `CLAUDE.md` calls
+the authority — required a variable no module has ever declared.
 
 **Resume here**: the interruption regression, then rolling-replace's two blind
 applies, then decide whether 0.1.0 ships a staging lane at all.

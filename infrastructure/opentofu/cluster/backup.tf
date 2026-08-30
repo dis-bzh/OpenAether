@@ -32,8 +32,8 @@ locals {
   artifact_bucket_primary = "${local.backup_bucket_prefix}-${var.cluster_role}-${var.environment}"
   artifact_bucket_replica = "${local.artifact_bucket_primary}-backup"
 
-  # State: the backend (backend.tf, configured via scripts/tf-backend.sh) writes the PRIMARY;
-  # scripts/backup-state.sh replicates it to the "-backup" store. Management and
+  # State: the backend (backend.tf, configured via scripts/internal/tf-backend.sh) writes the PRIMARY;
+  # scripts/ops/backup-state.sh replicates it to the "-backup" store. Management and
   # workload clusters on the same provider/env share this bucket, distinguished by
   # the per-cluster key. Surfaced via the backup_targets output.
   # Bucket for APPLICATION backups (restic, Longhorn volume backups).

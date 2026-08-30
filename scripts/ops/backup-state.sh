@@ -13,7 +13,7 @@
 #   primary : the ambient AWS_* (the Taskfile sets it to the cluster provider's keys)
 #   replica : <PU>_BACKUP_AWS_* -> BACKUP_AWS_* -> primary    (../lib/common.sh::s3_cred)
 #
-# Usage: ./scripts/backup-state.sh [tofu_dir]   (default: infrastructure/opentofu/cluster)
+# Usage: ./scripts/ops/backup-state.sh [tofu_dir]   (default: infrastructure/opentofu/cluster)
 # ==============================================================================
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"

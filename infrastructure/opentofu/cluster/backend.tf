@@ -36,7 +36,7 @@ terraform {
   # cluster's tfvars (the single source of truth) so each cluster gets its OWN
   # encrypted state, following s3-<project>-<provider>-tfstate-<env> (key
   # <cluster_name>.tfstate). Initialise with:
-  #   tofu init -reconfigure $(scripts/tf-backend.sh envs/<cluster>.tfvars)
+  #   tofu init -reconfigure $(scripts/internal/tf-backend.sh envs/<cluster>.tfvars)
   # The Taskfile does this for you. The state payload is client-encrypted by the
   # encryption{} block above before it ever reaches S3.
   backend "s3" {

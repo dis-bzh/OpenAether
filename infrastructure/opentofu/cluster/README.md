@@ -118,7 +118,7 @@ Each file describes a single cluster (provider + role + sizing). There is no
 
 **`<kind>-<provider>` matrix** — every kind runs on any provider (`scaleway`, `ovh`,
 `outscale`). Each cluster is a single `.tfvars` (the source of truth); the S3
-backend config is **derived from it** by `scripts/tf-backend.sh` (no separate
+backend config is **derived from it** by `scripts/internal/tf-backend.sh` (no separate
 backend file, so dev/prod never drift):
 
 | Kind | Role | Template |

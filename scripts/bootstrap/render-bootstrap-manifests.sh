@@ -109,8 +109,23 @@ if [[ "${1:-}" == "--check" ]]; then
       diff <(norm "${MANIFESTS_DIR}/flux-install.yaml") <(norm "${tmp}/flux-install.yaml") | head -10 | sed 's/^/      /'
       drift=1
     fi
+  elif [ "${RENDER_CHECK_ALLOW_OFFLINE:-0}" = 1 ]; then
+    echo "  ⚠ flux-install.yaml NOT checked — ${FLUX_VERSION} unreachable, and"
+    echo "    RENDER_CHECK_ALLOW_OFFLINE=1 says to accept that."
   else
-    echo "  ⚠ flux-install.yaml NOT checked — ${FLUX_VERSION} unreachable"
+    # Warning-and-continue is how this check went quiet: it printed one line
+    # mid-scroll and `task preflight` still announced "every free rung passed".
+    # NOT drift=1 — "could not check" is not "does not match", and reporting the
+    # second for the first sends the reader to regenerate an artifact that may
+    # be perfectly correct.
+    cat >&2 <<EOT
+
+✗ flux-install.yaml was NOT checked — ${FLUX_VERSION} unreachable.
+  This says nothing about the artifact: it says the comparison did not happen.
+  Re-run with network, or RENDER_CHECK_ALLOW_OFFLINE=1 to accept a render-check
+  that skipped the vendored manifest.
+EOT
+    exit 1
   fi
   if [[ "$drift" -eq 1 ]]; then
     cat >&2 <<'EOT'
@@ -256,7 +271,7 @@ ls -lh "${MANIFESTS_DIR}"/*.tftpl 2>/dev/null || true
 echo ""
 if [[ "$LOCAL_MODE" == "true" ]]; then
   echo "💡 Local manifests generated. Drive the 3-CP Docker cluster with:"
-  echo "   ./scripts/test-talos-local.sh        # or: task local-test"
+  echo "   ./scripts/dev/test-talos-local.sh        # or: task local-test"
   echo "   (it reads bootstrap-manifests/cilium-local.yaml into TF_VAR_cilium_manifest)"
 else
   echo "💡 Commit these files to the repository."

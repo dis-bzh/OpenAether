@@ -11,8 +11,8 @@
 #
 # Usage:
 #   export KUBECONFIG=$PWD/infrastructure/opentofu-local/kubeconfig
-#   ./scripts/local-admin-portforward.sh           # start all, foreground (Ctrl-C to stop)
-#   ./scripts/local-admin-portforward.sh --stop     # kill any running forwards
+#   ./scripts/ops/local-admin-portforward.sh           # start all, foreground (Ctrl-C to stop)
+#   ./scripts/ops/local-admin-portforward.sh --stop     # kill any running forwards
 # ==============================================================================
 set -uo pipefail
 
@@ -67,7 +67,7 @@ cat <<EOF
     kubectl -n management-gitops get secret flux-initial-admin-secret \\
       -o jsonpath='{.data.password}' | base64 -d; echo
   ─────────────────────────────────────────────
-  Stop: ./scripts/local-admin-portforward.sh --stop
+  Stop: ./scripts/ops/local-admin-portforward.sh --stop
 EOF
 
 # Keep forwards alive in foreground unless backgrounded by caller.

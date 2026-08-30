@@ -835,6 +835,8 @@ printf '%s passed, %s failed, %s hung, %s skipped, %s known defect(s) in the scr
   printf 'known defects are reported, not fixed: this file owns the tests. STRICT_DEFECTS=1 makes them fatal.\n'
 RC=0
 [ "$FAIL" -eq 0 ] || RC=1
+  # Zero failures is also what a harness that never asserted reports.
+  [ "$PASS" -gt 0 ] || { printf 'NOT green: no assertion ran at all.\n'; RC=1; }
 # A hang is red on its own: it means an assertion never got an answer to judge.
 [ "$HUNG" -eq 0 ] || { printf 'NOT green: %s verdict(s) came from a run that never returned.\n' "$HUNG"; RC=1; }
 # An assertion that did not run has proven nothing, so a run with skips is not

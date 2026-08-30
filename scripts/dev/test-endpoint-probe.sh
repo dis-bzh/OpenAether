@@ -15,6 +15,7 @@
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 source scripts/lib/common.sh
+oa_require_fn oa_talos_endpoint_ok || exit 1
 
 PASS=0; FAIL=0
 ok()  { printf '  \033[32m✓\033[0m %s\n' "$*"; PASS=$((PASS + 1)); }
@@ -100,4 +101,6 @@ rm -rf "$SHIM"
 
 echo
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+# A floor, not just a verdict: `FAIL -eq 0` is also true when the harness died
+# before asserting anything, which is the shape this repository keeps meeting.
+[ "$PASS" -gt 0 ] && [ "$FAIL" -eq 0 ]

@@ -3,7 +3,7 @@
 # bastion-harden-check.sh — Post-deploy hardening validation for OpenAether bastion
 #
 # Usage:
-#   ./scripts/bastion-harden-check.sh <bastion_ip> <bastion_user> <ssh_key>
+#   ./scripts/ops/bastion-harden-check.sh <bastion_ip> <bastion_user> <ssh_key>
 #
 # Checks (in order):
 #   1. SSH tunnel non-regression: 6443 + 50000 reachable via bastion
