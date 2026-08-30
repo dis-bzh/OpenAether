@@ -98,7 +98,25 @@ if [ -f "$SCHEMATIC_YAML" ] && [ -f "$CLUSTER_VARS" ]; then
     echo "  Update the default in cluster/variables.tf, then re-run." >&2
     exit 1
   fi
-  [ -n "$LIVE_ID" ] && echo "  ✓ schematic ${LIVE_ID:0:12}… matches the cluster pin"
+  # An empty LIVE_ID skipped BOTH branches above — no refusal, and no line of
+  # reassurance either: the check evaporated and the build went on to "image
+  # already up to date", in silence, on the path to a billable publish. Note
+  # what empty means here: a curl that FAILS aborts under `set -e`, so this is
+  # the narrower case where the Factory answers something carrying no id — a
+  # rate limit, an error body, a redirect. Abstaining is allowed; saying
+  # nothing is not.
+  if [ -n "$LIVE_ID" ]; then
+    echo "  ✓ schematic ${LIVE_ID:0:12}… matches the cluster pin"
+  elif [ "${TALOS_IMAGE_ALLOW_OFFLINE:-0}" = 1 ]; then
+    echo "  ⚠ schematic NOT checked — factory.talos.dev unreachable, and" >&2
+    echo "    TALOS_IMAGE_ALLOW_OFFLINE=1 says to build anyway. Nodes may install" >&2
+    echo "    from a schematic this tree no longer describes." >&2
+  else
+    echo "✗ factory.talos.dev returned no schematic id — the pin could not be" >&2
+    echo "  verified, and a build is the only moment it can be. Re-run, or set" >&2
+    echo "  TALOS_IMAGE_ALLOW_OFFLINE=1 to build against an unverified pin." >&2
+    exit 1
+  fi
 fi
 
 # The image buckets follow the same namespace as every other bucket, read from

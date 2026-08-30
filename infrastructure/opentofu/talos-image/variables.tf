@@ -94,8 +94,9 @@ variable "outscale_secret_key_id" {
 # --- State encryption (mirrors the cluster root) -----------------------------
 
 variable "encryption_passphrase" {
-  type      = string
-  sensitive = true
+  description = "Passphrase encrypting this root's tfstate. Same value as the cluster root — the two states are encrypted by one secret, not two."
+  type        = string
+  sensitive   = true
 
   validation {
     condition     = length(var.encryption_passphrase) >= 32

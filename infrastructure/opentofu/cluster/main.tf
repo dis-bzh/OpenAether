@@ -328,23 +328,29 @@ module "proxmox" {
 # coalesce() selects the first non-null value across all providers.
 # Since only one provider is active per apply, exactly one will have a value.
 #
+# one(), never try(): try() swallows "this output does not exist" exactly like
+# "this provider is inactive". A module that stops honouring the contract then
+# validates, applies, and yields null — the endpoint falls back to the literal
+# below and Talos fails much later, on a cluster that costs money. one() returns
+# null at count = 0 and REFUSES an attribute the module does not declare.
+#
 # See: modules/providers/provider-contract.md
 # ==============================================================================
 
 locals {
   k8s_lb_ip = coalesce(
-    try(module.scw[0].k8s_lb_ip, null),
-    try(module.ovh[0].k8s_lb_ip, null),
-    try(module.outscale[0].k8s_lb_ip, null),
-    try(module.proxmox[0].k8s_lb_ip, null),
+    one(module.scw[*].k8s_lb_ip),
+    one(module.ovh[*].k8s_lb_ip),
+    one(module.outscale[*].k8s_lb_ip),
+    one(module.proxmox[*].k8s_lb_ip),
     "127.0.0.1"
   )
 
   bastion_ip = coalesce(
-    try(module.scw[0].bastion_ip, null),
-    try(module.ovh[0].bastion_ip, null),
-    try(module.outscale[0].bastion_ip, null),
-    try(module.proxmox[0].bastion_ip, null),
+    one(module.scw[*].bastion_ip),
+    one(module.ovh[*].bastion_ip),
+    one(module.outscale[*].bastion_ip),
+    one(module.proxmox[*].bastion_ip),
     "<bastion-ip>"
   )
 
@@ -378,18 +384,18 @@ locals {
   apiserver_vip_interface = local.active_provider == "proxmox" ? local.pmx_dist.apiserver_vip_interface : "eth0"
 
   control_plane_ips = coalesce(
-    length(try(module.scw[0].control_plane_private_ips, [])) > 0 ? module.scw[0].control_plane_private_ips : null,
-    length(try(module.ovh[0].control_plane_private_ips, [])) > 0 ? module.ovh[0].control_plane_private_ips : null,
-    length(try(module.outscale[0].control_plane_private_ips, [])) > 0 ? module.outscale[0].control_plane_private_ips : null,
-    length(try(module.proxmox[0].control_plane_private_ips, [])) > 0 ? module.proxmox[0].control_plane_private_ips : null,
+    length(coalesce(one(module.scw[*].control_plane_private_ips), [])) > 0 ? module.scw[0].control_plane_private_ips : null,
+    length(coalesce(one(module.ovh[*].control_plane_private_ips), [])) > 0 ? module.ovh[0].control_plane_private_ips : null,
+    length(coalesce(one(module.outscale[*].control_plane_private_ips), [])) > 0 ? module.outscale[0].control_plane_private_ips : null,
+    length(coalesce(one(module.proxmox[*].control_plane_private_ips), [])) > 0 ? module.proxmox[0].control_plane_private_ips : null,
     []
   )
 
   worker_ips = coalesce(
-    length(try(module.scw[0].worker_private_ips, [])) > 0 ? module.scw[0].worker_private_ips : null,
-    length(try(module.ovh[0].worker_private_ips, [])) > 0 ? module.ovh[0].worker_private_ips : null,
-    length(try(module.outscale[0].worker_private_ips, [])) > 0 ? module.outscale[0].worker_private_ips : null,
-    length(try(module.proxmox[0].worker_private_ips, [])) > 0 ? module.proxmox[0].worker_private_ips : null,
+    length(coalesce(one(module.scw[*].worker_private_ips), [])) > 0 ? module.scw[0].worker_private_ips : null,
+    length(coalesce(one(module.ovh[*].worker_private_ips), [])) > 0 ? module.ovh[0].worker_private_ips : null,
+    length(coalesce(one(module.outscale[*].worker_private_ips), [])) > 0 ? module.outscale[0].worker_private_ips : null,
+    length(coalesce(one(module.proxmox[*].worker_private_ips), [])) > 0 ? module.proxmox[0].worker_private_ips : null,
     []
   )
 
@@ -404,7 +410,7 @@ locals {
 
 # ==============================================================================
 # Bootstrap Manifests — Loaded from static files
-# Generate with: ./scripts/render-bootstrap-manifests.sh
+# Generate with: ./scripts/bootstrap/render-bootstrap-manifests.sh
 # ==============================================================================
 
 locals {

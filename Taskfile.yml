@@ -97,11 +97,16 @@ tasks:
       - task: test-scripts
       - cmd: |
           echo
+          if [ "${RENDER_CHECK_ALLOW_OFFLINE:-0}" = 1 ]; then
+            echo "⚠ preflight INCOMPLETE — RENDER_CHECK_ALLOW_OFFLINE=1 was set, so the vendored"
+            echo "  flux-install.yaml was never compared against upstream. Everything else passed."
+          else
           echo "✓ preflight green — every free rung passed."
           echo "  NOT covered here — only a cloud run can show that the provider accepts these"
           echo "  arguments, that the stored state is ciphertext, that an upgrade keeps the API"
           echo "  up, and that the teardown leaves the account empty. All four HAVE been shown on"
           echo "  real clouds: see the table in docs/status.md for which, when, and how long."
+          fi
 
   lint:
     desc: Lint and format code (OpenTofu, YAML)
@@ -113,7 +118,10 @@ tasks:
       # and only get caught by a contributor's local pre-commit, if they had
       # it installed. `task lint` now matches what pre-commit checks.
       - yamllint -c infrastructure/.yamllint .github/ .pre-commit-config.yaml Taskfile.yml .checkov.yaml
-      - tflint --chdir=infrastructure/opentofu --recursive
+      # NOT `tflint --recursive` on its own: it resolves .tflint.hcl per
+      # directory, so thirteen of fourteen were linted with no config and passed.
+      # The script names the config and proves it loaded before trusting the run.
+      - ./scripts/dev/tflint-all.sh
       # yamllint says a workflow is well-formed YAML; it cannot say that a
       # `${{ needs.x.outputs.y }}` names an output that exists, and a scheduled
       # workflow cannot be dry-run — its first execution is production. This
@@ -136,6 +144,10 @@ tasks:
       # a pin nothing watches is a pin nobody bumps, and it looks identical to
       # a healthy one. Offline, milliseconds.
       - python3 scripts/clea/clea.py coverage
+      # provider-contract.md is the document CLAUDE.md and the provider-module
+      # skill call the authority, and nothing read it: it required a variable no
+      # module has ever declared. The tables are checked now, not just written.
+      - ./scripts/dev/check-provider-contract.sh
       # Required inputs must be named where the operator will look. A variable
       # with no default that no document mentions is a deploy that works for us
       # and fails for a stranger — the release criterion is that the docs are
@@ -246,6 +258,23 @@ tasks:
       # test fixtures use synthetic-but-routable quads. This asserts they still
       # match; two of them once matched nothing and passed.
       - ./scripts/dev/check-gitleaks-rules.sh
+
+  purge-orphans:
+    desc: >-
+      Last resort: delete resources a teardown left behind, by talking to the provider API
+      directly. Usage: task purge-orphans PROVIDER=scaleway|ovh|outscale [APPLY=1].
+      Dry-run by default. See scripts/ops/purge-orphans/README.md for the scope warning —
+      it targets the WHOLE project, not one cluster.
+    # The scripts are the last sentence between a failed teardown and a bill, and
+    # they were reachable from prose only: docs/release-checklist.md already told
+    # the reader to run `task purge-orphans`, which did not exist.
+    vars:
+      APPLY: '{{.APPLY | default ""}}'
+    preconditions:
+      - sh: 'test -f scripts/ops/purge-orphans/{{.PROVIDER}}.py'
+        msg: "PROVIDER must be one of scaleway, ovh, outscale (got: '{{.PROVIDER}}')"
+    cmds:
+      - python3 scripts/ops/purge-orphans/{{.PROVIDER}}.py {{if .APPLY}}--apply{{end}}
 
   check-jsonpath:
     desc: >-

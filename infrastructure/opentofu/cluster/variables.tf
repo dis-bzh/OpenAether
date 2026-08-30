@@ -379,6 +379,17 @@ variable "flux_namespace" {
   description = "Namespace for Flux installation"
   type        = string
   default     = "flux-system"
+
+  # The vendored flux-install.yaml creates exactly one Namespace, flux-system,
+  # and every namespaced object in it points there. Another value renders
+  # inlineManifests aimed at a namespace nothing creates — and Talos applies
+  # inlineManifests with no ordering and no namespace creation, so it fails on a
+  # paid cluster with every offline gate green. No schema validator can see it:
+  # `namespace: gitops` is perfectly valid YAML.
+  validation {
+    condition     = var.flux_namespace == "flux-system"
+    error_message = "flux_namespace must be flux-system: the vendored flux-install.yaml creates that namespace and nothing else. Re-render the manifest before changing this."
+  }
 }
 
 variable "cilium_manifest" {

@@ -70,6 +70,7 @@ run() { # <plan-exit> [script args...] — prints the script's output, exits as 
   # </dev/null is the point of the whole exercise: this is the lane that runs
   # with no terminal to answer a prompt.
   env PATH="$SB:$PATH" OA_STUB_LOG="$LOG" OA_STUB_PLAN_EXIT="$pe" \
+      TALOS_IMAGE_ALLOW_OFFLINE="${TALOS_IMAGE_ALLOW_OFFLINE:-0}" \
       OA_TFVARS="$SB/t.tfvars" \
       SCW_AWS_ACCESS_KEY_ID=STUB-AK SCW_AWS_SECRET_ACCESS_KEY=STUB-SK \
       "$SCRIPT" scaleway v1.13.4 "$@" </dev/null 2>&1
@@ -89,6 +90,30 @@ positional() { # <subcommand> — its non-flag arguments
   done
   printf '%s' "${out[*]:-}"
 }
+
+# The schematic gate's OWN blind case, which this file used to leave to nobody:
+# an unreachable Factory left LIVE_ID empty, so the refusal and the line of
+# reassurance were both skipped and the build went ahead in silence.
+# Note WHICH failure this is. A curl that exits non-zero aborts under `set -e`;
+# the case nothing covered is the Factory answering with no id in it — a rate
+# limit, an error body — which leaves LIVE_ID empty at exit 0.
+echo "--- the Factory answers with no schematic id: the gate must not go quiet ---"
+mv "$SB/curl" "$SB/curl.ok"
+printf '#!/usr/bin/env bash\nprintf %%s "{\\"error\\":\\"rate limited\\"}"\n' >"$SB/curl"
+chmod +x "$SB/curl"
+OUT="$(run 2 --ensure)"; RC=$?
+[ "$RC" -ne 0 ] \
+  && ok "an unverifiable schematic pin refuses the build (rc=$RC)" \
+  || bad "the build proceeded with the schematic pin unverified — rc=$RC"
+grep -qi "no schematic id" <<<"$OUT" \
+  && ok "and it says which check did not happen" \
+  || bad "it stopped without naming the unverified check"
+OUT="$(TALOS_IMAGE_ALLOW_OFFLINE=1 run 2 --ensure)"; RC=$?
+is "TALOS_IMAGE_ALLOW_OFFLINE=1 lets it through" 0 "$RC"
+grep -qi "NOT checked" <<<"$OUT" \
+  && ok "and the abstention is stated, not silent" \
+  || bad "it built anyway without a word about the skipped check"
+mv "$SB/curl.ok" "$SB/curl"
 
 echo "--- --ensure, a rebuild IS needed: one plan, to a file, and THAT file is applied ---"
 OUT="$(run 2 --ensure)"; RC=$?

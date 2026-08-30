@@ -17,13 +17,13 @@ Run whenever upgrading Cilium or Flux:
 
 ```bash
 # Default versions (from script)
-./scripts/render-bootstrap-manifests.sh
+./scripts/bootstrap/render-bootstrap-manifests.sh
 
 # Override versions
-CILIUM_VERSION=1.20.0 FLUX_VERSION=v2.5.0 ./scripts/render-bootstrap-manifests.sh
+CILIUM_VERSION=1.20.0 FLUX_VERSION=v2.5.0 ./scripts/bootstrap/render-bootstrap-manifests.sh
 
 # Local Docker testing only (regenerate cilium-local.yaml)
-./scripts/render-bootstrap-manifests.sh --local
+./scripts/bootstrap/render-bootstrap-manifests.sh --local
 ```
 
 Then commit the updated files. OpenTofu reads them at apply time.

@@ -34,16 +34,16 @@ output "k8s_lb_ip" {
 output "app_lb_ip" {
   description = "Public IP (or DNS name) of the App LB (80/443)"
   value = coalesce(
-    try(module.scw[0].app_lb_ip, null),
-    try(module.ovh[0].app_lb_ip, null),
-    try(module.outscale[0].app_lb_ip, null),
+    one(module.scw[*].app_lb_ip),
+    one(module.ovh[*].app_lb_ip),
+    one(module.outscale[*].app_lb_ip),
     "N/A"
   )
 }
 
 output "worker_ingress_targets" {
   description = "Worker IPs for manual ingress (providers without a managed app LB, e.g. Proxmox)"
-  value       = try(module.proxmox[0].worker_ingress_targets, null)
+  value       = one(module.proxmox[*].worker_ingress_targets)
 }
 
 output "kubeconfig" {
@@ -90,7 +90,7 @@ output "machine_secrets" {
   sensitive   = true
 }
 
-# --- Backup / DR targets (consumed by scripts/backup-state.sh) ---
+# --- Backup / DR targets (consumed by scripts/ops/backup-state.sh) ---
 
 output "backup_targets" {
   description = "Derived buckets + endpoints for the state and artifact backups (non-sensitive)."

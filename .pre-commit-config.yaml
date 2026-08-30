@@ -15,6 +15,17 @@ repos:
   # `Assisted-by:` instead. Rule adopted 2026-08; older commits are not rewritten.
   - repo: local
     hooks:
+      # NOT pre-commit-terraform's terraform_tflint: it runs `--recursive` with
+      # no config, and tflint resolves .tflint.hcl per directory — thirteen of
+      # fourteen were linted bare and passed. Same script as `task lint`, so a
+      # hook and CI cannot disagree.
+      - id: tflint-all
+        name: tflint (one config, every directory)
+        language: system
+        pass_filenames: false
+        files: \.tf$
+        entry: scripts/dev/tflint-all.sh
+
       - id: no-tool-authorship-trailer
         name: no Co-Authored-By / Signed-off-by from a tool
         language: system
@@ -59,8 +70,6 @@ repos:
         args: ["--args=-recursive", "--hook-config=--tf-path=tofu"]
       - id: terraform_validate
         args: ["--hook-config=--retry-once-with-cleanup=true", "--hook-config=--tf-path=tofu"]
-      - id: terraform_tflint
-        args: ["--args=--recursive"]
 
   # YAML linting (same config the CI uses)
   - repo: https://github.com/adrienverge/yamllint

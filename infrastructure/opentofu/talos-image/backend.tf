@@ -3,7 +3,7 @@
 # Talos version and reused by every cluster apply (decoupled lifecycle).
 #
 # Partial backend: bucket / key / region / endpoint are passed at init time by
-# scripts/talos-image.sh. State lives on the TARGET provider's S3
+# scripts/bootstrap/talos-image.sh. State lives on the TARGET provider's S3
 # (s3-openaether-<provider>-talos-image / talos-image.tfstate), reached with
 # AWS_* = that provider's S3 keys — the same cred rule as deploying a cluster on
 # it. State payload is client-encrypted by the encryption{} block below.

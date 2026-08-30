@@ -12,7 +12,7 @@
 # see oa_tunnel_offset() in scripts/lib/common.sh.
 #
 # Usage:
-#   SSH_KEY=~/.ssh/mykey ./scripts/talos-tunnels.sh open|close [tofu_dir]
+#   SSH_KEY=~/.ssh/mykey ./scripts/bootstrap/talos-tunnels.sh open|close [tofu_dir]
 #
 #   open-direct --bastion <ip> --user <user> --cps <ip,…> [--workers <ip,…>]
 #     EXPERIMENTAL, for the single-apply path (var.auto_tunnels): takes IPs as
