@@ -52,13 +52,15 @@ every apply plans to a file and applies THAT file, and a saved plan never prompt
 Destroy always takes two commands and no flag collapses them. S3 credentials are
 namespaced by the cloud that HOLDS the bucket, and a cross-provider backup is
 proven — an encrypted tfstate at Outscale while the cluster runs on Scaleway.
-486 offline assertions across 15 harnesses. Counted 2026-08-28 from `task
-test-scripts` itself, and **it had drifted again before anything was added**:
-the tree already answered 482 across 15 against the 468 across 14 this page
-claimed. That is the third time this number has been wrong here, which is the
-whole argument for not writing numbers nothing re-counts — see
-[#111](https://github.com/dis-bzh/OpenAether-infra/issues/111). The emulated lane runs feint 0.10.0 against Scaleway provider
-2.81.0, the version the clusters run.
+Every offline assertion is mutation-tested; the count and harness total are not
+written here as a number — a hand-typed one drifted from what `task
+test-scripts` actually ran **four** times running (333, then 413, then 468,
+then 486, each one stale before the next edit — the last of those from a
+branch that, while fixing the same symptom, kept writing a number here; see
+[#111](https://github.com/dis-bzh/OpenAether-infra/issues/111)). Measure it
+instead: `task test-scripts 2>&1 | grep -oE '^[0-9]+ passed' | awk '{s+=$1;
+n++} END {print s, n}'`. The emulated lane runs feint 0.10.0 against Scaleway
+provider 2.81.0, the version the clusters run.
 
 **The root cause behind a week of upgrade failures is fixed**, and it was ours:
 the shared schematic shipped `siderolabs/qemu-guest-agent`, which never starts on

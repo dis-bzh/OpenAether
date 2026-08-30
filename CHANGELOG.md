@@ -223,6 +223,12 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **`docs/status.md`'s assertion count, hand-typed, had drifted from what
+  `task test-scripts` actually ran three times running** (333, then 413, then
+  468, each stale before the next edit —
+  [#111](https://github.com/dis-bzh/OpenAether-infra/issues/111)). The page no
+  longer states a number: it points at the one-line command that measures it
+  instead, so a fourth drift is not possible — there is nothing left to drift.
 - **`CONTRIBUTING.md` required what `check-commit-trailers.sh`'s own example,
   and the `change-process` skill, forbade** — naming the model in the
   `Assisted-by:` trailer, when the skill's "Never" section says the identifier
