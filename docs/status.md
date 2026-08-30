@@ -52,11 +52,12 @@ every apply plans to a file and applies THAT file, and a saved plan never prompt
 Destroy always takes two commands and no flag collapses them. S3 credentials are
 namespaced by the cloud that HOLDS the bucket, and a cross-provider backup is
 proven — an encrypted tfstate at Outscale while the cluster runs on Scaleway.
-468 offline assertions across 14 harnesses, every one mutation-tested. Counted
-2026-08-27 from `task test-scripts` itself, and it had drifted again: 452 across
-13 before the SessionStart-hook harness was added, against the 413 this page
-claimed — the same defect the 333 above records, which is what a number nothing
-re-counts does. The emulated lane runs feint 0.10.0 against Scaleway provider
+Every offline assertion is mutation-tested; the count and harness total are not
+written here as a number — a hand-typed one drifted from what `task
+test-scripts` actually ran three times running (333, then 413, then 468, each
+one stale before the next edit). Measure it instead:
+`task test-scripts 2>&1 | grep -oE '^[0-9]+ passed' | awk '{s+=$1; n++} END
+{print s, n}'`. The emulated lane runs feint 0.10.0 against Scaleway provider
 2.81.0, the version the clusters run.
 
 **The root cause behind a week of upgrade failures is fixed**, and it was ours:
