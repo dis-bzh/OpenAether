@@ -120,6 +120,17 @@ puis redémarrer `capo-controller-manager`.
 `api.eu-west-2a.outscale.com`, qui ne résout pas — le Net ne réconcilie jamais.
 Mettre `eu-west-2` ; la subregion va dans `OSC_SUBREGION`.
 
+**L'IP flottante d'un enfant OpenStack (CAPO) doit exister AVANT son
+démarrage.** L'IMDS ne l'expose jamais (NAT côté Neutron) : elle doit être
+dans les `certSANs` Talos en amont, donc dans git avant `flux reconcile`, pas
+quelque chose que CAPO peut allouer en cours de provisioning.
+`scripts/ops/ensure-capo-fip.py <cluster> [--network Ext-Net] [--count N]` la
+trouve ou l'alloue via un tag de description `openaether:<cluster>`
+(idempotent — un re-run ne facture jamais de doublon) et affiche l'adresse à
+copier dans `OS_CP_FLOATING_IPS` de l'enfant. C'est aussi la seule ressource
+CAPO créée hors OpenTofu et CAPI — donc la seule qu'un teardown laisse
+derrière lui, toujours facturée.
+
 ## Teardown
 
 Les enfants d'abord (le management détient leurs CR), puis le management.
