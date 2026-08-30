@@ -156,6 +156,9 @@ tasks:
       # A script nobody invokes is the failure mode task test-scripts exists
       # for, one level up: the check does the work, it is simply never asked.
       - ./scripts/dev/check-script-reachability.sh
+      # A path stops resolving and nothing notices — in a comment, read once,
+      # or a printed string, read (and copy-pasted) on every run (#118).
+      - ./scripts/dev/check-dead-references.sh
 
   fmt:
     desc: Format OpenTofu code
@@ -367,6 +370,11 @@ tasks:
       # check-script-reachability.sh actually flags an unreferenced script
       # and clears once it's wired in, not just that today's tree is clean.
       - ./scripts/dev/test-script-reachability.sh
+      # Same isolation, for check-dead-references.sh (#118): proves fences,
+      # backtick spans, comments and printed strings are checked, plain prose
+      # and fixture-writing redirects are not, and .deadreferencesignore
+      # scopes to the one file:candidate pair it names.
+      - ./scripts/dev/test-dead-references.sh
       # A --set typo reaches the cluster silently past every other gate;
       # this proves the effective-config reader (and check-cilium-parity.py's
       # missing-key guard) actually catch it, offline.

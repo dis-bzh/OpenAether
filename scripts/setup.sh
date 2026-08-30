@@ -51,7 +51,7 @@ HELM_VERSION="4.2.3"
 #
 # Only the tools this file PINS get the second argument. For the others there is
 # no version to compare against, and inventing one would be a check that cannot
-# fail; pinning them is a separate decision, in docs/backlog.md.
+# fail; pinning them is a separate decision, not made here.
 check_cmd() {
     local tool="$1" want="${2:-}" version
     if ! command -v "$tool" &> /dev/null; then

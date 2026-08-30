@@ -87,6 +87,21 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Added
 
+- **`check-dead-references.sh`, wired into `task lint` (#118).** A path stops
+  resolving and nothing notices — read once in a comment, or read (and
+  copy-pasted) on every run in a printed string. lychee finds none of this:
+  this repository writes commands as bare paths inside fences, not Markdown
+  links, and lychee reads neither comments nor printed strings. Scope is
+  deliberately PATHS only, inside a fenced block, a backtick span, a code
+  comment, or a printed string — `task [a-z-]+` alone gave ~45 false positives
+  ("task is", "task and", "task was") against real ones while scoping this.
+  First run on this tree found two real stale references, both citing the
+  now-deleted docs/backlog.md: `scripts/setup.sh` and
+  `scripts/ops/verify-provider-clean.py`, now fixed.
+  `.deadreferencesignore` allowlists what a regex genuinely cannot see (a doc
+  narrating its own removed file's name, an example value in a portable
+  tool's own README, a cross-repo path stated bare) — scoped per
+  file:candidate pair, never a whole file, and each entry carries a reason.
 - **`task purge-orphans PROVIDER=… [APPLY=1]`.** `docs/release-checklist.md`
   already told the reader to run it; it did not exist. The scripts it wraps are
   the last sentence between a failed teardown and a bill, and they were reachable
