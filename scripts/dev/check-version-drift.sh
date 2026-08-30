@@ -47,11 +47,17 @@ TOFU_CI="$(sed -nE 's/^[[:space:]]*tofu_version:[[:space:]]*"([^"]+)".*/\1/p' .g
 # is not part of the zero floor below for that reason.
 TALOS_CLUSTER="$(scripts/internal/talos-version.sh 2>/dev/null || true)"
 TALOS_CI="$(sed -nE 's/^[[:space:]]*TALOS_VERSION:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/p' .github/workflows/ci.yml | head -1)"
+GITLEAKS_INSTALL="$(pin scripts/internal/install-gitleaks.sh GITLEAKS_VERSION)"
+# The rev: line right after the gitleaks repo: line, not "the Nth rev: in the
+# file" — order-independent, so adding or reordering another repo: block
+# cannot silently start comparing the wrong pin.
+GITLEAKS_PRECOMMIT="$(awk '/repo:.*gitleaks\/gitleaks/{f=1; next} f && /rev:/{print; exit}' \
+  .pre-commit-config.yaml | sed -nE 's/.*#[[:space:]]*v([0-9][^[:space:]]*).*/\1/p')"
 
 # ZERO FLOOR. If the extractors return nothing the comparisons below all pass
 # vacuously, and this file becomes a green line that proves nothing — the exact
 # shape it is written against.
-for v in CILIUM HELM_MAJOR FEINT HELM_SETUP HELM_CI TOFU_SETUP TOFU_CI TALOS_CLUSTER; do
+for v in CILIUM HELM_MAJOR FEINT HELM_SETUP HELM_CI TOFU_SETUP TOFU_CI TALOS_CLUSTER GITLEAKS_INSTALL GITLEAKS_PRECOMMIT; do
   [ -n "${!v}" ] || { echo "✗ could not extract ${v} — the extractor is broken, not the repository" >&2; exit 1; }
 done
 
@@ -103,6 +109,15 @@ elif [ "$CHART" = "$CILIUM" ]; then
   ok "Cilium ${CILIUM}: the pin and the committed manifest agree"
 else
   bad "Cilium: ${RENDER} pins ${CILIUM}, the committed manifest is ${CHART}"
+fi
+
+# gitleaks: the pre-commit rev versus the pinned binary install-gitleaks.sh
+# fetches for the gitleaks-system hook. Diverge and a contributor's local hook
+# runs a different gitleaks than the one pre-commit's metadata claims.
+if [ "$GITLEAKS_INSTALL" = "$GITLEAKS_PRECOMMIT" ]; then
+  ok "gitleaks ${GITLEAKS_INSTALL}: install-gitleaks.sh and .pre-commit-config.yaml agree"
+else
+  bad "gitleaks: install-gitleaks.sh pins ${GITLEAKS_INSTALL}, .pre-commit-config.yaml pins ${GITLEAKS_PRECOMMIT}"
 fi
 
 echo "=== the documentation states the same pins ==="
