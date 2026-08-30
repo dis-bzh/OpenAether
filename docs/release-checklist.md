@@ -197,6 +197,13 @@ untested cases. Take as many as the budget allows, top down:
       formatted LUKS2 and mounted at `/var/mnt/<name>` — `cluster-verify` asks
       about no volume at all.
 - [ ] **`task cluster-roll`** — re-run it since the Talos version moved.
+- [ ] **bastion hardening, read back rather than assumed** —
+      `scripts/ops/bastion-harden-check.sh <bastion_ip> <bastion_user> <ssh_key>
+      [node_private_ip]` checks SSH tunnel reachability, root login refusal,
+      `sshd` hardening (`PermitRootLogin no`, `PasswordAuthentication no`,
+      `AllowGroups bastion-admins`), the nftables egress DROP/ALLOW split, that
+      only `:22` listens externally, and `bastion-admins` membership. Applies to
+      any provider's bastion — never run against the reference cluster.
 
 ## 5. Cloud — OVH
 
