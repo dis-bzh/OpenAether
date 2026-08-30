@@ -338,6 +338,10 @@ tasks:
       # check-script-reachability.sh actually flags an unreferenced script
       # and clears once it's wired in, not just that today's tree is clean.
       - ./scripts/dev/test-script-reachability.sh
+      # A --set typo reaches the cluster silently past every other gate;
+      # this proves the effective-config reader (and check-cilium-parity.py's
+      # missing-key guard) actually catch it, offline.
+      - ./scripts/dev/test-cilium-effective-config.sh
 
   test:
     desc: Run OpenTofu tests (cluster root)
@@ -1197,6 +1201,11 @@ tasks:
       # and a generator writing into a phantom directory. This check replays the
       # render into a throwaway directory and compares.
       - ./scripts/bootstrap/render-bootstrap-manifests.sh --check
+      # A `--set` typo passes `helm template` silently (rc 0 — an unknown key
+      # is just another value in .Values) and the check above only diffs the
+      # render against itself, so regenerating after a typo is green too.
+      # This reads the EFFECTIVE settings the committed ConfigMap carries.
+      - python3 scripts/ops/check-cilium-effective-config.py
 
   kubeconfig:
     desc: >-
