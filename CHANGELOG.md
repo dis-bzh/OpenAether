@@ -157,6 +157,19 @@ in git. 0.1.0 is the first entry describing something proven.
   accepts at most one). `check-version-drift.sh` now compares the two pins.
   [#126](https://github.com/dis-bzh/OpenAether-infra/issues/126)
 
+- **A `--set` typo in `render-bootstrap-manifests.sh` was silent end to end.**
+  `helm template` exits 0 on an unknown key (it just lands under another name
+  in `.Values`), `task render-check` only diffs the render against itself, and
+  `check-cilium-parity.py` skipped a `--set` key it could not resolve instead
+  of flagging it — so a one-character typo (`hostNamespaceOnl` for
+  `hostNamespaceOnly`) reached the cluster with nothing anywhere saying so.
+  New `check-cilium-effective-config.py`, wired into `task render-check`,
+  reads the EFFECTIVE settings the committed `cilium-config` ConfigMap
+  carries rather than the flags that produced them; `check-cilium-parity.py`
+  now fails when the production block does not set a `CHECKED` key at all,
+  instead of silently treating that as "nothing to enforce".
+  [#112](https://github.com/dis-bzh/OpenAether-infra/issues/112)
+
 - **`outscale.py`'s purge never looked at leftover snapshots**, so a
   duplicate snapshot from a failed image build sat in the account while
   "account is clean" was true of everything the script asked and false of
