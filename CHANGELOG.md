@@ -141,6 +141,13 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **`CONTRIBUTING.md` required what `check-commit-trailers.sh`'s own example,
+  and the `change-process` skill, forbade** — naming the model in the
+  `Assisted-by:` trailer, when the skill's "Never" section says the identifier
+  must never appear in a pushed artifact
+  ([#125](https://github.com/dis-bzh/OpenAether-infra/issues/125)).
+  `CONTRIBUTING.md` now matches the skill (tool-only trailer, no model
+  version) and the script's example agrees.
 - **The `gitleaks` pre-commit hook could not run at all in some sandboxes**,
   blocking every local commit. `.pre-commit-config.yaml` used the upstream
   `gitleaks` hook (`language: golang`), which pre-commit compiles from source
@@ -156,7 +163,6 @@ in git. 0.1.0 is the first entry describing something proven.
   every changed file as a positional arg, and gitleaks' `git` subcommand
   accepts at most one). `check-version-drift.sh` now compares the two pins.
   [#126](https://github.com/dis-bzh/OpenAether-infra/issues/126)
-
 - **`outscale.py`'s purge never looked at leftover snapshots**, so a
   duplicate snapshot from a failed image build sat in the account while
   "account is clean" was true of everything the script asked and false of

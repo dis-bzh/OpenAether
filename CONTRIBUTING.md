@@ -117,13 +117,19 @@ Welcome, under one condition, and the condition is not about AI: **bring the
 evidence, not the intention.** A PR claiming it fixes the Outscale egress path
 and showing no run is refused whoever wrote it.
 
-**Disclose it** with the `Assisted-by:` git trailer, naming the tool and the
-model version — the convention the Linux kernel, Fedora, Mesa and QGIS converged
-on. It exists so a future reader of `git log` knows what to re-check.
+**Disclose it** with the `Assisted-by:` git trailer, naming the tool — the
+convention the Linux kernel, Fedora, Mesa and QGIS converged on. It exists so a
+future reader of `git log` knows what to re-check.
 
     feat(outscale): two-subnet egress plan
 
-    Assisted-by: Claude Code (claude-opus-5)
+    Assisted-by: Claude Code
+
+No model version: the sessions that write these commits run under a harness
+that forbids a model identifier in anything pushed or posted, so the trailer
+stays tool-only here. This narrows the upstream convention rather than
+breaking it — `checkpatch.pl` treats the value as free-form and only warns
+when it is empty; naming the model was never a hard requirement there either.
 
 `Co-Authored-By` and `Signed-off-by` from a tool are **forbidden**: those
 trailers assert authorship and certify origin, and a model can do neither. The
