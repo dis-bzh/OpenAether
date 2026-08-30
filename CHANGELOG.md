@@ -229,6 +229,13 @@ in git. 0.1.0 is the first entry describing something proven.
   [#111](https://github.com/dis-bzh/OpenAether-infra/issues/111)). The page no
   longer states a number: it points at the one-line command that measures it
   instead, so a fourth drift is not possible — there is nothing left to drift.
+- **`CONTRIBUTING.md` required what `check-commit-trailers.sh`'s own example,
+  and the `change-process` skill, forbade** — naming the model in the
+  `Assisted-by:` trailer, when the skill's "Never" section says the identifier
+  must never appear in a pushed artifact
+  ([#125](https://github.com/dis-bzh/OpenAether-infra/issues/125)).
+  `CONTRIBUTING.md` now matches the skill (tool-only trailer, no model
+  version) and the script's example agrees.
 - **Two tracked scripts were reachable from nothing**: `scripts/ops/ensure-capo-fip.py`
   (whose own docstring calls it "the only CAPO child resource created outside
   both OpenTofu and CAPI … the only one a teardown leaves behind and billing")
