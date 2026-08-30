@@ -104,8 +104,33 @@ def parse_children() -> dict[str, dict[str, str]]:
     return children
 
 
+def missing_parent_keys(parent: dict[str, str]) -> list[str]:
+    """CHECKED keys the production block does not set at all.
+
+    Always a defect, never a legitimate omission: every CHECKED key is
+    expected in the production --set list, so its absence here means either
+    the flag was removed, or misspelled — which makes parse_parent() capture
+    it under a different name than CHECKED expects, e.g.
+    `socketLB.hostNamespaceOnl` instead of `socketLB.hostNamespaceOnly`. The
+    per-child loop below cannot tell that apart from "this cloud legitimately
+    doesn't set it", so it has to be caught here, once, before any child is
+    compared.
+    """
+    return [key for key in CHECKED if key not in parent]
+
+
 def main() -> int:
     parent = parse_parent()
+    missing = missing_parent_keys(parent)
+    if missing:
+        print(
+            f"❌ the foundation's production block does not set {len(missing)} "
+            "CHECKED key(s) — a --set typo, or the flag was removed:"
+        )
+        for key in missing:
+            print(f"  {key}")
+        return 1
+
     children = parse_children()
     if not children:
         sys.exit(f"❌ no Cilium HelmRelease found in {CLUSTERS}")
