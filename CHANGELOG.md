@@ -208,6 +208,24 @@ in git. 0.1.0 is the first entry describing something proven.
   egress policy refuses `www.talos.dev`, where the old installer took the whole
   bootstrap down with it at step 2 under `set -e`.
 
+- **`stephrobert/feint` 0.10.0 → 0.12.0, and `getplumber/plumber` v0.4.39 →
+  v0.4.48** — checked by hand at the maintainer's request, not from a Cléa
+  "probed green" verdict: feint's own probe had failed only on doc drift (the
+  installer/upgrade checks all passed), fixed here alongside the bump; plumber
+  isn't `clea bump`-safe at all — its anchor is a SHA-pinned `uses:` line where
+  the tool only rewrites the trailing `# vX.Y.Z` comment, which would leave the
+  old commit pinned under a new-looking version. Bumped past what Cléa's stale
+  report knew about (0.11.0) once a direct check of `stephrobert/feint`'s tags
+  showed 0.12.0 already released; plumber's new commit SHA was read straight
+  from its `v0.4.48` tag and verified against the tag's own commit before
+  writing it, never derived from the version string. Proof: `task lint`,
+  `task render-check`, `task test-scripts`, `task validate` (`cluster` and
+  `talos-image`), `task test`, checkov and gitleaks (`trivy` unreachable from
+  this sandbox) all green, plus `task feint-test` — a full create / verify /
+  empty-replan / destroy cycle against the real v0.12.0 binary, both Scaleway
+  and Outscale. `plumber`'s own audit is unexercised outside GitHub Actions;
+  this PR's CI run is what proves that pin.
+
 - **Renovate moves from a six-hour weekly window to a daily one**, and
   `dependencyDashboard` becomes explicit. It has proposed nothing since its
   config landed on 2026-07-30 — its nine pull requests were created three hours

@@ -116,7 +116,7 @@ régressions de câblage avant de dépenser.
 
 ## Manques connus
 
-Épinglé sur **Feint 0.10.0** (`scripts/dev/feint.sh`). Ce que cette voie ne peut
+Épinglé sur **Feint 0.12.0** (`scripts/dev/feint.sh`). Ce que cette voie ne peut
 toujours pas porter, tout consigné dans [les issues ouvertes](https://github.com/dis-bzh/OpenAether-infra/issues) :
 
 | Non exercé | Pourquoi |
