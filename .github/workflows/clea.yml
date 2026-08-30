@@ -32,9 +32,12 @@ concurrency:
   group: clea
   cancel-in-progress: false
 
+# Read-only baseline. Every job that needs more declares it itself, scoped to
+# what that job actually does — see #124: this used to be contents:write +
+# issues:write for the whole workflow, including the jobs that install and run
+# code published upstream that same day.
 permissions:
-  contents: write   # push clea/probe/* branches
-  issues: write     # rewrite the report issue
+  contents: read
 
 env:
   WEEKLY: ${{ github.event.schedule == '41 3 * * 0' || inputs.lane == 'weekly' }}
@@ -44,12 +47,16 @@ jobs:
     name: Scan upstream
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     outputs:
       state: ${{ steps.scan.outputs.state }}
       matrix: ${{ steps.matrix.outputs.matrix }}
       issue: ${{ steps.issue.outputs.number }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
 
       # The report issue is also the state store: `clea report` embeds the state
       # in an HTML comment at the end of its body. No artifact, no cache, and
@@ -114,6 +121,8 @@ jobs:
     if: needs.scan.outputs.matrix != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       max-parallel: 4
@@ -204,20 +213,9 @@ jobs:
           PY
           bash -e gates.sh 2>&1 | tee gates.log
 
-      - name: Verdict, and the branch that carries it
+      - name: Verdict, and the commit that carries it
         env:
           GREEN: ${{ steps.probe.outcome != 'failure' && steps.gates.outcome != 'failure' }}
-          # Optional. GITHUB_TOKEN cannot push a change to a file under
-          # .github/workflows/ — three anchors live there (commitizen,
-          # opentofu/opentofu, siderolabs/talos, all in ci.yml) — and no
-          # `permissions:` grant exists for it; only a classic PAT with the
-          # `workflow` scope can. Falls back to the default token when unset,
-          # which still pushes every OTHER probe branch fine.
-          CLEA_WORKFLOW_TOKEN: ${{ secrets.CLEA_WORKFLOW_TOKEN }}
-          # The checkout above no longer persists this anywhere — see why on
-          # that step. Every push now builds its own credential explicitly,
-          # this one included.
-          DEFAULT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -253,32 +251,20 @@ jobs:
           git add -u
           git add clea-probe.json
           git commit -q -m "chore(clea): probe ${DEP} ${VERSION}"
-          # Pushed green or red on purpose: a red branch is the reproduction, and
-          # deleting it leaves a report describing something nobody can re-run.
-          #
-          # --force, not --force-with-lease: this checkout never fetched the
-          # branch it is about to overwrite (only the default branch is
-          # fetched), so the lease has nothing to compare against and refuses
-          # every push once the branch already exists from a prior run — "!
-          # [rejected] ... (stale info)", on EVERY dependency, seen on this
-          # workflow's second-ever run (2026-08-24). The lease exists to stop
-          # clobbering someone else's concurrent work; nobody but this
-          # workflow ever writes to clea/probe/*, so there is nothing to
-          # protect against, and the branch is meant to always reflect only
-          # the latest probe.
-          # Two things a URL-embedded credential ran into before this checkout
-          # stopped persisting one of its own: (1) actions/checkout's default
-          # credential is not a simple config key to unset — it lives behind
-          # an `includeIf` pointing at a temp file, so `--unset-all` on the
-          # visible key silently touched nothing; (2) layering a second
-          # credential with `-c` on top of a persisted one sent two
-          # Authorization headers and GitHub refused the request outright.
-          # With nothing persisted at all (checkout above), the credential
-          # built here is the only one in play, whichever it is.
-          token="${CLEA_WORKFLOW_TOKEN:-$DEFAULT_TOKEN}"
-          git push --force \
-            "https://x-access-token:${token}@github.com/${{ github.repository }}.git" \
-            "HEAD:clea/probe/${SLUG}"
+          # Packaged as a patch, not pushed from here (#124): everything above
+          # this step ran code published upstream that same day (probe.sh)
+          # plus this repository's own regen/gates. A PATH shim dropped by any
+          # of that could capture a credential held in THIS job's environment
+          # — so this job never holds contents:write, and the `push` job,
+          # which runs none of that code, applies the patch instead.
+          git format-patch -1 HEAD --stdout > "${SLUG}.patch"
+
+      - name: Hand the branch to the push job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: clea-probe-${{ env.SLUG }}
+          path: ${{ env.SLUG }}.patch
+          retention-days: 1
 
   cluster:
     name: Local Talos cluster
@@ -288,6 +274,8 @@ jobs:
       (github.event.schedule == '41 3 * * 0' || inputs.lane == 'weekly')
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      contents: read
     env:
       # One control plane, one worker. This repository's own default is 3 + 3,
       # which is six Talos containers on a shared runner; the topology below is
@@ -346,11 +334,6 @@ jobs:
         env:
           UP: ${{ steps.up.outcome }}
           VERIFY: ${{ steps.verify.outcome }}
-          # See the probe job's Verdict step: `talos_version` is one of the
-          # bumps above, and it is also anchored inside ci.yml — the same
-          # GITHUB_TOKEN restriction applies here.
-          CLEA_WORKFLOW_TOKEN: ${{ secrets.CLEA_WORKFLOW_TOKEN }}
-          DEFAULT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -383,25 +366,98 @@ jobs:
           git add -u
           git add clea-probe.json
           git commit -q -m "chore(clea): local cluster lane"
-          # --force: see the probe job's push for why --force-with-lease
-          # cannot work here — this checkout never fetched the branch either.
-          # See the probe job's push for why the credential is built
-          # explicitly rather than relying on anything persisted.
-          token="${CLEA_WORKFLOW_TOKEN:-$DEFAULT_TOKEN}"
-          git push --force \
-            "https://x-access-token:${token}@github.com/${{ github.repository }}.git" \
-            HEAD:clea/probe/local-cluster
+          # See the probe job's verdict step (#124): packaged as a patch, not
+          # pushed — this job also ran freshly installed upstream code (helm,
+          # flux, talosctl, via setup.sh) before this point.
+          git format-patch -1 HEAD --stdout > local-cluster.patch
 
-  report:
-    name: Report
+      - name: Hand the branch to the push job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: clea-probe-local-cluster
+          path: local-cluster.patch
+          retention-days: 1
+
+  push:
+    name: Push probe branches
     needs: [scan, probe, cluster]
     if: always() && needs.scan.result == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The only job in this workflow holding contents:write. Deliberately: it
+    # is also the only job that runs none of the code published upstream that
+    # `probe`/`cluster` just installed and ran — nothing here but this
+    # repository's own checkout action and git. #124.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+
+      - name: Collect the probe/cluster branches
+        id: download
+        continue-on-error: true  # nothing to probe today is not a failure
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          pattern: clea-probe-*
+          path: patches
+          merge-multiple: true
+
+      # Pushed green or red on purpose: a red branch is the reproduction, and
+      # deleting it leaves a report describing something nobody can re-run.
+      - name: Apply each patch and push its branch
+        if: steps.download.outcome == 'success'
+        env:
+          # Optional. GITHUB_TOKEN cannot push a change to a file under
+          # .github/workflows/ — three anchors live there (commitizen,
+          # opentofu/opentofu, siderolabs/talos, all in ci.yml) — and no
+          # `permissions:` grant exists for it; only a classic PAT with the
+          # `workflow` scope can. Falls back to the default token when unset,
+          # which still pushes every OTHER probe branch fine.
+          CLEA_WORKFLOW_TOKEN: ${{ secrets.CLEA_WORKFLOW_TOKEN }}
+          # The checkout above does not persist a credential — see that step.
+          # This job builds its own explicitly, this one included.
+          DEFAULT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          token="${CLEA_WORKFLOW_TOKEN:-$DEFAULT_TOKEN}"
+          remote="https://x-access-token:${token}@github.com/${{ github.repository }}.git"
+          for patch in patches/*.patch; do
+            slug="$(basename "$patch" .patch)"
+            branch="clea/probe/${slug}"
+            git checkout -q -B "$branch" "${{ github.sha }}"
+            git am -q "$patch"
+            # --force, not --force-with-lease: this checkout never fetched the
+            # branch it is about to overwrite (only the default branch is
+            # fetched), so the lease has nothing to compare against and
+            # refuses every push once the branch already exists from a prior
+            # run — "! [rejected] ... (stale info)", on EVERY dependency, seen
+            # on this workflow's second-ever run (2026-08-24). The lease
+            # exists to stop clobbering someone else's concurrent work; nobody
+            # but this workflow ever writes to clea/probe/*, so there is
+            # nothing to protect against, and the branch is meant to always
+            # reflect only the latest probe.
+            git push --force "$remote" "HEAD:${branch}"
+            git checkout -q "${{ github.sha }}"
+          done
+
+  report:
+    name: Report
+    needs: [scan, probe, cluster, push]
+    if: always() && needs.scan.result == 'success'
+    runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write   # prune stale clea/probe/* branches, below
+      issues: write     # rewrite the report issue
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Collect the probe verdicts from their own branches
         env:
@@ -497,11 +553,16 @@ jobs:
           fi
 
       - name: Probe branches whose bump already landed
+        env:
+          # The checkout above does not persist a credential (#124) — this
+          # push builds its own explicitly, same as the push job's.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           python3 scripts/clea/clea.py prune > stale.txt || true
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
           while read -r branch; do
             [ -n "$branch" ] || continue
             echo "pruning ${branch}"
-            git push -q origin --delete "$branch" || true
+            git push -q "$remote" --delete "$branch" || true
           done < stale.txt
