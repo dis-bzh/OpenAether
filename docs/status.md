@@ -54,11 +54,13 @@ namespaced by the cloud that HOLDS the bucket, and a cross-provider backup is
 proven — an encrypted tfstate at Outscale while the cluster runs on Scaleway.
 Every offline assertion is mutation-tested; the count and harness total are not
 written here as a number — a hand-typed one drifted from what `task
-test-scripts` actually ran three times running (333, then 413, then 468, each
-one stale before the next edit). Measure it instead:
-`task test-scripts 2>&1 | grep -oE '^[0-9]+ passed' | awk '{s+=$1; n++} END
-{print s, n}'`. The emulated lane runs feint 0.10.0 against Scaleway provider
-2.81.0, the version the clusters run.
+test-scripts` actually ran **four** times running (333, then 413, then 468,
+then 486, each one stale before the next edit — the last of those from a
+branch that, while fixing the same symptom, kept writing a number here; see
+[#111](https://github.com/dis-bzh/OpenAether-infra/issues/111)). Measure it
+instead: `task test-scripts 2>&1 | grep -oE '^[0-9]+ passed' | awk '{s+=$1;
+n++} END {print s, n}'`. The emulated lane runs feint 0.10.0 against Scaleway
+provider 2.81.0, the version the clusters run.
 
 **The root cause behind a week of upgrade failures is fixed**, and it was ours:
 the shared schematic shipped `siderolabs/qemu-guest-agent`, which never starts on
@@ -130,6 +132,17 @@ to completion; nobody has
 deployed under a non-empty `bucket_suffix`; and the failover — provider A treated
 as gone, the cluster rebuilt on B from B's replica alone — has never been
 attempted.
+
+**Six gates were green on something they had stopped checking**, found on
+2026-08-28 by auditing what the pipeline actually constrains rather than what it
+runs. Each is reproduced in both directions and fixed — see the CHANGELOG. The
+two that would have cost money: `tofu validate` answered `Success!` with a
+required provider-contract output deleted (`try()` cannot tell an inactive
+provider from a missing attribute), and `talos-image.sh` went straight to "image
+already up to date" when the Factory answered without a schematic id, one step
+from a billable publish with the pin never verified. `tflint` was linting one
+directory in fourteen. `provider-contract.md` — the document `CLAUDE.md` calls
+the authority — required a variable no module has ever declared.
 
 **Resume here**: the interruption regression, then rolling-replace's two blind
 applies, then decide whether 0.1.0 ships a staging lane at all.

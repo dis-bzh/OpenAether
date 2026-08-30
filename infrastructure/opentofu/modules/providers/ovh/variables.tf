@@ -52,8 +52,8 @@ variable "worker_data_volume_type" {
     explicitly requested. Observed on a real EU-WEST-PAR apply (2026-07-25).
     Available types: high-speed, high-speed-gen2, *-luks variants (Longhorn
     already does its own LUKS with an OpenBao-held key, so plain is enough).
-    ⚠️ `high-speed-gen2` a produit des volumes en `error status` sur un 50 GiB
-    in EU-WEST-PAR (2026-07-25) — it has size/region constraints;
+    ⚠️ `high-speed-gen2` produced volumes stuck in `error status` on a 50 GiB
+    disk in EU-WEST-PAR (2026-07-25) — it has size/region constraints;
     `high-speed` works. Check the type before changing it.
   EOT
   type        = string

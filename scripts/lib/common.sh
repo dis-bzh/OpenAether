@@ -10,6 +10,20 @@
 # and consistent — change a rule here, not in five places.
 # ==============================================================================
 
+# --- A harness must not grade a function that is not there --------------------
+# `fn args && bad "..." || ok "..."` reads as a test and is not one: when fn does
+# not exist bash returns 127, the `||` branch runs, and a ✓ is printed for an
+# assertion nothing executed. Two sites in test-endpoint-probe.sh had that shape.
+# Call this before the assertions, so the harness dies instead of congratulating
+# itself. Usage: oa_require_fn oa_talos_endpoint_ok ...
+oa_require_fn() {
+  local missing=0 fn
+  for fn in "$@"; do
+    declare -F "$fn" >/dev/null || { echo "✗ $fn is not defined — this harness would grade nothing" >&2; missing=1; }
+  done
+  [ "$missing" -eq 0 ]
+}
+
 # --- Can sudo actually be USED here, or does it merely exist? -----------------
 # `command -v sudo` answers the wrong question, and eight places asked it. On a
 # workstation where /usr/local/bin is not writable and sudo wants a password,

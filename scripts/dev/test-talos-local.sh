@@ -11,8 +11,8 @@
 # (maintenance-mode gRPC apply, which is cloud-only per the Talos Docker docs).
 #
 # Usage:
-#   ./scripts/test-talos-local.sh             # full 3-CP deploy + verify
-#   ./scripts/test-talos-local.sh --destroy   # tear down
+#   ./scripts/dev/test-talos-local.sh             # full 3-CP deploy + verify
+#   ./scripts/dev/test-talos-local.sh --destroy   # tear down
 #
 # Prerequisites: docker (Desktop + WSL2 integration), tofu, talosctl, kubectl, helm, nc
 # ==============================================================================

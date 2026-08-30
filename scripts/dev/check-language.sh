@@ -120,10 +120,22 @@ scan_code() {
       # the repository clean while `preflight-quotas.py --help` answered "VMs que
       # la topologie ajoutera" between two English options — a half-translated
       # block, which is the 2026-07-29 regression CLAUDE.md names by hand.
+      # A third kind, and the one that got away: an HCL `description = <<-EOT`
+      # heredoc. Its body is neither a comment nor a line carrying
+      # `description=`, so every continuation line was invisible — which is how
+      # a whole French sentence sat in the middle of an English block in
+      # ovh/variables.tf, in the text `tofu` prints to the operator.
+      /description[[:space:]]*=[[:space:]]*<<-?[A-Za-z_]+/ {
+        match($0, /<<-?[A-Za-z_]+/)
+        term = substr($0, RSTART, RLENGTH)
+        sub(/^<<-?/, "", term)
+        in_doc = 1
+      }
+      in_doc && $0 ~ ("^[[:space:]]*" term "[[:space:]]*$") { in_doc = 0; next }
       {
         comment = ($0 ~ /^[[:space:]]*(#|\/\/|\*)/)
         printed = (!comment && $0 ~ /((echo|print|printf|puts)[[:space:](]|(help|description)=)/)
-        if (!comment && !printed) next
+        if (!comment && !printed && !in_doc) next
         text = $0
         # In a printed line, a substitution is code, not prose: `du -h "$SNAP"`
         # inside an otherwise English message is the `du` command, and reporting
