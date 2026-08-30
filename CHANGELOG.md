@@ -87,6 +87,22 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Added
 
+- **Two Checkov custom checks close the gap for the three providers Checkov
+  ships no policy family for (#123).** `.checkov.yaml` is a hard gate, but
+  measured on this tree Checkov's built-in rules land on OpenStack (OVH)
+  alone — 84 of 131 provider resources (Scaleway, Outscale, Proxmox) passed
+  through it in silence, indistinguishable in a CI log from a clean scan.
+  `infrastructure/opentofu/checkov-custom-checks/` expresses two rows of
+  `provider-contract.md` as checks instead of prose: `CKV_OA_1` (every
+  control_plane/worker node ignores its boot-image attribute — without it a
+  routine `tofu apply` after a `talosctl upgrade` replaces every node at
+  once, all control planes together, and etcd loses quorum) and `CKV_OA_2`
+  (a security group's inbound default policy must be `drop`). Both are
+  mutation-tested against the real tree (`test-checkov-custom-checks.sh`,
+  wired into `task security`): break either rule, watch it name the exact
+  resource, restore, watch it pass again. The directory's `__init__.py` is
+  load-bearing — without it Checkov registers nothing and still exits 0,
+  the exact false green this fix exists to close, confirmed by removing it.
 - **`task purge-orphans PROVIDER=… [APPLY=1]`.** `docs/release-checklist.md`
   already told the reader to run it; it did not exist. The scripts it wraps are
   the last sentence between a failed teardown and a bill, and they were reachable
