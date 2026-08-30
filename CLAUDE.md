@@ -132,6 +132,16 @@ mocké → `task feint-*` émulé → cloud réel.
 Un constat sans changement à proposer est une **issue**, pas une PR. Une PR
 propose un changement ; c'est ce qui distingue les deux.
 
+**Un audit n'est pas une PR.** Une session qui balaie le dépôt à la recherche
+de défauts (revue de pipeline, de gates, etc.) doit soit corriger ce qu'elle
+trouve dans la même session (une PR par lot cohérent, comme la routine
+quotidienne), soit s'arrêter à 2 issues comme toute autre session — jamais
+ouvrir un lot au-delà sans un budget de fermeture en face. Le 2026-08-28, une
+session d'audit a ouvert 15 issues (#111–#125) en 9 minutes et laissé un
+commit correctif de 51 fichiers sur une branche jamais transformée en PR :
+aucune de ces issues n'a été refermée par ce travail. Le déséquilibre
+entrée/sortie est le signal à surveiller, pas le nombre d'issues en lui-même.
+
 Il y a eu `docs/backlog.md`, un tracker tenu à la main jusqu'à 696 lignes, et
 illisible bien avant. Il est supprimé, et son contenu réparti selon sa nature :
 

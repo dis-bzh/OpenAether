@@ -118,6 +118,16 @@ secret's `region` key, so `eu-west-2a` yields `api.eu-west-2a.outscale.com`,
 which does not resolve — the Net never reconciles. Use `eu-west-2`; the
 subregion belongs in `OSC_SUBREGION`.
 
+**An OpenStack (CAPO) child's floating IP must exist BEFORE it boots.** The
+IMDS never exposes it (Neutron-side NAT), so it has to be in the Talos
+`certSANs` up front, which means in git before `flux reconcile`, not
+something CAPO can allocate for you mid-provision. `scripts/ops/ensure-capo-fip.py
+<cluster> [--network Ext-Net] [--count N]` finds-or-allocates it by a
+`openaether:<cluster>` description tag (idempotent — re-running never bills a
+duplicate) and prints the address to copy into the child's `OS_CP_FLOATING_IPS`.
+It is also the only CAPO child resource created outside both OpenTofu and CAPI,
+so it is the only one a teardown leaves behind, still billing.
+
 ## Teardown
 
 Children first (the management owns their CRs), then the management.

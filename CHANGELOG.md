@@ -148,6 +148,19 @@ in git. 0.1.0 is the first entry describing something proven.
   ([#125](https://github.com/dis-bzh/OpenAether-infra/issues/125)).
   `CONTRIBUTING.md` now matches the skill (tool-only trailer, no model
   version) and the script's example agrees.
+- **Two tracked scripts were reachable from nothing**: `scripts/ops/ensure-capo-fip.py`
+  (whose own docstring calls it "the only CAPO child resource created outside
+  both OpenTofu and CAPI … the only one a teardown leaves behind and billing")
+  and `scripts/ops/bastion-harden-check.sh`, a check nothing ever asked for.
+  New `check-script-reachability.sh`, wired into `task lint`, requires every
+  tracked script to be named by a task, a workflow, another script, or a
+  document — a plain basename `git grep`, same shape as the reproduction in
+  [#116](https://github.com/dis-bzh/OpenAether-infra/issues/116). Both scripts
+  are kept: `ensure-capo-fip.py` is now documented in `docs/capi-bootstrap.md`
+  / `.fr.md` (the CAPO floating-IP pitfall it exists to close), and
+  `bastion-harden-check.sh` in `docs/release-checklist.md`'s "worth the extra
+  spend" list.
+
 - **The `gitleaks` pre-commit hook could not run at all in some sandboxes**,
   blocking every local commit. `.pre-commit-config.yaml` used the upstream
   `gitleaks` hook (`language: golang`), which pre-commit compiles from source
