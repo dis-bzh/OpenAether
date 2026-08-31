@@ -16,6 +16,16 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **`check-commit-authors.sh` could read its own `git log` failure as "no
+  commit is authored by a tool" (#132).** `set -e` does not propagate a
+  failure inside a process substitution (`< <(git log … )`) — a malformed
+  rev-range from a future CI edit would leave the `while read` loop with
+  nothing to read, zero iterations, and the script printed its success line
+  over a check that never ran. `git log` now writes to a file first and its
+  own exit status is checked before anything reads it. Not yet exercised by
+  CI's own wiring (the `commits` job always passes a valid range), so this
+  was latent, not live — reproduced and fixed anyway.
+
 - **`test-talos-local.sh` hung for 90s on a host missing `CAP_SYS_RESOURCE`,
   then failed on an unrelated-looking timeout**, instead of the ~1s refusal
   its siblings give when no local cluster is reachable
@@ -96,6 +106,22 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Added
 
+- **Two Checkov custom checks close the gap for the three providers Checkov
+  ships no policy family for (#123).** `.checkov.yaml` is a hard gate, but
+  measured on this tree Checkov's built-in rules land on OpenStack (OVH)
+  alone — 84 of 131 provider resources (Scaleway, Outscale, Proxmox) passed
+  through it in silence, indistinguishable in a CI log from a clean scan.
+  `infrastructure/opentofu/checkov-custom-checks/` expresses two rows of
+  `provider-contract.md` as checks instead of prose: `CKV_OA_1` (every
+  control_plane/worker node ignores its boot-image attribute — without it a
+  routine `tofu apply` after a `talosctl upgrade` replaces every node at
+  once, all control planes together, and etcd loses quorum) and `CKV_OA_2`
+  (a security group's inbound default policy must be `drop`). Both are
+  mutation-tested against the real tree (`test-checkov-custom-checks.sh`,
+  wired into `task security`): break either rule, watch it name the exact
+  resource, restore, watch it pass again. The directory's `__init__.py` is
+  load-bearing — without it Checkov registers nothing and still exits 0,
+  the exact false green this fix exists to close, confirmed by removing it.
 - **`check-dead-references.sh`, wired into `task lint` (#118).** A path stops
   resolving and nothing notices — read once in a comment, or read (and
   copy-pasted) on every run in a printed string. lychee finds none of this:
