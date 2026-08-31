@@ -31,19 +31,10 @@ task feint-down
 ## Trois voies, parce qu'une seule ne peut pas faire les trois
 
 **`feint-plan` — le vrai root `cluster`, plan seulement.** Vrais modules, vrai
-provider, `envs/feint-<provider>.tfvars.example`. Impossible d'aller plus loin
-que le `plan`, et ce qui l'en empêche tient désormais en une liste courte :
-
-- **Scaleway** : le module crée toujours une public gateway et des réservations
-  IPAM. La gateway n'est pas servie ; la réservation IPAM est déclinée
-  volontairement. Inchangé depuis **Feint** 0.5.0 — aucune version jusqu'à
-  l'enregistrement 0.7.3 ci-dessous n'a fait bouger le pack Scaleway.
-- **Outscale** : les load balancers, et rien d'autre — et c'est une décision, pas
-  un manque. La 0.6.0 a fait passer le pack de 31 à 72 routes : security groups,
-  IP publiques, internet service, NAT service, route tables et NICs fonctionnent
-  tous ; la 0.7.0 n'y ajoute aucune route mais a fait cesser le segfault de
-  `data.outscale_images`, ce qui permet à cette voie de résoudre son image par
-  la data source.
+provider, `envs/feint-<provider>.tfvars.example`. Le script lui-même ne fait
+toujours que planifier, mais les raisons qui l'arrêtaient là ont disparu depuis
+Feint 0.12.0 — voir `feint-record` ci-dessous, qui applique désormais le
+module provider de ce même root de bout en bout.
 
 Le root déclarant un backend S3 partiel, la voie y dépose un `*_override.tf` de
 backend local et le retire en sortant.
@@ -58,25 +49,19 @@ depuis l'API et non depuis le state. Voir son
 **`feint-record` — mesurer le mur au lieu d'en discuter.** `feint proxy`
 s'intercale entre le provider et l'émulateur et écrit un objet JSON caviardé par
 échange ; `feint transcript` classe ensuite les opérations qu'aucun pack ne sert,
-les plus appelées d'abord. L'apply derrière est *censé* échouer, au premier appel
-non servi — tout ce qui précède est justement ce qui est enregistré. Résultat
-actuel, reproductible avec les commandes ci-dessus :
+les plus appelées d'abord. En dessous, ceci exécute un vrai `tofu apply
+-target=module.<provider>` sur le root cluster lui-même — le même root que
+`feint-plan` se contente de planifier — à travers le proxy, et cet apply était
+*censé* échouer au premier appel non servi.
 
-| Provider | Appelé, servi par personne | Appels | Manquant, ou décliné ? |
-|---|---|---|---|
-| Scaleway | `POST /ipam/v1/regions/fr-par/ips` (501) | 2 | Décliné — le `GET` sur le même chemin répond 200 |
-| Scaleway | `/lb/v1/zones/fr-par-1/ips` (501) | 2 | Manquant |
-| Scaleway | `/vpc-gw/v2/zones/fr-par-1/ips` (501) | 1 | Manquant |
-| Outscale | `/api/v1/CreateLoadBalancer` (404) | 2 | Décliné |
-
-Les mêmes trois opérations en 0.6.0, 0.7.0 et 0.7.3 : aucune version n'a bougé
-quoi que ce soit qu'appellent nos modules. Ce qui a bougé, c'est la *forme* du
-refus — les deux manques Scaleway répondaient un `404` en texte brut jusqu'à la
-0.7.3, que le SDK jetait pour son content type, si bien que l'appelant voyait
-`404 Not Found` et pas de corps. Ils répondent maintenant `501` dans le dialecte
-de Scaleway (notre issue #74). La distinction de la dernière colonne est tout
-l'intérêt de rejouer la mesure — une route manquante est un trou que quelqu'un
-peut combler, un decline est une réponse.
+**Fermé depuis Feint 0.12.0** (re-mesuré le 2026-08-31, les deux providers) :
+*« every operation the client called is served by a pack »* — zéro appel non
+servi, là où l'enregistrement 0.7.3 ci-dessous en listait trois. L'apply que
+ceci mesure va maintenant jusqu'au bout sur les modules des deux providers, ce
+qui prouve que le module provider du vrai root cluster peut être appliqué
+contre l'émulateur, pas seulement planifié (voir `feint-plan` ci-dessus). Ce
+qui échouait avant et où c'est parti est conservé dans « Manques connus »
+ci-dessous, puisque c'est de l'histoire désormais, plus une limite actuelle.
 
 L'amont est ici l'émulateur, pas le cloud. Un client qui signe l'hôte pour lequel
 il a été configuré — le provider Terraform le fait — ne peut pas être enregistré
@@ -121,13 +106,10 @@ toujours pas porter, tout consigné dans [les issues ouvertes](https://github.co
 
 | Non exercé | Pourquoi |
 |---|---|
-| Load balancers Outscale | `CreateLoadBalancer` est **décliné volontairement**, pas manquant : un load balancer est un plan de données que l'émulateur n'a pas, en créer un rendrait un nom DNS ne résolvant nulle part. `ReadLoadBalancers` répond une liste vide. Celui-là ne bougera pas. |
-| Réservations IPAM Scaleway | Décliné aussi, avec une raison : les adresses viennent du plan de sous-réseau où le NIC est placé, donc `BookIP` distribuerait une adresse qu'aucun runtime ne configure. `scaleway_ipam_ip` est donc hors de portée ici. |
-| LB et public gateway Scaleway | Réellement absents. Les deux vrais manques que nos modules rencontrent. Depuis la 0.7.3 ils refusent au moins lisiblement — `501` dans le dialecte du SDK au lieu du `404` en texte brut de net/http, que le SDK Scaleway jetait pour son content type (notre issue #74). |
-| Type de volume racine Scaleway | Aucun `root_volume { volume_type }` n'est écrivable : le provider 2.79+ refuse `b_ssd`, et `sbs_volume` planifie éternellement car l'émulateur l'écrase. L'honorer enverrait le provider sur `block/v1`, non monté. Mesuré ici, c'est devenu la limite documentée en amont et son issue #8. |
+| Type de volume racine Scaleway | Aucun `root_volume { volume_type }` n'est écrivable : le provider 2.79+ refuse `b_ssd`, et `sbs_volume` planifie éternellement car l'émulateur l'écrase. L'honorer enverrait le provider sur `block/v1`, non monté. Mesuré ici, c'est devenu la limite documentée en amont et son issue #8. Non re-vérifié sous 0.12.0. |
 | Résolution d'image par nom | Le catalogue est fixe, et la 0.7.0 applique le filtre `image_names` : un nom publié par un pipeline de build ne correspond à rien — des deux côtés. Les tfvars Scaleway épinglent `image_id` ; ceux d'Outscale pointent `image_name` sur une entrée du catalogue, ce qui exerce la recherche sans prétendre résoudre notre propre image. |
 
-Trois choses ont quitté cette liste. `outscale_volume_link` en 0.6.0, qui a monté
+Six choses ont quitté cette liste. `outscale_volume_link` en 0.6.0, qui a monté
 le filtre `LinkVolumeVmIds` dont dépend son attente. `data.outscale_images` en
 0.7.0, qui ne fait plus segfaulter le provider — la voie Outscale résout donc son
 image par la data source plutôt que par un id épinglé, ce qui exerce la forme
@@ -138,3 +120,17 @@ contre seize que le pack frappait, si bien que taguer un `igw-` ou un `rtb-`
 maintenant six types plutôt que de remettre les trois qu'elle avait retirés — une
 table qui a pris du retard une fois mérite d'être exercée sur plus que la ligne
 qui l'a attrapée.
+
+Trois de plus l'ont quittée en 0.12.0, mesuré le 2026-08-31, et cette table les
+avait pourtant appelées permanents. **Load balancers Outscale** :
+`CreateLoadBalancer` et `UpdateLoadBalancer` répondent maintenant 200 —
+étiquetés ici « décliné volontairement... celui-là ne bougera pas » jusqu'à la
+version qui l'a fait bouger. **Réservations IPAM Scaleway** :
+`ipam/v1/API.BookIP` répond maintenant 200, pas le `501` que cette table
+appelait un decline permanent. **LB et public gateway Scaleway** : chaque
+route `lb/v1/ZonedAPI.*` que le module appelle (`CreateLB`, `CreateFrontend`,
+`CreateBackend`, `AttachPrivateNetwork`…) répond maintenant 200 — les deux
+manques que cette table appelait « réellement absents ». C'est l'apply propre
+à `feint-record` (ci-dessus) qui a attrapé les trois : un apply du module
+provider du vrai root cluster, les deux providers, allant jusqu'au bout avec
+zéro appel non servi, là où la 0.7.3 s'arrêtait net au premier.
