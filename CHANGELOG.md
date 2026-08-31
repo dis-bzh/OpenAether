@@ -16,6 +16,15 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **A comment beside the Outscale provider block claimed the top-level
+  `region` argument was deprecated and warned on every real command**
+  (#77). Stale: `outscale/terraform-provider-outscale` reverted that
+  deprecation in its own PR #817, shipped in 1.8.0 — the version this repo
+  already pins. Real commands no longer warn, so there is nothing left to
+  avoid by building the API URL ourselves (which would mean hardcoding
+  Outscale's DNS). Comment now records the decision instead of a stale
+  premise; no behavior change.
+
 - **`docs/emulated-cloud.md`/`.fr.md` documented three Feint gaps as
   permanent** — Outscale load balancers ("this one will not move"), Scaleway
   IPAM reservations, Scaleway LB and public gateway ("genuinely absent") —
