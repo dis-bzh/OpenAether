@@ -326,6 +326,7 @@ data:
 
 # Extra config allows adding arbitrary properties to the cilium config.
 # By putting it at the end of the ConfigMap, it's also possible to override existing properties.
+
 ---
 # Source: cilium/templates/cilium-envoy/configmap.yaml
 apiVersion: v1
@@ -769,6 +770,7 @@ rules:
   - get
   - list
   - watch
+
 ---
 # Source: cilium/templates/cilium-agent/role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -809,6 +811,7 @@ rules:
   - delete
   - update
   - patch
+
 ---
 # Source: cilium/templates/cilium-operator/role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -860,6 +863,7 @@ subjects:
   - kind: ServiceAccount
     name: "cilium"
     namespace: kube-system
+
 ---
 # Source: cilium/templates/cilium-agent/rolebinding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -897,6 +901,7 @@ subjects:
 - kind: ServiceAccount
   name: "cilium-operator"
   namespace: kube-system
+
 ---
 # Source: cilium/templates/cilium-operator/rolebinding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
