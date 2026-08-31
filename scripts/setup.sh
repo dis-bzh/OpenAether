@@ -391,6 +391,13 @@ if ! check_cmd gitleaks; then
     "$(dirname "${BASH_SOURCE[0]}")/internal/install-gitleaks.sh"
 fi
 
+# 5e. plumber — `task pipeline-audit` runs it directly; before this it was the
+# CI policy scanner nobody could see the verdict of without fetching the
+# binary by hand (#52).
+if ! check_cmd plumber; then
+    "$(dirname "${BASH_SOURCE[0]}")/internal/install-plumber.sh"
+fi
+
 # 6. Check Talos image + backup tools (used by `task image-build` and the S3 backups)
 MISSING_IMG_TOOLS=0
 for t in curl zstd qemu-img aws gpg jq; do

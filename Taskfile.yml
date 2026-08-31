@@ -228,8 +228,24 @@ tasks:
       # no error in the CAPI CR. Two deployments were lost to it.
       - python3 scripts/ops/preflight-quotas.py {{.PROVIDER}} {{.CLI_ARGS}}
 
+  pipeline-audit:
+    desc: >-
+      Run the CI policy scanner (plumber) locally — same gate as
+      "Pipeline audit" in security.yml, before pushing.
+    cmds:
+      - |
+        command -v plumber >/dev/null 2>&1 || {
+          echo "✗ plumber not installed — run ./scripts/setup.sh, or: ./scripts/internal/install-plumber.sh" >&2
+          exit 1
+        }
+        # GH_TOKEN is optional here: without one, branch-protection controls
+        # cannot be evaluated and the run reports degraded/incomplete rather
+        # than refusing outright — same shape CI's own token-scope fallback
+        # already documents (security.yml, "branchMustBeProtected").
+        plumber analyze --output plumber-report.json
+
   security:
-    desc: "Run security scans (Trivy, Checkov, Gitleaks)"
+    desc: "Run security scans (Trivy, Checkov, Gitleaks, pipeline audit)"
     cmds:
       # Skip the upstream-vendored Cilium/Flux bootstrap manifests (not our
       # config to fix; reviewed at render time). Matches the CI Trivy step.
@@ -261,6 +277,11 @@ tasks:
       # test fixtures use synthetic-but-routable quads. This asserts they still
       # match; two of them once matched nothing and passed.
       - ./scripts/dev/check-gitleaks-rules.sh
+      # Last: without GH_TOKEN this legitimately exits 3 ("incomplete data" —
+      # branch protection cannot be evaluated), so it must not swallow the
+      # checks above it that CAN succeed offline. Set GH_TOKEN for a complete
+      # run; see task pipeline-audit's own description.
+      - task: pipeline-audit
 
   purge-orphans:
     desc: >-
@@ -375,6 +396,10 @@ tasks:
       # and fixture-writing redirects are not, and .deadreferencesignore
       # scopes to the one file:candidate pair it names.
       - ./scripts/dev/test-dead-references.sh
+      # A host missing CAP_SYS_RESOURCE looked healthy for 90s before this,
+      # then died on an unrelated-looking timeout (#54). Against a stubbed
+      # capsh, and also against this host's real one where reachable.
+      - ./scripts/dev/test-docker-talos-capability.sh
       # A --set typo reaches the cluster silently past every other gate;
       # this proves the effective-config reader (and check-cilium-parity.py's
       # missing-key guard) actually catch it, offline.
@@ -1460,6 +1485,9 @@ tasks:
       # Fail fast on a Hyper-V port reservation: Docker Desktop only reports it
       # as an opaque 500, five retries and a 90s timeout later.
       - ./scripts/dev/check-host-ports.sh {{.TALOS_API_PORT_BASE}} {{.K8S_API_PORT}}
+      # Same shape, a different 90s hang: a host missing CAP_SYS_RESOURCE looks
+      # healthy right up to the etcd-quorum wait. See infrastructure/opentofu-local/README.md.
+      - ./scripts/dev/check-docker-talos-capability.sh
       # cilium-local.yaml is gitignored, so a fresh clone has none — render it
       # rather than boot a cluster with no CNI. Mirrors what `up` does for the
       # cloud manifest.
