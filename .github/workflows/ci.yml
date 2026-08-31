@@ -479,9 +479,27 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         run: task feint-evidence PROVIDER=${{ matrix.provider }}
 
+      # `evidence baseline` only reads the file `feint evidence` already wrote,
+      # so this needs no live emulator — safe to run after `feint-down`. A
+      # log line is not a build artifact: exact bytes, not a hand transcription
+      # of terminal output, are what a baseline this repo commits is built from.
+      - name: Capture the baseline as a build artifact
+        if: needs.changes.outputs.code == 'true'
+        run: |
+          ./scripts/dev/feint.sh evidence-baseline ${{ matrix.provider }} \
+            > "/tmp/feint-evidence-${{ matrix.provider }}.json"
+
       - name: task feint-down
         if: always() && needs.changes.outputs.code == 'true'
         run: task feint-down
+
+      - name: Upload the baseline
+        if: needs.changes.outputs.code == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: feint-evidence-${{ matrix.provider }}
+          path: /tmp/feint-evidence-${{ matrix.provider }}.json
+          retention-days: 7
 
   talos:
     name: Talos Config Validation
