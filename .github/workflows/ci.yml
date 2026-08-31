@@ -389,6 +389,126 @@ jobs:
         if: always() && needs.changes.outputs.code == 'true'
         run: task feint-down
 
+  # First trial of a machine runtime in this repo's CI (#151): `feint evidence
+  # baseline` refuses to pin anything captured under metadata-only machines
+  # (every `dataplane` verdict would be a hardcoded `false`), and this is the
+  # only way to earn a real one. Kept off the required path with
+  # continue-on-error while this is unproven here — not a signal it may be
+  # ignored, just that a still-flaky Incus recipe should not block unrelated
+  # work the first few times.
+  #
+  # No job-level `if:` either, same reason as `validate`/`emulated` above: a
+  # matrix job skipped by its own `if:` collapses every combination into one
+  # unexpanded check name. Steps are gated per matrix entry instead.
+  feint-evidence:
+    name: Feint Evidence (${{ matrix.provider }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [validate, changes]
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [scaleway, outscale]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup OpenTofu
+        if: needs.changes.outputs.code == 'true'
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4  # v2
+        with:
+          # renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
+          tofu_version: "1.12.6"
+
+      - name: Setup Task
+        if: needs.changes.outputs.code == 'true'
+        run: ./scripts/internal/install-task.sh
+
+      - name: Install Feint (pinned + checksum-verified)
+        if: needs.changes.outputs.code == 'true'
+        run: |
+          ./scripts/dev/feint.sh install
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # The Zabbly stable channel, not the distro package: Ubuntu 24.04 ships
+      # Incus 6.0.0, below the 6.0.4 floor where NIC ACLs start being
+      # accepted. Mirrors stephrobert/feint's own runtime-proof.yml, the only
+      # place this recipe has actually been proven on a GitHub-hosted runner.
+      - name: Install Incus (Zabbly stable, key fingerprint pinned)
+        if: needs.changes.outputs.code == 'true'
+        env:
+          ZABBLY_FPR: "4EFC590696CB15B87C73A3AD82CC8797C838DCFD"
+        run: |
+          set -euo pipefail
+          workdir="$(mktemp -d)"
+          curl --retry 3 --retry-connrefused -fsSL https://pkgs.zabbly.com/key.asc -o "${workdir}/zabbly.asc"
+          fpr="$(gpg --show-keys --with-colons "${workdir}/zabbly.asc" | awk -F: '/^fpr/ {print $10; exit}')"
+          if [ "${fpr}" != "${ZABBLY_FPR}" ]; then
+            echo "unexpected Zabbly key fingerprint: ${fpr}" >&2
+            exit 1
+          fi
+          sudo install -D -m 0644 "${workdir}/zabbly.asc" /etc/apt/keyrings/zabbly.asc
+          # shellcheck disable=SC1091
+          codename="$(. /etc/os-release && echo "${VERSION_CODENAME}")"
+          arch="$(dpkg --print-architecture)"
+          sudo tee /etc/apt/sources.list.d/zabbly-incus.sources >/dev/null <<EOF
+          Enabled: yes
+          Types: deb
+          URIs: https://pkgs.zabbly.com/incus/stable
+          Suites: ${codename}
+          Components: main
+          Architectures: ${arch}
+          Signed-By: /etc/apt/keyrings/zabbly.asc
+          EOF
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends incus incus-client
+          sudo incus admin init --minimal
+          sudo incus --version
+
+      # The runner image ships Docker, which sets the host's iptables FORWARD
+      # policy to DROP — every packet an Incus machine sends or receives would
+      # die on a policy Incus never wrote. Same fix stephrobert/feint's own CI
+      # applies for the same reason.
+      - name: Keep the runner's Docker firewall out of the verdict
+        if: needs.changes.outputs.code == 'true'
+        run: sudo iptables -P FORWARD ACCEPT
+
+      - name: task feint-evidence
+        if: needs.changes.outputs.code == 'true'
+        run: task feint-evidence PROVIDER=${{ matrix.provider }}
+
+      # Has what `.feint-evidence-<provider>.json` pins stopped being true?
+      # `continue-on-error` on the job (above) is what keeps this from blocking
+      # unrelated PRs on the startup race measured on this job's first runs
+      # (#151) — not a signal this check may be ignored.
+      - name: task feint-evidence-verify
+        if: needs.changes.outputs.code == 'true'
+        run: task feint-evidence-verify PROVIDER=${{ matrix.provider }}
+
+      # `evidence baseline` only reads the file `feint evidence` already wrote,
+      # so this needs no live emulator — safe to run after `feint-down`. A
+      # log line is not a build artifact: exact bytes, not a hand transcription
+      # of terminal output, are what a baseline this repo commits is built from.
+      - name: Capture the baseline as a build artifact
+        if: needs.changes.outputs.code == 'true'
+        run: |
+          ./scripts/dev/feint.sh evidence-baseline ${{ matrix.provider }} \
+            > "/tmp/feint-evidence-${{ matrix.provider }}.json"
+
+      - name: task feint-down
+        if: always() && needs.changes.outputs.code == 'true'
+        run: task feint-down
+
+      - name: Upload the baseline
+        if: needs.changes.outputs.code == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: feint-evidence-${{ matrix.provider }}
+          path: /tmp/feint-evidence-${{ matrix.provider }}.json
+          retention-days: 7
+
   talos:
     name: Talos Config Validation
     runs-on: ubuntu-latest

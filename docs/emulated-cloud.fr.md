@@ -26,6 +26,10 @@ task feint-apply  PROVIDER=outscale    # cycle apply/destroy sur la fixture réd
 task feint-record PROVIDER=scaleway    # classe ce que notre module appelle et qu'aucun pack ne sert
 task feint-test                        # les deux providers, plan + apply
 task feint-down
+
+task feint-evidence PROVIDER=scaleway  # besoin d'Incus : apply sous un vrai runtime machine, puis
+                                        # affiche ce qu'un baseline de la preuve de feint épinglerait (#151)
+task feint-evidence-verify PROVIDER=scaleway  # vérifie une capture fraîche contre le baseline épinglé
 ```
 
 ## Trois voies, parce qu'une seule ne peut pas faire les trois
@@ -107,7 +111,7 @@ toujours pas porter, tout consigné dans [les issues ouvertes](https://github.co
 | Non exercé | Pourquoi |
 |---|---|
 | Type de volume racine Scaleway | Aucun `root_volume { volume_type }` n'est écrivable : le provider 2.79+ refuse `b_ssd`, et `sbs_volume` planifie éternellement car l'émulateur l'écrase. L'honorer enverrait le provider sur `block/v1`, non monté. Mesuré ici, c'est devenu la limite documentée en amont et son issue #8. Non re-vérifié sous 0.12.0. |
-| Résolution d'image par nom | Le catalogue est fixe, et la 0.7.0 applique le filtre `image_names` : un nom publié par un pipeline de build ne correspond à rien — des deux côtés. Les tfvars Scaleway épinglent `image_id` ; ceux d'Outscale pointent `image_name` sur une entrée du catalogue, ce qui exerce la recherche sans prétendre résoudre notre propre image. |
+| Résolution d'image par nom, Outscale | Les tfvars Outscale pointent `image_name` sur une entrée fixe du catalogue, ce qui exerce le mécanisme de recherche sans résoudre un nom publié par notre propre pipeline — voir #150 pour ce qu'il faudrait. |
 
 Six choses ont quitté cette liste. `outscale_volume_link` en 0.6.0, qui a monté
 le filtre `LinkVolumeVmIds` dont dépend son attente. `data.outscale_images` en
@@ -134,3 +138,14 @@ manques que cette table appelait « réellement absents ». C'est l'apply propre
 à `feint-record` (ci-dessus) qui a attrapé les trois : un apply du module
 provider du vrai root cluster, les deux providers, allant jusqu'au bout avec
 zéro appel non servi, là où la 0.7.3 s'arrêtait net au premier.
+
+La moitié Scaleway de la résolution d'image par nom a fermé le même jour, pas
+via une version de feint mais parce que `scripts/dev/feint.sh` enregistre
+désormais une image sous le nom que demande
+`envs/feint-scaleway.tfvars.example`, avant de planifier ou d'appliquer :
+`data.scaleway_instance_image.talos`, code mort derrière un `image_id`
+épinglé jusque-là, tourne maintenant pour de vrai, et `feint-plan` comme
+`feint-record` le résolvent — le transcript de ce dernier montre le module
+appelant `instance/v1/API.ListImages` et `GetImage` pour la première fois
+(#150). Outscale non : ses tfvars pointent toujours `image_name` sur une
+entrée du catalogue plutôt que sur quelque chose que cette voie a créé.

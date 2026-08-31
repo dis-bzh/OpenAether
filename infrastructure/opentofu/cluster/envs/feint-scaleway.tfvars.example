@@ -8,9 +8,11 @@
 # Every value here is fake by construction — this file is public, and nothing in
 # it may ever name a real environment. admin_ip is RFC 5737 TEST-NET-3.
 #
-# image_id is pinned because Feint serves no image search: `instance/v1
-# ListImages` answers 501, so a lookup by name cannot resolve. This id is the
-# single image the emulator publishes.
+# image_name, not image_id: as of Feint 0.12.0 `instance/v1 ListImages`,
+# CreateSnapshot and CreateImage are all served, so `scripts/dev/feint.sh`
+# registers a throwaway image under this exact name before planning or
+# applying — the same `data.scaleway_instance_image` name lookup a real
+# deploy uses actually runs, instead of being skipped by a pinned id (#150).
 # ==============================================================================
 
 cluster_name    = "feint-scaleway"
@@ -26,7 +28,7 @@ node_distribution = {
     zone           = "fr-par-1"
     zones          = ["fr-par-1"]
     instance_type  = "DEV1-S"
-    image_id       = "22222222-2222-4222-8222-222222222222"
+    image_name     = "talos-openaether-feint"
   }
 }
 

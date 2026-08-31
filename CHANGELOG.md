@@ -139,6 +139,54 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Added
 
+- **The Scaleway feint lane resolves its image by name instead of skipping
+  the lookup (#150).** `data.scaleway_instance_image.talos` in
+  `modules/providers/scw/main.tf` — the real, production `image_name`
+  lookup — had a `count` of 0 on every feint run because
+  `envs/feint-scaleway.tfvars.example` pinned `image_id` instead, dating
+  back to when Feint declined `instance/v1 ListImages` outright. As of
+  0.12.0 that route is served, along with `CreateSnapshot` and
+  `CreateImage` (the latter enforces a real dependency: a made-up snapshot
+  id gets a genuine 404, not a rubber stamp). `scripts/dev/feint.sh` now
+  registers a throwaway image under the name the tfvars ask for — volume →
+  snapshot → image — before planning or applying, so the data source
+  resolves it for real. Verified on both lanes: `feint-plan` completes with
+  the data source resolved (a failed lookup errors `tofu plan` outright,
+  it does not silently degrade), and `feint-record`'s transcript now shows
+  the module calling `instance/v1/API.ListImages` and `GetImage`, which a
+  pinned `image_id` never triggered.
+
+- **`feint evidence baseline`/`evidence verify` wired in, with a real,
+  committed baseline (#151).** Feint 0.12.0 lets a downstream project pin
+  the level of proof — seven independent axes per operation — it actually
+  relies on, and fail its own CI the day Feint stops delivering one,
+  instead of finding out from the outside after the fact. `feint evidence
+  baseline` refuses unconditionally, before any `--axes` filtering, when
+  the record it is pinning was earned with no machine runtime
+  (`internal/cli/evidence_baseline.go`'s `reachesARuntime`) — every
+  `dataplane` verdict would be a hardcoded `false`, and pinning that would
+  report nothing on the day it regressed for real. New `scripts/dev/feint.sh
+  evidence|evidence-baseline|evidence-verify`, `task
+  feint-evidence`/`feint-evidence-verify`, and a `feint-evidence` CI job
+  that installs Incus (the same Zabbly-stable recipe `stephrobert/feint`'s
+  own CI proves on GitHub-hosted runners) and runs the fixture's full
+  apply/destroy cycle under it — unverifiable locally, this environment's
+  egress policy blocks the Zabbly package host outright.
+
+  `.feint-evidence-scaleway.json` / `.feint-evidence-outscale.json` are the
+  real committed artefacts: pulled from two independent green CI runs of
+  that job (not hand-transcribed — a log line is not a build artifact, so
+  the job also uploads the baseline it captured, and this is that upload,
+  downloaded back), byte-identical between them, and `feint evidence
+  verify` now runs against them on every push. One of those two runs also
+  measured the only rough edge so far: `Feint Evidence (outscale)` failed
+  once with the emulator gone entirely between `feint start` confirming
+  "running" and the next command's own check — passed clean on the
+  immediate re-run and on scaleway throughout, so this reads as a
+  startup race under Incus rather than a real defect. The job stays
+  `continue-on-error` until that is either reproduced and fixed or seen
+  stable across enough runs to trust as a hard gate.
+
 - **Two Checkov custom checks close the gap for the three providers Checkov
   ships no policy family for (#123).** `.checkov.yaml` is a hard gate, but
   measured on this tree Checkov's built-in rules land on OpenStack (OVH)

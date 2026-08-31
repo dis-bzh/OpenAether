@@ -95,6 +95,10 @@ infrastructure/opentofu/cluster/bootstrap-manifests/cilium-local.yaml
 # a trap — if you ever see it in a working tree, a run died hard: delete it.
 infrastructure/opentofu-feint/terraform.tfstate*
 infrastructure/opentofu/cluster/zz-feint-backend_override.tf
+# `feint evidence`'s own output: regenerated per run, timestamped, never the
+# thing to commit. `.feint-evidence-<provider>.json` (the pinned baseline) is
+# the committed artifact, deliberately outside this directory.
+coverage/
 
 # Editor/IDE
 .idea/
