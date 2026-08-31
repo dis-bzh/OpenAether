@@ -408,6 +408,10 @@ tasks:
       # this proves the effective-config reader (and check-cilium-parity.py's
       # missing-key guard) actually catch it, offline.
       - ./scripts/dev/test-cilium-effective-config.sh
+      # `set -e` does not see a process substitution's own git-log failure
+      # (#132) — proves a malformed rev-range fails loud instead of reading
+      # as zero commits, none of them tool-authored.
+      - ./scripts/dev/test-commit-authors.sh
 
   test:
     desc: Run OpenTofu tests (cluster root)
