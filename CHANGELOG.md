@@ -159,6 +159,23 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Added
 
+- **New `feint-apply-root` lane: an untargeted apply on the REAL cluster
+  root, not a fixture or a `-target`-scoped one (#76, first half).**
+  `feint-plan` only plans `infrastructure/opentofu/cluster`; `feint-apply`
+  drives the separate reduced fixture (`infrastructure/opentofu-feint/`);
+  `feint-record`'s own apply is `-target=module.<provider>`-scoped to the
+  provider module alone. Nothing ran a full `tofu apply` on the real root
+  itself — Talos config, bootstrap manifests, everything. `task
+  feint-apply-root PROVIDER=scaleway|outscale` (`scripts/dev/feint.sh
+  apply-root`) now does that: untargeted apply → verify the second plan is
+  empty → the two-step destroy the root README already documents (`tofu
+  state rm module.talos.talos_machine_secrets.this[0]` first, since that
+  resource carries `prevent_destroy`, then `destroy -var
+  talos_bootstrap=false`). Verified both providers: 27 resources added on
+  Scaleway, 41 on Outscale, second plan empty, destroy clean. Closes #76's
+  first criterion; the second (`feint shapes --check` against a real-cloud
+  recording) stays open — real-cloud only, not attempted here.
+
 - **The Scaleway feint lane resolves its image by name instead of skipping
   the lookup (#150).** `data.scaleway_instance_image.talos` in
   `modules/providers/scw/main.tf` — the real, production `image_name`
