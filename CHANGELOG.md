@@ -28,6 +28,16 @@ in git. 0.1.0 is the first entry describing something proven.
   certificate authenticates, the same bare key without it is refused, and
   `ssh -o ExitOnForwardFailure=yes -L` carries traffic through `PermitOpen`.
   Rung: emulated.
+
+- **A comment beside the Outscale provider block claimed the top-level
+  `region` argument was deprecated and warned on every real command**
+  (#77). Stale: `outscale/terraform-provider-outscale` reverted that
+  deprecation in its own PR #817, shipped in 1.8.0 — the version this repo
+  already pins. Real commands no longer warn, so there is nothing left to
+  avoid by building the API URL ourselves (which would mean hardcoding
+  Outscale's DNS). Comment now records the decision instead of a stale
+  premise; no behavior change.
+
 - **`docs/emulated-cloud.md`/`.fr.md` documented three Feint gaps as
   permanent** — Outscale load balancers ("this one will not move"), Scaleway
   IPAM reservations, Scaleway LB and public gateway ("genuinely absent") —
@@ -148,6 +158,17 @@ in git. 0.1.0 is the first entry describing something proven.
   PR #106: its `0764f61` is authored by `Claude <noreply@anthropic.com>`. New
   `scripts/dev/check-commit-authors.sh`, run in CI on the PR range, which is the
   only place it can still be refused.
+
+- **The version-pair guard was only tested on its start and end points, never
+  the path between them (#50).** A valid pair joined to another valid pair by
+  a step that is neither still passes if nothing evaluates the step. Seven
+  new `tofu test` run blocks in `version-pair.tftest.hcl` walk every
+  intermediate pair of the documented climb from (v1.12.7, v1.31.0) to
+  (v1.13.9, v1.36.3) — Talos moving first, then Kubernetes one minor at a
+  time — plus one trap pair (v1.13.9, v1.30.0: Talos ahead of Kubernetes
+  catching up) that the guard must refuse. Mutation-verified: narrowing
+  `k8s_min` in `version-support.json` turned one of the new intermediate runs
+  red before the revert.
 
 ### Added
 

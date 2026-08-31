@@ -146,3 +146,69 @@ run "unknown_talos_minor_is_refused" {
   }
   expect_failures = [terraform_data.version_pair_guard]
 }
+
+# A valid start and a valid end can be joined by a step that is neither, since
+# the two move one minor at a time. Each of these is one step of the climb
+# from (v1.12.7, v1.31.0) to the final pair above (v1.13.9, v1.36.3): Talos
+# first, then Kubernetes one minor at a time — every step must clear the guard
+# on its own, not just the endpoints.
+
+run "climb_step_v1_12_7_v1_31_0_passes" {
+  command = plan
+  variables {
+    talos_version      = "v1.12.7"
+    kubernetes_version = "v1.31.0"
+  }
+}
+
+run "climb_step_v1_13_9_v1_31_0_passes" {
+  command = plan
+  variables {
+    talos_version      = "v1.13.9" # Talos moves first, Kubernetes unchanged
+    kubernetes_version = "v1.31.0"
+  }
+}
+
+run "climb_step_v1_13_9_v1_32_0_passes" {
+  command = plan
+  variables {
+    talos_version      = "v1.13.9"
+    kubernetes_version = "v1.32.0"
+  }
+}
+
+run "climb_step_v1_13_9_v1_33_0_passes" {
+  command = plan
+  variables {
+    talos_version      = "v1.13.9"
+    kubernetes_version = "v1.33.0"
+  }
+}
+
+run "climb_step_v1_13_9_v1_34_0_passes" {
+  command = plan
+  variables {
+    talos_version      = "v1.13.9"
+    kubernetes_version = "v1.34.0"
+  }
+}
+
+run "climb_step_v1_13_9_v1_35_0_passes" {
+  command = plan
+  variables {
+    talos_version      = "v1.13.9"
+    kubernetes_version = "v1.35.0"
+  }
+}
+
+run "climb_trap_v1_13_9_v1_30_0_is_refused" {
+  command = plan
+  variables {
+    # Talos moved ahead of Kubernetes catching up: a valid pair on its own
+    # (1.30 is in range for Talos 1.12) but not one this climb ever visits
+    # once Talos is at 1.13, whose floor is 1.31.
+    talos_version      = "v1.13.9"
+    kubernetes_version = "v1.30.0"
+  }
+  expect_failures = [terraform_data.version_pair_guard]
+}
