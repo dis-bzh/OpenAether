@@ -25,6 +25,10 @@ task feint-apply  PROVIDER=outscale    # apply/destroy cycle on the reduced fixt
 task feint-record PROVIDER=scaleway    # rank what our module calls and no pack serves
 task feint-test                        # both providers, plan + apply
 task feint-down
+
+task feint-evidence PROVIDER=scaleway  # needs Incus: apply under a real machine runtime, then
+                                        # print what a baseline of feint's own proof would pin (#151)
+task feint-evidence-verify PROVIDER=scaleway  # check a fresh capture against the pinned baseline
 ```
 
 ## Three lanes, because one cannot do all three jobs
@@ -104,7 +108,7 @@ carry, all recorded in [the open issues](https://github.com/dis-bzh/OpenAether-i
 | Not exercised | Why |
 |---|---|
 | Scaleway root volume type | No `root_volume { volume_type }` is writable: provider 2.79+ refuses `b_ssd`, and `sbs_volume` plans for ever because the emulator overrides it. Honouring it would send the provider to `block/v1`, unmounted. Measured here, now upstream's stated limit and its issue #8. Not re-verified against 0.12.0. |
-| Image name resolution | The catalogue is fixed, and 0.7.0 applies the `image_names` filter, so a name a build pipeline published matches nothing — on either provider. The Scaleway tfvars pin `image_id`; the Outscale ones point `image_name` at a catalogue entry instead, which exercises the lookup without pretending to resolve our own image. |
+| Outscale image name resolution | The Outscale tfvars point `image_name` at a fixed catalogue entry, which exercises the lookup mechanism without resolving a name our own pipeline published — see #150 for what it would take. |
 
 Six things left this list. `outscale_volume_link` in 0.6.0, which mounted the
 `LinkVolumeVmIds` filter its wait depends on. `data.outscale_images` in 0.7.0,
@@ -129,3 +133,13 @@ the two gaps this table called "genuinely absent". `feint-record`'s own apply
 (above) is what caught all three: an apply of the real cluster root's
 provider module, both providers, completing with zero unserved calls where
 0.7.3 stopped hard on the first one.
+
+Scaleway's half of image name resolution closed the same day, not from a
+feint version but from `scripts/dev/feint.sh` registering an image under the
+name `envs/feint-scaleway.tfvars.example` asks for, before planning or
+applying: `data.scaleway_instance_image.talos`, dead code behind a pinned
+`image_id` until then, now runs for real, and both `feint-plan` and
+`feint-record` resolve it — the latter's transcript shows the module calling
+`instance/v1/API.ListImages` and `GetImage` for the first time (#150).
+Outscale is not: its tfvars still point `image_name` at a catalogue entry
+rather than something this lane created.

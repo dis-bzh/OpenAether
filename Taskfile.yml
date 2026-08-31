@@ -1472,6 +1472,35 @@ tasks:
         vars: {PROVIDER: "{{.ITEM}}"}
       - task: feint-down
 
+  feint-evidence:
+    desc: >-
+      Capture Feint's evidence record under a machine runtime (Incus) and print what a baseline would
+      pin. Needs Incus; see docs/emulated-cloud.md. Usage: task feint-evidence PROVIDER=scaleway|outscale
+    vars:
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    # Task vars are NOT environment variables: without this,
+    # `task feint-plan FEINT_ENDPOINT=https://api.scaleway.com` set a var the
+    # script never read, the loopback guard never saw it, and the negative
+    # test in docs/release-checklist.md passed without testing anything.
+    env:
+      FEINT_ENDPOINT: '{{.FEINT_ENDPOINT | default "http://127.0.0.1:4599"}}'
+      FEINT_VM: incus
+    cmds:
+      - ./scripts/dev/feint.sh start
+      - ./scripts/dev/feint.sh apply {{.PROVIDER}}
+      - ./scripts/dev/feint.sh evidence {{.PROVIDER}}
+      - ./scripts/dev/feint.sh evidence-baseline {{.PROVIDER}}
+      - ./scripts/dev/feint.sh stop
+
+  feint-evidence-verify:
+    desc: >-
+      Check a freshly captured evidence record against the pinned baseline (.feint-evidence-<provider>.json).
+      Usage: task feint-evidence-verify PROVIDER=scaleway|outscale
+    vars:
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    cmds:
+      - ./scripts/dev/feint.sh evidence-verify {{.PROVIDER}}
+
   # ===========================================================================
   # Local Testing (Docker / WSL2)
   # ===========================================================================

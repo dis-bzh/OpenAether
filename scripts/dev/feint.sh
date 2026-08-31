@@ -5,6 +5,7 @@
 #
 # Usage: feint.sh install|start|stop|status|guard [endpoint]
 #        feint.sh plan|apply|record scaleway|outscale
+#        feint.sh evidence|evidence-baseline|evidence-verify scaleway|outscale
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -13,6 +14,23 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 FEINT_VERSION="0.12.0"
 FEINT_ENDPOINT="${FEINT_ENDPOINT:-http://127.0.0.1:4599}"
 BIN_DIR="${FEINT_BIN_DIR:-$HOME/.local/bin}"
+# Off (metadata-only machines) unless a caller asks for a real one — the
+# evidence lane sets this to "incus", nothing else needs to.
+FEINT_VM="${FEINT_VM:-}"
+
+# feint_cli runs the emulator's own lifecycle commands (start/stop/status): a
+# machine runtime means Incus, whose socket belongs to root:incus-admin, and a
+# group granted mid-job never reaches the runner's already-running session —
+# so root is how feint's own CI runs it too. Resolved to an absolute path
+# first: sudo's secure_path does not carry $BIN_DIR when that is a user
+# install (~/.local/bin).
+feint_cli() {
+  if [ -n "$FEINT_VM" ]; then
+    sudo "$(command -v feint)" "$@"
+  else
+    feint "$@"
+  fi
+}
 
 # --- The guard --------------------------------------------------------------
 # Refuse anything that is not this machine. Every official cloud client falls
@@ -32,7 +50,7 @@ addr_of() { printf '%s' "${1#http://}"; }
 
 # running answers whether the emulator is actually listening. `feint status`
 # exits 0 whether or not it is, so the output is the only signal.
-running() { feint status 2>/dev/null | grep -q '^running on'; }
+running() { feint_cli status 2>/dev/null | grep -q '^running on'; }
 
 # require_emulator fails a lane that has nothing to talk to.
 #
@@ -65,8 +83,10 @@ require_emulator() {
 # a lane inherits the previous one's resources and dies on 409 at the first
 # create, long before reaching the operations it was meant to measure.
 reset_emulator() {
-  feint stop >/dev/null 2>&1 || true
-  feint start --addr "$(addr_of "$FEINT_ENDPOINT")" >/dev/null
+  local vm_args=()
+  [ -n "$FEINT_VM" ] && vm_args=(--vm "$FEINT_VM")
+  feint_cli stop >/dev/null 2>&1 || true
+  feint_cli start --addr "$(addr_of "$FEINT_ENDPOINT")" "${vm_args[@]}" >/dev/null
   running || { echo "✗ the emulator did not come back on $FEINT_ENDPOINT" >&2; exit 1; }
 }
 
@@ -111,6 +131,49 @@ install_feint() {
   echo "installed feint v${FEINT_VERSION} → $BIN_DIR/feint"
 }
 
+# The Terraform provider resolves `image_name` through a real name lookup —
+# `data.scaleway_instance_image.talos` in modules/providers/scw/main.tf, whose
+# `count` is 0 whenever `image_id` is set. Every feint tfvars used to pin
+# `image_id` instead, so that data source never actually ran. Feint 0.7.0
+# declined `instance/v1 ListImages` outright (501); 0.12.0 serves it, along with
+# CreateSnapshot and CreateImage — none declined, and CreateImage enforces a
+# real dependency (a made-up snapshot id gets a genuine 404, not a rubber
+# stamp). So a name can now be made to resolve to something real: create a
+# throwaway volume, snapshot it, and register an image under the name
+# `envs/feint-scaleway.tfvars.example` asks for. See issue #150.
+SCW_FEINT_IMAGE_NAME="talos-openaether-feint"
+# The fixed project the emulated `scaleway` provider block pins
+# (infrastructure/opentofu/cluster/main.tf, local.emulator_creds.scw_project_id).
+SCW_FEINT_PROJECT_ID="11111111-1111-1111-1111-111111111111"
+
+register_scaleway_image() {
+  local endpoint="$1" zone="fr-par-1" images_url vol_id snap_id
+  images_url="$endpoint/instance/v1/zones/$zone/images"
+
+  # Idempotent: a second call against an emulator that already served the
+  # first one must not mint a duplicate image under the same name.
+  if curl -sf "$images_url?name=$SCW_FEINT_IMAGE_NAME" \
+    | grep -q "\"name\":\"$SCW_FEINT_IMAGE_NAME\""; then
+    return 0
+  fi
+
+  vol_id="$(curl -sf -X POST "$endpoint/instance/v1/zones/$zone/volumes" \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"${SCW_FEINT_IMAGE_NAME}-src\",\"volume_type\":\"l_ssd\",\"size\":10000000000,\"project_id\":\"$SCW_FEINT_PROJECT_ID\"}" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["volume"]["id"])')"
+
+  snap_id="$(curl -sf -X POST "$endpoint/instance/v1/zones/$zone/snapshots" \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"${SCW_FEINT_IMAGE_NAME}-snap\",\"volume_id\":\"$vol_id\",\"project_id\":\"$SCW_FEINT_PROJECT_ID\"}" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["snapshot"]["id"])')"
+
+  curl -sf -X POST "$images_url" -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$SCW_FEINT_IMAGE_NAME\",\"root_volume\":\"$snap_id\",\"arch\":\"x86_64\",\"project_id\":\"$SCW_FEINT_PROJECT_ID\"}" \
+    >/dev/null
+
+  echo "  registered image '$SCW_FEINT_IMAGE_NAME' — image_name now resolves to something the emulator actually created"
+}
+
 # plan_root runs `tofu plan` on the REAL cluster root against the emulator.
 #
 # That root declares a partial S3 backend, and `init -backend=false` then leaves
@@ -141,6 +204,8 @@ terraform {
 }
 EOT
   cp "$example" "$work/feint.tfvars"
+
+  [ "$provider" = scaleway ] && register_scaleway_image "$FEINT_ENDPOINT"
 
   emulated_env
   export TF_VAR_encryption_passphrase="feint-emulated-lane-passphrase-not-a-secret"
@@ -181,6 +246,10 @@ record_root() {
 
   work="$(mktemp -d)"
   reset_emulator
+  # Straight to the emulator, never through the proxy about to start: this is
+  # our own setup, not a call the module makes, and the transcript below must
+  # rank only the latter.
+  [ "$provider" = scaleway ] && register_scaleway_image "$FEINT_ENDPOINT"
   feint proxy --provider "$provider" --upstream "$FEINT_ENDPOINT" \
     --addr "$proxy_addr" --record "$work/$provider.jsonl" >"$work/proxy.log" 2>&1 &
   proxy_pid=$!
@@ -314,21 +383,23 @@ case "${1:-}" in
     # honoured on a fresh machine and decorative on every machine that had already
     # run the lane. Bumping the pin to 0.10.0 on 2026-08-21 kept running 0.9.0.
     install_feint
+    vm_args=()
+    [ -n "$FEINT_VM" ] && vm_args=(--vm "$FEINT_VM")
     # Idempotent: `feint start` refuses when one is already listening, and a
     # target you cannot run twice is a target nobody re-runs after a failure.
     # Matched on the output, not the exit code: `feint status` exits 0 either
     # way, so keying off it silently skipped the start and left every later
     # step running against nothing.
-    running || feint start --addr "$(addr_of "$FEINT_ENDPOINT")"
+    running || feint_cli start --addr "$(addr_of "$FEINT_ENDPOINT")" "${vm_args[@]}"
     running || { echo "✗ the emulator did not come up on $FEINT_ENDPOINT" >&2; exit 1; }
-    feint status
+    feint_cli status
     ;;
   stop)
     # Stopping is enough to discard the store: it lives in memory, nothing is
     # persisted (no --state). Resetting between lanes is `reset_emulator`.
-    feint stop || true
+    feint_cli stop || true
     ;;
-  status) feint status ;;
+  status) feint_cli status ;;
   guard) guard_local "${2:-$FEINT_ENDPOINT}" ;;
   plan)
     guard_local "$FEINT_ENDPOINT"
@@ -345,9 +416,34 @@ case "${1:-}" in
     require_emulator
     record_root "${2:?usage: feint.sh record scaleway|outscale}"
     ;;
+  evidence)
+    # Reads whatever the emulator's own /_feint/conformance already knows, so
+    # it must run right after a real cycle (e.g. `feint.sh apply`) and before
+    # any reset — a reset is what a fresh `feint start` always is (#151).
+    guard_local "$FEINT_ENDPOINT"
+    require_emulator
+    provider="${2:?usage: feint.sh evidence scaleway|outscale}"
+    mkdir -p "$REPO_ROOT/coverage"
+    feint evidence --endpoint "$FEINT_ENDPOINT" --out "$REPO_ROOT/coverage/evidence-${provider}.json"
+    ;;
+  evidence-baseline)
+    # Refuses at capture if the record behind it reached no machine runtime
+    # (`FEINT_VM` unset) — see feint's own `evidence baseline` help. No `--out`:
+    # printed for a human to review before it becomes a committed file, not
+    # written as a side effect of a script.
+    provider="${2:?usage: feint.sh evidence-baseline scaleway|outscale}"
+    feint evidence baseline --evidence "$REPO_ROOT/coverage/evidence-${provider}.json"
+    ;;
+  evidence-verify)
+    provider="${2:?usage: feint.sh evidence-verify scaleway|outscale}"
+    feint evidence verify \
+      --baseline "$REPO_ROOT/.feint-evidence-${provider}.json" \
+      --evidence "$REPO_ROOT/coverage/evidence-${provider}.json"
+    ;;
   *)
     echo "Usage: $(basename "$0") install|start|stop|status|guard [endpoint]" >&2
     echo "       $(basename "$0") plan|apply|record scaleway|outscale" >&2
+    echo "       $(basename "$0") evidence|evidence-baseline|evidence-verify scaleway|outscale" >&2
     exit 1
     ;;
 esac
