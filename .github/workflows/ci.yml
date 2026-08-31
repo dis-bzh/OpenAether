@@ -22,27 +22,43 @@ jobs:
   # A docs-only PR cannot break Terraform, Talos, or a real HTTP API — feint,
   # OpenTofu validate/test, and the Talos/IaC scans exist to catch mistakes IN
   # infrastructure code, and there is none in the diff to catch a mistake in.
-  # Gates the JOB, never the trigger: a `paths-ignore` on `pull_request:`
-  # would stop these jobs from running at all on a docs-only PR, and a
-  # required check that never reports stays pending forever — the PR could
-  # never merge. A job that runs and is skipped by its own `if:` still
-  # reports "skipped", which satisfies a required check exactly like success.
+  #
+  # This job itself is NEVER skipped by its own `if:` (unlike the jobs it
+  # gates) — on push it just short-circuits to code=true without a checkout.
+  # Reason: `needs: changes` on a matrix job (validate, emulated) combined
+  # with a skipped `changes` would fail those jobs' implicit success() gate
+  # and skip them entirely — reintroducing the exact "required check never
+  # reports" trap this whole job exists to avoid, just one hop upstream.
+  #
+  # Downstream gating happens two different ways depending on whether the
+  # job is a matrix job, and this is not cosmetic — it's a GitHub Actions
+  # limitation (actions/runner#952): a job-level `if:` that evaluates false
+  # skips the job BEFORE its matrix expands, collapsing every combination
+  # into ONE check reported under the job's raw, unexpanded name (e.g.
+  # `Validate` instead of `Validate (cluster)` / `Validate (talos-image)`,
+  # or literally `Emulated Cloud (${{ matrix.provider }})`). None of those
+  # match the per-matrix required-check names branch protection expects, so
+  # the PR sits "blocked" forever — measured live on PR #146, the first
+  # genuinely docs-only PR to hit this path. So: non-matrix gated jobs
+  # (manifests, test, talos, security) gate at the JOB level; matrix jobs
+  # (validate, emulated) MUST gate at the STEP level instead, so the job
+  # itself always runs, the matrix always fully expands, and every
+  # per-combination check name always exists — just fast and empty when
+  # code == 'false'.
   #
   # Errs toward "code": classifies by exclusion (docs/**, *.md, README*,
   # CHANGELOG.md, CONTRIBUTING.md, LICENSE), so any path this doesn't
   # recognise as documentation — a new top-level file type, say — runs the
   # full suite until someone deliberately adds it to the docs list below.
-  # Push to main (not a PR) always runs everything: this job only exists for
-  # `pull_request`, and every gated job's own `if:` treats "not a PR" as code.
   changes:
     name: Detect change scope
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       code: ${{ steps.classify.outputs.code }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        if: github.event_name == 'pull_request'
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -51,6 +67,10 @@ jobs:
         id: classify
         run: |
           set -uo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           git diff --name-only "origin/${{ github.base_ref }}...HEAD" > "$RUNNER_TEMP/changed.txt"
           docs_pattern='^(docs/|README|CHANGELOG\.md$|CONTRIBUTING\.md$|LICENSE$|.*\.md$)'
           if grep -vEq "$docs_pattern" "$RUNNER_TEMP/changed.txt"; then
@@ -212,7 +232,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -237,12 +257,18 @@ jobs:
       - name: task render-check
         run: task render-check
 
+  # No job-level `if:` here, deliberately — see the `changes` job's comment.
+  # A skipped matrix job never expands, so `Validate (cluster)` and
+  # `Validate (talos-image)` would collapse into one check named `Validate`,
+  # which cannot satisfy required checks named after the expanded matrix.
+  # The job always runs; only the substantive steps are gated, per matrix
+  # entry, so both check names always exist — just near-instant when
+  # code == 'false'.
   validate:
     name: Validate
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
     strategy:
       matrix:
         # Validate every OpenTofu root, not just the cluster. talos-image is a
@@ -254,15 +280,18 @@ jobs:
           persist-credentials: false
 
       - name: Setup OpenTofu
+        if: needs.changes.outputs.code == 'true'
         uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4  # v2
         with:
           # renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
           tofu_version: "1.12.6"
 
       - name: Setup Task
+        if: needs.changes.outputs.code == 'true'
         run: ./scripts/internal/install-task.sh
 
       - name: task validate
+        if: needs.changes.outputs.code == 'true'
         run: task validate ROOT=${{ matrix.root }}
         env:
           AWS_DEFAULT_REGION: us-east-1
@@ -275,7 +304,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [validate, changes]
-    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -304,12 +333,15 @@ jobs:
           AWS_SECRET_ACCESS_KEY: mock
           TF_VAR_encryption_passphrase: ci-mock-passphrase-for-validation-only-ci
 
+  # No job-level `if:` here either, same reason as `validate` above: a
+  # skipped matrix job collapses `Emulated Cloud (scaleway)` / `(outscale)`
+  # into one literal, unexpanded `Emulated Cloud (${{ matrix.provider }})`
+  # check. Steps are gated per matrix entry instead.
   emulated:
     name: Emulated Cloud (${{ matrix.provider }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [validate, changes]
-    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
     # The real provider binaries against a real HTTP API, with no account: one
     # step past `tofu test`, which mocks the provider and never leaves the
     # process. See docs/emulated-cloud.md for what it does and does not prove.
@@ -323,32 +355,38 @@ jobs:
           persist-credentials: false
 
       - name: Setup OpenTofu
+        if: needs.changes.outputs.code == 'true'
         uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4  # v2
         with:
           # renovate: datasource=github-releases depName=opentofu/opentofu extractVersion=^v(?<version>.*)$
           tofu_version: "1.12.6"
 
       - name: Setup Task
+        if: needs.changes.outputs.code == 'true'
         run: ./scripts/internal/install-task.sh
 
       - name: Install Feint (pinned + checksum-verified)
+        if: needs.changes.outputs.code == 'true'
         run: |
           ./scripts/dev/feint.sh install
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: task feint-up
+        if: needs.changes.outputs.code == 'true'
         run: task feint-up
 
       # No credentials anywhere in this job, deliberately: the lane must fail if
       # anything in it ever needs one, rather than quietly reaching a real cloud.
       - name: task feint-plan
+        if: needs.changes.outputs.code == 'true'
         run: task feint-plan PROVIDER=${{ matrix.provider }}
 
       - name: task feint-apply
+        if: needs.changes.outputs.code == 'true'
         run: task feint-apply PROVIDER=${{ matrix.provider }}
 
       - name: task feint-down
-        if: always()
+        if: always() && needs.changes.outputs.code == 'true'
         run: task feint-down
 
   talos:
@@ -356,7 +394,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -398,7 +436,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
