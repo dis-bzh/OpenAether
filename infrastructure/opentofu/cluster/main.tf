@@ -43,8 +43,12 @@ provider "outscale" {
   access_key_id = local.emulated ? local.emulator_creds.osc_access_key : (var.outscale_access_key_id != "" ? var.outscale_access_key_id : null)
   secret_key_id = local.emulated ? local.emulator_creds.osc_secret_key : (var.outscale_secret_key_id != "" ? var.outscale_secret_key_id : null)
 
-  # region and the api{} block are mutually exclusive: the top-level argument is
-  # deprecated in favour of the block, and setting both warns on every command.
+  # region and the api{} block are mutually exclusive — only one may be set.
+  # #77 asked whether to move real runs onto api{} too, which would mean
+  # hardcoding Outscale's DNS ourselves. Decided: no. outscale/terraform-provider-outscale
+  # reverted the top-level `region` deprecation in its own PR #817 (shipped in
+  # 1.8.0, pinned here) — real commands no longer warn, so there is nothing left
+  # to build the URL to avoid.
   region = local.emulated ? null : (local.active_provider == "outscale" ? local.osc_dist.region : null)
 
   # `endpoint` carries the whole API path, version segment included. Without it
