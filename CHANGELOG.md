@@ -307,6 +307,13 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Changed
 
+- **`gitleaks/gitleaks` 8.22.1 → 8.30.1**, probed by Cléa. `install-gitleaks.sh`
+  (the binary CI and `task security` actually run) and
+  `.pre-commit-config.yaml`'s `gitleaks-system` hook rev now agree — the probe
+  branch had only bumped the former, which `check-version-drift.sh` caught.
+  `task lint` (includes the drift check) and the `gitleaks-system` hook itself
+  both green on the bumped pin.
+
 - **CI no longer runs feint, `task validate`/`test`, Talos config validation
   and the IaC security scan on a docs-only PR.** A new `changes` job diffs the
   PR against its base and classifies it by exclusion (anything outside

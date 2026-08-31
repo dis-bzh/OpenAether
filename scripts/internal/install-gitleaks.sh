@@ -19,7 +19,7 @@
 set -euo pipefail
 
 # renovate: datasource=github-releases depName=gitleaks/gitleaks extractVersion=^v(?<version>.*)$
-GITLEAKS_VERSION="8.22.1"
+GITLEAKS_VERSION="8.30.1"
 
 # shellcheck source=scripts/lib/common.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
