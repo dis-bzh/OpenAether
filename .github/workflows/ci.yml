@@ -19,6 +19,46 @@ permissions:
   contents: read
 
 jobs:
+  # A docs-only PR cannot break Terraform, Talos, or a real HTTP API — feint,
+  # OpenTofu validate/test, and the Talos/IaC scans exist to catch mistakes IN
+  # infrastructure code, and there is none in the diff to catch a mistake in.
+  # Gates the JOB, never the trigger: a `paths-ignore` on `pull_request:`
+  # would stop these jobs from running at all on a docs-only PR, and a
+  # required check that never reports stays pending forever — the PR could
+  # never merge. A job that runs and is skipped by its own `if:` still
+  # reports "skipped", which satisfies a required check exactly like success.
+  #
+  # Errs toward "code": classifies by exclusion (docs/**, *.md, README*,
+  # CHANGELOG.md, CONTRIBUTING.md, LICENSE), so any path this doesn't
+  # recognise as documentation — a new top-level file type, say — runs the
+  # full suite until someone deliberately adds it to the docs list below.
+  # Push to main (not a PR) always runs everything: this job only exists for
+  # `pull_request`, and every gated job's own `if:` treats "not a PR" as code.
+  changes:
+    name: Detect change scope
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Classify the diff
+        id: classify
+        run: |
+          set -uo pipefail
+          git diff --name-only "origin/${{ github.base_ref }}...HEAD" > "$RUNNER_TEMP/changed.txt"
+          docs_pattern='^(docs/|README|CHANGELOG\.md$|CONTRIBUTING\.md$|LICENSE$|.*\.md$)'
+          if grep -vEq "$docs_pattern" "$RUNNER_TEMP/changed.txt"; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # The commit-msg hooks that enforce this live in .git/hooks/, which no clone
   # carries — so the same checks run here on every subject a PR adds.
   commits:
@@ -171,6 +211,8 @@ jobs:
     name: Generated Manifests
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -199,6 +241,8 @@ jobs:
     name: Validate
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
     strategy:
       matrix:
         # Validate every OpenTofu root, not just the cluster. talos-image is a
@@ -230,7 +274,8 @@ jobs:
     name: OpenTofu Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: validate
+    needs: [validate, changes]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -263,7 +308,8 @@ jobs:
     name: Emulated Cloud (${{ matrix.provider }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: validate
+    needs: [validate, changes]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
     # The real provider binaries against a real HTTP API, with no account: one
     # step past `tofu test`, which mocks the provider and never leaves the
     # process. See docs/emulated-cloud.md for what it does and does not prove.
@@ -309,6 +355,8 @@ jobs:
     name: Talos Config Validation
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -349,6 +397,8 @@ jobs:
     name: IaC Security Scan
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:

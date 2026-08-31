@@ -226,6 +226,20 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Changed
 
+- **CI no longer runs feint, `task validate`/`test`, Talos config validation
+  and the IaC security scan on a docs-only PR.** A new `changes` job diffs the
+  PR against its base and classifies it by exclusion (anything outside
+  `docs/`, `README*`, `CHANGELOG.md`, `CONTRIBUTING.md`, `LICENSE`, `*.md` is
+  "code"); the six heavy jobs gate on `needs.changes.outputs.code == 'true'`.
+  Gates the job, never the trigger: a `paths-ignore` on the workflow itself
+  would stop those jobs from running at all, and a required check that never
+  reports stays pending forever — the PR could never merge. A job that runs
+  and is skipped by its own `if:` still reports "skipped", which satisfies a
+  required check exactly like success. `commits`, `leaks` and `lint` (the job
+  that actually validates docs) stay unconditional; `security.yml`'s
+  `secret-scan` and `pipeline-audit` are untouched — both are already cheap
+  and repo-wide, not infra-specific.
+
 - **`helm/helm` 4.2.3 → 4.2.4**, probed green by Cléa ([#104](https://github.com/dis-bzh/OpenAether-infra/issues/104)) on both anchors (`ci.yml`, `setup.sh`). Left out this cycle: `getplumber/plumber` (still not probed — its job keeps failing before it can push a verdict branch), `kubernetes/kubernetes` v1.37.0 and `fluxcd/flux2` v2.9.4 (both `❌ probe failed` — the former on `cluster/versions-guard.tf`, the latter on `task render-check` drift against the upstream Flux manifest), `stephrobert/feint` v0.12.0 (`❌ probe failed`, same doc-drift gate as before — a fix is already up in PR #137, unmerged as of this cycle). `task lint`, `task render-check`, `task test-scripts`, `task validate` (`cluster` and `talos-image`), `task test`, checkov and gitleaks all green on the bumped tree (`trivy` unreachable from this sandbox).
 
 - **Six dependencies Cléa's first report ([#91](https://github.com/dis-bzh/OpenAether-infra/issues/91)) found behind upstream and probed green, bumped for real**:
