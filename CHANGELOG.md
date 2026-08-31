@@ -16,6 +16,20 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **Cléa's report-issue picker grabbed the newest `clea`-labelled issue, not
+  necessarily its own report** (#127). The workflow's "Previous state, from
+  the report issue" step fetched with `per_page=1` on the API's created-desc
+  default sort, so any newer issue a human labelled `clea` — to cross-reference
+  a finding, the natural thing to do — won over the real report and got
+  PATCHed over wholesale on the next scheduled run; #104 clobbered #91 exactly
+  this way on 2026-08-28. The selection logic now lives in
+  `scripts/clea/clea.py` (`pick_report_issue`, wired as the `pick-issue`
+  subcommand) and picks by what only the automation itself ever writes — the
+  `render_report` marker as the first line of the body, from an issue authored
+  as `[report] bot_login` (default `github-actions[bot]`) — instead of
+  creation order. `clea.yml` now fetches every open, labelled issue and calls
+  `clea pick-issue` rather than trusting `per_page=1`.
+
 - **`docs/emulated-cloud.md`/`.fr.md` documented three Feint gaps as
   permanent** — Outscale load balancers ("this one will not move"), Scaleway
   IPAM reservations, Scaleway LB and public gateway ("genuinely absent") —
