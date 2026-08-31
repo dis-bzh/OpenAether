@@ -226,6 +226,8 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Changed
 
+- **`helm/helm` 4.2.3 → 4.2.4**, probed green by Cléa ([#104](https://github.com/dis-bzh/OpenAether-infra/issues/104)) on both anchors (`ci.yml`, `setup.sh`). Left out this cycle: `getplumber/plumber` (still not probed — its job keeps failing before it can push a verdict branch), `kubernetes/kubernetes` v1.37.0 and `fluxcd/flux2` v2.9.4 (both `❌ probe failed` — the former on `cluster/versions-guard.tf`, the latter on `task render-check` drift against the upstream Flux manifest), `stephrobert/feint` v0.12.0 (`❌ probe failed`, same doc-drift gate as before — a fix is already up in PR #137, unmerged as of this cycle). `task lint`, `task render-check`, `task test-scripts`, `task validate` (`cluster` and `talos-image`), `task test`, checkov and gitleaks all green on the bumped tree (`trivy` unreachable from this sandbox).
+
 - **Six dependencies Cléa's first report ([#91](https://github.com/dis-bzh/OpenAether-infra/issues/91)) found behind upstream and probed green, bumped for real**:
   `go-task/task` 3.52.0 → 3.53.1, `cloudnative-pg/cloudnative-pg` 1.23.6 →
   1.30.0, `opentofu/opentofu` 1.12.5 → 1.12.6 (four anchors in `ci.yml` plus
