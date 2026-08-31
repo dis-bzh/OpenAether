@@ -225,8 +225,24 @@ tasks:
       # no error in the CAPI CR. Two deployments were lost to it.
       - python3 scripts/ops/preflight-quotas.py {{.PROVIDER}} {{.CLI_ARGS}}
 
+  pipeline-audit:
+    desc: >-
+      Run the CI policy scanner (plumber) locally — same gate as
+      "Pipeline audit" in security.yml, before pushing.
+    cmds:
+      - |
+        command -v plumber >/dev/null 2>&1 || {
+          echo "✗ plumber not installed — run ./scripts/setup.sh, or: ./scripts/internal/install-plumber.sh" >&2
+          exit 1
+        }
+        # GH_TOKEN is optional here: without one, branch-protection controls
+        # cannot be evaluated and the run reports degraded/incomplete rather
+        # than refusing outright — same shape CI's own token-scope fallback
+        # already documents (security.yml, "branchMustBeProtected").
+        plumber analyze --output plumber-report.json
+
   security:
-    desc: "Run security scans (Trivy, Checkov, Gitleaks)"
+    desc: "Run security scans (Trivy, Checkov, Gitleaks, pipeline audit)"
     cmds:
       # Skip the upstream-vendored Cilium/Flux bootstrap manifests (not our
       # config to fix; reviewed at render time). Matches the CI Trivy step.
@@ -258,6 +274,11 @@ tasks:
       # test fixtures use synthetic-but-routable quads. This asserts they still
       # match; two of them once matched nothing and passed.
       - ./scripts/dev/check-gitleaks-rules.sh
+      # Last: without GH_TOKEN this legitimately exits 3 ("incomplete data" —
+      # branch protection cannot be evaluated), so it must not swallow the
+      # checks above it that CAN succeed offline. Set GH_TOKEN for a complete
+      # run; see task pipeline-audit's own description.
+      - task: pipeline-audit
 
   purge-orphans:
     desc: >-

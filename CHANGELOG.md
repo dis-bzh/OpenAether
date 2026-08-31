@@ -96,6 +96,14 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Added
 
+- **`task pipeline-audit`** runs the CI policy scanner (plumber) locally —
+  before this, the only way to see its verdict before pushing was to fetch
+  the binary by hand ([#52](https://github.com/dis-bzh/OpenAether-infra/issues/52)).
+  New `scripts/internal/install-plumber.sh` (pinned, checksum-verified, same
+  shape as `install-gitleaks.sh`); wired into `task security`, last, since
+  without `GH_TOKEN` it legitimately exits 3 ("incomplete data" — branch
+  protection cannot be evaluated) and must not swallow the checks that CAN
+  succeed offline.
 - **`task purge-orphans PROVIDER=… [APPLY=1]`.** `docs/release-checklist.md`
   already told the reader to run it; it did not exist. The scripts it wraps are
   the last sentence between a failed teardown and a bill, and they were reachable
