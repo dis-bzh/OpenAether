@@ -657,6 +657,14 @@ tasks:
       # has to reach it. APPROVE=auto inside is not a bypass: the one checkpoint
       # above already asked, and --check had told it what this would roll.
       - ./scripts/internal/converge-versions.sh {{.PROVIDER}} {{.ROLE}} {{.KEY}}
+      # The verdict, asked of the cluster rather than assumed from the steps
+      # above having run. go-task propagates this task's non-zero exit up
+      # through cluster-up, so a failing verify halts here — the closing
+      # echo below is only ever reached once it has passed.
+      - task: cluster-verify
+        vars:
+          ROLE: "{{.ROLE}}"
+          PROVIDER: "{{.PROVIDER}}"
       # Do NOT end on "every step above is idempotent": that line came out
       # identical on the first run, which applied 43 changes in phase 1 and 17 in
       # phase 2, and on the second, which applied none. Idempotence is a property
@@ -664,10 +672,7 @@ tasks:
       # own plan. A YAML comment, not a shell one: go-task echoes the block it
       # runs, so a `#` inside would be printed as the last thing the operator reads.
       - |
-        echo "✓ cluster-up complete."
-        echo "  Two verdicts, and neither of them is this line: OpenTofu's plan for"
-        echo "  the infrastructure, and the version check above for the fleet — asked"
-        echo "  separately because ignore_changes keeps a roll out of the plan."
+        echo "✓ cluster-up complete: cluster-verify passed."
         echo "  Run this exact command again to converge again."
 
   # ===========================================================================
