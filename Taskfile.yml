@@ -1445,6 +1445,21 @@ tasks:
     cmds:
       - ./scripts/dev/feint.sh apply {{.PROVIDER}}
 
+  feint-apply-root:
+    desc: >-
+      Untargeted apply/empty-replan/destroy on the REAL cluster root (Phase 1). Usage: task
+      feint-apply-root PROVIDER=scaleway|outscale
+    vars:
+      PROVIDER: '{{.PROVIDER | default "scaleway"}}'
+    # Task vars are NOT environment variables: without this,
+    # `task feint-plan FEINT_ENDPOINT=https://api.scaleway.com` set a var the
+    # script never read, the loopback guard never saw it, and the negative
+    # test in docs/release-checklist.md passed without testing anything.
+    env:
+      FEINT_ENDPOINT: '{{.FEINT_ENDPOINT | default "http://127.0.0.1:4599"}}'
+    cmds:
+      - ./scripts/dev/feint.sh apply-root {{.PROVIDER}}
+
   feint-record:
     desc: >-
       Rank the operations our module calls that the emulator does not serve. Usage: task feint-record
@@ -1471,6 +1486,14 @@ tasks:
         task: feint-apply
         vars: {PROVIDER: "{{.ITEM}}"}
       - task: feint-down
+
+  ssh-ca-check:
+    desc: >-
+      Bastion SSH-CA, rung "emulated" (#81): renders the shared cloud-init template and proves
+      TrustedUserCAKeys/AuthorizedPrincipalsFile actually work on a real sshd in Docker. No cloud
+      account. Needs Docker; skips (exit 0) if it is unavailable.
+    cmds:
+      - ./scripts/dev/ssh-ca-check.sh
 
   feint-evidence:
     desc: >-
