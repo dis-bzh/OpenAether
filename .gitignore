@@ -139,3 +139,7 @@ __pycache__/
 # Cléa writes this on a local `task clea-scan`; on a probe branch the committed
 # artefact is clea-probe.json, not this.
 clea-state.json
+
+# task pipeline-audit's own output — a local run's report, not an artefact
+# this repository commits.
+plumber-report.json

@@ -16,6 +16,15 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **`test-talos-local.sh` hung for 90s on a host missing `CAP_SYS_RESOURCE`,
+  then failed on an unrelated-looking timeout**, instead of the ~1s refusal
+  its siblings give when no local cluster is reachable
+  ([#54](https://github.com/dis-bzh/OpenAether-infra/issues/54)). New
+  `scripts/dev/check-docker-talos-capability.sh` (same fail-open shape as
+  `check-host-ports.sh`) catches it in milliseconds via the `capsh` probe
+  `infrastructure/opentofu-local/README.md` already documented; wired into
+  both `test-talos-local.sh` and `task local-up`, which shares the identical
+  exposure.
 - **Six gates were reporting green on something they had stopped checking.**
   Found by auditing what the pipeline actually constrains, and each one is
   reproduced in both directions — broken on purpose, watched go red, fixed,
@@ -87,6 +96,14 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Added
 
+- **`task pipeline-audit`** runs the CI policy scanner (plumber) locally —
+  before this, the only way to see its verdict before pushing was to fetch
+  the binary by hand ([#52](https://github.com/dis-bzh/OpenAether-infra/issues/52)).
+  New `scripts/internal/install-plumber.sh` (pinned, checksum-verified, same
+  shape as `install-gitleaks.sh`); wired into `task security`, last, since
+  without `GH_TOKEN` it legitimately exits 3 ("incomplete data" — branch
+  protection cannot be evaluated) and must not swallow the checks that CAN
+  succeed offline.
 - **`task purge-orphans PROVIDER=… [APPLY=1]`.** `docs/release-checklist.md`
   already told the reader to run it; it did not exist. The scripts it wraps are
   the last sentence between a failed teardown and a bill, and they were reachable
@@ -250,6 +267,19 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **`docs/status.md`'s assertion count, hand-typed, had drifted from what
+  `task test-scripts` actually ran three times running** (333, then 413, then
+  468, each stale before the next edit —
+  [#111](https://github.com/dis-bzh/OpenAether-infra/issues/111)). The page no
+  longer states a number: it points at the one-line command that measures it
+  instead, so a fourth drift is not possible — there is nothing left to drift.
+- **`CONTRIBUTING.md` required what `check-commit-trailers.sh`'s own example,
+  and the `change-process` skill, forbade** — naming the model in the
+  `Assisted-by:` trailer, when the skill's "Never" section says the identifier
+  must never appear in a pushed artifact
+  ([#125](https://github.com/dis-bzh/OpenAether-infra/issues/125)).
+  `CONTRIBUTING.md` now matches the skill (tool-only trailer, no model
+  version) and the script's example agrees.
 - **Two tracked scripts were reachable from nothing**: `scripts/ops/ensure-capo-fip.py`
   (whose own docstring calls it "the only CAPO child resource created outside
   both OpenTofu and CAPI … the only one a teardown leaves behind and billing")

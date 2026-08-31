@@ -16,7 +16,7 @@ if grep -qiE "^(Co-Authored-By|Signed-off-by):.*($tools)" "$msg"; then
 
   A model is not an author and cannot certify origin. Use instead:
 
-      Assisted-by: Claude Code (claude-opus-5)
+      Assisted-by: Claude Code
 
   CONTRIBUTING.md → AI-assisted contributions.
 EOT
