@@ -16,6 +16,20 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **`docs/emulated-cloud.md`/`.fr.md` documented three Feint gaps as
+  permanent** — Outscale load balancers ("this one will not move"), Scaleway
+  IPAM reservations, Scaleway LB and public gateway ("genuinely absent") —
+  and Feint 0.12.0 closed all three. Re-measured 2026-08-31 with
+  `task feint-record` on both providers: *"every operation the client called
+  is served by a pack"*, zero unserved calls where the 0.7.3 recording listed
+  three. `feint-record`'s own apply is a real `tofu apply
+  -target=module.<provider>` on the cluster root itself, so this is also
+  proof that root's provider module can now be applied against the emulator,
+  not only planned — `feint-plan`'s "plan only" framing was stale for the
+  same reason. Docs updated in both languages; the closed gaps moved from
+  the table to the "left this list" history alongside the ones 0.6.0/0.7.0
+  already closed.
+
 - **`check-commit-authors.sh` could read its own `git log` failure as "no
   commit is authored by a tool" (#132).** `set -e` does not propagate a
   failure inside a process substitution (`< <(git log … )`) — a malformed
