@@ -674,6 +674,63 @@ PY
 if [ $? -eq 0 ]; then PASS=$((PASS + 2)); else FAIL=$((FAIL + 1)); fi
 
 echo
+echo "=== pick-issue: Cléa's OWN report, not just the newest labelled issue (#127) ==="
+# #104 clobbered #91 for real on 2026-08-28: #104, human-authored and labelled
+# clea to cross-reference a finding, was NEWER than #91 (the actual report) and
+# won a naive created-desc/per_page=1 read — then got PATCHed over wholesale on
+# the next scheduled run. Fixture reproduces the exact shape: same two issues,
+# same order (newest first, as the API's default sort hands them over).
+REPORT_BODY="_Generated 2026-08-24T14:01:45+00:00 by [Cléa](../blob/main/scripts/clea/README.md). This issue is rewritten in place; do not open another._ ## Behind upstream"
+cat > "$TMP/basic/issues.json" <<EOF
+[
+  {"number": 104, "user": {"login": "vde-dis"},
+   "body": "Prove Talos v1.13.9 + Kubernetes v1.37.0 before bumping kubernetes_version."},
+  {"number": 91, "user": {"login": "github-actions[bot]"},
+   "body": "${REPORT_BODY}"}
+]
+EOF
+says "the actual report (#91) is picked over the newer human-authored issue" "91" \
+  -- python3 "$CLEA" --root "$TMP/basic" pick-issue --issues "$TMP/basic/issues.json" --body-out "$TMP/basic/previous.md"
+says "its body is carried to previous.md, for the next scan's --previous diff" "Behind upstream" \
+  -- cat "$TMP/basic/previous.md"
+
+python3 - "$CLEA" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("clea", sys.argv[1])
+clea = importlib.util.module_from_spec(spec); spec.loader.exec_module(clea)
+
+REPORT_BODY = ("_Generated 2026-08-24T14:01:45+00:00 by "
+              "[Cléa](../blob/main/scripts/clea/README.md). "
+              "This issue is rewritten in place; do not open another._")
+issue_104 = {"number": 104, "user": {"login": "vde-dis"}, "body": "unrelated write-up"}
+issue_91 = {"number": 91, "user": {"login": "github-actions[bot]"}, "body": REPORT_BODY}
+
+checks = [
+    ("the report wins regardless of list order",
+     clea.pick_report_issue([issue_104, issue_91], "github-actions[bot]")["number"] == 91
+     and clea.pick_report_issue([issue_91, issue_104], "github-actions[bot]")["number"] == 91),
+    ("no match among the label-fetched issues -> None, not a guess",
+     clea.pick_report_issue([issue_104], "github-actions[bot]") is None),
+    ("the marker alone, from the wrong author, is not enough",
+     clea.pick_report_issue([{"number": 200, "user": {"login": "someone-else"},
+                              "body": REPORT_BODY}], "github-actions[bot]") is None),
+    ("the right author alone, without the marker, is not enough",
+     clea.pick_report_issue([{"number": 201, "user": {"login": "github-actions[bot]"},
+                              "body": "some other bot-authored issue"}],
+                            "github-actions[bot]") is None),
+    ("multiple matches (should not happen) fall back to the lowest issue number",
+     clea.pick_report_issue([
+         {"number": 300, "user": {"login": "github-actions[bot]"}, "body": REPORT_BODY},
+         issue_91,
+     ], "github-actions[bot]")["number"] == 91),
+]
+for name, ok in checks:
+    print(("  \033[32m✓\033[0m " if ok else "  \033[31m✗\033[0m ") + name)
+sys.exit(1 if [c for c in checks if not c[1]] else 0)
+PY
+if [ $? -eq 0 ]; then PASS=$((PASS + 5)); else FAIL=$((FAIL + 1)); fi
+
+echo
 echo "=== ANSI color has no reason to survive into stored data ==="
 # GitHub's own issue-body storage does not return raw terminal escape sequences
 # unchanged — \u001b[32m came back as the literal three characters \^[ on a

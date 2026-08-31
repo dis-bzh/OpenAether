@@ -75,6 +75,8 @@ resource "proxmox_virtual_environment_file" "bastion_cloud_init" {
       extra_packages    = []
       extra_write_files = []
       extra_runcmd      = []
+      ssh_ca_public_key = var.bastion_ssh_ca_public_key
+      ssh_ca_principals = var.bastion_ssh_ca_principals
     })
   }
 }
