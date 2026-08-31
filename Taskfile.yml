@@ -262,6 +262,10 @@ tasks:
           exit 1
         }
         checkov -d infrastructure/opentofu --config-file .checkov.yaml
+      # The contract's own rules (#123), as checks (CKV_OA_1, CKV_OA_2) — proof
+      # each one actually fires: mutates real tracked files under a trap that
+      # always restores them, never left in the working tree either way.
+      - ./scripts/dev/test-checkov-custom-checks.sh
       # Only what git can see. Scanning the raw tree flagged .env.sh and the
       # *.kubeconfig files — gitignored on purpose — so this gate could never be
       # green on an operator's machine, only on a bare CI runner.
