@@ -97,7 +97,7 @@ baseline and not a picture of what was already there.
 
 ## 3. Emulated cloud — no account, real provider binaries
 
-The lane is pinned to Feint 0.10.0, running against the same Scaleway provider
+The lane is pinned to Feint 0.12.0, running against the same Scaleway provider
 version the clusters run.
 
 ```bash
