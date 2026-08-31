@@ -226,6 +226,15 @@ in git. 0.1.0 is the first entry describing something proven.
   and Outscale. `plumber`'s own audit is unexercised outside GitHub Actions;
   this PR's CI run is what proves that pin.
 
+  The plumber bump itself surfaced a real, if low-severity, finding: v0.4.48
+  added a control ("Checkout must not persist credentials", `ISSUE-307`)
+  that v0.4.39 never evaluated, and it was right — 11 `actions/checkout` steps
+  across `ci.yml` and `security.yml` left `GITHUB_TOKEN` in `.git/config` for
+  the rest of their job with no later step needing it (none of them push).
+  `persist-credentials: false` added to all 11, the same fix `clea.yml`
+  already carries on the two checkouts that DO push — this is every read-only
+  job catching up to that pattern.
+
 - **Renovate moves from a six-hour weekly window to a daily one**, and
   `dependencyDashboard` becomes explicit. It has proposed nothing since its
   config landed on 2026-07-30 — its nine pull requests were created three hours

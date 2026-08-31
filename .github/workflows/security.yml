@@ -25,6 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
+          persist-credentials: false
           fetch-depth: 0  # Full history for better detection
 
       - name: Install gitleaks (pinned + checksum-verified)
@@ -69,6 +70,8 @@ jobs:
       security-events: write  # SARIF upload to Code Scanning
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
 
       # Deliberately no .plumber.yaml. A config file REPLACES the built-in policy
       # instead of extending it: a minimal one, measured on 2026-08-11, left 22 of
