@@ -61,6 +61,14 @@ jobs:
       # The report issue is also the state store: `clea report` embeds the state
       # in an HTML comment at the end of its body. No artifact, no cache, and
       # the durable record is the thing a human already reads.
+      #
+      # Every open, labelled issue is fetched — not just the newest (#127): a
+      # human labelling an unrelated issue with this label, to cross-reference
+      # a finding, is the natural thing to do, and `per_page=1` on the API's
+      # created-desc default picked exactly that issue over the real report
+      # the moment it was newer, which then got PATCHed over wholesale. `clea
+      # pick-issue` matches on what only this automation itself ever writes —
+      # see `pick_report_issue` in scripts/clea/clea.py.
       - name: Previous state, from the report issue
         id: issue
         env:
@@ -71,14 +79,9 @@ jobs:
           api="https://api.github.com/repos/${{ github.repository }}"
           curl -sS -H "Authorization: Bearer $GH_TOKEN" \
                -H "Accept: application/vnd.github+json" \
-               "$api/issues?labels=${LABEL}&state=open&per_page=1" > issues.json
-          number="$(python3 -c 'import json;d=json.load(open("issues.json"));print(d[0]["number"] if d else "")')"
+               "$api/issues?labels=${LABEL}&state=open&per_page=100" > issues.json
+          number="$(python3 scripts/clea/clea.py pick-issue --issues issues.json --body-out previous.md)"
           echo "number=$number" >> "$GITHUB_OUTPUT"
-          if [ -n "$number" ]; then
-            python3 -c 'import json;print(json.load(open("issues.json"))[0]["body"] or "")' > previous.md
-          else
-            : > previous.md
-          fi
 
       # Authenticated, always. Unauthenticated the API allows 60 requests an
       # hour from an IP shared with every other GitHub customer — which is what

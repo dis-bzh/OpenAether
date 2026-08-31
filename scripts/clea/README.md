@@ -72,11 +72,24 @@ fixtures as dependencies of the repository under test.
 | `clea matrix` | no | what the probe lanes should run, as a GitHub Actions matrix. |
 | `clea bump <dep> <version>` | no | rewrite the pin, at **every** site, by the exact inverse of the reader. Exits 1 if nothing changed. |
 | `clea report` | no | render Markdown, with the state embedded in an HTML comment at the end. |
+| `clea pick-issue --issues <file>` | no | of a fetched, label-matched issue list, which one is Cléa's own report — see below. |
 | `clea prune` | no | name the probe branches whose bump has already landed. |
 
 Datasources: `github-releases`, `github-tags`, `pypi`, `helm`,
 `terraform-provider`, and `url-text` for a tool installed from a moving target
 such as `https://dl.k8s.io/release/stable.txt`.
+
+## The report issue
+
+The workflow keeps one open issue as both the report and the state store
+(`clea report`'s output, state embedded in an HTML comment at the end). It is
+found by label, but *not* by "newest labelled issue" — a human labelling an
+unrelated issue with the same label, to cross-reference a finding, is the
+natural thing to do, and if that issue is newer it must not be mistaken for
+the report and overwritten. `clea pick-issue` matches instead on what only
+this automation itself ever writes: the `_Generated … by [Cléa](…)_` marker
+`render_report` always puts first in the body, from an issue authored as
+`[report] bot_login` (default `github-actions[bot]`).
 
 ## Two rules it will not bend
 
