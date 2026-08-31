@@ -225,9 +225,11 @@ for i in $(seq 1 60); do
 done
 echo "Nodes:"
 kubectl get nodes -o wide 2>/dev/null | sed 's/^/    /'
-# Fatal, both of them. These two were still `|| warn` while the header above
-# claimed the degrade-to-warning bug was fixed — it was, for etcd and the Talos
-# health check only. A cluster with no working CNI reached the green banner.
+# Fatal, all four post-Cilium-fix checks: nodes and Cilium here, schedulable
+# workers (Step 5) and Flux controllers (Step 6) below. All four were still
+# `|| warn` while the header above claimed the degrade-to-warning bug was
+# fixed — it was, for etcd and the Talos health check only. A cluster with no
+# working CNI, no schedulable workers, or no Flux reached the green banner.
 if [[ "$READY" -eq "$TOTAL_NODES" ]]; then
   success "All ${TOTAL_NODES} nodes Ready (${#CP_IPS[@]} CP + ${#WORKER_IPS[@]} workers)"
 else
@@ -260,7 +262,12 @@ if [[ ${#WORKER_IPS[@]} -eq 0 ]]; then
 else
   info "Step 5 — Keeping control-plane taint (${#WORKER_IPS[@]} dedicated workers are schedulable)..."
   SCHED=$(kubectl get nodes --no-headers -l '!node-role.kubernetes.io/control-plane' 2>/dev/null | grep -c " Ready " || true)
-  [[ "$SCHED" -eq ${#WORKER_IPS[@]} ]] && success "${SCHED} schedulable worker node(s) Ready" || warn "Schedulable workers Ready: ${SCHED}/${#WORKER_IPS[@]}"
+  if [[ "$SCHED" -eq ${#WORKER_IPS[@]} ]]; then
+    success "${SCHED} schedulable worker node(s) Ready"
+  else
+    error "Schedulable workers Ready: ${SCHED}/${#WORKER_IPS[@]}"
+    exit 1
+  fi
 fi
 
 # ==============================================================================
@@ -279,7 +286,12 @@ for i in $(seq 1 36); do
   sleep 5
 done
 R=$(kubectl -n flux-system get pods --no-headers 2>/dev/null | grep -c "Running" || true)
-[[ "$R" -ge 4 ]] && success "Flux controllers running (${R} pods)" || warn "Flux pods running: ${R}/4"
+if [[ "$R" -ge 4 ]]; then
+  success "Flux controllers running (${R} pods)"
+else
+  error "Flux pods running: ${R}/4"
+  exit 1
+fi
 
 # ==============================================================================
 # Step 7 — Apply Flux Kustomizations (local overlay)

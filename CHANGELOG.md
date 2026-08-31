@@ -16,6 +16,24 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **Three checks that could not fail** ([#75](https://github.com/dis-bzh/OpenAether-infra/issues/75)).
+  `test-talos-local.sh`'s Step 5 (schedulable workers Ready) and Step 6 (Flux
+  controllers running) still degraded to `warn` after the same bug was fixed
+  for the etcd and CNI checks right above them — a cluster where workers never
+  became schedulable-Ready, or Flux never came up, still reached the
+  unconditional "validated end-to-end" banner. Both are now fatal, same
+  `if`/`error`/`exit 1` shape as their neighbors. `check-skill-parity.sh`
+  diffed the shared `SKILL.md` files between this repo and its
+  `OpenAether-apps` sibling but not `check-language.sh` itself, so widening
+  the French-word list in one copy and not the other would pass silently;
+  added the same byte-for-byte `diff -q`. `check-language.sh`'s prose scanner
+  read comment lines, `echo`/`print`/`printf`/`puts` lines and
+  `help=`/`description=` lines, but not the body of a `cat <<EOT` heredoc —
+  exactly the shape that hid the `fleet-down.sh` `<projet>`/`<project>`
+  mismatch; reused the existing heredoc state machine (already handled HCL's
+  `description = <<-EOT`), triggered by a narrow `cat`/`cat >&N` opener that
+  excludes `cat > file <<EOF` and piped heredocs on purpose.
+
 - **`test-talos-image.sh` and `test-unattended.sh` had gaps an adversarial
   pass could walk through** ([#60](https://github.com/dis-bzh/OpenAether-infra/issues/60)).
   `test-talos-image.sh`: the `-var` assertion was anchored to `-var ` with a

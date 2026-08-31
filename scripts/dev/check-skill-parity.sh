@@ -48,6 +48,12 @@ if ! diff -q "$MANIFEST" "$SIBLING/.claude/skills/SHARED" >/dev/null 2>&1; then
   echo "  ✗ the SHARED manifests themselves differ"; drift=1
 fi
 
+# check-language.sh is duplicated the same way the skills are — widening one
+# copy and not the other silently let French back through the sibling repo.
+if ! diff -q "$HERE/scripts/dev/check-language.sh" "$SIBLING/scripts/dev/check-language.sh" >/dev/null 2>&1; then
+  echo "  ✗ scripts/dev/check-language.sh differs between the two repositories"; drift=1
+fi
+
 # A shared skill must also be VALID where it is copied: a relative link to a file
 # only one repository has passes a byte-for-byte comparison and is still broken on
 # the other side. That happened to docs/release-checklist.md.
