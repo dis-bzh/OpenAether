@@ -112,7 +112,7 @@ def query(session_url: str, expr: str) -> int:
     try:
         with urllib.request.urlopen(url, timeout=20) as fh:
             return len(json.load(fh)["data"]["result"])
-    except Exception:
+    except (urllib.error.URLError, TimeoutError, ValueError, KeyError):
         return -1
 
 

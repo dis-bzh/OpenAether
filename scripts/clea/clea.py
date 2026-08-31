@@ -48,7 +48,7 @@ try:
     import tomllib  # Python 3.11+
 except ModuleNotFoundError:  # pragma: no cover - only on very old interpreters
     print("clea needs Python 3.11 or newer (tomllib)", file=sys.stderr)
-    raise SystemExit(1)
+    raise SystemExit(1) from None
 
 USER_AGENT = "clea/1 (+https://github.com/dis-bzh/OpenAether-infra)"
 SKIP_DIRS = {".git", "node_modules", ".terraform", ".terraform-validate", "vendor"}
@@ -378,7 +378,7 @@ def renovate_coverage(root: Path, config: str, exclude: list[str]) -> set[tuple[
                 try:
                     rx = re.compile(pattern, re.MULTILINE)
                 except re.error as exc:
-                    raise CleaError(f"{config}: unusable matchString {match_string!r}: {exc}")
+                    raise CleaError(f"{config}: unusable matchString {match_string!r}: {exc}") from exc
                 for m in rx.finditer(text):
                     covered.add((rel, text[: m.start()].count("\n") + 1))
     return covered
@@ -496,7 +496,7 @@ def http_get(url: str, token: str | None = None, accept: str | None = None) -> b
         body = ""
         try:
             body = exc.read().decode("utf-8", "replace")[:200]
-        except Exception:  # pragma: no cover - the status alone is enough
+        except OSError:  # pragma: no cover - the status alone is enough
             pass
         if exc.code in (401, 403, 429):
             # Never let this read as "no new version". Unauthenticated GitHub
@@ -612,8 +612,10 @@ def latest_terraform_provider(dep: str, _token: str | None,
     if not versions:
         raise CleaError(f"terraform-provider {dep}: no version at {base}")
     tag = max(versions, key=version_key)
+    namespace = dep.split("/", 1)[0]
+    name = dep.rsplit("/", 1)[-1]
     return {"tag": tag, "released_at": None,
-            "notes_url": f"https://github.com/{dep.split('/')[0]}/terraform-provider-{dep.split('/')[-1]}/releases/tag/v{tag}"}
+            "notes_url": f"https://github.com/{namespace}/terraform-provider-{name}/releases/tag/v{tag}"}
 
 
 def latest_url_text(dep: str, _token: str | None, url: str | None = None,
