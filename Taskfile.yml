@@ -1487,6 +1487,14 @@ tasks:
         vars: {PROVIDER: "{{.ITEM}}"}
       - task: feint-down
 
+  ssh-ca-check:
+    desc: >-
+      Bastion SSH-CA, rung "emulated" (#81): renders the shared cloud-init template and proves
+      TrustedUserCAKeys/AuthorizedPrincipalsFile actually work on a real sshd in Docker. No cloud
+      account. Needs Docker; skips (exit 0) if it is unavailable.
+    cmds:
+      - ./scripts/dev/ssh-ca-check.sh
+
   feint-evidence:
     desc: >-
       Capture Feint's evidence record under a machine runtime (Incus) and print what a baseline would
