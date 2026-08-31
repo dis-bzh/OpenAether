@@ -125,7 +125,13 @@ scan_code() {
       # `description=`, so every continuation line was invisible — which is how
       # a whole French sentence sat in the middle of an English block in
       # ovh/variables.tf, in the text `tofu` prints to the operator.
-      /description[[:space:]]*=[[:space:]]*<<-?[A-Za-z_]+/ {
+      #
+      # A fourth kind, same blind spot: `cat <<EOT` / `cat >&2 <<EOT`. Its body
+      # matches none of comment, printed or description= either — exactly the
+      # shape that hid the fleet-down.sh <projet>/<project> mismatch. Narrowed
+      # to a bare `cat` opener so `cat > file <<EOF` (redirect, not printed) and
+      # piped heredocs (`| cat <<EOF`, `kubectl apply -f - <<EOF`) stay out.
+      /description[[:space:]]*=[[:space:]]*<<-?[A-Za-z_]+/ || /^[[:space:]]*cat([[:space:]]+>&[0-9])?[[:space:]]*<<-?[A-Za-z_]+/ {
         match($0, /<<-?[A-Za-z_]+/)
         term = substr($0, RSTART, RLENGTH)
         sub(/^<<-?/, "", term)
