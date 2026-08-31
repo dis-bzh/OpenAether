@@ -16,6 +16,15 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **`test-talos-local.sh` hung for 90s on a host missing `CAP_SYS_RESOURCE`,
+  then failed on an unrelated-looking timeout**, instead of the ~1s refusal
+  its siblings give when no local cluster is reachable
+  ([#54](https://github.com/dis-bzh/OpenAether-infra/issues/54)). New
+  `scripts/dev/check-docker-talos-capability.sh` (same fail-open shape as
+  `check-host-ports.sh`) catches it in milliseconds via the `capsh` probe
+  `infrastructure/opentofu-local/README.md` already documented; wired into
+  both `test-talos-local.sh` and `task local-up`, which shares the identical
+  exposure.
 - **Six gates were reporting green on something they had stopped checking.**
   Found by auditing what the pipeline actually constrains, and each one is
   reproduced in both directions — broken on purpose, watched go red, fixed,

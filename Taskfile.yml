@@ -367,6 +367,10 @@ tasks:
       # check-script-reachability.sh actually flags an unreferenced script
       # and clears once it's wired in, not just that today's tree is clean.
       - ./scripts/dev/test-script-reachability.sh
+      # A host missing CAP_SYS_RESOURCE looked healthy for 90s before this,
+      # then died on an unrelated-looking timeout (#54). Against a stubbed
+      # capsh, and also against this host's real one where reachable.
+      - ./scripts/dev/test-docker-talos-capability.sh
       # A --set typo reaches the cluster silently past every other gate;
       # this proves the effective-config reader (and check-cilium-parity.py's
       # missing-key guard) actually catch it, offline.
@@ -1452,6 +1456,9 @@ tasks:
       # Fail fast on a Hyper-V port reservation: Docker Desktop only reports it
       # as an opaque 500, five retries and a 90s timeout later.
       - ./scripts/dev/check-host-ports.sh {{.TALOS_API_PORT_BASE}} {{.K8S_API_PORT}}
+      # Same shape, a different 90s hang: a host missing CAP_SYS_RESOURCE looks
+      # healthy right up to the etcd-quorum wait. See infrastructure/opentofu-local/README.md.
+      - ./scripts/dev/check-docker-talos-capability.sh
       # cilium-local.yaml is gitignored, so a fresh clone has none — render it
       # rather than boot a cluster with no CNI. Mirrors what `up` does for the
       # cloud manifest.
