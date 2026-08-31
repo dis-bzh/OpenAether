@@ -21,9 +21,10 @@ là-bas plutôt qu'ici, elles bougent :
 
 ```bash
 task feint-up                          # démarre l'émulateur (installe le binaire épinglé si absent)
-task feint-plan   PROVIDER=scaleway    # plan du VRAI root cluster, sans credentials
-task feint-apply  PROVIDER=outscale    # cycle apply/destroy sur la fixture réduite
-task feint-record PROVIDER=scaleway    # classe ce que notre module appelle et qu'aucun pack ne sert
+task feint-plan       PROVIDER=scaleway  # plan du VRAI root cluster, sans credentials
+task feint-apply      PROVIDER=outscale  # cycle apply/destroy sur la fixture réduite
+task feint-apply-root PROVIDER=scaleway  # apply/destroy non ciblé sur le VRAI root cluster
+task feint-record     PROVIDER=scaleway  # classe ce que notre module appelle et qu'aucun pack ne sert
 task feint-test                        # les deux providers, plan + apply
 task feint-down
 
@@ -32,13 +33,13 @@ task feint-evidence PROVIDER=scaleway  # besoin d'Incus : apply sous un vrai run
 task feint-evidence-verify PROVIDER=scaleway  # vérifie une capture fraîche contre le baseline épinglé
 ```
 
-## Trois voies, parce qu'une seule ne peut pas faire les trois
+## Quatre voies, parce qu'une seule ne peut pas faire les quatre
 
 **`feint-plan` — le vrai root `cluster`, plan seulement.** Vrais modules, vrai
 provider, `envs/feint-<provider>.tfvars.example`. Le script lui-même ne fait
 toujours que planifier, mais les raisons qui l'arrêtaient là ont disparu depuis
-Feint 0.12.0 — voir `feint-record` ci-dessous, qui applique désormais le
-module provider de ce même root de bout en bout.
+Feint 0.12.0 — voir `feint-apply-root` et `feint-record` ci-dessous, qui
+appliquent désormais ce même root de bout en bout.
 
 Le root déclarant un backend S3 partiel, la voie y dépose un `*_override.tf` de
 backend local et le retire en sortant.
@@ -49,6 +50,21 @@ formes sur le sous-ensemble réellement servi : init → validate → plan → a
 **second plan vide** → destroy, l'existence comme la disparition étant relues
 depuis l'API et non depuis le state. Voir son
 [README](../infrastructure/opentofu-feint/README.md).
+
+**`feint-apply-root` — le vrai root `cluster`, apply non ciblé.** Même root et
+mêmes tfvars que `feint-plan`, mais un `tofu apply` complet (Phase 1 :
+`talos_bootstrap = false`, déjà le réglage des deux
+`envs/feint-<provider>.tfvars.example`) — VMs, réseau, LB, tout ce que
+`feint-plan` se contente de planifier — suivi d'un second plan vide et du
+destroy en deux temps que documente le
+[README du root](../infrastructure/opentofu/cluster/README.md#teardown-destroy)
+(les machine secrets portent `prevent_destroy`, donc `tofu state rm
+module.talos.talos_machine_secrets.this[0]` d'abord, puis `destroy -var
+talos_bootstrap=false`). Ferme le premier critère de l'issue #76 : 27
+ressources sur Scaleway, 41 sur Outscale, second plan vide, destroy propre —
+les deux providers, mesuré le 2026-08-31. `feint-record` ci-dessous avait
+prouvé que le module provider seul s'applique de bout en bout ; ceci est le
+root entier, pas seulement ce module.
 
 **`feint-record` — mesurer le mur au lieu d'en discuter.** `feint proxy`
 s'intercale entre le provider et l'émulateur et écrit un objet JSON caviardé par

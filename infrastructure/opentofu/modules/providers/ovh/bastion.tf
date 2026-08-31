@@ -117,6 +117,8 @@ resource "openstack_compute_instance_v2" "bastion" {
     extra_packages    = []
     extra_write_files = []
     extra_runcmd      = []
+    ssh_ca_public_key = var.bastion_ssh_ca_public_key
+    ssh_ca_principals = var.bastion_ssh_ca_principals
   })
 
   tags = ["bastion", var.cluster_name]

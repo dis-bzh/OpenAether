@@ -208,6 +208,20 @@ variable "bastion_ssh_keys" {
   default     = []
 }
 
+# SSH-CA — both "" (default) keeps the bastion on static-key auth only, byte
+# for byte the same cloud-init as before these variables existed.
+variable "bastion_ssh_ca_public_key" {
+  description = "SSH CA public key trusted for certificate auth on the bastion (empty = SSH-CA off)"
+  type        = string
+  default     = ""
+}
+
+variable "bastion_ssh_ca_principals" {
+  description = "Principals (one per line) authorized via AuthorizedPrincipalsFile for bastion_user (empty = SSH-CA off)"
+  type        = string
+  default     = ""
+}
+
 # --- Worker storage (contract parity; consumed here to create data disks) -----
 
 variable "worker_storage" {
