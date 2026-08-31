@@ -34,6 +34,45 @@ in git. 0.1.0 is the first entry describing something proven.
   `description = <<-EOT`), triggered by a narrow `cat`/`cat >&N` opener that
   excludes `cat > file <<EOF` and piped heredocs on purpose.
 
+- **`test-talos-image.sh` and `test-unattended.sh` had gaps an adversarial
+  pass could walk through** ([#60](https://github.com/dis-bzh/OpenAether-infra/issues/60)).
+  `test-talos-image.sh`: the `-var` assertion was anchored to `-var ` with a
+  trailing space, so the single-token `-var=` form passed while the message
+  said it did not; nothing tied the saved plan's filename to the `$TGT`
+  discriminator `talos-image.sh` bakes into it, so dropping `$TGT` from the
+  filename went unnoticed. `test-unattended.sh`'s embedded Python shell
+  reader: its "interactive exemption" credited an `exit` found anywhere in an
+  `if`/`else` block, not scoped to the branch actually reached when the tty
+  test fails, so a script that prompts but does not refuse headless could
+  still claim it; `blank` for a `$(`/`$((` scope was computed from the WHOLE
+  quote stack instead of the active frame, so a heredoc opened inside
+  `"$(...)"` (reproduced against `test-bucket-names.sh`'s own heredoc) read as
+  quoted text and the heredoc-skip path never fired, corrupting the parse of
+  everything after it; `task_call()` skipped every `-`-prefixed token as a
+  bare flag with no notion of a go-task flag that consumes the next one
+  (`-d`, `-t`, `-o`), so `task -d somedir cluster-up` read `somedir` as the
+  callee and the real one went unseen; the anti-abuse check was a literal
+  path substring search, missing a script CI reaches only through a Task
+  wrapper; the floors asserted "non-zero", so a real count of 8 dropping to 1
+  stayed green; the `ENSURE` check accepted any non-empty string, including
+  an unresolved forward like `ENSURE: "{{.ENSURE}}"`. Each fix was proven
+  against a mutation shaped like its defect — confirmed red before the fix,
+  green after, on the harness itself as well as on the real unmutated tree.
+
+- **Cléa's report-issue picker grabbed the newest `clea`-labelled issue, not
+  necessarily its own report** (#127). The workflow's "Previous state, from
+  the report issue" step fetched with `per_page=1` on the API's created-desc
+  default sort, so any newer issue a human labelled `clea` — to cross-reference
+  a finding, the natural thing to do — won over the real report and got
+  PATCHed over wholesale on the next scheduled run; #104 clobbered #91 exactly
+  this way on 2026-08-28. The selection logic now lives in
+  `scripts/clea/clea.py` (`pick_report_issue`, wired as the `pick-issue`
+  subcommand) and picks by what only the automation itself ever writes — the
+  `render_report` marker as the first line of the body, from an issue authored
+  as `[report] bot_login` (default `github-actions[bot]`) — instead of
+  creation order. `clea.yml` now fetches every open, labelled issue and calls
+  `clea pick-issue` rather than trusting `per_page=1`.
+
 - **The bastion's SSH-CA hooks shipped inert since they were written** ([#81](https://github.com/dis-bzh/OpenAether-infra/issues/81)).
   `_shared/bastion-cloud-init.yaml.tftpl` hardcoded `TrustedUserCAKeys` and
   `AuthorizedPrincipalsFile` to an always-empty file and directory, so no
@@ -55,7 +94,6 @@ in git. 0.1.0 is the first entry describing something proven.
   avoid by building the API URL ourselves (which would mean hardcoding
   Outscale's DNS). Comment now records the decision instead of a stale
   premise; no behavior change.
-
 - **`docs/emulated-cloud.md`/`.fr.md` documented three Feint gaps as
   permanent** — Outscale load balancers ("this one will not move"), Scaleway
   IPAM reservations, Scaleway LB and public gateway ("genuinely absent") —

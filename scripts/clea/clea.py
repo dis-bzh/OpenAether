@@ -17,6 +17,7 @@ Commands
              write the state file plus a Markdown report.
   bump       rewrite one pin in place, by the exact inverse of the reader.
   report     render Markdown from a state file.
+  pick-issue which open, labelled issue is Cléa's OWN report — not just the newest.
   prune      name the probe branches whose pin already landed on the base branch.
 
 The two rules this file will not bend
@@ -678,7 +679,8 @@ DATASOURCES = {
 
 DEFAULT_CONFIG = {
     "scan": {"marker": "# renovate:", "exclude": [], "include": []},
-    "report": {"title": "Cléa — dependency report", "label": "clea"},
+    "report": {"title": "Cléa — dependency report", "label": "clea",
+              "bot_login": "github-actions[bot]"},
     "inventory": [],
     "tool": [],
     "unpinned": [],
@@ -1199,6 +1201,51 @@ def cmd_report(args) -> int:
 
 
 # ---------------------------------------------------------------------------
+# pick-issue — which open, labelled issue is Cléa's OWN report (#127)
+# ---------------------------------------------------------------------------
+# `render_report` always writes this exact text as the first line of the body
+# it produces — the one thing every report issue carries and nothing else
+# does. Matched together with the author identity the workflow's own
+# PATCH/POST always write issues as (`[report] bot_login`, default
+# github-actions[bot]): either alone can collide with an unrelated issue (a
+# human can paste this text, and the bot opens other issues too), but the
+# pair only ever matches an issue this automation itself produced.
+REPORT_MARKER_RE = re.compile(
+    r"^_Generated \S+ by \[Cléa\]\(\.\./blob/main/scripts/clea/README\.md\)\. "
+    r"This issue is rewritten in place; do not open another\._"
+)
+
+
+def pick_report_issue(issues: list[dict], bot_login: str) -> dict | None:
+    """Which of these open, label-matched issues is Cléa's own report.
+
+    Not "the newest" (#127): a human labelling an unrelated issue with the
+    report label — to cross-reference a finding, the natural thing to do — is
+    picked instead by a naive `sort=created&per_page=1` the moment it is newer
+    than the actual report, and the next scheduled run then PATCHes it,
+    destroying the human-written content. #104 clobbered #91 exactly this way
+    on 2026-08-28. Multiple matches (should not happen — the workflow only
+    ever creates one, then rewrites it in place) fall back to the lowest
+    issue number: the original report, not whichever the API happened to
+    return first.
+    """
+    matches = [i for i in issues
+              if (i.get("user") or {}).get("login") == bot_login
+              and REPORT_MARKER_RE.match(i.get("body") or "")]
+    return min(matches, key=lambda i: i["number"]) if matches else None
+
+
+def cmd_pick_issue(args) -> int:
+    cfg = load_config(repo_root(args.root) / args.config)
+    issues = json.loads(Path(args.issues).read_text(encoding="utf-8"))
+    picked = pick_report_issue(issues, cfg["report"].get("bot_login", "github-actions[bot]"))
+    if args.body_out:
+        Path(args.body_out).write_text((picked or {}).get("body") or "", encoding="utf-8")
+    print(picked["number"] if picked else "")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # bump
 # ---------------------------------------------------------------------------
 
@@ -1325,6 +1372,11 @@ def main(argv: list[str] | None = None) -> int:
     p_report.add_argument("--state", default="clea-state.json")
     p_report.add_argument("--out")
 
+    p_pick = sub.add_parser("pick-issue", help="which open issue is Cléa's own report")
+    p_pick.add_argument("--issues", default="issues.json",
+                        help="GitHub API issue list (JSON array), as fetched by the workflow")
+    p_pick.add_argument("--body-out", help="write the picked issue's body here (empty if none)")
+
     p_bump = sub.add_parser("bump", help="rewrite a pin in place")
     p_bump.add_argument("dep")
     p_bump.add_argument("version")
@@ -1336,7 +1388,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     handlers = {"coverage": cmd_coverage, "scan": cmd_scan, "report": cmd_report,
                 "bump": cmd_bump, "prune": cmd_prune, "matrix": cmd_matrix,
-                "config": cmd_config}
+                "config": cmd_config, "pick-issue": cmd_pick_issue}
     try:
         return handlers[args.command](args)
     except CleaError as exc:
