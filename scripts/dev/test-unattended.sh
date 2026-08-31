@@ -77,7 +77,11 @@ def scan(line, st):
             i += 1; continue
         if ch == '\\' and i + 1 < n:
             out.append(line[i:i+2]); mask.extend('  '); i += 2; continue
-        blank = any(c in '"\'' for c in st)
+        # Per-frame, not stack-wide: a `$(`/`$((` frame is live shell code even
+        # nested inside a quoted one, so it must not inherit "blank" from an
+        # ancestor `"`/`'` frame — that inheritance is what let `<<` inside
+        # `"$(...)"` read as quoted text and skip the heredoc-skip path.
+        blank = top in ('"', "'")
         if top == '"' and not line.startswith('$(', i):
             out.append(ch); mask.append('\0')
             if ch == '"': st.pop()
@@ -114,13 +118,14 @@ def logical_lines(text):
         if not buf:
             start = i + 1
         t, m, st, cont = scan(line, st)
-        if cont:
-            buf += t.rstrip()[:-1] + ' '; mbuf += m.rstrip()[:-1] + ' '; i += 1; continue
-        buf += t; mbuf += m; i += 1
-        if st:                       # still inside a string: it keeps reading
-            buf += ' '; mbuf += ' '; continue
-        out.append((start, buf, mbuf))
-        for h in (HEREDOC.match(buf, p.start()) for p in re.finditer('<<', mbuf)):
+        i += 1
+        # A heredoc's body is consumed right after ITS OWN line, exactly as
+        # bash reads it — regardless of any $(...) / "..." still open around
+        # it. Checked per raw line, not the accumulated buffer: deferring this
+        # to where the whole logical line closes let a body embedded inside a
+        # still-open construct be scanned as shell instead of skipped, and its
+        # own quotes/parens then corrupted the stack this function tracks.
+        for h in (HEREDOC.match(t, p.start()) for p in re.finditer('<<', m)):
             if not h:
                 continue
             delim, dash = h.group(3), h.group(1) == '-'
@@ -128,6 +133,12 @@ def logical_lines(text):
                 cur = raw[i]; i += 1
                 if (cur.strip() if dash else cur.rstrip()) == delim:
                     break
+        if cont:
+            buf += t.rstrip()[:-1] + ' '; mbuf += m.rstrip()[:-1] + ' '; continue
+        buf += t; mbuf += m
+        if st:                       # still inside a string: it keeps reading
+            buf += ' '; mbuf += ' '; continue
+        out.append((start, buf, mbuf))
         buf, mbuf = '', ''
     if st:
         raise ValueError('unterminated ' + ''.join(st))
@@ -191,6 +202,12 @@ def command(seg):
             env[m.group(1)] = m.group(2)
     return env, [trim(x) for x in tk[i:]]
 
+# go-task flags with a separate value token (VERIFIED on Task 3.52 --help):
+# `task -d somedir cluster-up` has the callee at index 2, not 1 — skipping
+# `-d` alone reads `somedir` as the callee and misses the real one entirely.
+TASK_TAKES_VALUE = {'-d', '--dir', '-t', '--taskfile', '-o', '--output',
+                     '--output-group-begin', '--output-group-end'}
+
 def task_call(seg):
     """(callee, vars) if this segment runs `task`, else None."""
     env, argv = command(seg)
@@ -199,9 +216,15 @@ def task_call(seg):
     rest = argv[1:]
     if '--' in rest:
         rest = rest[:rest.index('--')]   # past `--` it is CLI_ARGS, not a task var
-    callee, kv = None, dict(env)
+    callee, kv, skip = None, dict(env), False
     for t in rest:
-        if t.startswith('-') or REDIR.match(t):
+        if skip:
+            skip = False; continue
+        if t.startswith('-'):
+            name = t.split('=', 1)[0]
+            skip = name in TASK_TAKES_VALUE and '=' not in t
+            continue
+        if REDIR.match(t):
             continue
         m = ASSIGN.match(t)
         if m:
@@ -428,8 +451,16 @@ hdr('the image build the entry point triggers is the non-interactive one')
 img = [(callee, kv) for c, callee, _, kv in EDGES if c == ENTRY and callee == 'image-build']
 if not img:
     bad(f'{ENTRY} no longer calls image-build — this check is measuring a journey that moved')
+def ensures(v):
+    """Does this value provably make image-build take --ensure? A literal
+    truthy string does; an unresolved {{ }} template token does not — reaching
+    here unresolved means the var was forwarded, not given, and forwarding
+    proves nothing about what cluster-up's own caller actually passed."""
+    v = unquote(v)
+    return bool(v) and '{{' not in v
+
 for callee, kv in img:
-    if unquote(kv.get('ENSURE', '')):
+    if ensures(kv.get('ENSURE', '')):
         ok(f'{ENTRY} → image-build carries ENSURE={kv["ENSURE"]}')
     else:
         bad(f'{ENTRY} → image-build passes no ENSURE — talos-image.sh then takes its prompt-capable apply')
@@ -451,22 +482,54 @@ TTY = re.compile(r'(\[\[?|\btest\b)[^;]*?-t\s+[01]')
 
 def refuses_headless(lines):
     """True when the script cannot run without a terminal: a tty test that exits,
-    on its own statement or as the `if` that wraps one."""
+    on its own statement, gating a while/until loop, or — for an `if` — in the
+    branch actually taken when the test FAILS (no tty), not just anywhere in
+    the if/else. An exit in the branch taken when a tty IS present proves
+    nothing: the script still runs on to prompt in the headless case."""
     for n, (_, line, _) in enumerate(lines):
         if not TTY.search(line):
             continue
         if re.search(r'\bexit\b', line):
             return True
-        if re.match(r'(if|while|until)\b', line.strip()):
+        head = line.strip()
+        if re.match(r'(while|until)\b', head):
             depth = 0
             for _, nxt, nmask in lines[n:]:
                 for seg in segments(nxt, nmask):
-                    if re.match(r'(if)\b', seg): depth += 1
-                    if seg.strip() == 'fi': depth -= 1
+                    if re.match(r'(if|while|until)\b', seg): depth += 1
+                    if seg.strip() in ('fi', 'done'): depth -= 1
                 if re.search(r'\bexit\b', nxt):
                     return True
                 if depth <= 0 and n:
                     break
+            continue
+        if not re.match(r'if\b', head):
+            continue
+        # The branch reached when the test fails is `else` — unless the test
+        # itself is negated (`! [ -t 0 ]` / `[ ! -t 0 ]`), in which case it is
+        # `then`: a bare position match, not full boolean parsing, but enough
+        # to tell the two idioms actually used here apart.
+        bang, tty_at = head.find('!'), TTY.search(head).start()
+        no_tty_branch = 'then' if 0 <= bang < tty_at else 'else'
+        depth, branch, hit = 0, 'then', {'then': False, 'else': False}
+        for _, nxt, nmask in lines[n:]:
+            for seg in segments(nxt, nmask):
+                if re.match(r'if\b', seg):
+                    depth += 1; continue
+                if seg == 'fi':
+                    depth -= 1; continue
+                if depth != 1:
+                    continue    # nested if/fi: not this branch's own exit
+                if seg == 'else':
+                    branch = 'else'; continue
+                if re.match(r'elif\b', seg):
+                    branch = None; continue   # a different condition entirely
+                if branch and re.search(r'\bexit\b', seg):
+                    hit[branch] = True
+            if depth <= 0:
+                break
+        if hit[no_tty_branch]:
+            return True
     return False
 
 def call_sites():
@@ -542,10 +605,30 @@ for kind, f, ln, callee, kv, interactive, seg in sites:
 
 # The exemption must stay expensive. A script that refuses without a terminal
 # cannot also be a CI step: that job would die at second zero.
+def reaches_script(name, script, seen=None):
+    """True when task `name` shells out to `script`, directly or by calling
+    (via any Taskfile edge) a task that does. CI reaching the script through a
+    wrapper task is still CI reaching it — the literal-path search below only
+    sees a workflow that names the script itself."""
+    seen = seen if seen is not None else set()
+    if name in seen:
+        return False
+    seen.add(name)
+    if script in BODY.get(name, ''):
+        return True
+    return any(reaches_script(callee, script, seen)
+               for caller, callee, _, _ in EDGES if caller == name)
+
 for f in sorted(claimed):
     used = [w for w in WORKFLOWS if re.search(re.escape(f), open(w).read())]
+    if not used:
+        wrappers = {n for n in TASKS if reaches_script(n, f)}
+        used = sorted({s[1] for s in sites if s[0] == 'workflow' and s[3] in wrappers})
+        via = ' (via a task wrapper)' if used else ''
+    else:
+        via = ''
     if used:
-        bad(f'{f} claims the interactive exemption yet {used[0]} runs it as a CI step — it would refuse at second zero')
+        bad(f'{f} claims the interactive exemption yet {used[0]} runs it as a CI step{via} — it would refuse at second zero')
     else:
         ok(f'{f} claims the interactive exemption and no workflow runs it')
 
@@ -555,12 +638,26 @@ for f in sorted(claimed):
 # summary. Zero of anything below means the parser went blind, not that the
 # repository is clean.
 hdr('the analysis actually found something to measure')
+# Baseline is what this repo actually measured, not "non-zero": non-zero let a
+# real count of 8 drop to 1 and stay green, which is the defect this floor
+# exists to catch. Bump a number here deliberately when the repo's shape
+# genuinely changes (a task removed, a script deleted) — never to silence a
+# failure without checking why the count moved first.
+FLOORS = {'tasks that need APPROVE': 5, 'call edges into them': 2,
+          'cloud-lane applies': 4, 'guarded prompts': 2,
+          'shell scripts read': 77, 'workflow files read': 3,
+          '`task …` invocations found outside the Taskfile': 32,
+          'of them into a task that needs APPROVE': 8}
 for label, n in (('tasks that need APPROVE', len(NEEDS)), ('call edges into them', edges),
                  ('cloud-lane applies', seen['cloud']), ('guarded prompts', prompts),
                  ('shell scripts read', len(SCRIPTS)), ('workflow files read', len(WORKFLOWS)),
                  ('`task …` invocations found outside the Taskfile', len(sites)),
                  ('of them into a task that needs APPROVE', external)):
-    ok(f'{n} {label}') if n else bad(f'ZERO {label} — the parser is broken, or the journey was renamed under it')
+    floor = FLOORS[label]
+    if n >= floor:
+        ok(f'{n} {label}')
+    else:
+        bad(f'{n} {label} — below the floor of {floor}: the parser is broken, the journey was renamed under it, or a real drop needs a deliberate bump here')
 
 print("\n".join(f'{v}|{m}' for v, m in R))
 PY

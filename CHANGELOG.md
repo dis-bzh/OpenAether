@@ -16,6 +16,30 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **`test-talos-image.sh` and `test-unattended.sh` had gaps an adversarial
+  pass could walk through** ([#60](https://github.com/dis-bzh/OpenAether-infra/issues/60)).
+  `test-talos-image.sh`: the `-var` assertion was anchored to `-var ` with a
+  trailing space, so the single-token `-var=` form passed while the message
+  said it did not; nothing tied the saved plan's filename to the `$TGT`
+  discriminator `talos-image.sh` bakes into it, so dropping `$TGT` from the
+  filename went unnoticed. `test-unattended.sh`'s embedded Python shell
+  reader: its "interactive exemption" credited an `exit` found anywhere in an
+  `if`/`else` block, not scoped to the branch actually reached when the tty
+  test fails, so a script that prompts but does not refuse headless could
+  still claim it; `blank` for a `$(`/`$((` scope was computed from the WHOLE
+  quote stack instead of the active frame, so a heredoc opened inside
+  `"$(...)"` (reproduced against `test-bucket-names.sh`'s own heredoc) read as
+  quoted text and the heredoc-skip path never fired, corrupting the parse of
+  everything after it; `task_call()` skipped every `-`-prefixed token as a
+  bare flag with no notion of a go-task flag that consumes the next one
+  (`-d`, `-t`, `-o`), so `task -d somedir cluster-up` read `somedir` as the
+  callee and the real one went unseen; the anti-abuse check was a literal
+  path substring search, missing a script CI reaches only through a Task
+  wrapper; the floors asserted "non-zero", so a real count of 8 dropping to 1
+  stayed green; the `ENSURE` check accepted any non-empty string, including
+  an unresolved forward like `ENSURE: "{{.ENSURE}}"`. Each fix was proven
+  against a mutation shaped like its defect — confirmed red before the fix,
+  green after, on the harness itself as well as on the real unmutated tree.
 - **`docs/emulated-cloud.md`/`.fr.md` documented three Feint gaps as
   permanent** — Outscale load balancers ("this one will not move"), Scaleway
   IPAM reservations, Scaleway LB and public gateway ("genuinely absent") —
