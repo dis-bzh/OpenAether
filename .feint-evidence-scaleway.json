@@ -1,0 +1,138 @@
+{
+  "format": "feint-evidence-baseline",
+  "version": 1,
+  "machines": [
+    "incus"
+  ],
+  "generated_from": {
+    "contracts": "absent",
+    "shapes": "absent",
+    "suites": "absent"
+  },
+  "operations": {
+    "block/v1/API.DeleteVolume": {
+      "dataplane": true,
+      "driven": true
+    },
+    "block/v1/API.GetVolume": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v1/API.CreateIP": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v1/API.CreateSecurityGroup": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v1/API.CreateServer": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v1/API.CreateVolume": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v1/API.DeleteIP": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v1/API.DeleteSecurityGroup": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v1/API.DeleteVolume": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v1/API.GetIP": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v1/API.GetSecurityGroup": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v1/API.GetServer": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v1/API.GetServerUserData": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v1/API.GetVolume": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v1/API.ListSecurityGroupRules": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v1/API.ListServerUserData": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v1/API.ListServersTypes": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v1/API.ServerAction": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v1/API.SetSecurityGroupRules": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v1/API.SetServerUserData": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v1/API.UpdateIP": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v1/API.UpdateSecurityGroup": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v2alpha1/API.CreatePrivateNetworkInterface": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v2alpha1/API.DeletePrivateNetworkInterface": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v2alpha1/API.GetPrivateNetworkInterface": {
+      "dataplane": true,
+      "driven": true
+    },
+    "instance/v2alpha1/API.ListPrivateNetworkInterfaces": {
+      "dataplane": true,
+      "driven": true
+    },
+    "ipam/v1/API.ListIPs": {
+      "dataplane": true,
+      "driven": true
+    },
+    "marketplace/v2/API.ListLocalImages": {
+      "dataplane": true,
+      "driven": true
+    },
+    "vpc/v2/API.CreatePrivateNetwork": {
+      "dataplane": true,
+      "driven": true
+    },
+    "vpc/v2/API.DeletePrivateNetwork": {
+      "dataplane": true,
+      "driven": true
+    },
+    "vpc/v2/API.GetPrivateNetwork": {
+      "dataplane": true,
+      "driven": true
+    }
+  }
+}

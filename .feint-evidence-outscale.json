@@ -1,0 +1,202 @@
+{
+  "format": "feint-evidence-baseline",
+  "version": 1,
+  "machines": [
+    "incus"
+  ],
+  "generated_from": {
+    "contracts": "absent",
+    "shapes": "absent",
+    "suites": "absent"
+  },
+  "operations": {
+    "osc/Client.CreateInternetService": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.CreateKeypair": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.CreateNatService": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.CreateNet": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.CreatePublicIp": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.CreateRoute": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.CreateRouteTable": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.CreateSecurityGroup": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.CreateSecurityGroupRule": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.CreateSubnet": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.CreateTags": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.CreateVms": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.CreateVolume": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.DeleteInternetService": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.DeleteKeypair": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.DeleteNatService": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.DeleteNet": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.DeletePublicIp": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.DeleteRoute": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.DeleteRouteTable": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.DeleteSecurityGroup": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.DeleteSecurityGroupRule": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.DeleteSubnet": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.DeleteVms": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.DeleteVolume": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.LinkInternetService": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.LinkPublicIp": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.LinkRouteTable": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.LinkVolume": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.ReadInternetServices": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.ReadKeypairs": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.ReadLoadBalancers": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.ReadNatServices": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.ReadNets": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.ReadNics": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.ReadPublicIps": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.ReadRouteTables": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.ReadSecurityGroups": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.ReadSubnets": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.ReadVms": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.ReadVmsState": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.ReadVolumes": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.StopVms": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.UnlinkInternetService": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.UnlinkPublicIp": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.UnlinkRouteTable": {
+      "dataplane": true,
+      "driven": true
+    },
+    "osc/Client.UnlinkVolume": {
+      "dataplane": true,
+      "driven": true
+    }
+  }
+}

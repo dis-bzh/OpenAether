@@ -479,6 +479,14 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         run: task feint-evidence PROVIDER=${{ matrix.provider }}
 
+      # Has what `.feint-evidence-<provider>.json` pins stopped being true?
+      # `continue-on-error` on the job (above) is what keeps this from blocking
+      # unrelated PRs on the startup race measured on this job's first runs
+      # (#151) — not a signal this check may be ignored.
+      - name: task feint-evidence-verify
+        if: needs.changes.outputs.code == 'true'
+        run: task feint-evidence-verify PROVIDER=${{ matrix.provider }}
+
       # `evidence baseline` only reads the file `feint evidence` already wrote,
       # so this needs no live emulator — safe to run after `feint-down`. A
       # log line is not a build artifact: exact bytes, not a hand transcription
