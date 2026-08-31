@@ -16,6 +16,26 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **The docs-only CI gating (just added below, same cycle) left every
+  genuinely docs-only PR permanently "blocked"** ([#146](https://github.com/dis-bzh/OpenAether-infra/pull/146),
+  the first PR to hit the skip path for real). Root cause is a documented
+  GitHub Actions limitation (actions/runner#952): a job-level `if:` that
+  evaluates false skips a matrix job *before* its matrix expands, collapsing
+  every combination into ONE check reported under the job's raw, unexpanded
+  name — `Validate` instead of `Validate (cluster)` / `Validate
+  (talos-image)`, literally `Emulated Cloud (${{ matrix.provider }})` instead
+  of `(scaleway)` / `(outscale)`. None of those match the per-matrix
+  required-check names branch protection expects, so the PR sits blocked
+  forever. Fix: `validate` and `emulated` (the two matrix jobs) no longer
+  carry a job-level `if:` — the job always runs and the matrix always fully
+  expands; the substantive steps inside are gated instead, so every
+  per-combination check name always exists and reports fast when
+  `code == 'false'`. The four non-matrix gated jobs (`manifests`, `test`,
+  `talos`, `security`) keep job-level gating, unaffected by this. The
+  `changes` job itself also no longer skips on push (short-circuits to
+  `code=true` internally instead) — a skipped `changes` job would fail the
+  matrix jobs' own `needs` gate the same way.
+
 - **`check-commit-authors.sh` could read its own `git log` failure as "no
   commit is authored by a tool" (#132).** `set -e` does not propagate a
   failure inside a process substitution (`< <(git log … )`) — a malformed
