@@ -128,13 +128,14 @@ is "the apply is handed that exact plan file" "$PLANFILE" "$(positional apply)"
 grep -q -- '-auto-approve' "$LOG" \
   && bad "-auto-approve on a lane that computed its own plan: $(line apply)" \
   || ok "no -auto-approve — the approval is answered by a saved plan, not removed"
-grep -qE '^apply .*-var ' "$LOG" \
+grep -qE '^apply .*-var[ =]' "$LOG" \
   && bad "the apply re-passes -var; a value that disagrees with the plan file is refused outright" \
   || ok "the apply passes no -var — a saved plan carries its own"
 [ -e "$TFROOT/$PLANFILE" ] \
   && bad "${PLANFILE:-<no -out>} outlived the run" \
   || ok "the plan file is deleted after the apply"
 case "$PLANFILE" in *.tfplan) ok "it is named *.tfplan" ;; *) bad "${PLANFILE:-<no -out>} does not end in .tfplan" ;; esac
+is "the plan filename carries the \$TGT discriminator" "talos-image-scaleway.tfplan" "$PLANFILE"
 git check-ignore -q "$TFROOT/$PLANFILE" \
   && ok "and git ignores that path — a plan of a real account is never committable" \
   || bad "${PLANFILE:-<no -out>} is NOT gitignored: a plan file naming real buckets could be committed"
