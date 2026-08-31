@@ -135,6 +135,8 @@ resource "scaleway_instance_server" "bastion" {
       extra_packages    = ["netplan.io"]
       extra_write_files = local.scw_bastion_extra_write_files
       extra_runcmd      = local.scw_bastion_extra_runcmd
+      ssh_ca_public_key = var.bastion_ssh_ca_public_key
+      ssh_ca_principals = var.bastion_ssh_ca_principals
     })
   }
 

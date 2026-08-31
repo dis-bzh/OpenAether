@@ -16,6 +16,18 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **The bastion's SSH-CA hooks shipped inert since they were written** ([#81](https://github.com/dis-bzh/OpenAether-infra/issues/81)).
+  `_shared/bastion-cloud-init.yaml.tftpl` hardcoded `TrustedUserCAKeys` and
+  `AuthorizedPrincipalsFile` to an always-empty file and directory, so no
+  caller could ever turn SSH-CA on — every bastion stayed on a static key
+  only a `tofu apply` can revoke. Both are now real template variables
+  (`ssh_ca_public_key`, `ssh_ca_principals`), default `""`, threaded through
+  all four providers' `bastion.tf` and the Feint fixture — identical
+  rendered bytes when unset. New `scripts/dev/ssh-ca-check.sh`
+  (`task ssh-ca-check`) proves it on a real sshd in Docker: a CA-signed
+  certificate authenticates, the same bare key without it is refused, and
+  `ssh -o ExitOnForwardFailure=yes -L` carries traffic through `PermitOpen`.
+  Rung: emulated.
 - **`docs/emulated-cloud.md`/`.fr.md` documented three Feint gaps as
   permanent** — Outscale load balancers ("this one will not move"), Scaleway
   IPAM reservations, Scaleway LB and public gateway ("genuinely absent") —
