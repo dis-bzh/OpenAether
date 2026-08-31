@@ -146,6 +146,17 @@ in git. 0.1.0 is the first entry describing something proven.
   `scripts/dev/check-commit-authors.sh`, run in CI on the PR range, which is the
   only place it can still be refused.
 
+- **The version-pair guard was only tested on its start and end points, never
+  the path between them (#50).** A valid pair joined to another valid pair by
+  a step that is neither still passes if nothing evaluates the step. Seven
+  new `tofu test` run blocks in `version-pair.tftest.hcl` walk every
+  intermediate pair of the documented climb from (v1.12.7, v1.31.0) to
+  (v1.13.9, v1.36.3) — Talos moving first, then Kubernetes one minor at a
+  time — plus one trap pair (v1.13.9, v1.30.0: Talos ahead of Kubernetes
+  catching up) that the guard must refuse. Mutation-verified: narrowing
+  `k8s_min` in `version-support.json` turned one of the new intermediate runs
+  red before the revert.
+
 ### Added
 
 - **The Scaleway feint lane resolves its image by name instead of skipping
