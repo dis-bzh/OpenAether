@@ -37,7 +37,7 @@ TOFU_VERSION="1.12.6"
 # renovate: datasource=github-releases depName=fluxcd/flux2 extractVersion=^v(?<version>.*)$
 FLUX_VERSION="2.9.3"
 # renovate: datasource=github-releases depName=helm/helm extractVersion=^v(?<version>.*)$
-HELM_VERSION="4.2.3"
+HELM_VERSION="4.2.4"
 
 # check_cmd <tool> [pinned-version]
 #
