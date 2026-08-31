@@ -51,7 +51,7 @@ HELM_VERSION="4.2.3"
 #
 # Only the tools this file PINS get the second argument. For the others there is
 # no version to compare against, and inventing one would be a check that cannot
-# fail; pinning them is a separate decision, in docs/backlog.md.
+# fail; pinning them is a separate decision, not made here.
 check_cmd() {
     local tool="$1" want="${2:-}" version
     if ! command -v "$tool" &> /dev/null; then
@@ -389,6 +389,13 @@ fi
 # this reason — it shells out to whatever this installs.
 if ! check_cmd gitleaks; then
     "$(dirname "${BASH_SOURCE[0]}")/internal/install-gitleaks.sh"
+fi
+
+# 5e. plumber — `task pipeline-audit` runs it directly; before this it was the
+# CI policy scanner nobody could see the verdict of without fetching the
+# binary by hand (#52).
+if ! check_cmd plumber; then
+    "$(dirname "${BASH_SOURCE[0]}")/internal/install-plumber.sh"
 fi
 
 # 6. Check Talos image + backup tools (used by `task image-build` and the S3 backups)

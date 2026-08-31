@@ -155,8 +155,8 @@ CHECKS = {"openstack": openstack_leftovers, "outscale": outscale_leftovers}
 
 # What each check actually enumerates, and what it does not. Printed on success
 # because a teardown proof that says NOTHING when the account is clean looks
-# exactly like one that did not run — `docs/backlog.md` lists that shape twice,
-# once for a purge script and once for "an empty server list is not an empty
+# exactly like one that did not run — that shape has bitten twice already:
+# once for a purge script, and once for "an empty server list is not an empty
 # account", where seven block volumes billed for three days behind a clean
 # instance list.
 SCOPE = {

@@ -50,7 +50,7 @@ def listing(url, key):
         UNREACHABLE += 1
         print(f"  ⚠ unreachable: {url.split('?')[0]} (HTTP {e.code})")
         return []
-    except Exception as e:
+    except (urllib.error.URLError, TimeoutError) as e:
         UNREACHABLE += 1
         print(f"  ⚠ unreachable: {url.split('?')[0]} ({str(e)[:60]})")
         return []
@@ -71,7 +71,7 @@ def act(label, fn):
     try:
         fn()
         print("  ✓ deleted:", label)
-    except Exception as e:
+    except (urllib.error.URLError, TimeoutError, ValueError) as e:
         FAILED += 1
         print("  ⚠ failed:", label, str(e)[:80])
 
@@ -82,14 +82,14 @@ for z in ZONES:
     for s in listing(f'{API}/instance/v1/zones/{z}/servers?project={PROJECT}', 'servers'):
         total += 1
         act(f"[{z}] server {s['name']}",
-            lambda i=s['id']: call(f'{API}/instance/v1/zones/{z}/servers/{i}/action',
+            lambda i=s['id'], z=z: call(f'{API}/instance/v1/zones/{z}/servers/{i}/action',
                                    'POST', {'action': 'terminate'}))
 
     # 2. load balancers — release_ip so the flexible IP does not survive.
     for lb in listing(f'{API}/lb/v1/zones/{z}/lbs?project_id={PROJECT}', 'lbs'):
         total += 1
         act(f"[{z}] LB {lb['name']}",
-            lambda i=lb['id']: call(f'{API}/lb/v1/zones/{z}/lbs/{i}?release_ip=true', 'DELETE'))
+            lambda i=lb['id'], z=z: call(f'{API}/lb/v1/zones/{z}/lbs/{i}?release_ip=true', 'DELETE'))
 
     # 3. flexible IPs left unattached.
     for ip in listing(f'{API}/instance/v1/zones/{z}/ips?project={PROJECT}', 'ips'):
@@ -97,7 +97,7 @@ for z in ZONES:
             continue
         total += 1
         act(f"[{z}] IP {ip['address']}",
-            lambda i=ip['id']: call(f'{API}/instance/v1/zones/{z}/ips/{i}', 'DELETE'))
+            lambda i=ip['id'], z=z: call(f'{API}/instance/v1/zones/{z}/ips/{i}', 'DELETE'))
 
     # 4. block volumes — the leak this script was written for. `references`
     #    is empty once nothing is attached; a volume in use is left alone.
@@ -106,7 +106,7 @@ for z in ZONES:
             continue
         total += 1
         act(f"[{z}] volume {v['name']} ({v['size'] // 10**9}GB)",
-            lambda i=v['id']: call(f'{API}/block/v1alpha1/zones/{z}/volumes/{i}', 'DELETE'))
+            lambda i=v['id'], z=z: call(f'{API}/block/v1alpha1/zones/{z}/volumes/{i}', 'DELETE'))
 
 # 5. private networks — regional, and only removable once the NICs are gone.
 for pn in listing(f'{API}/vpc/v2/regions/{REGION}/private-networks?project_id={PROJECT}',

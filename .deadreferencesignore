@@ -1,0 +1,23 @@
+# Paths check-dead-references.sh (#118) has decided are not stale references,
+# each scoped to one file:candidate pair — narrower than .languageignore's
+# whole-file scope, because both files below also cite real paths that must
+# stay checked. A pair here needs a reason above it — an entry with no reason
+# is a silenced defect, which is what this file exists NOT to become.
+
+# CLAUDE.md narrates docs/backlog.md's own removal in the past tense, right
+# next to "Il est supprimé" — a correct sentence about a file that no longer
+# exists, not a stale reference. CLAUDE.md is off-limits to autonomous edits
+# (project instructions), so this narrows scope instead of rewriting it.
+CLAUDE.md:docs/backlog.md
+
+# scripts/clea/README.md's [lane] example is illustrative config-schema
+# documentation for a portable tool meant to be copied into OTHER projects
+# ("Copy scripts/clea/, write a clea.toml..."). The path is an example value,
+# not a claim about this repository — this repo's own clea.toml points at
+# scripts/bootstrap/render-bootstrap-manifests.sh instead.
+scripts/clea/README.md:./scripts/render.sh
+
+# "Their docs/proxy.md measures it" — same sentence names "their #76", and
+# "their" is stephrobert/feint (the emulator this script drives), not this
+# repository. Verified present at stephrobert/feint@docs/proxy.md.
+scripts/dev/feint.sh:docs/proxy.md

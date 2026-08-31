@@ -26,6 +26,15 @@ in git. 0.1.0 is the first entry describing something proven.
   CI's own wiring (the `commits` job always passes a valid range), so this
   was latent, not live — reproduced and fixed anyway.
 
+- **`test-talos-local.sh` hung for 90s on a host missing `CAP_SYS_RESOURCE`,
+  then failed on an unrelated-looking timeout**, instead of the ~1s refusal
+  its siblings give when no local cluster is reachable
+  ([#54](https://github.com/dis-bzh/OpenAether-infra/issues/54)). New
+  `scripts/dev/check-docker-talos-capability.sh` (same fail-open shape as
+  `check-host-ports.sh`) catches it in milliseconds via the `capsh` probe
+  `infrastructure/opentofu-local/README.md` already documented; wired into
+  both `test-talos-local.sh` and `task local-up`, which shares the identical
+  exposure.
 - **Six gates were reporting green on something they had stopped checking.**
   Found by auditing what the pipeline actually constrains, and each one is
   reproduced in both directions — broken on purpose, watched go red, fixed,
@@ -97,6 +106,29 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Added
 
+- **`check-dead-references.sh`, wired into `task lint` (#118).** A path stops
+  resolving and nothing notices — read once in a comment, or read (and
+  copy-pasted) on every run in a printed string. lychee finds none of this:
+  this repository writes commands as bare paths inside fences, not Markdown
+  links, and lychee reads neither comments nor printed strings. Scope is
+  deliberately PATHS only, inside a fenced block, a backtick span, a code
+  comment, or a printed string — `task [a-z-]+` alone gave ~45 false positives
+  ("task is", "task and", "task was") against real ones while scoping this.
+  First run on this tree found two real stale references, both citing the
+  now-deleted docs/backlog.md: `scripts/setup.sh` and
+  `scripts/ops/verify-provider-clean.py`, now fixed.
+  `.deadreferencesignore` allowlists what a regex genuinely cannot see (a doc
+  narrating its own removed file's name, an example value in a portable
+  tool's own README, a cross-repo path stated bare) — scoped per
+  file:candidate pair, never a whole file, and each entry carries a reason.
+- **`task pipeline-audit`** runs the CI policy scanner (plumber) locally —
+  before this, the only way to see its verdict before pushing was to fetch
+  the binary by hand ([#52](https://github.com/dis-bzh/OpenAether-infra/issues/52)).
+  New `scripts/internal/install-plumber.sh` (pinned, checksum-verified, same
+  shape as `install-gitleaks.sh`); wired into `task security`, last, since
+  without `GH_TOKEN` it legitimately exits 3 ("incomplete data" — branch
+  protection cannot be evaluated) and must not swallow the checks that CAN
+  succeed offline.
 - **`task purge-orphans PROVIDER=… [APPLY=1]`.** `docs/release-checklist.md`
   already told the reader to run it; it did not exist. The scripts it wraps are
   the last sentence between a failed teardown and a bill, and they were reachable

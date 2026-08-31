@@ -53,11 +53,14 @@ GITLEAKS_INSTALL="$(pin scripts/internal/install-gitleaks.sh GITLEAKS_VERSION)"
 # cannot silently start comparing the wrong pin.
 GITLEAKS_PRECOMMIT="$(awk '/repo:.*gitleaks\/gitleaks/{f=1; next} f && /rev:/{print; exit}' \
   .pre-commit-config.yaml | sed -nE 's/.*#[[:space:]]*v([0-9][^[:space:]]*).*/\1/p')"
+PLUMBER_INSTALL="$(pin scripts/internal/install-plumber.sh PLUMBER_VERSION)"
+PLUMBER_CI="$(sed -nE 's/.*getplumber\/plumber@[0-9a-f]+[[:space:]]*#[[:space:]]*v([0-9][^[:space:]]*).*/\1/p' \
+  .github/workflows/security.yml | head -1)"
 
 # ZERO FLOOR. If the extractors return nothing the comparisons below all pass
 # vacuously, and this file becomes a green line that proves nothing — the exact
 # shape it is written against.
-for v in CILIUM HELM_MAJOR FEINT HELM_SETUP HELM_CI TOFU_SETUP TOFU_CI TALOS_CLUSTER GITLEAKS_INSTALL GITLEAKS_PRECOMMIT; do
+for v in CILIUM HELM_MAJOR FEINT HELM_SETUP HELM_CI TOFU_SETUP TOFU_CI TALOS_CLUSTER GITLEAKS_INSTALL GITLEAKS_PRECOMMIT PLUMBER_INSTALL PLUMBER_CI; do
   [ -n "${!v}" ] || { echo "✗ could not extract ${v} — the extractor is broken, not the repository" >&2; exit 1; }
 done
 
@@ -118,6 +121,14 @@ if [ "$GITLEAKS_INSTALL" = "$GITLEAKS_PRECOMMIT" ]; then
   ok "gitleaks ${GITLEAKS_INSTALL}: install-gitleaks.sh and .pre-commit-config.yaml agree"
 else
   bad "gitleaks: install-gitleaks.sh pins ${GITLEAKS_INSTALL}, .pre-commit-config.yaml pins ${GITLEAKS_PRECOMMIT}"
+fi
+
+# plumber: `task pipeline-audit`'s own install versus the CI Action pin. Diverge
+# and a local run says something CI never checked.
+if [ "$PLUMBER_INSTALL" = "$PLUMBER_CI" ]; then
+  ok "plumber ${PLUMBER_INSTALL}: install-plumber.sh and security.yml agree"
+else
+  bad "plumber: install-plumber.sh pins ${PLUMBER_INSTALL}, security.yml pins ${PLUMBER_CI}"
 fi
 
 echo "=== the documentation states the same pins ==="
