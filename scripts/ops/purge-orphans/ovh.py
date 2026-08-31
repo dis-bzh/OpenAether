@@ -2,7 +2,10 @@
 """Purges ALL OVH project resources (servers, LBs, FIPs, routers, networks,
 security groups) — whole-account, no name filtering. See README.md.
 Usage: purge-orphans-ovh.py [--apply]   (dry-run by default)"""
-import os, sys, json, urllib.request
+import json
+import os
+import sys
+import urllib.request
 
 APPLY = '--apply' in sys.argv
 base = os.environ['OS_AUTH_URL'].rstrip('/')
@@ -44,7 +47,7 @@ def listing(url, key):
         UNREACHABLE += 1
         print(f"  ⚠ unreachable: {url.split('?')[0]} (HTTP {e.code})")
         return []
-    except Exception as e:
+    except (urllib.error.URLError, TimeoutError) as e:
         UNREACHABLE += 1
         print(f"  ⚠ unreachable: {url.split('?')[0]} ({str(e)[:60]})")
         return []
@@ -70,7 +73,7 @@ def delete(u, label):
     try:
         urllib.request.urlopen(urllib.request.Request(u, headers=H, method='DELETE'), timeout=90)
         print("  ✓ deleted:", label)
-    except Exception as e:
+    except (urllib.error.URLError, TimeoutError) as e:
         FAILED += 1
         print("  ⚠ failed:", label, str(e)[:80])
 
@@ -105,7 +108,7 @@ for r in listing(net + '/v2.0/routers', 'routers'):
                         net + f"/v2.0/routers/{r['id']}/remove_router_interface",
                         data=body, headers=H, method='PUT'), timeout=60)
                     print("  ✓ interface detached:", p['id'][:8])
-                except Exception as e:
+                except (urllib.error.URLError, TimeoutError) as e:
                     print("  ⚠ detach:", str(e)[:60])
             else:
                 print("  [dry-run] detach interface", p['id'][:8])

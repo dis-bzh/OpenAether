@@ -127,6 +127,9 @@ for cmd in docker tofu talosctl kubectl helm nc flux; do
 done
 [[ ${#MISSING[@]} -gt 0 ]] && { error "Missing tools: ${MISSING[*]}"; exit 1; }
 docker ps >/dev/null 2>&1 || { error "Docker is not running (start Docker Desktop, enable WSL2 integration)."; exit 1; }
+# Fail in ~10ms on a host that can never bootstrap Talos-in-Docker, instead of
+# a silent 90s hang in Step 3 below ending on an unrelated-looking timeout.
+"${SCRIPT_DIR}/check-docker-talos-capability.sh" || exit 1
 export TF_VAR_encryption_passphrase="${TF_VAR_encryption_passphrase:-local-test-passphrase-32chars-minimum}"
 
 # Flux reconciles from GitHub — the current branch must be pushed so the GitRepository can clone it.

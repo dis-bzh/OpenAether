@@ -5,7 +5,13 @@ security groups → subnets → net. Also REPORTS (never deletes) leftover
 snapshots — see the ARTIFACTS block below. Images are deliberately NOT
 enumerated here yet; see that block for why.
 Usage: purge-orphans-osc.py [--apply]"""
-import os, sys, json, hmac, hashlib, datetime, urllib.request
+import datetime
+import hashlib
+import hmac
+import json
+import os
+import sys
+import urllib.request
 
 APPLY = '--apply' in sys.argv
 AK, SK = os.environ['OUTSCALE_ACCESS_KEY_ID'], os.environ['OUTSCALE_SECRET_KEY']
@@ -70,7 +76,8 @@ def do(action, payload, label):
     global TOTAL, FAILED
     TOTAL += 1
     if not APPLY:
-        print("  [dry-run]", label); return
+        print("  [dry-run]", label)
+        return
     r = call(action, payload)
     if 'error' in r:
         FAILED += 1
