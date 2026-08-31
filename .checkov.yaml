@@ -14,6 +14,15 @@
 framework:
   - terraform
 
+# The contract's own rules, expressed as checks (#123) — Checkov ships policy
+# families for AWS/Azure/GCP-shaped resources and essentially none for
+# Scaleway, Outscale or Proxmox, so without these three of this repo's four
+# providers pass through the hard gate in silence. The directory needs its
+# own __init__.py or Checkov registers nothing and still exits 0 — see the
+# comment on that file.
+external-checks-dir:
+  - infrastructure/opentofu/checkov-custom-checks
+
 # No global skips by default — surface everything.
 skip-check: []
 
