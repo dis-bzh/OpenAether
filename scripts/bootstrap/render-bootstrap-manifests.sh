@@ -242,6 +242,22 @@ fi
 sed -i 's/[[:space:]]*$//' "${CILIUM_OUTPUT}"
 
 # ─────────────────────────────────────────────────────
+# 1b. Regenerate the upstream artifacts lock (production only)
+# ─────────────────────────────────────────────────────
+# cilium.yaml pins its images by digest; flux-install.yaml pins seven by tag
+# only, so a tag force-moved upstream changes not one byte of either committed
+# file and nothing here would notice (#119). This lock records what THIS
+# render actually wrote, offline-verifiable by
+# check-upstream-artifacts-lock.sh. Gated on OPENAETHER_SKIP_FLUX (already set
+# by --check's own recursive calls above): those render into a throwaway dir
+# that never holds flux-install.yaml, and cilium-local.yaml is gitignored —
+# neither belongs in a lock committed alongside the production artifacts.
+if [[ "$LOCAL_MODE" == "false" && "${OPENAETHER_SKIP_FLUX:-0}" != "1" ]]; then
+  (cd "${MANIFESTS_DIR}" && sha256sum cilium.yaml flux-install.yaml > upstream-artifacts.lock)
+  echo "  🔒 upstream-artifacts.lock regenerated"
+fi
+
+# ─────────────────────────────────────────────────────
 # 2. Download Flux install manifest
 # ─────────────────────────────────────────────────────
 # ⚠️ Opt-in (OPENAETHER_REFRESH_FLUX=1): re-downloading is an upgrade, not a
