@@ -86,8 +86,13 @@ jobs:
       # skipped the control. Measured under v0.4.39 on 2026-08-21: the default
       # token CAN read them. The run reported `22 controls evaluated, 1 stood down
       # as declared` and the control passed. `main` has been protected since
-      # 2026-08-20 — 13 required checks, no force-push, no deletions — so this is
-      # a control with something to check, not a formality.
+      # 2026-08-20 — no force-push, no deletions — so this is a control with
+      # something to check, not a formality. The required-check LIST itself is
+      # not this control's job and drifts silently (#122: a 14th check, CodeQL,
+      # runs on every PR with no workflow file and no mention here) —
+      # scripts/dev/check-required-checks.sh diffs it against what GitHub
+      # actually reports, offline self-test in `task test-scripts`; not yet
+      # wired live, see that script's header for why.
       - name: Plumber
         # renovate: datasource=github-releases depName=getplumber/plumber
         uses: getplumber/plumber@3feac69e925e9771f8a495f4177af754d568c1ad  # v0.4.48

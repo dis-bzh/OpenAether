@@ -36,6 +36,11 @@ fi
 TOFU_VERSION="1.12.6"
 # renovate: datasource=github-releases depName=fluxcd/flux2 extractVersion=^v(?<version>.*)$
 FLUX_VERSION="2.9.3"
+# The flux-schema plugin `task lint`'s check-flux-schema.sh needs (#114). Same
+# pin as ci.yml's lint job, installed through `flux plugin install`, which
+# does its own checksum verification (fluxcd/flux2 RFC 0013).
+# renovate: datasource=github-releases depName=fluxcd/flux-schema extractVersion=^v(?<version>.*)$
+FLUX_SCHEMA_VERSION="0.12.1"
 # renovate: datasource=github-releases depName=helm/helm extractVersion=^v(?<version>.*)$
 HELM_VERSION="4.2.4"
 
@@ -160,13 +165,9 @@ install_shellcheck() {
     # `task lint` gates on it, so a contributor who ran this script and cannot
     # run `task lint` is the defect this repository has already met twice — with
     # checkov, which lived only in CI, and with helm, pinned here one major below
-    # what the renderer accepts.
-    echo "Installing shellcheck..."
-    if command -v apt-get &> /dev/null; then
-        $SUDO apt-get update && $SUDO apt-get install -y shellcheck
-    else
-        echo "⚠️  Could not install shellcheck automatically — 'task lint' will fail until you do."
-    fi
+    # what the renderer accepts. Pinned + checksum-verified installer, same as
+    # ci.yml (#113) — apt's own shellcheck package carried no version pin either.
+    "$(dirname "${BASH_SOURCE[0]}")/internal/install-shellcheck.sh"
 }
 
 install_yamllint() {
@@ -410,6 +411,14 @@ fi
 # 7. Check Flux CLI
 if ! check_cmd flux "$FLUX_VERSION"; then
     install_flux
+fi
+
+# 7b. flux-schema plugin — `task lint`'s check-flux-schema.sh needs it (#114),
+# so local `task lint` must match what ci.yml's lint job installs. `flux plugin
+# install` is idempotent and checksum-verifies itself; no separate check_cmd
+# guard needed.
+if ! flux schema version 2> /dev/null | grep -qF "$FLUX_SCHEMA_VERSION"; then
+    flux plugin install "schema@${FLUX_SCHEMA_VERSION}"
 fi
 
 # 8. Check Helm — render-bootstrap-manifests.sh runs `helm template`, so every

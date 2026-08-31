@@ -16,6 +16,52 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **Four places where `ci.yml`/`task lint` claimed or should have verified
+  something and did not — same shape each time, closed or narrowed together.**
+  - **Three tool installs in `ci.yml` carried no version pin** (#113) —
+    `pip install yamllint`, `apt-get install -y shellcheck`,
+    `npx -p renovate`, sitting between a comment arguing against exactly
+    that. New `scripts/dev/check-tool-pins.sh` (wired into `task lint`)
+    scans every tracked `.sh`/workflow file for the same three shapes and
+    fails on any unpinned line outside a small, one-reason-each allowlist —
+    generic OS utilities, and the Incus install already pinned by its
+    Zabbly channel + GPG key fingerprint rather than an apt version. All
+    three are now pinned; shellcheck gets a new
+    `scripts/internal/install-shellcheck.sh` (pinned + checksum-verified —
+    ShellCheck's releases publish no checksums file, so the four platform
+    hashes are pinned inline), called from both `ci.yml` and `setup.sh`.
+  - **`flux-bootstrap.yaml.tftpl` was read by nothing, and a comment in
+    `ci.yml`'s security job claimed Trivy scanned it** (#114) — `.tftpl`
+    matches no Trivy detector, and every yamllint invocation is scoped to
+    `*.yaml`/`*.yml`. New `scripts/dev/check-flux-schema.sh` renders the
+    template with fixed dummy values and validates it with
+    `flux schema validate`, against CRD schemas extracted from the
+    VENDORED `flux-install.yaml` — not upstream, which would reintroduce
+    the drift `check-version-drift.sh` exists to kill. `ci.yml`'s lint job
+    and `setup.sh` both now install the flux CLI and the pinned
+    `flux-schema` plugin; the false Trivy claim is corrected.
+  - **The seven controller images `flux-install.yaml` pins by tag carried no
+    lock** (#119, offline half only — resolving tags to ghcr digests stays
+    in Cléa's daily lane, out of scope here). New
+    `infrastructure/opentofu/cluster/bootstrap-manifests/upstream-artifacts.lock`
+    records the sha256 of `cilium.yaml`/`flux-install.yaml`;
+    `render-bootstrap-manifests.sh` regenerates it after every production
+    render, and new `scripts/dev/check-upstream-artifacts-lock.sh` (wired
+    into `task lint`) verifies it offline.
+  - **A 14th required check (CodeQL) runs on every PR with no workflow file
+    and no mention anywhere in the tree** (#122) — `security.yml`'s "13
+    required checks" was a comment nothing verified. New
+    `scripts/dev/check-required-checks.sh` diffs GitHub's declared rulesets
+    against what actually reported on a commit, and refuses ("not
+    verifiable") rather than passing when the rulesets response is empty —
+    proven offline against two canned fixtures (a 13-context ruleset, a
+    14-entry check-runs capture with a CodeQL-shaped extra), run via
+    `task test-scripts`. **Not wired into any workflow yet**: against this
+    repository's current classic branch protection the rulesets endpoint
+    legitimately returns `[]`, so a live step would fail-closed on every
+    future PR until an admin adds a ruleset on `main` — that step is a
+    follow-up gated on it.
+
 - **Three checks that could not fail** ([#75](https://github.com/dis-bzh/OpenAether-infra/issues/75)).
   `test-talos-local.sh`'s Step 5 (schedulable workers Ready) and Step 6 (Flux
   controllers running) still degraded to `warn` after the same bug was fixed

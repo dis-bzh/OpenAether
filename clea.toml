@@ -66,6 +66,14 @@ name = "cloudnative-pg/cloudnative-pg"
 installer = "scripts/internal/install-kubectl-cnpg.sh"
 version_cmd = "kubectl-cnpg version"
 
+# Moved out of [[unpinned]] below (#113): both consumers — setup.sh and
+# ci.yml — now install through this pinned, checksum-verified installer
+# instead of an unpinned `apt-get install -y shellcheck`.
+[[tool]]
+name = "koalaman/shellcheck"
+installer = "scripts/internal/install-shellcheck.sh"
+version_cmd = "shellcheck --version"
+
 [[tool]]
 name = "stephrobert/feint"
 installer = "scripts/dev/feint.sh install"
@@ -132,11 +140,6 @@ consumed_by = "scripts/setup.sh (install_yamllint), .github/workflows/ci.yml"
 name = "pre-commit"
 datasource = "pypi"
 consumed_by = "scripts/setup.sh (install_precommit)"
-
-[[unpinned]]
-name = "koalaman/shellcheck"
-datasource = "github-releases"
-consumed_by = "scripts/setup.sh (install_shellcheck), .github/workflows/ci.yml"
 
 # --- The repository's own gates, run on every probe branch -------------------
 # Not a copy of CI: a bot push carries GITHUB_TOKEN, and GitHub does not trigger

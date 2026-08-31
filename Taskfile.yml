@@ -159,6 +159,17 @@ tasks:
       # A path stops resolving and nothing notices — in a comment, read once,
       # or a printed string, read (and copy-pasted) on every run (#118).
       - ./scripts/dev/check-dead-references.sh
+      # ci.yml installed yamllint/shellcheck/renovate-config-validator with no
+      # version pin, between a comment arguing against exactly that (#113).
+      - ./scripts/dev/check-tool-pins.sh
+      # flux-bootstrap.yaml.tftpl was read by nothing — not Trivy (no
+      # detector for .tftpl, despite a comment claiming otherwise), not
+      # yamllint (scoped to *.yaml/*.yml) (#114).
+      - ./scripts/dev/check-flux-schema.sh
+      # cilium.yaml/flux-install.yaml pin their images by digest/tag; a tag
+      # force-moved upstream changes no committed byte, so this compares
+      # against the sha256 recorded the last time either was rendered (#119).
+      - ./scripts/dev/check-upstream-artifacts-lock.sh
 
   fmt:
     desc: Format OpenTofu code
@@ -412,6 +423,13 @@ tasks:
       # (#132) — proves a malformed rev-range fails loud instead of reading
       # as zero commits, none of them tool-authored.
       - ./scripts/dev/test-commit-authors.sh
+      # Offline self-test of check-required-checks.sh's diff logic (#122):
+      # against canned fixtures, proves it flags a required check that a
+      # ruleset never declares (CodeQL-shaped) AND refuses an empty rulesets
+      # response instead of reading it as "nothing is required". Live mode
+      # needs GITHUB_TOKEN and a real ruleset on main — deliberately not
+      # exercised here or wired into any workflow, see the script's header.
+      - ./scripts/dev/check-required-checks.sh --self-test
 
   test:
     desc: Run OpenTofu tests (cluster root)
