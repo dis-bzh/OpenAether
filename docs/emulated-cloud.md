@@ -20,9 +20,10 @@ than here, they move: [`docs/limits.md`](https://github.com/stephrobert/feint/bl
 
 ```bash
 task feint-up                          # start the emulator (installs the pinned binary if absent)
-task feint-plan   PROVIDER=scaleway    # plan the REAL cluster root, no credentials
-task feint-apply  PROVIDER=outscale    # apply/destroy cycle on the reduced fixture
-task feint-record PROVIDER=scaleway    # rank what our module calls and no pack serves
+task feint-plan       PROVIDER=scaleway  # plan the REAL cluster root, no credentials
+task feint-apply      PROVIDER=outscale  # apply/destroy cycle on the reduced fixture
+task feint-apply-root PROVIDER=scaleway  # untargeted apply/destroy on the REAL cluster root
+task feint-record     PROVIDER=scaleway  # rank what our module calls and no pack serves
 task feint-test                        # both providers, plan + apply
 task feint-down
 
@@ -31,13 +32,13 @@ task feint-evidence PROVIDER=scaleway  # needs Incus: apply under a real machine
 task feint-evidence-verify PROVIDER=scaleway  # check a fresh capture against the pinned baseline
 ```
 
-## Three lanes, because one cannot do all three jobs
+## Four lanes, because one cannot do all four jobs
 
 **`feint-plan` — the real `cluster` root, plan only.** Real modules, real
 provider, `envs/feint-<provider>.tfvars.example`. The script itself still only
 plans, but the reasons it used to stop there are gone as of Feint 0.12.0 — see
-`feint-record` below, which now applies the same root's provider module end to
-end.
+`feint-apply-root` and `feint-record` below, which now apply the same root end
+to end.
 
 The root declares a partial S3 backend, so the lane drops a local-backend
 `*_override.tf` in and removes it on exit.
@@ -48,6 +49,19 @@ shapes over the subset the emulator does serve: init → validate → plan → a
 **empty second plan** → destroy, with existence and disappearance both re-read
 from the API rather than from the state. See its
 [README](../infrastructure/opentofu-feint/README.md).
+
+**`feint-apply-root` — the real `cluster` root, untargeted apply.** Same root
+and tfvars as `feint-plan`, but a full `tofu apply` (Phase 1:
+`talos_bootstrap = false`, already the setting in both
+`envs/feint-<provider>.tfvars.example`) — VMs, networking, LBs, everything
+`feint-plan` only plans — followed by an empty second plan and the two-step
+destroy the [root README](../infrastructure/opentofu/cluster/README.md#teardown-destroy)
+documents (machine secrets carry `prevent_destroy`, so `tofu state rm
+module.talos.talos_machine_secrets.this[0]` first, then `destroy -var
+talos_bootstrap=false`). Closes issue #76's first criterion: 27 resources on
+Scaleway, 41 on Outscale, second plan empty, destroy clean — both providers,
+measured 2026-08-31. `feint-record` below proved the provider module alone
+applies end to end; this is the whole root, not just that module.
 
 **`feint-record` — measure the wall instead of arguing about it.** `feint proxy`
 sits between the provider and the emulator and writes one redacted JSON object

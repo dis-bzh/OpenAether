@@ -30,6 +30,15 @@ in git. 0.1.0 is the first entry describing something proven.
   creation order. `clea.yml` now fetches every open, labelled issue and calls
   `clea pick-issue` rather than trusting `per_page=1`.
 
+- **A comment beside the Outscale provider block claimed the top-level
+  `region` argument was deprecated and warned on every real command**
+  (#77). Stale: `outscale/terraform-provider-outscale` reverted that
+  deprecation in its own PR #817, shipped in 1.8.0 — the version this repo
+  already pins. Real commands no longer warn, so there is nothing left to
+  avoid by building the API URL ourselves (which would mean hardcoding
+  Outscale's DNS). Comment now records the decision instead of a stale
+  premise; no behavior change.
+
 - **`docs/emulated-cloud.md`/`.fr.md` documented three Feint gaps as
   permanent** — Outscale load balancers ("this one will not move"), Scaleway
   IPAM reservations, Scaleway LB and public gateway ("genuinely absent") —
@@ -151,7 +160,35 @@ in git. 0.1.0 is the first entry describing something proven.
   `scripts/dev/check-commit-authors.sh`, run in CI on the PR range, which is the
   only place it can still be refused.
 
+- **The version-pair guard was only tested on its start and end points, never
+  the path between them (#50).** A valid pair joined to another valid pair by
+  a step that is neither still passes if nothing evaluates the step. Seven
+  new `tofu test` run blocks in `version-pair.tftest.hcl` walk every
+  intermediate pair of the documented climb from (v1.12.7, v1.31.0) to
+  (v1.13.9, v1.36.3) — Talos moving first, then Kubernetes one minor at a
+  time — plus one trap pair (v1.13.9, v1.30.0: Talos ahead of Kubernetes
+  catching up) that the guard must refuse. Mutation-verified: narrowing
+  `k8s_min` in `version-support.json` turned one of the new intermediate runs
+  red before the revert.
+
 ### Added
+
+- **New `feint-apply-root` lane: an untargeted apply on the REAL cluster
+  root, not a fixture or a `-target`-scoped one (#76, first half).**
+  `feint-plan` only plans `infrastructure/opentofu/cluster`; `feint-apply`
+  drives the separate reduced fixture (`infrastructure/opentofu-feint/`);
+  `feint-record`'s own apply is `-target=module.<provider>`-scoped to the
+  provider module alone. Nothing ran a full `tofu apply` on the real root
+  itself — Talos config, bootstrap manifests, everything. `task
+  feint-apply-root PROVIDER=scaleway|outscale` (`scripts/dev/feint.sh
+  apply-root`) now does that: untargeted apply → verify the second plan is
+  empty → the two-step destroy the root README already documents (`tofu
+  state rm module.talos.talos_machine_secrets.this[0]` first, since that
+  resource carries `prevent_destroy`, then `destroy -var
+  talos_bootstrap=false`). Verified both providers: 27 resources added on
+  Scaleway, 41 on Outscale, second plan empty, destroy clean. Closes #76's
+  first criterion; the second (`feint shapes --check` against a real-cloud
+  recording) stays open — real-cloud only, not attempted here.
 
 - **The Scaleway feint lane resolves its image by name instead of skipping
   the lookup (#150).** `data.scaleway_instance_image.talos` in
