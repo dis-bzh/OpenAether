@@ -52,7 +52,7 @@ repos:
   # installs instead — the exact same version, built upstream, carries no
   # such defect. See #126.
   - repo: https://github.com/gitleaks/gitleaks
-    rev: b69b5157a01fe4234a74a9acd186044152a80c43  # v8.22.1
+    rev: 83d9cd684c87d95d656c1458ef04895a7f1cbd8e  # v8.30.1
     hooks:
       - id: gitleaks-system
         # Unlike its `gitleaks`/`gitleaks-docker` siblings, upstream's own
