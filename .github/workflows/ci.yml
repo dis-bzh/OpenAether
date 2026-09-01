@@ -197,7 +197,7 @@ jobs:
 
       - name: Install yamllint
         # renovate: datasource=pypi depName=yamllint
-        run: pip install yamllint==1.35.1
+        run: pip install yamllint==1.38.0
 
       # `task lint` gates on shellcheck. The GitHub runner image is DOCUMENTED to
       # carry it, but "the image happens to ship it" is not a dependency — the

@@ -513,6 +513,19 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Changed
 
+- **`yamllint` 1.35.1 → 1.38.0** in `.github/workflows/ci.yml`, probed green
+  by Cléa (issue #91). `task lint`, `task test-scripts`, `task validate`
+  (both roots), `task test`, checkov (32/0) + custom checks, and a default-rules
+  gitleaks dir scan all green on the bump. `task security`'s `trivy` step
+  could not run in this sandbox (no network) — relies on CI. Left out of this
+  batch, all `❌ probe failed` or `not probed` in the same report: `flux2`
+  2.9.3 → 2.9.5 (three anchors), `plumber` v0.4.48 → v0.4.50 (two anchors —
+  `clea bump` now refuses the `security.yml` one outright: an `action-sha`
+  anchor whose SHA it cannot also move, so rewriting only the comment would
+  claim a version the pinned commit does not carry), and `kubernetes/kubernetes`
+  v1.36.3 → v1.37.0 (still refused by `cluster/versions-guard.tf`, tracked in
+  draft PR #149).
+
 - **`gitleaks/gitleaks` 8.22.1 → 8.30.1**, probed by Cléa. `install-gitleaks.sh`
   (the binary CI and `task security` actually run) and
   `.pre-commit-config.yaml`'s `gitleaks-system` hook rev now agree — the probe
