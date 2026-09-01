@@ -16,6 +16,22 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **Building a Talos image for one cluster could silently delete the image
+  another cluster's tfvars still pinned (#93).** talos-image's root tracks
+  exactly one image per provider (`backend.tf`: `key=talos-image.tfstate`, not
+  per-version) — retargeting `talos_version` replaced the sole tracked image
+  instead of adding a second, and nothing failed until that OTHER cluster's
+  next plan/apply, with no visible sign on the account before then.
+  `scripts/bootstrap/talos-image.sh` now scans every real
+  `cluster/envs/*-<provider>.tfvars` for the version being built (same
+  resolution path as `scripts/internal/talos-version.sh`) and refuses, naming
+  the conflicting file and both versions, right after the provider is
+  resolved — before any credential resolution, bucket creation or
+  `tofu init`. New coverage in `scripts/dev/test-talos-image.sh` (a throwaway
+  fixture tfvars under the real, gitignored `envs/` dir, removed via
+  `trap EXIT`) proves the refusal fires with zero `tofu`/`aws` calls recorded,
+  names both versions and the file, and does not fire when the pin matches.
+
 - **Four places where `ci.yml`/`task lint` claimed or should have verified
   something and did not — same shape each time, closed or narrowed together.**
   - **Three tool installs in `ci.yml` carried no version pin** (#113) —

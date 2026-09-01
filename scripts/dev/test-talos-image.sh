@@ -26,7 +26,10 @@ SCRIPT=scripts/bootstrap/talos-image.sh
 TFROOT=infrastructure/opentofu/talos-image
 SB="$(mktemp -d)"
 LOG="$SB/tofu.log"
-trap 'rm -rf "$SB"; rm -f "$TFROOT"/talos-image-scaleway.tfplan' EXIT
+# #93's guard scans the REAL (gitignored) envs dir, so its fixture has to live
+# there too — synthetic role prefix, removed on exit like every other fixture.
+FIXTURE93=infrastructure/opentofu/cluster/envs/oa93-scaleway.tfvars
+trap 'rm -rf "$SB"; rm -f "$TFROOT"/talos-image-scaleway.tfplan "$FIXTURE93"' EXIT
 
 # The schematic gate calls the Image Factory before anything else and refuses a
 # build when the live id differs from the cluster pin. Offline, the stub answers
@@ -54,7 +57,14 @@ case "$1" in
 esac
 exit 0
 STUB
-printf '#!/usr/bin/env bash\nexit 0\n' >"$SB/aws"
+# Logged (prefixed, so it never collides with a tofu subcommand match below) —
+# #93's zero-spend assertion needs to see whether aws was ever invoked, not
+# just tofu.
+cat >"$SB/aws" <<'STUB'
+#!/usr/bin/env bash
+printf 'aws:%s\n' "$*" >>"$OA_STUB_LOG"
+exit 0
+STUB
 printf '#!/usr/bin/env bash\nprintf %s "{\\"id\\":\\"%s\\"}"\n' '%s' "${PIN:-deadbeef}" >"$SB/curl"
 chmod +x "$SB/tofu" "$SB/aws" "$SB/curl"
 
@@ -190,6 +200,32 @@ env PATH="$SB:$PATH" OA_STUB_LOG="$LOG" OA_STUB_PLAN_EXIT=2 OA_STUB_APPLY_EXIT=1
 [ ! -e "$TFROOT/talos-image-scaleway.tfplan" ] \
   && ok "and the plan file is still cleaned up on that path" \
   || bad "a plan naming real buckets outlived a failed apply, in a public working tree"
+
+echo "--- #93: refuses when another cluster's tfvars still pins a different talos_version ---"
+printf 'talos_version = "v1.13.9"\n' >"$FIXTURE93"
+OUT="$(run 2 --ensure)"; RC=$?
+[ "$RC" -ne 0 ] \
+  && ok "a conflicting pin in another cluster's tfvars refuses the build (rc=$RC)" \
+  || bad "the build proceeded despite ${FIXTURE93##*/} pinning a different talos_version"
+grep -q "${FIXTURE93##*/}" <<<"$OUT" \
+  && ok "the message names the conflicting tfvars file" \
+  || bad "the refusal does not name ${FIXTURE93##*/}"
+grep -q 'v1.13.9' <<<"$OUT" && grep -q 'v1.13.4' <<<"$OUT" \
+  && ok "the message names both the pinned version and the one being built" \
+  || bad "the refusal does not name both versions"
+[ ! -s "$LOG" ] \
+  && ok "zero tofu/aws calls recorded — refusal happened before any spend" \
+  || bad "tofu/aws were invoked despite the conflicting pin: $(cat "$LOG")"
+
+echo "--- #93: a matching pin is not a false positive ---"
+printf 'talos_version = "v1.13.4"\n' >"$FIXTURE93"
+OUT="$(run 2 --ensure)"; RC=$?
+is "the script completes when the fixture's pin matches the build" 0 "$RC"
+grep -qi 'pins talos_version' <<<"$OUT" \
+  && bad "a matching pin was refused as though it conflicted" \
+  || ok "no conflict refusal when the tfvars pin matches the version being built"
+is "the run proceeded past the guard (plan+apply as normal)" 1 "$(calls apply)"
+rm -f "$FIXTURE93"
 
 echo "--- floors: the stubs really ran (all of the above is vacuous otherwise) ---"
 OUT="$(run 2 --ensure)"
