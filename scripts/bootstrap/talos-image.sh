@@ -37,6 +37,34 @@ case "$P" in
   *) echo "✗ unknown provider: $RAW (expected scaleway|ovh|outscale|proxmox)"; exit 1 ;;
 esac
 
+# ──────────────────────────────────────────────────────────────────────────────
+# talos-image's root tracks exactly one image PER PROVIDER (backend.tf:
+# key=talos-image.tfstate, not per-version) — retargeting talos_version does not
+# add a second image, it REPLACES the sole one tracked, destroying whatever
+# version another cluster's tfvars still pins. Nothing breaks that cluster until
+# its NEXT plan (Talos boots from local disk, it does not re-fetch the image at
+# runtime) — and by then the account has no visible sign of what happened (#93).
+# Refuse before the spend: same resolution path as everywhere else that reads a
+# cluster's pin (scripts/internal/talos-version.sh), scanned across every real
+# tfvars for THIS provider before a single credential is resolved.
+# ──────────────────────────────────────────────────────────────────────────────
+ENVS_DIR="$(dirname "${BASH_SOURCE[0]}")/../../infrastructure/opentofu/cluster/envs"
+INTERNAL="$(dirname "${BASH_SOURCE[0]}")/../internal"
+if [ -d "$ENVS_DIR" ]; then
+  conflict=0
+  for f in "$ENVS_DIR"/*-"$P".tfvars; do
+    [ -e "$f" ] || continue
+    PINNED="$("$INTERNAL/talos-version.sh" "$(basename "$f")" 2>/dev/null || true)"
+    [ -n "$PINNED" ] && [ "$PINNED" != "$VERSION" ] || continue
+    echo "✗ $(basename "$f") pins talos_version = ${PINNED}, but this build targets ${VERSION}." >&2
+    echo "  talos-image tracks ONE image per provider — building ${VERSION} would replace" >&2
+    echo "  the ${PINNED} image that cluster still pins, and it would not notice until its" >&2
+    echo "  next plan/apply. Build ${PINNED} instead, or update $(basename "$f") first." >&2
+    conflict=1
+  done
+  [ "$conflict" -eq 0 ] || exit 1
+fi
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../infrastructure/opentofu/talos-image" && pwd)"
 command -v tofu >/dev/null 2>&1 || { echo "✗ tofu required"; exit 1; }
 command -v aws  >/dev/null 2>&1 || { echo "✗ aws CLI required"; exit 1; }
