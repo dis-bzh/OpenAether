@@ -2,10 +2,11 @@
 #
 # Network access strategy:
 #   - 6443/TCP: Kubernetes API via K8s LB (permanent)
-#   - 50000/TCP: Talos API via bastion ONLY. Accessible via SSH tunnels established
-#                through the bastion host. Never exposed via Load Balancers.
+#   - 50000/TCP: Talos API — the bastion reaches nodes over its PRIVATE NIC, so
+#                this is admitted by the private-subnet mesh rule below, not a
+#                dedicated bastion rule. Never exposed via Load Balancers.
 #   - NodePorts 30080/30443: application traffic from the App LB (deploy_app_lb only)
-#   - Inter-node: full mesh on private subnets
+#   - Inter-node: full mesh on the module's own private subnet
 # ==============================================================================
 
 resource "scaleway_instance_security_group" "this" {
@@ -41,33 +42,18 @@ resource "scaleway_instance_security_group" "this" {
     }
   }
 
-  # Talos API — From Bastion ONLY (50000/TCP, never from LB)
+  # Inter-node mesh, scoped to this module's own pinned subnet (network.tf) —
+  # also what admits 50000/TCP (Talos API) from the bastion's private NIC now.
   inbound_rule {
     action   = "accept"
-    port     = 50000
-    ip_range = "${scaleway_instance_ip.bastion.address}/32"
-    protocol = "TCP"
-  }
-
-  # Inter-node communication (private subnets) + LB health checks
-  inbound_rule {
-    action   = "accept"
-    port     = 0
-    ip_range = "172.16.0.0/12"
+    ip_range = local.scw_cluster_subnet
     protocol = "ANY"
   }
 
+  # Scaleway internal / LB health checks — not this module's subnet, left as-is.
   inbound_rule {
     action   = "accept"
-    port     = 0
-    ip_range = "10.0.0.0/8"
-    protocol = "ANY"
-  }
-
-  inbound_rule {
-    action   = "accept"
-    port     = 0
-    ip_range = "100.64.0.0/10" # Scaleway internal / LB health checks
+    ip_range = "100.64.0.0/10"
     protocol = "ANY"
   }
 
