@@ -31,3 +31,15 @@ output "nat_gateway_ip" {
   description = "Public IP of the NAT gateway (for LB ACL whitelisting)"
   value       = scaleway_vpc_public_gateway_ip.this.address
 }
+
+# Test-only: security group internals aren't visible to test assertions
+# outside a module's own outputs — this lets scaleway.tftest.hcl check the
+# generated inbound rules directly (#79).
+output "inbound_rule_ports" {
+  description = "Flattened port of every security group inbound_rule, for tests"
+  value = flatten([
+    for sg in scaleway_instance_security_group.this : [
+      for r in sg.inbound_rule : r.port
+    ]
+  ])
+}

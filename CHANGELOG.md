@@ -32,6 +32,26 @@ in git. 0.1.0 is the first entry describing something proven.
   `trap EXIT`) proves the refusal fires with zero `tofu`/`aws` calls recorded,
   names both versions and the file, and does not fire when the pin matches.
 
+- **The Scaleway security group's documented perimeter and its enforced one
+  had drifted apart** (#79). `security.tf`'s own comment said "Talos API —
+  From Bastion ONLY" and admitted `:50000` from the bastion's **public** IP —
+  a rule that never fires, since the bastion reaches nodes over its private
+  NIC. What actually admitted that traffic (and everything else) was a
+  `port = 0`/`protocol = "ANY"` rule matching `172.16.0.0/12` — Scaleway's
+  whole IPAM range, not this cluster's own subnet — plus a redundant
+  `10.0.0.0/8` rule nothing in this module ever gets an address in. Fixed by
+  pinning the private network's own `/22` (`network.tf`, matching OVH's and
+  Outscale's existing self-declared-CIDR pattern instead of trusting IPAM
+  auto-assignment), scoping the mesh rule to that `/22`, dropping the dead
+  bastion-public-IP rule and the `10.0.0.0/8` rule, and dropping `port = 0`
+  from every remaining `protocol = "ANY"` rule (meaningless there, and
+  already the pattern `bastion.tf`'s own `outbound_rule` used). New
+  `tofu test` run asserts no SCW `inbound_rule` carries `port == 0`. Rung:
+  mocked + `task feint-plan`/`feint-apply` against the emulator; the
+  real-cloud confirmation (does pinning the subnet force a disruptive
+  replacement on an already-provisioned network, do LB health checks and
+  Talos API access still work after narrowing) is still open.
+
 - **Four places where `ci.yml`/`task lint` claimed or should have verified
   something and did not — same shape each time, closed or narrowed together.**
   - **Three tool installs in `ci.yml` carried no version pin** (#113) —
