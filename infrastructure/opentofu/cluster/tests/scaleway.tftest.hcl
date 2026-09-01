@@ -234,6 +234,19 @@ run "verify_bastion_config" {
 }
 
 # ==============================================================================
+# Test 4b: Security Groups — no inbound rule left wildcard-port (#79)
+# ==============================================================================
+
+run "verify_no_wildcard_inbound_port" {
+  command = plan
+
+  assert {
+    condition     = alltrue([for p in module.scw[0].inbound_rule_ports : p != 0])
+    error_message = "No SCW inbound_rule may carry port == 0 (#79)."
+  }
+}
+
+# ==============================================================================
 # Test 5: Provider Contract — SCW outputs conform to provider-contract.md
 # ==============================================================================
 

@@ -1,7 +1,18 @@
+# Pin the subnet ourselves instead of trusting Scaleway's IPAM auto-assignment —
+# OVH and Outscale already self-declare their CIDR (network.tf in each module);
+# Scaleway was the outlier, which let security.tf's mesh rule drift from it (#79).
+locals {
+  scw_cluster_subnet = "172.16.0.0/22"
+}
+
 # Private Network for secure internal communication
 resource "scaleway_vpc_private_network" "this" {
   name   = "${var.cluster_name}-private-network"
   region = var.region
+
+  ipv4_subnet {
+    subnet = local.scw_cluster_subnet
+  }
 }
 
 # Reserve IPs for control plane nodes via IPAM (VPC v2)
