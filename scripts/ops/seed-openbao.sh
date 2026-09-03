@@ -39,9 +39,12 @@ fail() { echo "✗ $*" >&2; exit 1; }
 [ -f "$TFVARS" ] || fail "no $TFVARS"
 command -v kubectl >/dev/null || fail "kubectl is required"
 
-tfvar() { # <key> — read a top-level string from the env file
-  grep -E "^[[:space:]]*$1[[:space:]]*=" "$TFVARS" | head -1 |
-    sed -E 's/^[^=]*=[[:space:]]*"?([^"#]*)"?.*/\1/' | tr -d '[:space:]'
+tfvar() { # <key> — read a top-level string from the env file; empty when absent
+  # sed, not grep|sed: an absent key made grep exit 1, and under pipefail +
+  # set -e that killed the script at the assignment with no output at all —
+  # the "vanish" this file's own comments below refuse for the root token.
+  sed -nE "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\"?([^\"#]*)\"?.*/\1/p" "$TFVARS" |
+    head -1 | tr -d '[:space:]'
 }
 
 # --- Where the secrets go -----------------------------------------------------

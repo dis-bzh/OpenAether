@@ -77,13 +77,16 @@ put_and_prune() { # bucket endpoint region ak sk
     aws s3 cp "$OUT" "s3://${bucket}/backups/etcd/$(basename "$OUT")" \
       --endpoint-url "$ep" --region "$region" --sse AES256 >/dev/null
 
-  # Retention: timestamped names sort lexically == chronologically.
+  # Retention: timestamped names sort lexically == chronologically. The slice
+  # end is clamped at 0: a negative end counts from the END in jq, so with fewer
+  # than $KEEP snapshots `.[0:(length - KEEP)]` deleted all but the newest few —
+  # 28 of 29 at KEEP=30 — exactly while a young cluster had the fewest to lose.
   local old
   old="$(AWS_ACCESS_KEY_ID="$ak" AWS_SECRET_ACCESS_KEY="$sk" \
     aws s3api list-objects-v2 --bucket "$bucket" --prefix "backups/etcd/etcd-" \
       --endpoint-url "$ep" --region "$region" \
       --query 'Contents[].Key' --output json 2>/dev/null \
-    | jq -r '. // [] | sort | .[0:(length - '"$KEEP"')] | .[]?' )"
+    | jq -r --argjson keep "$KEEP" '. // [] | sort | .[0:([length - $keep, 0] | max)] | .[]?' )"
   local key
   while IFS= read -r key; do
     [ -n "$key" ] || continue

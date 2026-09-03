@@ -25,6 +25,22 @@ in git. 0.1.0 is the first entry describing something proven.
   `oa_backup_bucket()` in `lib/common.sh`, and `test-bucket-names.sh` runs the
   seeder against a stub kubectl and reads the bucket it announces — the
   seventh derivation, compared with the six it already covered.
+- **`etcd-snapshot.sh` retention deleted almost everything while a cluster had
+  the fewest snapshots to lose.** The prune slice `.[0:(length - KEEP)]` went
+  negative with fewer than `KEEP` objects, and jq counts a negative end from
+  the END: at `KEEP=30`, 29 snapshots became 1, 20 became 10, every run. The
+  end is now clamped at 0. Found by the first harness for the data-loss
+  scripts, `scripts/dev/test-state-backups.sh` (backup-state.sh,
+  etcd-snapshot.sh, resolve-s3-cred.sh — stub tofu/aws/talosctl recording
+  argv AND the credential each call ran with, real gpg round-trip on the
+  artifact) and `scripts/dev/test-seed-openbao.sh` (write-if-absent on a
+  re-run, which path but never what). Two more defects fell out of writing
+  them: an optional tfvars key (`s3_replica_endpoint`, `bucket_suffix`) made
+  `grep` exit 1 under `pipefail`, and `seed-openbao.sh`'s `tfvar()` — and
+  `lib/common.sh`'s `tfv()` behind six other scripts — killed the caller at
+  the assignment with no output at all; both read with `sed -n` now. And
+  `s3_cred` with `<kind>`/`<type>` swapped printed the SECRET where an
+  access-key id was expected; it refuses.
 - **Building a Talos image for one cluster could silently delete the image
   another cluster's tfvars still pinned (#93).** talos-image's root tracks
   exactly one image per provider (`backend.tf`: `key=talos-image.tfstate`, not

@@ -65,10 +65,13 @@ oa_aws_compat() {
 }
 
 # --- tfvars: read a top-level string assignment (key = "value"), ignore comments.
+# Empty and exit 0 when the key is absent: with grep in front, an optional key
+# (bucket_suffix, s3_replica_endpoint) returned 1 under pipefail, and a caller's
+# `v="$(tfv …)"` under set -e died at the assignment with no output.
 # Usage: tfv <tfvars-file> <key>
 tfv() {
-  grep -E "^[[:space:]]*$2[[:space:]]*=" "$1" 2>/dev/null | head -1 \
-    | sed -E 's/^[^=]*=[[:space:]]*"?([^"#]*)"?.*/\1/' | sed 's/[[:space:]]*$//'
+  sed -nE "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*\"?([^\"#]*)\"?.*/\1/p" "$1" 2>/dev/null \
+    | head -1 | sed 's/[[:space:]]*$//'
 }
 
 # --- Detect the active provider (scaleway|ovh|outscale|proxmox) from node_distribution.
@@ -115,6 +118,10 @@ provider_of_endpoint() {
 _s3_cred_pick() {
   local prov="$1" kind="$2" type="$3" ep="${4:-}" pu suffix alt v1 v2 g rprov rpu
   pu="$(provider_pu "$prov")" || { echo "s3_cred: unknown provider '$prov'" >&2; return 1; }
+  # Swapped <kind> and <type> used to answer anyway: `s3_cred scw ak primary`
+  # read as backup+sk and printed the SECRET where an access-key id was expected.
+  case "$kind" in primary | backup) ;; *) echo "s3_cred: kind must be primary|backup, got '$kind'" >&2; return 1 ;; esac
+  case "$type" in ak | sk) ;; *) echo "s3_cred: type must be ak|sk, got '$type'" >&2; return 1 ;; esac
   if [ "$type" = ak ]; then suffix=ACCESS_KEY_ID; alt=ACCESS_KEY
   else suffix=SECRET_ACCESS_KEY; alt=SECRET_KEY; fi
 
