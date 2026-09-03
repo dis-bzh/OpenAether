@@ -27,6 +27,8 @@ set -euo pipefail
 PROVIDER="${1:?usage: seed-openbao.sh <provider> [role]}"
 ROLE="${2:-management}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib/common.sh
+source "$ROOT/scripts/lib/common.sh"   # oa_project / oa_backup_bucket
 CLUSTER="$ROOT/infrastructure/opentofu/cluster"
 TFVARS="$CLUSTER/envs/${ROLE}-${PROVIDER}.tfvars"
 
@@ -137,18 +139,11 @@ REPLICA_EP="$(tfvar s3_replica_endpoint)"
 [ -n "$PRIMARY_EP" ] || fail "s3_primary_endpoint is not set in $TFVARS"
 [ -n "$REPLICA_EP" ] || REPLICA_EP="$PRIMARY_EP"
 
-# Application-backup bucket, same convention as cluster/backup.tf:
-#   s3-<project>-<provider-short>-backups-<environment>
-CLUSTER_NAME="$(tfvar cluster_name)"
-ENVIRONMENT="$(tfvar environment)"
-PROJECT="${CLUSTER_NAME%%-*}"
-case "$PROVIDER" in
-  scaleway) SHORT=scaleway ;;
-  ovh) SHORT=ovh ;;
-  outscale) SHORT=outscale ;;
-  *) SHORT="$PROVIDER" ;;
-esac
-BUCKET="s3-${PROJECT}-${SHORT}-backups-${ENVIRONMENT}"
+# Application-backup bucket, through the SAME derivation as cluster/backup.tf
+# and every other shell caller — this was the one place that rebuilt the name
+# by hand and dropped bucket_suffix, so a suffixed cluster's restic and Loki
+# were pointed at a bucket nothing created (#166). bucket_suffix is optional.
+BUCKET="$(oa_backup_bucket "$(oa_project "$(tfvar cluster_name)" "$(tfvar bucket_suffix || true)")" "$PROVIDER" "$(tfvar environment)")"
 
 # Alerting endpoints are real in production and arbitrary on a throwaway cluster,
 # which admin-access.md says explicitly. Take them from the environment when set,

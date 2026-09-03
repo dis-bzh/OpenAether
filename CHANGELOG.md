@@ -16,6 +16,15 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **`seed-openbao.sh` named a backups bucket that did not exist on any
+  cluster deployed under a `bucket_suffix` (#166).** It rebuilt
+  `s3-<project>-<provider>-backups-<env>` by hand from `cluster_name`'s first
+  segment, while `cluster/backup.tf` and every other shell caller append the
+  suffix through `oa_project`; restic and Loki were seeded with the wrong
+  name and the seeder printed ✓. It now derives the name through the new
+  `oa_backup_bucket()` in `lib/common.sh`, and `test-bucket-names.sh` runs the
+  seeder against a stub kubectl and reads the bucket it announces — the
+  seventh derivation, compared with the six it already covered.
 - **Building a Talos image for one cluster could silently delete the image
   another cluster's tfvars still pinned (#93).** talos-image's root tracks
   exactly one image per provider (`backend.tf`: `key=talos-image.tfstate`, not

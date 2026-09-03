@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Six places build a bucket name. They must agree, or the backend points at a
+# Seven places build a bucket name. They must agree, or the backend points at a
 # bucket nothing created and the apply dies after the network exists.
 #
 # The derivations live in two languages that cannot import each other:
-#   shell  — oa_project / oa_state_bucket / oa_artifact_bucket (lib/common.sh),
-#            used by tf-backend.sh, ensure-buckets.sh, infra-verify.sh,
-#            restore-artifacts.sh and talos-image.sh, all of which run BEFORE or
-#            AROUND OpenTofu;
+#   shell  — oa_project / oa_state_bucket / oa_artifact_bucket / oa_backup_bucket
+#            (lib/common.sh), used by tf-backend.sh, ensure-buckets.sh,
+#            infra-verify.sh, restore-artifacts.sh, talos-image.sh and
+#            seed-openbao.sh, all of which run BEFORE or AROUND OpenTofu;
 #   HCL    — local.backup_project in cluster/backup.tf, which names the same
 #            buckets from inside the apply.
 # Nothing but this file compares them.
@@ -19,7 +19,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=../lib/common.sh
 source "$ROOT/scripts/lib/common.sh"
-oa_require_fn oa_state_bucket oa_artifact_bucket oa_project || exit 1
+oa_require_fn oa_state_bucket oa_artifact_bucket oa_backup_bucket oa_project || exit 1
 
 PASS=0
 FAIL=0
@@ -41,6 +41,7 @@ echo "=== the full bucket names ==="
 eq "state, no suffix"    "$(oa_state_bucket "$(oa_project example)" scaleway dev)"        "s3-example-scaleway-tfstate-dev"
 eq "state, suffix"       "$(oa_state_bucket "$(oa_project example a1b2c3)" scaleway dev)" "s3-example-a1b2c3-scaleway-tfstate-dev"
 eq "artifact, suffix"    "$(oa_artifact_bucket "$(oa_project example a1b2c3)" ovh management prod)" "s3-example-a1b2c3-ovh-management-prod"
+eq "backups, suffix"     "$(oa_backup_bucket "$(oa_project example a1b2c3)" outscale prod)" "s3-example-a1b2c3-outscale-backups-prod"
 
 echo "=== HCL and shell derive the SAME namespace ==="
 # `join("-", compact([...]))` in backup.tf against oa_project here. Reproduced
@@ -66,6 +67,11 @@ if grep -qF 'backup_project        = join("-", compact([split("-", var.cluster_n
   ok "backup.tf:local.backup_project is the expression mirrored above"
 else
   bad "backup.tf:local.backup_project changed — update hcl_project() here, then re-check every caller"
+fi
+if grep -qF 'backup_data_bucket = "${local.backup_bucket_prefix}-backups-${var.environment}"' "$BT"; then
+  ok "backup.tf:local.backup_data_bucket is <prefix>-backups-<env>, what oa_backup_bucket() prints"
+else
+  bad "backup.tf:local.backup_data_bucket changed — oa_backup_bucket() and seed-openbao.sh now name a different bucket"
 fi
 
 echo "=== every name is legal on all three providers ==="
@@ -117,6 +123,22 @@ for kind in primary replica; do
          sed -nE 's#.*s3://([a-z0-9-]+)/backups/.*#\1#p' | head -1)"
   eq "restore --from $kind targets the suffixed bucket" "$got" "$want"
 done
+
+echo "=== the Day-1 seeder names the SAME backups bucket backup.tf publishes ==="
+# Same shape: RUN seed-openbao.sh against a stub kubectl (every path reads as
+# already set, so nothing is written) and read the bucket it announces. It was
+# the seventh place building the name and the only one dropping the suffix, so
+# restic and Loki were seeded with a bucket backup.tf never created (#166).
+cat >"$SB/kubectl" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in "get secret openbao-recovery"*) printf 'stub-token' | base64 ;; "exec "*" secrets list") printf 'secret/\n' ;; esac
+exit 0
+STUB
+chmod +x "$SB/kubectl"; printf 'apiVersion: v1\n' >"$SB/kubeconfig"
+WANT_SEED="$(oa_backup_bucket "$(oa_project "$CNAME" "$SUF")" scaleway "$ENVV")"
+got="$(PATH="$SB:$PATH" KUBECONFIG="$SB/kubeconfig" OPENBAO_WAIT=0 SCW_AWS_ACCESS_KEY_ID=k SCW_AWS_SECRET_ACCESS_KEY=k \
+       ./scripts/ops/seed-openbao.sh scaleway oatest 2>&1 | sed -nE 's/.*bucket ([a-z0-9-]+)\).*/\1/p' | head -1)"
+eq "seed-openbao announces the suffixed backups bucket" "$got" "$WANT_SEED"
 
 
 echo "--- the state lock is claimed only where the store honours it ---"
