@@ -378,6 +378,12 @@ tasks:
       # with the first provider's. Only the ENDPOINTS can say a backup was meant
       # to be elsewhere, which is what these assert.
       - ./scripts/dev/test-backup-creds.sh
+      # The three scripts between a cluster and a lost tfstate or etcd, and the
+      # Day-1 seeder whose one rule is never to rotate what exists. Writing
+      # these found a retention slice that deleted 28 of 29 snapshots and two
+      # scripts that died silently on an absent optional key.
+      - ./scripts/dev/test-state-backups.sh
+      - ./scripts/dev/test-seed-openbao.sh
       # Nothing said "tainted", so re-running destroyed a load balancer the
       # provider was still building. This keeps that sentence on screen.
       - ./scripts/dev/test-explain-failure.sh
