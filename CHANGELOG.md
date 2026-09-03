@@ -538,6 +538,30 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Changed
 
+- **`getplumber/plumber` v0.4.48 → v0.4.51** in `.github/workflows/security.yml`
+  and `scripts/internal/install-plumber.sh`, bumped by hand rather than by
+  Cléa: the `security.yml` anchor is `action-sha`-pinned
+  (`uses: getplumber/plumber@<sha> # vX.Y.Z`), and `clea bump` refuses to
+  rewrite only the trailing comment there since it cannot also move the SHA —
+  doing so would claim a version the pinned commit does not carry. Both sites
+  were not yet probed by Cléa (issue #91), so this bump carries its own
+  evidence in place of a probe: the release notes for v0.4.49 → v0.4.51 show
+  no breaking change (GitLab-platform-mode features and an additive
+  report-schema field only); the pinned SHA was checksum-verified against
+  `getplumber/plumber`'s own `checksums.txt` via `install-plumber.sh`; and a
+  real `plumber analyze` run against this tree on v0.4.51 was diffed against
+  the same run on v0.4.48 — identical 24-control set, identical
+  `dataCollectionDegraded: true` (this sandbox's GitHub session is
+  repository-scoped, so `branchProtectionResult` and the action-CVE lookups
+  can't resolve — the same limitation the v0.4.48 baseline hits, not a
+  regression), and every real policy control (`actionPinningResult`,
+  `excessivePermissionsResult`, `permissionsResult`, `dangerousTriggersResult`,
+  `checkoutCredentialsResult`, …) passing on both. `task lint` (including
+  `check-version-drift.sh`'s pin-agreement check), `task test-scripts`,
+  `task validate` (both roots), `task test`, checkov (32/0) + custom checks,
+  and a default-rules gitleaks dir scan all green. `task security`'s `trivy`
+  step could not run in this sandbox (no network) — relies on CI.
+
 - **`yamllint` 1.35.1 → 1.38.0** in `.github/workflows/ci.yml`, probed green
   by Cléa (issue #91). `task lint`, `task test-scripts`, `task validate`
   (both roots), `task test`, checkov (32/0) + custom checks, and a default-rules
