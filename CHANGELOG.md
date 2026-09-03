@@ -16,6 +16,20 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **`feint.sh` checked whether the emulator had restarted exactly once, with
+  no retry (#169).** `feint start` returning — even after printing its own
+  "listening on ..." line — does not guarantee `feint status` already
+  answers. `reset_emulator` (used before every apply/record lane) and the
+  `start` command hit this on a GitHub-hosted runner: CI's "Feint Evidence
+  (outscale)" job on PR #168 failed with "the emulator did not come back",
+  then passed on an unmodified re-run of the same commit. Both now poll for
+  up to `FEINT_RESTART_TIMEOUT` (default 10s, integer sleep only — feint also
+  ships Darwin binaries and BSD `sleep` rejects a fractional argument) before
+  failing, and the failure path prints the emulator's own log (previously
+  only `require_emulator` did). New `scripts/dev/test-feint-restart.sh`: a
+  stub `feint` puts the startup delay under control; `FEINT_RESTART_TIMEOUT=0`
+  reproduces the exact pre-fix behavior through the real code path, not a
+  diff revert.
 - **`seed-openbao.sh` named a backups bucket that did not exist on any
   cluster deployed under a `bucket_suffix` (#166).** It rebuilt
   `s3-<project>-<provider>-backups-<env>` by hand from `cluster_name`'s first

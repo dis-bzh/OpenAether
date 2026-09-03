@@ -66,15 +66,38 @@ require_emulator() {
   # The one thing that could explain it, the emulator's own log, was discarded.
   # Observed 2026-08-17: the outscale leg planned successfully, then found no
   # emulator at the apply, and nothing in the run said why.
+  emulator_log_hint
+  exit 1
+}
+
+# emulator_log_hint prints the emulator's own log so "why" survives past the
+# process that could have answered it directly. Shared by require_emulator and
+# reset_emulator's failure path.
+emulator_log_hint() {
   local log="${XDG_RUNTIME_DIR:-/tmp}/feint/${FEINT_ENDPOINT#http://}/feint.log"
   log="${log//:/_}"
   if [ -r "$log" ]; then
-    echo "  it was started and is gone. Last lines of ${log}:" >&2
+    echo "  Last lines of ${log}:" >&2
     tail -20 "$log" | sed 's/^/    /' >&2
   else
     echo "  no log at ${log} either — if it never started, run 'task feint-up' first." >&2
   fi
-  exit 1
+}
+
+# poll_running waits up to FEINT_RESTART_TIMEOUT seconds for the emulator to
+# actually answer `status`. `feint start` returning — even after its own
+# "listening on ..." line — does not mean the status endpoint is already up:
+# a restart inside reset_emulator raced this on a GitHub-hosted runner and
+# failed CI once with no code change involved, passing again on an unmodified
+# re-run (#169). Integer sleep only: feint also ships Darwin binaries, and
+# BSD sleep does not accept a fractional argument.
+FEINT_RESTART_TIMEOUT="${FEINT_RESTART_TIMEOUT:-10}"
+poll_running() {
+  local deadline=$((SECONDS + FEINT_RESTART_TIMEOUT))
+  until running; do
+    [ "$SECONDS" -lt "$deadline" ] || return 1
+    sleep 1
+  done
 }
 
 # reset_emulator empties the store, which only a restart does: the store is in
@@ -87,7 +110,11 @@ reset_emulator() {
   [ -n "$FEINT_VM" ] && vm_args=(--vm "$FEINT_VM")
   feint_cli stop >/dev/null 2>&1 || true
   feint_cli start --addr "$(addr_of "$FEINT_ENDPOINT")" "${vm_args[@]}" >/dev/null
-  running || { echo "✗ the emulator did not come back on $FEINT_ENDPOINT" >&2; exit 1; }
+  poll_running || {
+    echo "✗ the emulator did not come back on $FEINT_ENDPOINT within ${FEINT_RESTART_TIMEOUT}s" >&2
+    emulator_log_hint
+    exit 1
+  }
 }
 
 # emulated_env clears every credential a provider could pick up on its own.
@@ -448,8 +475,14 @@ case "${1:-}" in
     # Matched on the output, not the exit code: `feint status` exits 0 either
     # way, so keying off it silently skipped the start and left every later
     # step running against nothing.
-    running || feint_cli start --addr "$(addr_of "$FEINT_ENDPOINT")" "${vm_args[@]}"
-    running || { echo "✗ the emulator did not come up on $FEINT_ENDPOINT" >&2; exit 1; }
+    if ! running; then
+      feint_cli start --addr "$(addr_of "$FEINT_ENDPOINT")" "${vm_args[@]}"
+      poll_running || {
+        echo "✗ the emulator did not come up on $FEINT_ENDPOINT within ${FEINT_RESTART_TIMEOUT}s" >&2
+        emulator_log_hint
+        exit 1
+      }
+    fi
     feint_cli status
     ;;
   stop)
