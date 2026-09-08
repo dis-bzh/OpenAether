@@ -16,6 +16,17 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ### Fixed
 
+- **`install-shellcheck.sh` died extracting its own download on a bare box,
+  which Cléa's probe misreported as a `fluxcd/flux2` bump failure (#174).**
+  ShellCheck's release asset is a `.tar.xz`; a bare `ubuntu:24.04` (Cléa's
+  probe image) has no `xz`, so `curl` and the checksum both succeeded and
+  `tar -xJf` then died with "xz: Cannot exec: No such file or directory" —
+  after which `setup.sh` carried on, `flux` never got installed either, and
+  the probe blamed flux2 for an environment gap that had nothing to do with
+  it. Same shape `install-tflint.sh` already hit and fixed for `unzip`:
+  install `xz-utils` when `xz` is missing and apt is available, refuse
+  by name otherwise. Reproduced the exact failure in a bare `ubuntu:24.04`
+  container (red without the fix, green with it, idempotent on a second run).
 - **`feint.sh` checked whether the emulator had restarted exactly once, with
   no retry (#169).** `feint start` returning — even after printing its own
   "listening on ..." line — does not guarantee `feint status` already

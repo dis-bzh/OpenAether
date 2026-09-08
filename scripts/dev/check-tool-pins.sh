@@ -31,6 +31,7 @@ cd "$ROOT" || exit 1
 
 declare -A ALLOW=(
   [unzip]="generic OS utility (unpacks vendored downloads) — no meaningful version to track"
+  [xz-utils]="generic OS utility (unpacks vendored downloads, e.g. shellcheck's .tar.xz) — no meaningful version to track"
   [zstd]="generic OS utility (talos image build)"
   [qemu-utils]="generic OS utility (talos image build)"
   [gnupg]="generic OS utility (backup encryption, Zabbly key verification)"
