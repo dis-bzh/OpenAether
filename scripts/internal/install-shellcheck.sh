@@ -50,6 +50,20 @@ case "$(uname -s)-$(uname -m)" in
   *) echo "✗ no published shellcheck binary for $(uname -s)-$(uname -m)" >&2; exit 1 ;;
 esac
 
+# ShellCheck ships a .tar.xz, and a bare ubuntu:24.04 has no xz — same gap
+# install-tflint.sh already hit and fixed for unzip (#174): the extract died
+# with "tar (child): xz: Cannot exec: No such file or directory" after the
+# download and checksum had both already succeeded, which read as a bump
+# failure in Cléa's probe when the actual cause was never reached.
+if ! command -v xz >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    $SUDO apt-get update -qq && $SUDO apt-get install -y -qq xz-utils
+  else
+    echo "✗ xz is required to extract shellcheck's release archive, and I cannot install it here" >&2
+    exit 1
+  fi
+fi
+
 base="https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
