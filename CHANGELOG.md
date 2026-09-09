@@ -14,6 +14,19 @@ in git. 0.1.0 is the first entry describing something proven.
 
 ## [Unreleased]
 
+### Added
+
+- **`task check-flux-digests`: the network half of #119.** `flux-install.yaml`
+  pins its seven controller images by tag only — a tag force-moved upstream
+  changes not one byte of the committed YAML, so `task render-check` sees
+  nothing, Cléa has no `# renovate:` anchor on these lines, and Trivy skips
+  the file. `scripts/dev/check-flux-image-digests.sh` resolves each tag to
+  the digest ghcr.io serves today (an anonymous token, same as `docker pull`)
+  and compares it to `flux-image-digests.lock`, recorded alongside
+  `upstream-artifacts.lock`. Needs the network but never a cloud account, so
+  it stays out of `task lint`. Proven by mutating one recorded digest: the
+  check went red naming the drift, then green again once restored.
+
 ### Fixed
 
 - **`install-shellcheck.sh` died extracting its own download on a bare box,
