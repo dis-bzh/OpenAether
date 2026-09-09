@@ -1312,6 +1312,14 @@ tasks:
       # This reads the EFFECTIVE settings the committed ConfigMap carries.
       - python3 scripts/ops/check-cilium-effective-config.py
 
+  check-flux-digests:
+    desc: >-
+      Resolve flux-install.yaml's 7 tag-pinned images to their ghcr.io digest and compare to
+      upstream-artifacts.lock's sibling (#119). Needs the network, never a cloud account — not part
+      of `task lint`, which must stay offline. Usage: task check-flux-digests [-- --write]
+    cmds:
+      - ./scripts/dev/check-flux-image-digests.sh {{.CLI_ARGS}}
+
   kubeconfig:
     desc: >-
       Retrieve kubeconfig/talosconfig from OpenTofu outputs (re-inits the backend, so this works from a cold
